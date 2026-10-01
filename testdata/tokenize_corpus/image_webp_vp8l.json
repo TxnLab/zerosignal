@@ -1,0 +1,22 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": [
+    {
+     "type": "text",
+     "text": "describe this image in detail"
+    },
+    {
+     "type": "image_url",
+     "image_url": {
+      "url": "data:image/webp;base64,UklGRvgBAABXRUJQVlA4TOwBAAAv/8SzADmAIAb8D5uI6H9qBxCE/20TEf1PgUHbRpJm+cPeBXBvPAEDGIrctm26CejWX4zDntNV684/e3s/Lv/m4vM3+A/+g//gP/if8B/8B//Bf/A/4T/4DwyA/+B/wn/wH/wH/8H/hP/gP0IY/Af/E/6D/+A/+A/+J/wH/xHC4D/4n/Af/Af/wX/wP+E/+I8QBv/B/4T/4D/4D/6D/wn/wX+EMPgP/if8B//Bf/Af/E/4D/6D/yhB8B/8T/gP/oP/4H/Cf/Af/EcIg//gf8J/8B/8B/8T/oP/4D9CGPwH/xP+g//gP/if8B/8B/8RwuA/+J/wH/wH/8H/hP/gP/iPEAb/wf+E/+A/+A/+J/wH/8F/hDD4D/4n/Af/wX/wH/xP+A/+I4TBf/A/4T/4D/6D/+B/wn/wHyEM/oP/Cf/Bf/Af/Af/E/6D/whh8B/8T/gP/oP/4D/4n/Af/EcIg//gf8J/8B/8B//B/4T/4D9CGPwH/xP+g//gP/gP/if8B//Bf5Qg+A/+J/wH/8F/8D/hP/gP/iOEwX/wP+E/+A/+g/8J/8F/8B8hDP6D/wn/wX/wH/xP+A/+g/8IYfAf/E/4D/6D/+B/wn/wH/xHCIP/4H/Cf/Af/Af/E/6D/+A/Qhj8B/8T/oP/MAD0eww=",
+      "detail": "auto"
+     }
+    }
+   ]
+  }
+ ],
+ "stream": true
+}

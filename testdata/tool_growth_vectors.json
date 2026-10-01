@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "comment": "Cross-impl parity vectors for reserve tool-loop-headroom classification. Regenerate via: cd proto/go \u0026\u0026 go test ./inject -run TestToolGrowthVectors -update. Loaded by proto/go/inject/toolgrowth_vectors_test.go and proto/ts/test/tool-growth-vectors.test.ts.",
+  "body_drives_server_side_tool_growth": [
+    {
+      "name": "no_tools",
+      "body": "{\"model\":\"m\",\"messages\":[]}",
+      "expected": false,
+      "why": "no tools field at all"
+    },
+    {
+      "name": "empty_tools",
+      "body": "{\"model\":\"m\",\"tools\":[]}",
+      "expected": false,
+      "why": "empty array cannot grow anything"
+    },
+    {
+      "name": "malformed",
+      "body": "not json",
+      "expected": false,
+      "why": "unparseable body reports false; the node's input-budget check backstops"
+    },
+    {
+      "name": "tools_not_array",
+      "body": "{\"tools\":{\"type\":\"web_search\"}}",
+      "expected": false,
+      "why": "non-array tools is not a tools list"
+    },
+    {
+      "name": "function_only",
+      "body": "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\"}}]}",
+      "expected": false,
+      "why": "caller-executed: the harness runs it and re-issues a separately-measured request"
+    },
+    {
+      "name": "many_functions",
+      "body": "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"a\"}},{\"type\":\"function\",\"function\":{\"name\":\"b\"}},{\"type\":\"function\",\"function\":{\"name\":\"c\"}}]}",
+      "expected": false,
+      "why": "the coding-agent case: MCP servers expanded client-side into plain function tools"
+    },
+    {
+      "name": "bare_function_no_type",
+      "body": "{\"tools\":[{\"function\":{\"name\":\"lookup\"}}]}",
+      "expected": false,
+      "why": "no type: a bare function entry is still caller-executed"
+    },
+    {
+      "name": "local_shell",
+      "body": "{\"tools\":[{\"type\":\"local_shell\"}]}",
+      "expected": false,
+      "why": "caller-executed by name"
+    },
+    {
+      "name": "apply_patch",
+      "body": "{\"tools\":[{\"type\":\"apply_patch\"}]}",
+      "expected": false,
+      "why": "caller-executed by name"
+    },
+    {
+      "name": "computer_use",
+      "body": "{\"tools\":[{\"type\":\"computer_use_preview\"}]}",
+      "expected": false,
+      "why": "normalizes to computer_use; the caller's harness performs the actions"
+    },
+    {
+      "name": "anthropic_bash_dated",
+      "body": "{\"tools\":[{\"type\":\"bash_20250124\"}]}",
+      "expected": false,
+      "why": "the _YYYYMMDD suffix normalizes away to bash, which is caller-executed"
+    },
+    {
+      "name": "shell_local_env",
+      "body": "{\"tools\":[{\"type\":\"shell\",\"environment\":{\"type\":\"local\"}}]}",
+      "expected": false,
+      "why": "environment.type local folds onto local_shell — runs on the caller's machine"
+    },
+    {
+      "name": "zs_builtin",
+      "body": "{\"tools\":[{\"type\":\"zs_web_search\"}]}",
+      "expected": true,
+      "why": "node built-in: the NODE runs the chat-\u003etool-\u003echat loop in-process"
+    },
+    {
+      "name": "zs_builtin_among_functions",
+      "body": "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"a\"}},{\"type\":\"zs_web_read\"}]}",
+      "expected": true,
+      "why": "one growth-driving tool anywhere in the list is enough"
+    },
+    {
+      "name": "vendor_web_search",
+      "body": "{\"tools\":[{\"type\":\"web_search\"}]}",
+      "expected": true,
+      "why": "vendor-hosted: the upstream re-prefills results into the context"
+    },
+    {
+      "name": "vendor_code_interpreter",
+      "body": "{\"tools\":[{\"type\":\"code_interpreter\"}]}",
+      "expected": true,
+      "why": "vendor-hosted"
+    },
+    {
+      "name": "vendor_mcp",
+      "body": "{\"tools\":[{\"type\":\"mcp\",\"server_label\":\"x\"}]}",
+      "expected": true,
+      "why": "hosted-but-free still inflates context — the per-call fee is a separate axis"
+    },
+    {
+      "name": "moonshot_builtin_function",
+      "body": "{\"tools\":[{\"type\":\"builtin_function\",\"function\":{\"name\":\"$web_search\"}}]}",
+      "expected": true,
+      "why": "Moonshot spelling: the identifying name is the $-prefixed function name"
+    },
+    {
+      "name": "shell_hosted_env",
+      "body": "{\"tools\":[{\"type\":\"shell\",\"environment\":{\"type\":\"container_auto\"}}]}",
+      "expected": true,
+      "why": "vendor-managed container: the upstream executes it"
+    },
+    {
+      "name": "unknown_hosted_type",
+      "body": "{\"tools\":[{\"type\":\"some_new_vendor_tool\"}]}",
+      "expected": true,
+      "why": "default-deny: an unrecognized hosted type is assumed to grow context"
+    }
+  ],
+  "classify_tool_entry": [
+    {
+      "name": "function",
+      "entry": "{\"type\":\"function\",\"function\":{\"name\":\"get_weather\"}}",
+      "want_name": "get_weather",
+      "want_class": "client"
+    },
+    {
+      "name": "zs_builtin",
+      "entry": "{\"type\":\"zs_web_search\"}",
+      "want_name": "zs_web_search",
+      "want_class": "client"
+    },
+    {
+      "name": "builtin_function_moonshot",
+      "entry": "{\"type\":\"builtin_function\",\"function\":{\"name\":\"$web_search\"}}",
+      "want_name": "web_search",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "bare_function",
+      "entry": "{\"function\":{\"name\":\"lookup\"}}",
+      "want_name": "lookup",
+      "want_class": "client"
+    },
+    {
+      "name": "dollar_named_no_type",
+      "entry": "{\"function\":{\"name\":\"$web_search\"}}",
+      "want_name": "web_search",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "shell_local",
+      "entry": "{\"type\":\"shell\",\"environment\":{\"type\":\"local\"}}",
+      "want_name": "local_shell",
+      "want_class": "not_billed"
+    },
+    {
+      "name": "shell_hosted",
+      "entry": "{\"type\":\"shell\",\"environment\":{\"type\":\"container_auto\"}}",
+      "want_name": "shell",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "shell_no_env",
+      "entry": "{\"type\":\"shell\"}",
+      "want_name": "shell",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "mcp",
+      "entry": "{\"type\":\"mcp\"}",
+      "want_name": "mcp",
+      "want_class": "not_billed"
+    },
+    {
+      "name": "web_search_preview",
+      "entry": "{\"type\":\"web_search_preview\"}",
+      "want_name": "web_search",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "unknown",
+      "entry": "{\"type\":\"brand_new_tool\"}",
+      "want_name": "brand_new_tool",
+      "want_class": "vendor_billable"
+    },
+    {
+      "name": "not_an_object",
+      "entry": "\"just a string\"",
+      "want_name": "",
+      "want_class": "client"
+    }
+  ],
+  "normalize_tool_name": {
+    "  WEB_SEARCH  ": "web_search",
+    "$web_search": "web_search",
+    "already_canonical": "already_canonical",
+    "attachment_search": "attachment_search",
+    "code_execution": "code_interpreter",
+    "collections_search": "file_search",
+    "computer": "computer_use",
+    "computer_use_preview": "computer_use",
+    "custom_tool": "custom",
+    "mcp_call": "mcp",
+    "web_search_20250305": "web_search",
+    "web_search_call": "web_search",
+    "web_search_calls": "web_search",
+    "web_search_preview": "web_search"
+  }
+}

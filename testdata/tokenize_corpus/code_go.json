@@ -1,0 +1,10 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "explain this:\n\nfunc InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\nfunc InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\nfunc InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\nfunc InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  }
+ ],
+ "stream": true
+}

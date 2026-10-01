@@ -1,0 +1,222 @@
+' Hayai escrow payment flow — open / settle / protest / refundInactive.
+' Companion to proto/SPEC.md §3a (ticket lifecycle, settlement asset model,
+' operator authentication, settlement windows) and §3b (slashing evidence).
+' Contract methods sourced from proto/escrow/ZeroSignalEscrow.arc56.json.
+'
+' This diagram reflects the consensus-verified-operator + prepaid-MBR-pool
+' design (SPEC.md "Operator authentication" + "Settlement asset model"):
+'   * open()  is a 2-tx group [payer usdcPayment + operator-signed AppCall];
+'             the operator's gtxn[1] carries fee = 2 * minTxnFee to fee-pool
+'             the whole group. There is NO feePayment leg — the box MBR is
+'             drawn from the payer's prepaid pool (open() does openTickets++).
+'   * settle() is normally an atomic 2-tx group [op_first_half + payer_ack];
+'             gtxn[0] (operator-signed) fee-pools the group, SIZED to the
+'             disbursement inners that actually fire (escrow/fee.go):
+'               fee = (2 outer + SettleInnerCount + gapOpUps) * minTxnFee
+'             SettleInnerCount = 0..3 (0 for a free model, 1 for a 0-charge
+'             refund, 3 for a paid ticket that also refunds). The grouped path
+'             issues NO base op-up, so a steady-state paid settle = 5 and a
+'             free-model settle = 2; gapOpUps (>0 only across revenue-ring day
+'             gaps) reaches ~6 in the worst case.
+'   * Standalone settle / settleLapsed: single app call, so it DOES add a base
+'             op-up: fee = (1 outer + SettleInnerCount + 1 base op-up + gapOpUps)
+'             * minTxnFee — 5 for a paid ticket, 2 for a free model.
+'   * Payer ALGO net cost on the happy path is 0 microALGO. Operator
+'     absorbs ~8,000 microALGO/request, recovered through USDC rates.
+'     (The box-MBR ALGO is a one-time recoverable per-payer pool deposit
+'      via depositMbr, not a per-turn cost.)
+
+@startuml flow-escrow-payment
+title Hayai escrow lifecycle — payment, settlement, protest, refund
+
+autonumber "<b>[00]</b>"
+skinparam sequence {
+    ArrowColor #444
+    LifeLineBorderColor #888
+    ParticipantBorderColor #444
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #C0A000
+}
+
+actor       "Payer\n(end-user wallet)"                        as Payer
+participant "Proxy\n(client-side signer,\nhayai_dispatch.go)" as Proxy
+participant "Escrow App\nZeroSignalEscrow.arc56.json\n(Ticket + Operator + Node boxes)"   as Escrow
+participant "Serving Node\n(one node within an operator)\nreserve.go + tickets.go +\nreceipt.go + settlement worker" as Operator
+
+note over Escrow
+  TicketRecord fields (proto/escrow/ZeroSignalEscrow.arc56.json):
+    payer, operatorId, nodeId, operatorOwner (operator-box payout),
+    nodeSigning (the serving node's key, from the node box),
+    maxPrice, openedAt, expiresAt, settlementGraceSeconds,
+    status, pendingAmount, pendingBy, pendingDigest, commitK
+  STATUS values: OPEN=1, FROZEN=4, PENDING_SETTLE=5
+  (SETTLED=2 / REFUNDED=3 are never stored — those paths delete the box.)
+  pendingBy: NONE=0, OPERATOR=1, PAYER=2
+end note
+
+== Admission (see flow-ticket-reserve) ==
+
+Payer -> Proxy: /v1/chat/completions (plaintext)
+Proxy -> Operator: POST /v1/zs/reserve\n{model, input_tokens, max_output_tokens, stream,\n proxy_recipient, payer_addr}
+Operator --> Proxy: signed Ticket + wrapped_response_key\n+ presigned_open_txn (operator-signed gtxn[1],\n  fee=2*minTxnFee, ABI args carry payer_addr)
+
+== 1. Payment — open escrow ticket (consensus-verified operator) ==
+
+note over Proxy, Operator
+  Co-composed open group (2 txns — NO feePayment leg):
+    gtxn[0]  payer usdcPayment  ASA   amount = max_price       fee = 0
+              receiver = escrow app addr,  asset = usdcAssetId
+    gtxn[1]  node AppCall       open(operatorId, nodeId, maxPrice,
+                                    expiresAt, payerAddr,
+                                    settlementGraceSeconds, commitK)
+              sender = the serving node's signing key (nodeSigning),
+                       fee = 2 * minTxnFee
+  The operator's gtxn[1] is delivered at reserve time as
+  presigned_open_txn; the proxy signs gtxn[0] against the group hash
+  already pinned into gtxn[1] (no re-signing of gtxn[1]). The box MBR
+  is drawn from the payer's prepaid pool (depositMbr'd earlier) —
+  open() does openTickets++ to claim one slot from the pool.
+end note
+
+Proxy -> Proxy: SubmitPresignedOpenGroup\n  decode presigned_open_txn -> SignedTxn for gtxn[1]\n  build gtxn[0] usdcPayment (sender=payer, fee=0) per the\n  shape pinned at reserve time\n  sign gtxn[0] with payer key\n  assemble [gtxn0, gtxn1] and broadcast atomically
+Proxy -> Escrow: submit signed 2-tx group
+Escrow -> Escrow: open()  (ZeroSignalEscrow.algo.ts::open)\n  resolve the serving node from the (operatorId, nodeId) node box\n  consensus check: Txn.sender == nodeRecord.signing (node's hot key)\n  (Algorand pool admission verifies the node's Ed25519 sig over the\n   canonical txn bytes — no in-contract ed25519verify_bare;\n   "consensus-verified operator")\n  require usdcPayment.assetAmount == max_price\n  require payer opted-in AND\n          (openTickets + 1) * mbrForTicket() <= algoBalance\n  openTickets++  (draw one box-MBR slot from the prepaid pool)\n  bind t.payer = payerAddr (from ABI arg, NOT Txn.Sender)\n  snapshot operatorId, nodeId, operatorOwner (operator-box payout),\n           nodeSigning (node-box key) onto the TicketRecord\n  create TicketRecord box keyed by ticket_id;  status = STATUS_OPEN
+Escrow --> Proxy: per-tx txids (gtxn[0], gtxn[1]) + group id
+Proxy -> Proxy: gtxn[1] app-call txid threaded into the\n  inner-request header's algorand_tx_id (inside the seal)\n  (group id retained on OpenHandle for audit only;\n   see flow-request-response)
+
+== 2. Inference round-trip ==
+
+note over Proxy, Operator #lightgray
+  Sealed request / response choreography is covered by
+  flow-request-response.puml. The operator emits:
+    - signed UsageReceipt   (X-Zs-Receipt header /
+                             event: zs-receipt SSE frame)
+    - operator-signed atomic settle group, gtxn[0] only
+                            (X-Zs-Settle-Group header /
+                             event: zs-settle-group SSE frame)
+  The proxy completes gtxn[1] of the settle group (payer ack)
+  for atomic broadcast in the next phase.
+end note
+
+Proxy <-> Operator: sealed request / response\n(+ signed UsageReceipt + presigned settle group)
+
+== 3a. Happy path — atomic settle group (operator first-half + payer ack) ==
+
+note over Proxy, Escrow
+  Atomic settle group:
+    gtxn[0]  operator first-half  settle(ticketId, amountCharged,
+                                          receiptDigest, asOperator=true)
+              sender = node_signing (serving node's key)
+              fee = (2 outer + SettleInnerCount(charged,max) + gapOpUps) * minTxnFee
+              (SettleInnerCount 0..3; grouped path adds no base op-up, so a
+               paid ticket = 5, a free model = 2; gapOpUps > 0 only on a
+               multi-day-idle settle)
+    gtxn[1]  payer ack            settle(ticketId, amountCharged,
+                                          receiptDigest, asOperator=false)
+              sender = t.payer,           fee = 0
+              identical args to gtxn[0]
+  The payer's signature on gtxn[1] is the only thing the proxy
+  has to add — gtxn[0] was pre-signed by the operator. The
+  asOperator arg pins each call's authorization branch so the
+  same address can act in both roles when needed (e.g. operator
+  testing their own deployment).
+end note
+
+Proxy -> Escrow: SubmitPresignedSettleGroup\n  decode X-Zs-Settle-Group / event: zs-settle-group\n  sign gtxn[1] in place (payer key, fee=0)\n  broadcast [gtxn[0], gtxn[1]] atomically
+Escrow -> Escrow: settle() — gtxn[0] (operator first-half)\n  asOperator=true  =>  require Txn.sender == t.nodeSigning\n  load TicketRecord; status must be OPEN\n  require amount_charged <= max_price\n  require latestTimestamp <= expires_at + grace\n  record (amount, digest, pendingBy = OPERATOR)\n  status -> STATUS_PENDING_SETTLE
+Escrow -> Escrow: settle() — gtxn[1] (payer ack)\n  asOperator=false =>  require Txn.sender == t.payer\n  require side != pendingBy (or args match exactly: idempotent no-op)\n  match (amount, digest) -> finalize:\n    inner-axfer payer USDC (max_price - charged - fee_paid)\n    inner-axfer operator_owner  USDC opPayout\n    inner-axfer treasury        USDC fee_paid    (skipped when 0)\n    write metrics to BOTH the (operatorId,nodeId) node box (per-node)\n      and the operatorId operator box (rollup)\n    openTickets-- (release the box-MBR slot back to the pool;\n                   NO inner ALGO refund)\n  delete TicketRecord box
+Escrow --> Proxy: ok (atomic match -> box deleted)
+Escrow --> Operator: USDC inner-axfer (operator owner)
+Escrow --> Payer: USDC residual refund\n(box-MBR slot released to the payer's prepaid pool —\n recoverable later via withdrawMbr / closeDeposit)
+
+note right of Operator
+  Operator's settlement driver acts as a watchdog only — it
+  waits hayai.settlement_watchdog_seconds (default 30s) before
+  considering a standalone fire. If the box is gone (proxy
+  atomic-finalized first), it records the externally-finalized
+  state via MarkSettling+MarkSettled and exits. Eager firing
+  is safe (idempotency tweak) but wastes ~5,000 microALGO of
+  outer-fee per occurrence.
+end note
+
+== 3b. Watchdog standalone — operator fires alone after delay ==
+
+note over Operator, Escrow
+  Triggered when the proxy never broadcasts an ack (offline,
+  killed, etc.) within the watchdog window. Box still exists,
+  status still OPEN, no operator claim recorded yet.
+end note
+
+Operator -> Escrow: settle(ticketId, amountCharged, receiptDigest,\n                       asOperator=true)\n  sender = node_signing (serving node's key)\n  fee = (1 outer + SettleInnerCount + 1 base op-up + gapOpUps) * minTxnFee\n  (single app call always op-ups once; paid ticket = 5, free model = 2)
+Escrow -> Escrow: settle() — first-half\n  status OPEN -> PENDING_SETTLE pendingBy=OPERATOR\n  records (amount, digest)
+note right of Escrow
+  Once status is PENDING_SETTLE pendingBy=OPERATOR with the
+  operator's args, a later payer ack with matching args
+  finalizes; if no payer ack arrives by deadline, anyone can
+  call settleLapsed() to finalize to the operator (3c).
+end note
+
+== 3c. Lapsed path — payer never acked an operator claim ==
+
+note over Escrow
+  After latestTimestamp > expires_at + settlement_grace_seconds,
+  a pending operator claim can be force-finalized. Callable
+  by anyone — the operator typically posts it, but a watcher
+  bot can close it out if the operator is unavailable.
+end note
+
+Operator -> Escrow: settleLapsed(ticket_id)\n  sender = any account\n  fee = (1 outer + SettleInnerCount + 1 base op-up + gapOpUps) * minTxnFee\n  (paid ticket = 5, free model = 2)
+Escrow -> Escrow: settleLapsed()\n  require status == STATUS_PENDING_SETTLE\n  require pendingBy == OPERATOR\n  require latestTimestamp > expires_at + settlement_grace_seconds\n  inner-axfer payer USDC (max_price - pendingAmount - fee_paid)\n  inner-axfer operator_owner USDC opPayout\n  inner-axfer treasury USDC fee_paid (skipped when 0)\n  openTickets-- (release the box-MBR slot to the pool)\n  delete TicketRecord box
+Escrow --> Operator: USDC payout
+Escrow --> Payer: USDC residual refund\n(box-MBR slot released to the prepaid pool)
+
+== 3d. Inactive path — no operator claim ever posted ==
+
+note over Escrow
+  Past the deadline, if no operator claim is pending (status is
+  OPEN, or PENDING_SETTLE with pendingBy == PAYER), the payer
+  recovers the full max_price (and its prepaid-pool MBR slot) via
+  refundInactive. Payer pays the outer fee here (2 * minTxnFee:
+  1 outer + 1 USDC refund inner) — the only ALGO-fee-bearing
+  happy-ish path on the payer side (besides protest()).
+end note
+
+Proxy -> Escrow: refundInactive(ticket_id)\n  sender = any account (typically payer),  fee = 2 * minTxnFee
+Escrow -> Escrow: refundInactive()\n  require status == OPEN OR\n          (status == PENDING_SETTLE AND pendingBy == PAYER)\n  require latestTimestamp > expires_at + settlement_grace_seconds\n  inner-axfer payer USDC max_price       (fee=0)\n  openTickets-- (release the box-MBR slot to the pool)\n  delete TicketRecord box
+Escrow --> Payer: full USDC max_price refund\n(box-MBR slot released to the prepaid pool)
+
+== 3e. Protest path — payer disputes receipt with evidence ==
+
+note over Proxy
+  Triggered when the proxy has cryptographic evidence
+  of misbehavior (SPEC §3b): over-charge, commit_k
+  mismatch, truncated stream with no refund, etc.
+  Legal whether the ticket is OPEN or PENDING_SETTLE;
+  silent disagreement via a mismatched second settle()
+  also freezes, but protest() carries the structured
+  dispute_excerpt for off-chain arbitration.
+
+  protest() runs an in-contract ed25519verify_bare over
+  the operator's receipt sig (open/settle do not — they
+  authenticate via consensus)
+  (1 outer + 3 OpUp inners; payer pays 4 * minTxnFee).
+end note
+
+Proxy -> Escrow: protest(ticket_id, amount_charged,\n                   receipt_digest, receipt_sig,\n                   dispute_excerpt)\n  sender = t.payer,  fee = 4 * minTxnFee
+Escrow -> Escrow: protest()\n  require status in {OPEN, PENDING_SETTLE}\n  require Txn.sender == t.payer\n  ed25519verify_bare(receipt_digest, receipt_sig,\n                     t.nodeSigning.bytes)\n  require len(dispute_excerpt) <= max_dispute_excerpt_bytes\n  status -> STATUS_FROZEN\n  (no inner payments — awaits off-chain arbitration)
+Escrow --> Proxy: ok
+note right of Escrow
+  Frozen tickets exit the auto-paths: settle(),
+  settleLapsed(), and refundInactive() all reject
+  STATUS_FROZEN. Resolution flows through the
+  admin/arbiter path (out of scope for this diagram).
+end note
+
+note over Payer, Operator
+  Terminal states per ticket: atomic match, watchdog standalone +
+  later ack, settleLapsed, refundInactive (all delete the box and
+  release its MBR slot to the prepaid pool), or STATUS_FROZEN (box
+  retained until off-chain arbitration resolves).
+end note
+
+@enduml

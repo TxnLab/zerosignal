@@ -1,0 +1,10 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "review:\n\nfunc InputTokenBoundV2(body []byte) uint64 {\n  body = bytes.TrimPrefix(body, bomPrefix)\n  if len(body) == 0 {\n    return FlatMargin\n  }\n  urlBytes, imageTokens, ok := imageStatsV2(body)\n  if !ok {\n    return saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n  }\n  textBytes := uint64(len(body))\n  if urlBytes < textBytes {\n    textBytes -= urlBytes\n  }\n  return saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\nfunc InputTokenBoundV2(body []byte) uint64 {\n  body = bytes.TrimPrefix(body, bomPrefix)\n  if len(body) == 0 {\n    return FlatMargin\n  }\n  urlBytes, imageTokens, ok := imageStatsV2(body)\n  if !ok {\n    return saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n  }\n  textBytes := uint64(len(body))\n  if urlBytes < textBytes {\n    textBytes -= urlBytes\n  }\n  return saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\nfunc InputTokenBoundV2(body []byte) uint64 {\n  body = bytes.TrimPrefix(body, bomPrefix)\n  if len(body) == 0 {\n    return FlatMargin\n  }\n  urlBytes, imageTokens, ok := imageStatsV2(body)\n  if !ok {\n    return saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n  }\n  textBytes := uint64(len(body))\n  if urlBytes < textBytes {\n    textBytes -= urlBytes\n  }\n  return saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  }
+ ],
+ "stream": true
+}

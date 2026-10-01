@@ -1,0 +1,169 @@
+' Hayai ticket lifecycle on a time axis (ZeroSignalEscrow.algo.ts, SPEC §3a/§3b).
+' Companion to the sequence-oriented flow-escrow-payment.puml. Units on the time
+' axis are unix seconds (compared against Global.latestTimestamp on-chain).
+'
+' Consensus-verified-operator + prepaid-MBR-pool design (SPEC.md "Operator
+' authentication" + "Settlement asset model"): open() and settle() authenticate
+' the operator via Algorand consensus (no in-contract ed25519verify_bare); only
+' protest() uses the contract-side receipt-sig verify.
+'
+' ========== Phase legend ==========
+'   [A] reserve       off-chain only; node builds ticket_id, K_response,
+'                     commit_k, signs ticket (off-chain audit), and
+'                     pre-signs gtxn[1] of the open group at fee =
+'                     2 * minTxnFee. Returns Ticket + presigned_open_txn
+'                     + wrapped_response_key. No escrow state yet.
+'   [B] open          2-tx atomic group lands on chain (no feePayment leg):
+'                       gtxn[0] payer usdcPayment   USDC max_price       fee=0
+'                       gtxn[1] operator AppCall    open(...)            fee=2*minTxnFee
+'                     contract open() asserts Txn.sender == nodeSigning (the
+'                     serving node's key from the (operatorId,nodeId) node box;
+'                     consensus-verified), draws one box-MBR slot from the
+'                     payer's prepaid pool (openTickets++), and stamps
+'                     status=STATUS_OPEN. Payer ALGO net cost: 0 microALGO.
+'   [C] inference     sealed req/resp (see flow-request-response); operator
+'                     emits a signed UsageReceipt and an operator-signed
+'                     atomic settle group (gtxn[0]) bound to a payer-ack
+'                     gtxn[1] template.
+'   [D] claim/ack     normally a single atomic broadcast: proxy signs gtxn[1]
+'                     (payer ack) against the operator's pre-signed gtxn[0],
+'                     submits as a 2-tx group. gtxn[0] flips OPEN ->
+'                     PENDING_SETTLE; gtxn[1] (matching args, opposite side)
+'                     finalizes and deletes the box. Same-side re-claim with
+'                     matching args is an idempotent no-op (resolves the
+'                     watchdog race).
+'                     Operator-side settlement driver acts as a watchdog
+'                     fallback only — fires standalone after
+'                     hayai.settlement_watchdog_seconds (default 30s) if
+'                     the proxy never broadcast.
+'   [E] expires_at    unix-second boundary (TicketRecord.expiresAt); no new
+'                     inference admitted. settle() / protest() still legal
+'                     while status is OPEN or PENDING_SETTLE.
+'   [F] +grace        expires_at + settlementGraceSeconds reached.
+'                     settleLapsed() now finalizes a pending operator claim
+'                     that the payer never responded to.
+'                     refundInactive() refunds the payer when no operator
+'                     claim was ever posted (or only a payer-side claim).
+'                     settle() (the two-party happy path) is rejected past
+'                     this boundary.
+'   [G] terminal      ticket deleted (atomic match, watchdog standalone +
+'                     later finalize, settleLapsed, or refundInactive),
+'                     or STATUS_FROZEN (mismatch / protest, awaits
+'                     off-chain arbitration).
+'
+' ========== Design notes ==========
+'   1. Co-signed settle removes the race between settle() and protest().
+'      Finalization requires both sides on-chain; happy path is the atomic
+'      group, where both calls land in a single broadcast. `protest()` is
+'      strictly the structured-evidence path — silent disagreement via a
+'      mismatched second settle() call also freezes the ticket.
+'
+'   2. Operator absorbs all per-request ALGO fees via fee pooling.
+'      open() gtxn[1] fee = 2*minTxnFee covers the whole open group;
+'      settle() fees are SIZED to the disbursement inners that actually fire
+'      (SettleInnerCount = 0..3, escrow/fee.go). Atomic gtxn[0] =
+'      (2 outer + SettleInnerCount + gapOpUps)*minTxnFee — the grouped path
+'      adds no base op-up, so a paid ticket = 5, a free model = 2, ~6 worst
+'      case. Standalone settle / settleLapsed adds a base op-up:
+'      (1 outer + SettleInnerCount + 1 + gapOpUps)*minTxnFee — 5 paid, 2 free.
+'      Payer ALGO net cost on the happy path is 0 microALGO; only
+'      refundInactive (2*minTxnFee) and protest (4*minTxnFee) are
+'      payer-fee-bearing paths.
+'
+'   3. settleLapsed is the operator's timeout fallback.
+'      Callable by anyone after expires_at + settlementGraceSeconds, but only
+'      when a PENDING_SETTLE claim was posted by the operator. If no claim
+'      exists (or the pending side is the payer), refundInactive is the only
+'      post-deadline path and the payer recovers the full max_price + MBR.
+'
+'   4. settlement_grace_seconds semantics.
+'      Payer-silence window in seconds: how long after expires_at the
+'      operator waits before force-finalizing via settleLapsed. Happy-path
+'      settle() still must land before the same deadline.
+'
+'   5. asOperator ABI arg.
+'      settle(ticketId, amountCharged, receiptDigest, asOperator) lets the
+'      same Algorand account act as both operator and payer (e.g. operator
+'      testing their own deployment). The contract pins authorization on
+'      the arg: asOperator=true requires Txn.sender == t.nodeSigning
+'      (the serving node's key); asOperator=false requires Txn.sender == t.payer.
+'
+'   6. protest() authorization + evidence.
+'      protest() is the payer's one-call freeze primitive: callable while
+'      status is OPEN or PENDING_SETTLE, it runs an in-contract
+'      ed25519verify_bare over the operator's receipt sig and carries a
+'      length-capped dispute_excerpt. open() and settle() instead authenticate
+'      the operator via Algorand consensus (no in-contract ed25519verify_bare).
+'      A FROZEN ticket resolves through the admin/arbiter path off-chain.
+
+@startuml
+title Ticket lifecycle on a time axis (ZeroSignalEscrow, SPEC §3a/§3b)
+
+skinparam noteBackgroundColor #FFF8DC
+skinparam noteBorderColor #C0A000
+
+concise "Phase"         as PH
+robust  "Ticket.status" as TS
+concise "Operator"      as OP
+concise "Payer"         as PAY
+concise "Anyone"        as ANY
+
+@0
+PH is "-"
+TS is none
+OP is idle
+PAY is idle
+ANY is idle
+
+@10
+PH is "A: reserve"
+OP is "reserve\n+ pre-sign gtxn[1]"
+PAY -> OP : \nPOST /v1/zs/reserve\n(payer_addr, proxy_recipient)
+note top of OP : returns Ticket + wrapped_response_key\n+ presigned_open_txn (gtxn[1], fee=2*minTxnFee)
+
+@25
+PH is "B: open"
+TS is OPEN
+OP is "await req"
+PAY -> TS : 2-tx open group\n(operator-signed gtxn[1] + payer-signed gtxn[0] usdcPayment)
+note bottom of PAY : payer ALGO fee = 0\n(operator's gtxn[1] fee pools the group; box MBR from prepaid pool)
+
+@40
+PH is "C: inference"
+OP is serve
+PAY -> OP : sealed request
+OP -> PAY : sealed response\n+ UsageReceipt + presigned settle group
+
+@70
+PH is "D: claim/ack"
+TS is PENDING_SETTLE
+OP is "watchdog\n(30s default)"
+PAY -> TS : atomic settle group\n(gtxn[0] op first-half + gtxn[1] payer ack)
+note top of PAY : single broadcast in the happy path —\noperator's gtxn[0] flips status, payer's gtxn[1]\nfinalizes (idempotent no-op on same-side\nmatching re-claim).
+
+@90
+note bottom of OP : if proxy never broadcasts, watchdog fires\nstandalone at fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee\n(5 paid, 2 free) after settlement_watchdog_seconds.
+OP -> TS : settle(asOperator=true) — standalone
+
+@105
+PH is "E: expires_at"
+
+@125
+PH is "F: +grace"
+ANY is "lapsed / refund"
+ANY -> TS : settleLapsed() OR refundInactive()
+note top of ANY : settle() rejected past deadline.\nsettleLapsed: pending operator claim\n(finalizes to operator).\nrefundInactive: no operator claim\n(full refund to payer).
+
+@155
+PH is "G: terminal"
+TS is "deleted (match / lapse / refund) or FROZEN"
+OP is "-"
+PAY is "-"
+ANY is "-"
+
+highlight 25 to 70 #E8F4FF
+highlight 70 to 105 #F0E8FF
+highlight 105 to 125 #FFF4CC
+highlight 125 to 155 #FFE8E8
+
+@enduml

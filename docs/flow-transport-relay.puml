@@ -1,0 +1,174 @@
+' Hayai transport privacy — single-hop operator-as-relay (Option A).
+' Companion to proto/SPEC.md § 3f. hayai.privacy defaults ON: honest clients
+' route THROUGH a relay by default; only an explicit privacy: false (YAML) /
+' PROXY_ZS_PRIVACY=false opts back to a direct route.
+'
+' The envelope / ticket / receipt / admission tag / AAD layout are identical to
+' the direct flow (flow-request-response.puml + flow-ticket-reserve.puml). This
+' diagram shows ONLY the relay indirection wrapped around them: proxy -> relay
+' node -> target node, with the relay as a byte-transparent forwarder that never
+' decrypts, never verifies admission, and never touches its keystore. Function
+' names reference the Go reference impl (proto/go/relay + proto/go/selection,
+' proxy/internal/hayai/relayrouter.go, node/internal/server/relay.go).
+
+@startuml flow-transport-relay
+title Hayai transport privacy — single-hop relay (proxy -> relay -> target)
+
+autonumber "<b>[00]</b>"
+skinparam sequence {
+    ArrowColor #444
+    LifeLineBorderColor #888
+    ParticipantBorderColor #444
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #C0A000
+}
+
+participant "Proxy\nhayai_dispatch.go +\ninternal/hayai/relayrouter.go\n(hayai.privacy = ON)" as Proxy
+participant "Algod / ZeroSignalEscrow\nOperator + Node boxes" as Chain
+participant "Relay Node\nhandleRelay (server/relay.go)\n+ CachedRelayDirectory" as Relay
+participant "Target Node\nhandlers.go + receipt.go +\nsettlement worker" as Target
+
+note over Proxy, Target
+  ON BY DEFAULT. The proxy routes THROUGH a relay
+  on every request unless privacy is explicitly disabled (privacy: false /
+  PROXY_ZS_PRIVACY=false), in which case it routes DIRECTLY to the
+  target — byte-identical to flow-request-response.puml. Everything below
+  is the relay wrapper added when privacy is ON (the default).
+end note
+
+== Path selection (proxy side; on-chain enumeration is NOT relayed) ==
+
+Proxy -> Chain: enumerate Operator + Node boxes (algod box reads, fetcher.go)\n  -> []hayai.Operator  (each entry is ONE node within an operator,\n     keyed by (operatorId, nodeId))\n  *This is NOT an operator HTTP call -> never relayed* (SPEC §3f);\n  hiding the proxy here is out of scope (any algod endpoint works).
+Chain --> Proxy: per-node set\n  {operatorId, nodeId, owner_addr (operator-level),\n   base_url (per-node), proto_version, reachable,\n   tee_attested, models[], builtin_tools[]}
+
+Proxy -> Proxy: selection.SelectTargets(ops, constraints, preferred)\n  ServesModel filter -> sizing -> image-factor -> version -> TEE\n  -> built-in-tool partition -> affinity reorder\n  => TARGET operator (same policy as the direct pickCandidates)
+
+Proxy -> Proxy: hop = SelectRelayHop(ops, target, RandomRelaySeed())\n  selection.SelectRelay eligibility (a relay is ONE node):\n    (op.ID, op.NodeID) != (target.ID, target.NodeID)   (hard)\n    op.OwnerAddr != target.OwnerAddr                   (hard owner diversity)\n    wire.ProtoVersionCompatible(op)                    (exposes /v1/zs/relay)\n  prefer Reachable; /16 subnet diversity best-effort (public IPv4 only,\n    skipped for hostnames / loopback / RFC1918)\n  sort eligible by ID; pick relays[seed % len]\n  *fresh random seed per request => relay ROTATES each call*\n  ErrNoRelay => proxy HARD-FAILS 503 no_relay_available (MUST NOT\n    fall back to a direct route — that silently voids privacy)
+
+== Relayed request (worked example: sealed inference POST) ==
+
+note over Proxy
+  The inner request is built EXACTLY as the direct case — envelope wrap,
+  admission_tag, and AAD are all sealed/bound to the TARGET's age key and
+  target-issued ticket (see flow-request-response.puml). Privacy only
+  rewrites WHERE it is sent, via ApplyRelay(req, hop, innerPath, innerMethod):
+    req.URL    = hop.BaseURL + wire.RelayPath   ("/v1/zs/relay")
+    req.Method = POST                           (relay route is always POST)
+    X-Zs-Relay-Target      = target operator id   (an id, NOT a URL)
+    X-Zs-Relay-Target-Node = target node id       (within the operator)
+    X-Zs-Relay-Path        = "/v1/chat/completions"   (inner path)
+    X-Zs-Relay-Method      = "POST"               (inner method)
+  Body + inner Content-Type (application/vnd.zs+json) are unchanged.
+  Client Authorization is dropped here, as always. A nil hop = no-op
+  (the direct path), so the call site is unconditional.
+end note
+
+Proxy -> Relay: POST <relay.BaseURL>/v1/zs/relay\nContent-Type: application/vnd.zs+json\nX-Zs-Relay-Target: <target operator id>\nX-Zs-Relay-Target-Node: <target node id>\nX-Zs-Relay-Path: /v1/chat/completions\nX-Zs-Relay-Method: POST\n{ciphertext}   (identifiers ride inside the seal — SPEC §4)
+
+== Relay handler — byte-transparent forward (no decrypt, no keystore) ==
+
+Relay -> Relay: validate relay headers (cheap, pre-I/O, before any slot held)\n  ParseUint(X-Zs-Relay-Target) + ParseUint(X-Zs-Relay-Target-Node)\n    or 400 relay_bad_target\n  relay.IsAllowedInnerPath(path): closed allow-list, must be /v1/*,\n    reject ".." traversal; /v1/zs/relay itself NOT allowed (single-hop,\n    no chaining) -> else 400 relay_bad_path\n  method in {GET, POST} -> else 400 relay_bad_method
+Relay -> Relay: acquire relaySem (defaultRelayMaxInflight = 256 circuits)\n  full => 503 relay_busy\n  *held-connection cap (a circuit pins 2 conns for the stream lifetime,\n   write-timeout 0); the per-IP relay_per_ip bucket limits RATE, not\n   held conns, so the semaphore guards against slow-loris circuits*
+Relay -> Chain: CachedRelayDirectory.BaseURL(operatorId, nodeId)\n  base_url lives on the (operatorId, nodeId) node box\n  serve from cache when fresh (TTL 5m); stale/cold -> single refresh\n  under refreshMu via FetchAllOperators (20s timeout, 10s fail-backoff\n  so an algod outage serves fast 404s instead of N serialized fetches)
+Chain --> Relay: target node base_url\n  unknown (operatorId, nodeId) => 404 relay_unknown_target\n  *THE SSRF BOUNDARY: the target URL comes from the on-chain directory,\n   NEVER from a client-supplied header — a relay can't be steered at an\n   arbitrary host, only at a registered (operatorId,nodeId) node's\n   allow-listed paths*
+
+Relay -> Target: POST <target.base_url>/v1/chat/completions\nContent-Type: application/vnd.zs+json   (copied from inner request)\nAccept: text/event-stream                  (copied, when streaming)\n{ciphertext, ...}   (body forwarded VERBATIM — io.Copy, no re-framing)\n  X-Zs-Relay-* routing headers + any client-identifying header are\n  NOT forwarded (the relay's whole purpose is to hide the client)
+
+note over Target
+  Target decrypts + admits EXACTLY as the direct flow
+  (flow-request-response.puml / flow-ticket-reserve.puml):
+    DecryptRequest -> Peek(ticket_id) -> verifyAdmissionTag
+    -> VerifyOpenAppCall -> Consume -> upstream LLM -> seal response.
+  The relay changed NONE of these bytes. The ONLY difference the target
+  observes is the source IP = the relay's, never the client's.
+  A relay that mutated any AAD-bound byte => AEAD fails CLOSED here
+  (decrypt error), never a silent corruption.
+end note
+
+Target --> Relay: 200 OK\nContent-Type: text/event-stream  (or application/vnd.zs+json)\nX-Zs-Response-Key (age-wrapped) / X-Zs-Receipt + X-Zs-Settle-Group (both sealed)\nevent: zs\\ndata: <base64(nonce || ct)>\n...\ndata: [DONE]   (plaintext sentinel, §5.3)
+
+Relay -> Relay: copyRelayResponseHeaders(dst, src)\n  copy status + Content-Type + every X-Zs-* + Retry-After,\n  MINUS hop-by-hop (Connection, Transfer-Encoding, Upgrade, ...)\n  and Access-Control-* (CORS is the proxy<->browser contract, set by\n  the proxy — not the target node)
+Relay --> Proxy: streamRelayBody(w, resp.Body)\n  raw io.Copy + Flush after every chunk — NO SSE parse, NO re-framing,\n  so the AEAD frame-index AAD binding (SPEC §6) and the plaintext\n  [DONE] sentinel (§5.3) pass through BYTE-FOR-BYTE
+
+note over Proxy
+  The proxy handles the response identically to the direct case:
+    UnwrapResponseKey -> verifyCommitK -> DecryptBody / DecryptSSEDataValue
+    -> validate receipt + body_hash -> wallet.AckSettle (atomic settle group)
+    -> deliver plaintext to the OpenAI-SDK client (X-Zs-* stripped).
+  The relay hop is invisible to all of it.
+end note
+
+== Same mechanic at the other two relay call sites ==
+
+note over Proxy, Target
+  Reserve and discovery use the IDENTICAL relay route, differing only in
+  inner path / method / body (relay indirection has THREE proxy edit sites,
+  no single chokepoint):
+
+    Reserve  — HTTPReserveClient.Reserve(..., hop) -> ApplyRelay
+      X-Zs-Relay-Path: /v1/zs/reserve     Method: POST
+      inner Content-Type: application/vnd.zs-reserve+json
+      body = SEALED reserve (age-sealed to the target's recipient so the
+        relay can't read payer_addr — the whole reason it's sealed; SPEC §3a)
+
+    Discovery — ChainOperatorSource.Privacy -> discoveryHop per operator
+      DetailsClient.Fetch:      /v1/zs/details         GET (no body)
+      /v1/models, /v1/models/{id}                          GET (no body)
+      AttestationClient.Fetch:  /v1/zs/attestation      GET (no body)
+
+  Discovery probes ride a relay too: a direct probe would re-expose the
+  client IP on a background cadence (SPEC §3f).
+end note
+
+note right of Proxy
+  Discovery cold-start: the relay-candidate set seeds unprobed operators'
+  proto_version OPTIMISTICALLY with wire.ProtoVersion (privacy presupposes
+  an all-relay-capable fleet), so a probe always routes through a peer
+  assumed relay-capable — NO direct probe ever leaks the proxy IP. A
+  pre-relay peer 404s the forward; the probe retries next cycle through a
+  rotated peer (self-healing). ChainOperatorSource carries each operator's
+  last probe outcome across cycles so SelectRelay's reachability preference
+  benefits the probes too.
+end note
+
+== Anonymity & trust model (per request) ==
+
+note over Proxy, Target
+  RELAY  sees: client IP + target IP + ciphertext + timing/byte counts
+               => "who talked to whom, never WHAT" — the body is sealed to
+                  the target's age key; the relay holds no key and cannot
+                  decrypt, forge admission, or tamper.
+               It also cannot read the PAYER: every leg of both the reserve
+                  and inference round-trips is sealed, so the payer address,
+                  ticket_id and algorand_tx_id are all off the wire (SPEC §3f).
+  TARGET sees: the RELAY's IP + the decrypted prompt
+               => "WHAT was asked, never who" — it never receives the
+                  client IP at all.
+  Per-request relay rotation (fresh random seed) stops any single relay
+  from learning a stable client<->target pair across a session — the
+  OHTTP single-relay property, without OHTTP's streaming gap.
+  RESIDUAL: open() is a public Algorand txn, so a relay can still correlate
+  (client IP, target, timing) against the chain to guess the payer. Linkage
+  is reduced to statistical timing, not eliminated — SPEC §3f.
+  Out of scope for single-hop: hiding the TARGET's IP from the client.
+end note
+
+== Failure / guard paths ==
+
+note over Proxy, Relay
+  - Proxy: SelectRelay ErrNoRelay -> 503 no_relay_available. The proxy
+    MUST hard-fail; routing direct would silently void the privacy guarantee.
+  - Relay 400s: missing/invalid target (relay_bad_target); path off the
+    allow-list or traversal (relay_bad_path); method not GET/POST
+    (relay_bad_method).
+  - Relay 404 relay_unknown_target: target id not a currently-registered
+    operator (the SSRF boundary).
+  - Relay 503 relay_busy: inflight-circuit semaphore saturated.
+  - Relay 502 relay_upstream_unreachable: target connection failed.
+  - escrow_app_id == 0 (test isolation): the relay route is DISABLED — no
+    on-chain directory to resolve targets against (and the node is
+    unreachable / unable to settle in production anyway). Tests inject a
+    fake RelayDirectory via server.Options, never a header-supplied URL.
+end note
+
+@enduml

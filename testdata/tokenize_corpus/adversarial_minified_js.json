@@ -1,0 +1,10 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}function a(b,c){var d=b.length,e=[];for(var f=0;f<d;f++){e.push(b[f]*c);}return e.filter(function(g){return g>0;}).map(function(h){return h+1;});}"
+  }
+ ],
+ "stream": true
+}

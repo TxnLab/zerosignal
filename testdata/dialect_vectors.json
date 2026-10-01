@@ -1,0 +1,568 @@
+{
+  "version": 1,
+  "comment": "Cross-impl parity vectors for inferDialect / hostMatchesDomain / httpsUpstreamHost / namedUpstreamAdmissible / upstreamAttested. Expectations are hand-authored. Regenerate via: cd proto/go \u0026\u0026 go test ./inject -run TestDialectVectors -update. Loaded by proto/go/inject/dialect_vectors_test.go and proto/ts/test/dialect-vectors.test.ts.",
+  "infer_dialect": [
+    {
+      "url": "https://api.x.ai/v1",
+      "want": "xai"
+    },
+    {
+      "url": "https://x.ai/v1",
+      "want": "xai",
+      "why": "apex"
+    },
+    {
+      "url": "https://API.X.AI/v1",
+      "want": "xai",
+      "why": "hosts are case-insensitive"
+    },
+    {
+      "url": "https://api.x.ai./v1",
+      "want": "xai",
+      "why": "fully-qualified trailing dot names the same host"
+    },
+    {
+      "url": "https://api.x.ai:443/v1",
+      "want": "xai",
+      "why": "a port is not part of the host"
+    },
+    {
+      "url": "http://api.x.ai/v1",
+      "want": "xai",
+      "why": "the scheme is not a dialect question; attested_passthrough refuses http separately"
+    },
+    {
+      "url": "  https://api.x.ai/v1  ",
+      "want": "xai",
+      "why": "surrounding whitespace is trimmed, as config loading does"
+    },
+    {
+      "url": "https://api.openai.com/v1",
+      "want": "openai"
+    },
+    {
+      "url": "https://api.moonshot.ai/v1",
+      "want": "moonshot"
+    },
+    {
+      "url": "https://api.moonshot.cn/v1",
+      "want": "moonshot"
+    },
+    {
+      "url": "https://api.kimi.ai/v1",
+      "want": "moonshot"
+    },
+    {
+      "url": "https://api.kimi.com/coding/v1",
+      "want": "moonshot"
+    },
+    {
+      "url": "https://api.z.ai/api/paas/v4",
+      "want": "zai"
+    },
+    {
+      "url": "https://API.Z.AI/api/paas/v4",
+      "want": "zai"
+    },
+    {
+      "url": "https://open.bigmodel.cn/api/paas/v4",
+      "want": "zai"
+    },
+    {
+      "url": "https://openrouter.ai/api/v1",
+      "want": "openrouter"
+    },
+    {
+      "url": "https://OPENROUTER.AI/api/v1/chat",
+      "want": "openrouter"
+    },
+    {
+      "url": "https://api.together.xyz/v1",
+      "want": "generic"
+    },
+    {
+      "url": "http://localhost:8000/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://api.x.ai.attacker.example/v1",
+      "want": "generic",
+      "why": "vendor host as a PREFIX of an attacker host"
+    },
+    {
+      "url": "https://x.ai.attacker.example/v1",
+      "want": "generic",
+      "why": "apex as a prefix — the old //x.ai pattern"
+    },
+    {
+      "url": "https://api.x.ai@attacker.example/v1",
+      "want": "generic",
+      "why": "userinfo: reads as xAI, dials the attacker"
+    },
+    {
+      "url": "https://attacker.example@api.x.ai/v1",
+      "want": "generic",
+      "why": "userinfo is refused even when the dialed host is genuine"
+    },
+    {
+      "url": "https://attacker.example/api.x.ai/v1",
+      "want": "generic",
+      "why": "vendor host in the PATH"
+    },
+    {
+      "url": "https://attacker.example/v1?u=api.x.ai",
+      "want": "generic",
+      "why": "vendor host in the QUERY"
+    },
+    {
+      "url": "https://attacker.example/v1#//x.ai",
+      "want": "generic",
+      "why": "vendor host in the FRAGMENT"
+    },
+    {
+      "url": "https://notx.ai/v1",
+      "want": "generic",
+      "why": "suffix without a label boundary"
+    },
+    {
+      "url": "https://api-x.ai.attacker.example/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://api.openai.com.attacker.example/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://openrouter.ai.attacker.example/api/v1",
+      "want": "generic",
+      "why": "a lookalike would otherwise advertise upstream_enforced"
+    },
+    {
+      "url": "https://attacker.example/openrouter.ai/api/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://openrouter.example.com/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://my-router.example.com/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://my-moonshot-proxy.example/v1",
+      "want": "generic",
+      "why": "a vendor NAME in a host is not the vendor's domain"
+    },
+    {
+      "url": "https://kimi.attacker.example/v1",
+      "want": "generic"
+    },
+    {
+      "url": "api.x.ai/v1",
+      "want": "generic",
+      "why": "scheme-less: url.Parse yields a path, not a host"
+    },
+    {
+      "url": "",
+      "want": "generic"
+    },
+    {
+      "url": "://api.x.ai",
+      "want": "generic",
+      "why": "does not parse"
+    },
+    {
+      "url": "//api.x.ai/v1",
+      "want": "generic",
+      "why": "scheme-relative: url.Parse finds a host, WHATWG URL refuses it"
+    },
+    {
+      "url": "https:api.x.ai/v1",
+      "want": "generic",
+      "why": "opaque: no authority"
+    },
+    {
+      "url": "https:///api.x.ai/v1",
+      "want": "generic",
+      "why": "empty authority"
+    },
+    {
+      "url": "https://api.x.ai\\@attacker.example/v1",
+      "want": "generic",
+      "why": "WHATWG reads the backslash as a path separator"
+    },
+    {
+      "url": "https://attacker.example\\.api.x.ai/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://api%2ex%2eai/v1",
+      "want": "generic",
+      "why": "percent-escaped host: url.Parse errors, WHATWG decodes it to api.x.ai — refused"
+    },
+    {
+      "url": "https://api.x.ai/v1%zz",
+      "want": "generic",
+      "why": "malformed escape in the path: url.Parse refuses it, so the TS side must too"
+    },
+    {
+      "url": "https://api.x.ai/v1#%zz",
+      "want": "generic",
+      "why": "malformed escape in the fragment"
+    },
+    {
+      "url": "https://api.x.ai/v1%",
+      "want": "generic",
+      "why": "a trailing bare %"
+    },
+    {
+      "url": "https://api.x.ai/v1?a=%zz",
+      "want": "generic",
+      "why": "url.Parse keeps the query raw; refused anyway so one rule covers the string"
+    },
+    {
+      "url": "https://api.x.ai/v1%2F",
+      "want": "xai",
+      "why": "a well-formed escape in the path is fine"
+    },
+    {
+      "url": "https://api.x.ai/v1?a=%4z",
+      "want": "generic",
+      "why": "half-valid escape: BOTH characters after % must be hex"
+    },
+    {
+      "url": "https://api.x.ai/v1#",
+      "want": "generic",
+      "why": "DEL counts as a control byte, and url.Parse misses it in the fragment"
+    },
+    {
+      "url": "https://a_b.x.ai/v1",
+      "want": "generic",
+      "why": "underscore: url.Parse accepts it, the LDH subset does not"
+    },
+    {
+      "url": "https://[::1]:8000/v1",
+      "want": "generic",
+      "why": "IPv6 literal"
+    },
+    {
+      "url": "https://api.x.ai:abc/v1",
+      "want": "generic",
+      "why": "non-numeric port"
+    },
+    {
+      "url": "https://api.x.ai:/v1",
+      "want": "xai",
+      "why": "empty port: both parsers take the host"
+    },
+    {
+      "url": "https://xn--x-9ga.ai/v1",
+      "want": "generic",
+      "why": "punycode is plain LDH and is not x.ai"
+    },
+    {
+      "url": "https://api.х.ai/v1",
+      "want": "generic",
+      "why": "Cyrillic U+0445: not LDH, refused before any IDNA mapping"
+    },
+    {
+      "url": "\thttps://api.x.ai/v1\n",
+      "want": "xai",
+      "why": "ASCII whitespace around the URL is trimmed"
+    },
+    {
+      "url": "﻿https://api.x.ai/v1",
+      "want": "generic",
+      "why": "U+FEFF: non-ASCII whitespace is not trimmed on either side"
+    },
+    {
+      "url": " https://api.x.ai/v1",
+      "want": "generic",
+      "why": "U+00A0"
+    },
+    {
+      "url": "https://api.x.ai/v1\u0001",
+      "want": "generic",
+      "why": "a control byte anywhere is refused on both sides"
+    },
+    {
+      "url": "https://api.x.ai/v1#f\u0000",
+      "want": "generic",
+      "why": "url.Parse alone admits a control byte in the fragment; refused explicitly"
+    },
+    {
+      "url": "https://api.x.ai/v1",
+      "want": "generic"
+    },
+    {
+      "url": "https://api.x.ai:443:1/v1",
+      "want": "generic",
+      "why": "two colons: not a host:port"
+    },
+    {
+      "url": "https://attacker.example?@api.x.ai/v1",
+      "want": "generic",
+      "why": "the query ends the authority in both parsers"
+    }
+  ],
+  "host_matches_domain": [
+    {
+      "host": "api.x.ai",
+      "domain": "x.ai",
+      "want": true
+    },
+    {
+      "host": "x.ai",
+      "domain": "x.ai",
+      "want": true
+    },
+    {
+      "host": "X.AI.",
+      "domain": "x.ai",
+      "want": true
+    },
+    {
+      "host": "a.b.x.ai",
+      "domain": "x.ai",
+      "want": true
+    },
+    {
+      "host": "notx.ai",
+      "domain": "x.ai",
+      "want": false
+    },
+    {
+      "host": "x.ai.attacker.example",
+      "domain": "x.ai",
+      "want": false
+    },
+    {
+      "host": "ai",
+      "domain": "x.ai",
+      "want": false
+    },
+    {
+      "host": "",
+      "domain": "x.ai",
+      "want": false
+    },
+    {
+      "host": "x.ai",
+      "domain": "",
+      "want": false
+    },
+    {
+      "host": "x.aİ",
+      "domain": "x.ai",
+      "want": false
+    },
+    {
+      "host": "api.x.ai",
+      "domain": "x.aİ",
+      "want": false
+    }
+  ],
+  "https_upstream_host": [
+    {
+      "url": "https://api.x.ai/v1",
+      "host": "api.x.ai"
+    },
+    {
+      "url": "HTTPS://API.X.AI/v1",
+      "host": "API.X.AI"
+    },
+    {
+      "url": "https://gateway.example:8443/v1",
+      "host": "gateway.example"
+    },
+    {
+      "url": "http://api.x.ai/v1",
+      "host": ""
+    },
+    {
+      "url": "ws://api.x.ai/v1",
+      "host": ""
+    },
+    {
+      "url": "https://api.x.ai@attacker.example/v1",
+      "host": ""
+    },
+    {
+      "url": "https://api%2ex%2eai/v1",
+      "host": ""
+    },
+    {
+      "url": "//api.x.ai/v1",
+      "host": ""
+    },
+    {
+      "url": "",
+      "host": ""
+    },
+    {
+      "url": "https://[::1]:8000/v1",
+      "host": ""
+    },
+    {
+      "url": "https://a_b.example/v1",
+      "host": ""
+    }
+  ],
+  "named_upstream_admissible": [
+    {
+      "name": "xAI with zero retention",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "upstream_attested": false,
+      "want": true
+    },
+    {
+      "name": "xAI with zero retention, attestation also present",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "upstream_attested": true,
+      "want": true
+    },
+    {
+      "name": "xAI without zero retention",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\"}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "xAI over plain http",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"http://api.x.ai/v1\",\"zero_retention\":true}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "xAI over plain http, attestation present",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"http://api.x.ai/v1\",\"zero_retention\":true}",
+      "upstream_attested": true,
+      "want": false
+    },
+    {
+      "name": "lookalike host",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai.attacker.example/v1\",\"zero_retention\":true}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "userinfo lookalike",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai@attacker.example/v1\",\"zero_retention\":true}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "path lookalike",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://attacker.example/api.x.ai/v1\",\"zero_retention\":true}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "ACI gateway with attestation",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://gateway.example/v1\",\"upstream_attested\":true}",
+      "upstream_attested": true,
+      "want": true
+    },
+    {
+      "name": "ACI gateway, block dropped (lapsed appraisal)",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://gateway.example/v1\",\"upstream_attested\":true}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "block injected for a node that never signed upstream_attested",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://gateway.example/v1\"}",
+      "upstream_attested": true,
+      "want": false
+    },
+    {
+      "name": "upstream_attested over plain http",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"http://gateway.example/v1\",\"upstream_attested\":true}",
+      "upstream_attested": true,
+      "want": false
+    },
+    {
+      "name": "attested branch does not consult the vendor: any https host whose enclave the node appraised",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai.attacker.example/v1\",\"upstream_attested\":true}",
+      "upstream_attested": true,
+      "want": true
+    },
+    {
+      "name": "no URL",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\"}",
+      "upstream_attested": true,
+      "want": false
+    },
+    {
+      "name": "in_enclave is not a named upstream",
+      "posture_json": "{\"plaintext_terminates\":\"in_enclave\"}",
+      "upstream_attested": false,
+      "want": false
+    },
+    {
+      "name": "absent posture",
+      "posture_json": "",
+      "upstream_attested": true,
+      "want": false
+    }
+  ],
+  "upstream_attested": [
+    {
+      "block_json": "{\"protocol\":\"aci/1\",\"base_url\":\"https://gateway.example/v1\"}",
+      "want": true
+    },
+    {
+      "block_json": "{\"protocol\":\"aci/1\"}",
+      "want": true,
+      "why": "presence of a recognized protocol is the whole check; nothing else is verified here"
+    },
+    {
+      "block_json": "",
+      "want": false,
+      "why": "absent"
+    },
+    {
+      "block_json": "null",
+      "want": false
+    },
+    {
+      "block_json": "{}",
+      "want": false,
+      "why": "an empty block names no protocol, so it is unverifiable"
+    },
+    {
+      "block_json": "{\"protocol\":\"aci/2\"}",
+      "want": false,
+      "why": "an unrecognized protocol MUST be treated as unverifiable"
+    },
+    {
+      "block_json": "{\"protocol\":\"ACI/1\"}",
+      "want": false,
+      "why": "exact match"
+    },
+    {
+      "block_json": "{\"Protocol\":\"aci/1\"}",
+      "want": false,
+      "why": "keys match exactly on both sides"
+    },
+    {
+      "block_json": "{\"protocol\":1}",
+      "want": false,
+      "why": "Go fails the bundle decode; TypeScript reads a non-string"
+    },
+    {
+      "block_json": "[]",
+      "want": false,
+      "why": "not an object: Go fails the bundle decode"
+    },
+    {
+      "block_json": "true",
+      "want": false
+    },
+    {
+      "block_json": "\"aci/1\"",
+      "want": false
+    }
+  ]
+}

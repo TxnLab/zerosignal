@@ -1,0 +1,613 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "find record 42"
+  }
+ ],
+ "stream": true,
+ "tools": [
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_0",
+    "description": "Look up record 0 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_1",
+    "description": "Look up record 1 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_2",
+    "description": "Look up record 2 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_3",
+    "description": "Look up record 3 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_4",
+    "description": "Look up record 4 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_5",
+    "description": "Look up record 5 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_6",
+    "description": "Look up record 6 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_7",
+    "description": "Look up record 7 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_8",
+    "description": "Look up record 8 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_9",
+    "description": "Look up record 9 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_10",
+    "description": "Look up record 10 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_11",
+    "description": "Look up record 11 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_12",
+    "description": "Look up record 12 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_13",
+    "description": "Look up record 13 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_14",
+    "description": "Look up record 14 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_15",
+    "description": "Look up record 15 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_16",
+    "description": "Look up record 16 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_17",
+    "description": "Look up record 17 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_18",
+    "description": "Look up record 18 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_19",
+    "description": "Look up record 19 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  }
+ ],
+ "tool_choice": "auto"
+}

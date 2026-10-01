@@ -1,0 +1,463 @@
+{
+  "version": 1,
+  "comment": "Ground-truth token counts for proto/testdata/tokenize_corpus/*.json, measured with real BPE vocabularies. real_tokens is the WORST (largest) count across tokenizers — the reserve input-token bound must be >= it for every sample. Regenerate via: python3 proto/testdata/gen_tokenize_corpus.py (needs tiktoken + pillow). Consumed by proto/go/tokenize/corpus_test.go and proto/ts/test/tokenize-corpus.test.ts.",
+  "tokenizers": [
+    "o200k_base",
+    "cl100k_base"
+  ],
+  "tokens_per_message": 4,
+  "tokens_per_reply_primer": 3,
+  "samples": [
+    {
+      "name": "adversarial_base64",
+      "body_bytes": 4206,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 2781,
+        "cl100k_base": 2957
+      },
+      "real_tokens": 2957
+    },
+    {
+      "name": "adversarial_hex",
+      "body_bytes": 4206,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 2641,
+        "cl100k_base": 2633
+      },
+      "real_tokens": 2641
+    },
+    {
+      "name": "adversarial_minified_js",
+      "body_bytes": 1862,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 657,
+        "cl100k_base": 645
+      },
+      "real_tokens": 657
+    },
+    {
+      "name": "adversarial_rare_words",
+      "body_bytes": 2190,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 582,
+        "cl100k_base": 612
+      },
+      "real_tokens": 612
+    },
+    {
+      "name": "adversarial_short_rare_words",
+      "body_bytes": 1874,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 612,
+        "cl100k_base": 626
+      },
+      "real_tokens": 626
+    },
+    {
+      "name": "adversarial_uuids",
+      "body_bytes": 7509,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 3908,
+        "cl100k_base": 3908
+      },
+      "real_tokens": 3908
+    },
+    {
+      "name": "agent_tool_history",
+      "body_bytes": 8933,
+      "messages": 14,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1398,
+        "cl100k_base": 1390
+      },
+      "real_tokens": 1398
+    },
+    {
+      "name": "cjk_ja",
+      "body_bytes": 5870,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1209,
+        "cl100k_base": 1689
+      },
+      "real_tokens": 1689
+    },
+    {
+      "name": "cjk_ko",
+      "body_bytes": 5110,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1011,
+        "cl100k_base": 1610
+      },
+      "real_tokens": 1610
+    },
+    {
+      "name": "cjk_zh",
+      "body_bytes": 5150,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 849,
+        "cl100k_base": 1569
+      },
+      "real_tokens": 1569
+    },
+    {
+      "name": "code_go",
+      "body_bytes": 2035,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 521,
+        "cl100k_base": 520
+      },
+      "real_tokens": 521
+    },
+    {
+      "name": "code_ts",
+      "body_bytes": 1552,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 413,
+        "cl100k_base": 413
+      },
+      "real_tokens": 413
+    },
+    {
+      "name": "cyrillic_greek",
+      "body_bytes": 7310,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1360,
+        "cl100k_base": 2710
+      },
+      "real_tokens": 2710
+    },
+    {
+      "name": "emoji_dense",
+      "body_bytes": 4010,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1909,
+        "cl100k_base": 2709
+      },
+      "real_tokens": 2709
+    },
+    {
+      "name": "empty_messages",
+      "body_bytes": 64,
+      "messages": 0,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 3,
+        "cl100k_base": 3
+      },
+      "real_tokens": 3
+    },
+    {
+      "name": "image_garbage_dataurl",
+      "body_bytes": 336,
+      "messages": 1,
+      "image_tokens": 2805,
+      "tokens": {
+        "o200k_base": 2819,
+        "cl100k_base": 2819
+      },
+      "real_tokens": 2819
+    },
+    {
+      "name": "image_gif_320x240",
+      "body_bytes": 24544,
+      "messages": 1,
+      "image_tokens": 255,
+      "tokens": {
+        "o200k_base": 269,
+        "cl100k_base": 269
+      },
+      "real_tokens": 269
+    },
+    {
+      "name": "image_jpeg_800x600",
+      "body_bytes": 13209,
+      "messages": 1,
+      "image_tokens": 765,
+      "tokens": {
+        "o200k_base": 779,
+        "cl100k_base": 779
+      },
+      "real_tokens": 779
+    },
+    {
+      "name": "image_jpeg_big_exif",
+      "body_bytes": 63829,
+      "messages": 1,
+      "image_tokens": 425,
+      "tokens": {
+        "o200k_base": 439,
+        "cl100k_base": 439
+      },
+      "real_tokens": 439
+    },
+    {
+      "name": "image_low_detail",
+      "body_bytes": 24083,
+      "messages": 1,
+      "image_tokens": 85,
+      "tokens": {
+        "o200k_base": 99,
+        "cl100k_base": 99
+      },
+      "real_tokens": 99
+    },
+    {
+      "name": "image_png_1024x768",
+      "body_bytes": 5988,
+      "messages": 1,
+      "image_tokens": 765,
+      "tokens": {
+        "o200k_base": 779,
+        "cl100k_base": 779
+      },
+      "real_tokens": 779
+    },
+    {
+      "name": "image_png_4096",
+      "body_bytes": 80132,
+      "messages": 1,
+      "image_tokens": 10965,
+      "tokens": {
+        "o200k_base": 10979,
+        "cl100k_base": 10979
+      },
+      "real_tokens": 10979
+    },
+    {
+      "name": "image_png_512",
+      "body_bytes": 2932,
+      "messages": 1,
+      "image_tokens": 255,
+      "tokens": {
+        "o200k_base": 269,
+        "cl100k_base": 269
+      },
+      "real_tokens": 269
+    },
+    {
+      "name": "image_remote_url",
+      "body_bytes": 327,
+      "messages": 1,
+      "image_tokens": 2805,
+      "tokens": {
+        "o200k_base": 2819,
+        "cl100k_base": 2819
+      },
+      "real_tokens": 2819
+    },
+    {
+      "name": "image_truncated_png",
+      "body_bytes": 332,
+      "messages": 1,
+      "image_tokens": 2805,
+      "tokens": {
+        "o200k_base": 2819,
+        "cl100k_base": 2819
+      },
+      "real_tokens": 2819
+    },
+    {
+      "name": "image_two_plus_text",
+      "body_bytes": 4403,
+      "messages": 1,
+      "image_tokens": 510,
+      "tokens": {
+        "o200k_base": 598,
+        "cl100k_base": 598
+      },
+      "real_tokens": 598
+    },
+    {
+      "name": "image_webp_vp8",
+      "body_bytes": 5165,
+      "messages": 1,
+      "image_tokens": 765,
+      "tokens": {
+        "o200k_base": 779,
+        "cl100k_base": 779
+      },
+      "real_tokens": 779
+    },
+    {
+      "name": "image_webp_vp8l",
+      "body_bytes": 1005,
+      "messages": 1,
+      "image_tokens": 1105,
+      "tokens": {
+        "o200k_base": 1119,
+        "cl100k_base": 1119
+      },
+      "real_tokens": 1119
+    },
+    {
+      "name": "image_webp_vp8x",
+      "body_bytes": 12753,
+      "messages": 1,
+      "image_tokens": 2125,
+      "tokens": {
+        "o200k_base": 2139,
+        "cl100k_base": 2139
+      },
+      "real_tokens": 2139
+    },
+    {
+      "name": "json_in_content",
+      "body_bytes": 1231,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 670,
+        "cl100k_base": 670
+      },
+      "real_tokens": 670
+    },
+    {
+      "name": "latin_polish",
+      "body_bytes": 1094,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 310,
+        "cl100k_base": 382
+      },
+      "real_tokens": 382
+    },
+    {
+      "name": "latin_turkish",
+      "body_bytes": 1202,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 238,
+        "cl100k_base": 358
+      },
+      "real_tokens": 358
+    },
+    {
+      "name": "latin_vietnamese",
+      "body_bytes": 1214,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 238,
+        "cl100k_base": 442
+      },
+      "real_tokens": 442
+    },
+    {
+      "name": "mixed_cjk_latin",
+      "body_bytes": 4910,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 910,
+        "cl100k_base": 1110
+      },
+      "real_tokens": 1110
+    },
+    {
+      "name": "prose_medium",
+      "body_bytes": 1646,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 310,
+        "cl100k_base": 310
+      },
+      "real_tokens": 310
+    },
+    {
+      "name": "prose_multiturn",
+      "body_bytes": 5081,
+      "messages": 11,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 967,
+        "cl100k_base": 967
+      },
+      "real_tokens": 967
+    },
+    {
+      "name": "prose_short",
+      "body_bytes": 147,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 17,
+        "cl100k_base": 17
+      },
+      "real_tokens": 17
+    },
+    {
+      "name": "responses_input",
+      "body_bytes": 823,
+      "messages": 3,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 123,
+        "cl100k_base": 123
+      },
+      "real_tokens": 123
+    },
+    {
+      "name": "tools_builtin",
+      "body_bytes": 227,
+      "messages": 2,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 34,
+        "cl100k_base": 34
+      },
+      "real_tokens": 34
+    },
+    {
+      "name": "tools_many",
+      "body_bytes": 13163,
+      "messages": 2,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1919,
+        "cl100k_base": 1899
+      },
+      "real_tokens": 1919
+    },
+    {
+      "name": "whitespace_heavy",
+      "body_bytes": 7648,
+      "messages": 1,
+      "image_tokens": 0,
+      "tokens": {
+        "o200k_base": 1058,
+        "cl100k_base": 1058
+      },
+      "real_tokens": 1058
+    }
+  ]
+}

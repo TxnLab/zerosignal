@@ -1,0 +1,138 @@
+' Hayai ticket-gated admission — reserve pre-flight + later consume.
+' Companion to proto/SPEC.md §3a.
+'
+' Reserve is the round-trip where the operator commits to a price and
+' co-composes the open() group: the proxy supplies its payer_addr (sealed
+' to the serving node), the node pre-signs gtxn[1] of the open group (the
+' AppCall) at fee = 2 * minTxnFee and returns it as presigned_open_txn
+' alongside the signed Ticket and wrapped_response_key. The proxy then
+' completes the group on the paying request by signing gtxn[0] (usdcPayment,
+' fee = 0) and broadcasting the 2-tx group atomically. The box MBR is drawn
+' from the payer's prepaid pool (open() does openTickets++) — no feePayment
+' leg. Both reserve bodies are sealed: the REQUEST to the serving node
+' (application/vnd.zs-reserve+json) so a relay can't read payer_addr, and the
+' 200 RESPONSE back to proxy_recipient (application/vnd.zs-reserve-response+json)
+' so a relay can't read the payer address inside presigned_open_txn.
+
+@startuml flow-ticket-reserve
+title Hayai admission — /v1/zs/reserve then consume on paying request
+
+autonumber "<b>[00]</b>"
+skinparam sequence {
+    ArrowColor #444
+    LifeLineBorderColor #888
+    ParticipantBorderColor #444
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #C0A000
+}
+
+participant "Proxy\nhayai_dispatch.go\n+ registryProvider + reserveClient + wallet" as Proxy
+participant "Node\nreserve.go + tickets.go + handlers.go +\nescrow client (ComposeOpenGroup)" as Node
+
+== Pre-flight: admission (tokenize -> pick operators -> reserve) ==
+
+Proxy -> Proxy: tokenize.EstimateWithRegistry(body)\n  -> input_tokens, max_output_tokens\n  (400 max_output_required if neither body nor default supplies one)
+
+Proxy -> Proxy: pickCandidates(ctx, model, body, sizing)\n  registryProvider.Operators(model) -> filter by hayai.Fits\n  -> affinity re-rank via ExtractInputToolCallIDs + affinity.Lookup\n  empty registry -> 503 no_operator\n  empty after size filter -> 400 context_length_exceeded\n  strict-affinity misfit -> 400 context_length_exceeded (affinity msg)
+
+loop per candidate operator (break on 200 OK)
+
+Proxy -> Proxy: age.GenerateX25519Identity() -> ephemeral\n  recipient is sent as proxy_recipient so the node can wrap K_response\n  back to us at reserve time; the same identity is reused as the envelope's\n  reply_to_public_key on the sealed request (one private key unwraps both\n  wrapped_response_key and X-Zs-Response-Key).
+
+Proxy -> Proxy: payer_addr = wallet.PayerAddr()\n  the address that will sign gtxn[0] (usdcPayment) of the open() group
+
+Proxy -> Node: POST <op.BaseURL>/v1/zs/reserve\nContent-Type: application/vnd.zs-reserve+json\n  (wire.SealReserveRequest: the ReserveRequest below age-sealed to the\n   operator's ephemeral recipient — confidentiality so a relay can't\n   read payer_addr; SPEC §3a/§3f)\nsealed body = {model, input_tokens, max_output_tokens, stream,\n proxy_recipient: ephemeral.Recipient().String(),\n payer_addr: <payer Algorand address>}
+
+Node -> Node: Content-Type check (reserve.go) — sealed-only\n  != wire.SealedReserveContentType\n     ("application/vnd.zs-reserve+json") -> 415 bad_content_type
+
+Node -> Node: ephemeral.OpenReserveRequest(rawBody)\n  age-decrypt with the in-memory ephemeral identity (no node.key\n  anchor — SPEC §8), then json.Decode the plaintext ReserveRequest\n  unseal / decode failure -> 400 bad_body
+
+Node -> Node: handleReserve\n  validateReserveRequest: missing model / input_tokens /\n    max_output_tokens / proxy_recipient / payer_addr -> 400 invalid_reserve\n  age.ParseX25519Recipient(proxy_recipient) -> 400 invalid_proxy_recipient if malformed\n  algorand-address parse(payer_addr) -> 400 invalid_payer_addr if malformed\n  pricing = cfg.Hayai.ModelPricing[model]   (unknown -> 400 unsupported_model)\n  defense-in-depth: ModelContextWindows[model] gate -> 400 context_length_exceeded\n  baseMax = ceil(input_tokens*input_rate/1e6)\n          + ceil(max_output_tokens*output_rate/1e6)\n    (no output round-up — the 1000-token floor lives in min_price)\n  baseMax = max(baseMax, min_price)   (min_charge floor, SPEC §3a)\n  max_price = grossUpForFee(baseMax, protocolFeeBps)\n    (additive fee: operator rates are net; escrow covers base + worst-\n     case fee, the HAY-tier discount is refunded to the payer at settle)\n  (overflow -> 400 price_overflow)
+
+Node -> Node: crypto/rand -> K_response (32 B), tid_raw (16 B)\n  ticket_id = base64.StdEncoding.EncodeToString(tid_raw)
+
+Node -> Node: s.tickets.Reserve(ticket_id, ReserveParams{...})\n  store ticket_id -> {K, max_price, input_rate, output_rate, model, expires_at, consumed=false}\n  (at cap -> 429 no_capacity + Retry-After = ticket TTL)
+
+Node -> Node: commit_k = proto.CommitResponseKey(K) = sha256(K)   (SPEC §3a)
+
+Node -> Node: assemble proto.Ticket{...}\n  ticket.Sign(ctx, signer, signing_addr)\n  raw Ed25519 over digest = sha256(CanonicalBytes())\n  off-chain audit only — no contract method consumes ticket.sig\n  signer loaded from proto/keystore (mnemonic at startup)
+
+Node -> Node: escrow.ComposeOpenGroup(ctx, OpenArgs{\n    ticketId, operatorId, nodeId, maxPrice, expiresAt,\n    settlementGraceSeconds, payerAddr, commitK},\n    nodeSigner, signingAddr)\n  composes gtxn[0] (AssetTransfer, sender=payerAddr, fee=0,\n                   amount=max_price, asset=usdcAssetId),\n           gtxn[1] (AppCall escrow.open(...),\n                   sender=node_signing (this node's hot key), fee=2*minTxnFee)\n  (no feePayment leg — open() draws the box MBR from the payer's\n   prepaid pool, openTickets++; open() resolves the node from the\n   (operatorId, nodeId) node box and snapshots both ids on the ticket)\n  computes the group hash and signs gtxn[1] only\n  -> SignedTxn[2] with gtxn[0] left unsigned
+
+Node -> Node: presigned_open_txn = escrow.EncodeOpenGroup(group)\n  base64-encode the operator-signed gtxn[1] (with the group hash\n  already pinned) for delivery to the proxy
+
+Node -> Node: wrapped_response_key = age.Encrypt(K, proxy_recipient)\n  (same age primitive as X-Zs-Response-Key — early delivery is\n   what lets the proxy compute admission_tag on the next request)
+
+Node --> Proxy: 200 OK\nContent-Type: application/vnd.zs-reserve-response+json\n{ciphertext: <base64(age_encrypt(response, proxy_recipient))>}\n  inner plaintext (SPEC §3a):\n  {ticket: {ticket_id, operator_id, node_id, input_tokens, max_output_tokens,\n            input_rate, output_rate, max_price, expires_at,\n            model, stream, commit_k, sig},\n   wrapped_response_key: <base64(age_encrypt(K, proxy_recipient))>,\n   presigned_open_txn:   <base64(operator-signed gtxn[1])>}\n  sealed because presigned_open_txn names the payer twice
+
+Proxy -> Proxy: Ticket.Verify(op.TicketSigningKey)   (off-chain audit)\n  Ed25519 over the same digest sha256(CanonicalBytes())
+
+Proxy -> Proxy: proto.UnwrapResponseKey(wrapped_response_key, ephemeral) -> K_response
+
+Proxy -> Proxy: escrow.DecodeOpenGroup(presigned_open_txn) -> SignedTxn[2]\n  retain gtxn[1]'s signature + group hash for atomic submission
+
+Proxy -> Proxy: stash {Ticket, K_response, ephemeral, PreSignedOpenGroup}\n  as ReservedTicket — bundle handed to runHayaiSealed so the\n  same identity unwraps both reserve-time K and response-time wrapped_key
+
+Proxy -> Proxy: validateTicketShape(ticket, op, req)\n  operator, model, input_tokens, max_output_tokens, stream, expires_at\n  mismatch -> try next candidate
+
+note right of Proxy
+  On 429 no_capacity: hayai.IsBusy -> move to next candidate
+  (unless AffinityStrict, which hard-fails on the pinned operator).
+  Track the largest Retry-After hint for the final 503 fallback.
+  All candidates exhausted -> 503 operators_busy + Retry-After.
+end note
+
+end
+
+note right of Proxy #lightgray
+  Wallet.Open(reserved) calls escrow.SubmitPresignedOpenGroup,
+  which fills in the payer signature on gtxn[0] (usdcPayment, fee=0)
+  and broadcasts the 2-tx atomic group. Returns the gtxn[1]
+  app-call txid, which becomes the envelope's algorand_tx_id.
+  Payer pays NO ALGO outer fees on open — the operator's
+  gtxn[1] fee (2 * minTxnFee) covers the whole group via
+  Algorand fee pooling. The box MBR is not a per-turn leg — it's
+  drawn from the payer's prepaid pool (openTickets++).
+end note
+
+note over Node
+  K_response is generated at reserve and held server-side; one copy is
+  also wrapped to proxy_recipient and returned in wrapped_response_key
+  so the proxy can compute admission_tag on its next request without
+  round-tripping. See proto/docs/admission-tag.md for why this delivery
+  has to happen at reserve (not response) time.
+end note
+
+== Later: paying sealed request arrives (continues in flow-request-response) ==
+
+group sealed request
+
+  Proxy -> Node: POST /v1/chat/completions\nContent-Type: application/vnd.zs+json\n{ciphertext}   (identifiers ride inside the seal: reply_to_public_key,\n algorand_tx_id, ticket_id, admission_tag are inner-frame header fields)\n(envelope wrap + AAD binding + tag computation -> flow-request-response)
+
+  Node -> Node: handlers.go admission gate (encrypted)\n  missing ticket_id -> 402 ticket_required
+
+  Node -> Node: s.tickets.Peek(ticket_id)\n  non-destructive lookup of K_response\n  missing / consumed -> 402 ticket_invalid
+
+  Node -> Node: refuseEnvelope: verifyAdmissionTag(rc, K)   (admission.go)\n  expected = ComputeAdmissionTag(K, ticket_id, algorand_tx_id, body)\n  hmac.Equal(rc.admissionTag, expected)\n  missing / mismatched -> 402 admission_tag_invalid\n  *runs BEFORE Consume so a forged tag does not burn the ticket*
+
+  Node -> Node: refuseEnvelope: verifyReplyTo(rc, peeked)   (admission.go)\n  inner header's reply_to_public_key MUST equal the ticket's\n  reserve-time proxy_recipient — the one header field the tag\n  does NOT cover; no stored recipient -> fail closed\n  mismatch -> 402 reply_to_mismatch\n  *also BEFORE Consume*
+
+  Node -> Node: s.tickets.Consume(ticket_id)\n  flip consumed=true atomically, return *ConsumedTicket\n        {Key, MaxPrice, InputRate, OutputRate, Model, ExpiresAt}\n        rc.admitted = consumed (carried forward for sealer + receipt math)
+
+  Node -> Node: defer s.tickets.Release(ticket_id)\n  registered IMMEDIATELY after Consume, before any other call:\n  a consumed-but-never-released slot counts as in-flight forever\n  and would hang every future graceful drain; idempotent
+
+  Node -> Node: VerifyOpenAppCall(pendingTxn, OpenAppCallSpec{\n    AppID, OperatorID, NodeID, MaxPrice, ExpiresAt, CommitK,\n    NodeSigningAddr, PayerAddr})\n  asserts:\n    Txn.sender == NodeSigningAddr   (the serving node's hot key;\n      consensus-verified)\n    ABI args (incl. operatorId, nodeId) match the ticket\n    payerAddr (from ABI arg) consistent with funding gtxn senders\n  rc.payerAddr = payerAddr from the ABI arg\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket,\n    so the caller must re-reserve, never retry the same ticket_id)
+
+  Node -> Node: verifyRequestModel(rc.body, rc.admitted.Model)\n  body's model MUST equal the reserved model\n  mismatch -> 400 model_mismatch (sealed, zero-cost receipt)
+
+  Node -> Node: newSealer(rc) uses rc.admitted.Key (pre-committed K from reserve)\n  (sealer construction + AEAD details -> flow-request-response)
+
+  note right of Proxy
+    On response (non-stream): verifyCommitK(ticket, K) at
+    hayai_dispatch.go checks sha256(K) == ticket.commit_k.
+    Mismatch -> 502 proxy_error (slashing evidence, SPEC §3b case (a)).
+  end note
+
+end
+
+@enduml

@@ -1,0 +1,25 @@
+{
+ "model": "zs-test-model",
+ "instructions": "You are terse.",
+ "input": [
+  {
+   "role": "user",
+   "content": [
+    {
+     "type": "input_text",
+     "text": "The reserve is a realistic upper bound on the input tokens a request will consume, not a tokenizer output. It is used as the input side of the ticket's maximum price, so it must never come in below what the model is actually billed for. Overestimates only widen the refund at settlement, while an underestimate means the payer reserves too little and the operator absorbs the difference. Because the serving node re-computes the same bound over the decrypted body, the two implementations have to agree exactly. "
+    }
+   ]
+  },
+  {
+   "role": "assistant",
+   "content": [
+    {
+     "type": "output_text",
+     "text": ""
+    }
+   ]
+  }
+ ],
+ "stream": true
+}

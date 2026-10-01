@@ -1,0 +1,18 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "what happened in the news today?"
+  }
+ ],
+ "stream": true,
+ "tools": [
+  {
+   "type": "zs_web_search"
+  },
+  {
+   "type": "zs_web_read"
+  }
+ ]
+}

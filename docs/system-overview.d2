@@ -1,0 +1,49 @@
+direction: right
+
+codingHarness: Coding Harness {
+  shape: rectangle
+}
+client: Client UI\n(local or hosted) {
+  shape: rectangle
+}
+
+proxy: Localhost\nProxy {
+  shape: rectangle
+}
+
+# protocol: Protocol {
+#   shape: rectangle
+# }
+
+client.Protocol
+proxy.Protocol
+
+nodeAsRelay: Node (as Relay) {
+  shape: rectangle
+}
+
+node: Node {
+  shape: rectangle
+}
+
+upstream: Upstream LLM\n(OpenAI / vLLM / LM Studio) {
+  shape: rectangle
+}
+
+chain: Algorand\nZeroSignalEscrow contract {
+  shape: cylinder
+}
+
+codingHarness -> proxy: plaintext OpenAI
+proxy.Protocol -> nodeAsRelay: 1. target-encrypted bytes {style.stroke: "#17CAC6"; style.stroke-width: 3}
+client.Protocol -> nodeAsRelay: 1. target-encrypted bytes {style.stroke: "#17CAC6"; style.stroke-width: 3}
+nodeAsRelay -> node: 2. sealed/encrypted envelope {style.stroke: "#17CAC6"; style.stroke-width: 3}
+node -> upstream: 3. internal/external LLM {style.stroke: "#17CAC6"; style.stroke-width: 3}
+upstream -> node: 4. response {style.stroke: "#AA0000"; style.stroke-width: 3}
+node -> nodeAsRelay: 5. encrypted response {style.stroke: "#AA0000"; style.stroke-width: 3}
+nodeAsRelay -> client.Protocol: 6. encrypted response {style.stroke: "#AA0000"; style.stroke-width: 3}
+nodeAsRelay -> proxy.Protocol: 6. encrypted response {style.stroke: "#AA0000"; style.stroke-width: 3}
+
+proxy.Protocol -> chain: open + ack-settle {style.stroke-dash: 3}
+client.Protocol -> chain: open + ack-settle {style.stroke-dash: 3}
+node -> chain: verify + op-settle {style.stroke-dash: 3}

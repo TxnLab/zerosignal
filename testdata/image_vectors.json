@@ -1,0 +1,333 @@
+{
+    "version": 1,
+    "comment": "Cross-impl byte-parity vectors for hayai image pricing (imageprice). Regenerate via: cd proto/go \u0026\u0026 go test ./imageprice -run TestVectors -update. Loaded by proto/go/imageprice/vectors_test.go and proto/ts/test/imageprice-vectors.test.ts.",
+    "sample_rates": [
+        40000,
+        7
+    ],
+    "cases": [
+        {
+            "size": "1024x1024",
+            "quality": "standard",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "medium",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "auto",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "low",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 4,
+            "per_image_micro_usdc": [
+                10000,
+                2
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "high",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 4,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                160000,
+                28
+            ]
+        },
+        {
+            "size": "1024x1024",
+            "quality": "hd",
+            "normalized_size": "1024x1024",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 4,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                160000,
+                28
+            ]
+        },
+        {
+            "size": "512x512",
+            "quality": "standard",
+            "normalized_size": "512x512",
+            "normalized_ok": true,
+            "w": 512,
+            "h": 512,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 4,
+            "per_image_micro_usdc": [
+                10000,
+                2
+            ]
+        },
+        {
+            "size": "512x512",
+            "quality": "high",
+            "normalized_size": "512x512",
+            "normalized_ok": true,
+            "w": 512,
+            "h": 512,
+            "dims_ok": true,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "2048x2048",
+            "quality": "standard",
+            "normalized_size": "2048x2048",
+            "normalized_ok": true,
+            "w": 2048,
+            "h": 2048,
+            "dims_ok": true,
+            "factor_num": 4,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                160000,
+                28
+            ]
+        },
+        {
+            "size": "2048x2048",
+            "quality": "high",
+            "normalized_size": "2048x2048",
+            "normalized_ok": true,
+            "w": 2048,
+            "h": 2048,
+            "dims_ok": true,
+            "factor_num": 16,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                640000,
+                112
+            ]
+        },
+        {
+            "size": "1792x1024",
+            "quality": "standard",
+            "normalized_size": "1792x1024",
+            "normalized_ok": true,
+            "w": 1792,
+            "h": 1024,
+            "dims_ok": true,
+            "factor_num": 7,
+            "factor_den": 4,
+            "per_image_micro_usdc": [
+                70000,
+                13
+            ]
+        },
+        {
+            "size": "1024x1536",
+            "quality": "medium",
+            "normalized_size": "1024x1536",
+            "normalized_ok": true,
+            "w": 1024,
+            "h": 1536,
+            "dims_ok": true,
+            "factor_num": 3,
+            "factor_den": 2,
+            "per_image_micro_usdc": [
+                60000,
+                11
+            ]
+        },
+        {
+            "size": "768",
+            "quality": "standard",
+            "normalized_size": "768x768",
+            "normalized_ok": true,
+            "w": 768,
+            "h": 768,
+            "dims_ok": true,
+            "factor_num": 9,
+            "factor_den": 16,
+            "per_image_micro_usdc": [
+                22500,
+                4
+            ]
+        },
+        {
+            "size": "2k",
+            "quality": "standard",
+            "normalized_size": "2048x2048",
+            "normalized_ok": true,
+            "w": 2048,
+            "h": 2048,
+            "dims_ok": true,
+            "factor_num": 4,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                160000,
+                28
+            ]
+        },
+        {
+            "size": "16:9",
+            "quality": "standard",
+            "normalized_size": "16:9",
+            "normalized_ok": true,
+            "w": 0,
+            "h": 0,
+            "dims_ok": false,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "auto",
+            "quality": "low",
+            "normalized_size": "",
+            "normalized_ok": false,
+            "w": 0,
+            "h": 0,
+            "dims_ok": false,
+            "factor_num": 1,
+            "factor_den": 4,
+            "per_image_micro_usdc": [
+                10000,
+                2
+            ]
+        },
+        {
+            "size": "",
+            "quality": "high",
+            "normalized_size": "",
+            "normalized_ok": false,
+            "w": 0,
+            "h": 0,
+            "dims_ok": false,
+            "factor_num": 4,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                160000,
+                28
+            ]
+        },
+        {
+            "size": "large",
+            "quality": "standard",
+            "normalized_size": "",
+            "normalized_ok": false,
+            "w": 0,
+            "h": 0,
+            "dims_ok": false,
+            "factor_num": 1,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40000,
+                7
+            ]
+        },
+        {
+            "size": "30000x30000",
+            "quality": "high",
+            "normalized_size": "30000x30000",
+            "normalized_ok": true,
+            "w": 16384,
+            "h": 16384,
+            "dims_ok": true,
+            "factor_num": 1024,
+            "factor_den": 1,
+            "per_image_micro_usdc": [
+                40960000,
+                7168
+            ]
+        }
+    ],
+    "cost_cases": [
+        {
+            "image_rate": 40000,
+            "n": 3,
+            "size": "1024x1024",
+            "quality": "standard",
+            "expected_micro_usdc": 120000
+        },
+        {
+            "image_rate": 7,
+            "n": 3,
+            "size": "768",
+            "quality": "standard",
+            "expected_micro_usdc": 12
+        },
+        {
+            "image_rate": 40000,
+            "n": 1,
+            "size": "2048x2048",
+            "quality": "high",
+            "expected_micro_usdc": 640000
+        }
+    ]
+}

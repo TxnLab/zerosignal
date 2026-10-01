@@ -1,0 +1,417 @@
+{
+  "version": 3,
+  "comment": "Cross-impl byte-parity vectors for shared token pricing. Regenerate via: cd proto/go \u0026\u0026 go test ./pricing -run TestVectors -update. Loaded by proto/go/pricing/vectors_test.go and proto/ts/test/pricing-vectors.test.ts.",
+  "usd_rate": [
+    {
+      "name": "free",
+      "usd_per_1m": 0,
+      "expected": 0
+    },
+    {
+      "name": "half",
+      "usd_per_1m": 0.5,
+      "expected": 500000
+    },
+    {
+      "name": "two",
+      "usd_per_1m": 2,
+      "expected": 2000000
+    },
+    {
+      "name": "frac_ceil",
+      "usd_per_1m": 1.0000011,
+      "expected": 1000002
+    },
+    {
+      "name": "high",
+      "usd_per_1m": 1000,
+      "expected": 1000000000
+    }
+  ],
+  "input_cost": [
+    {
+      "name": "no_cache",
+      "non_cached": 1000,
+      "input_rate": 2000000,
+      "cached": 0,
+      "cache_read_rate": 2000000,
+      "expected": 2000
+    },
+    {
+      "name": "unset_cache_equals_input",
+      "non_cached": 700,
+      "input_rate": 2000000,
+      "cached": 300,
+      "cache_read_rate": 2000000,
+      "expected": 2000
+    },
+    {
+      "name": "discounted",
+      "non_cached": 700,
+      "input_rate": 2000000,
+      "cached": 300,
+      "cache_read_rate": 500000,
+      "expected": 1550
+    },
+    {
+      "name": "free_cache",
+      "non_cached": 700,
+      "input_rate": 2000000,
+      "cached": 300,
+      "cache_read_rate": 0,
+      "expected": 1400
+    },
+    {
+      "name": "all_cached",
+      "non_cached": 0,
+      "input_rate": 2000000,
+      "cached": 1000,
+      "cache_read_rate": 500000,
+      "expected": 500
+    },
+    {
+      "name": "single_token_ceil",
+      "non_cached": 1,
+      "input_rate": 1,
+      "cached": 0,
+      "cache_read_rate": 0,
+      "expected": 1
+    },
+    {
+      "name": "bigint_range",
+      "non_cached": 10000000,
+      "input_rate": 1000000000,
+      "cached": 0,
+      "cache_read_rate": 0,
+      "expected": 10000000000
+    }
+  ],
+  "charge": [
+    {
+      "name": "zero_usage",
+      "actual_input": 0,
+      "cached_input": 0,
+      "actual_output": 0,
+      "input_rate": 2000000,
+      "cache_read_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 1000,
+      "base_max": 100000,
+      "expected": 0
+    },
+    {
+      "name": "normal",
+      "actual_input": 1000,
+      "cached_input": 0,
+      "actual_output": 500,
+      "input_rate": 2000000,
+      "cache_read_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 1000,
+      "base_max": 100000,
+      "expected": 4000
+    },
+    {
+      "name": "under_min",
+      "actual_input": 1,
+      "cached_input": 0,
+      "actual_output": 1,
+      "input_rate": 2000000,
+      "cache_read_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 5000,
+      "base_max": 100000,
+      "expected": 5000
+    },
+    {
+      "name": "over_base_max",
+      "actual_input": 1000000,
+      "cached_input": 0,
+      "actual_output": 1000000,
+      "input_rate": 2000000,
+      "cache_read_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 1000,
+      "base_max": 100,
+      "expected": 100
+    },
+    {
+      "name": "cached_discount",
+      "actual_input": 1000,
+      "cached_input": 800,
+      "actual_output": 0,
+      "input_rate": 2000000,
+      "cache_read_rate": 500000,
+      "output_rate": 4000000,
+      "min_price": 0,
+      "base_max": 1000000,
+      "expected": 800
+    },
+    {
+      "name": "cached_over_input",
+      "actual_input": 100,
+      "cached_input": 500,
+      "actual_output": 0,
+      "input_rate": 2000000,
+      "cache_read_rate": 0,
+      "output_rate": 4000000,
+      "min_price": 0,
+      "base_max": 100000,
+      "expected": 0
+    },
+    {
+      "name": "min_gt_base_max",
+      "actual_input": 1,
+      "cached_input": 0,
+      "actual_output": 1,
+      "input_rate": 2000000,
+      "cache_read_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 5000,
+      "base_max": 100,
+      "expected": 100
+    }
+  ],
+  "reserve_min_price": [
+    {
+      "name": "unpaid_free",
+      "min_output_tokens": 1000,
+      "output_rate": 0,
+      "algo_txns": 2,
+      "algo_usd": 0.2,
+      "paid": false,
+      "expected": 0
+    },
+    {
+      "name": "token_floor",
+      "min_output_tokens": 1000,
+      "output_rate": 4000000,
+      "algo_txns": 0,
+      "algo_usd": 0,
+      "paid": true,
+      "expected": 4000
+    },
+    {
+      "name": "algo_floor",
+      "min_output_tokens": 100,
+      "output_rate": 4000000,
+      "algo_txns": 8,
+      "algo_usd": 0.25,
+      "paid": true,
+      "expected": 2000
+    },
+    {
+      "name": "oracle_out",
+      "min_output_tokens": 100,
+      "output_rate": 4000000,
+      "algo_txns": 8,
+      "algo_usd": 0,
+      "paid": true,
+      "expected": 400
+    }
+  ],
+  "min_charge_floor": [
+    {
+      "name": "token_dominant",
+      "min_charge_output_tokens": 1000,
+      "output_rate": 4000000,
+      "min_charge_micro_usdc": 100,
+      "expected": 4000
+    },
+    {
+      "name": "micro_dominant",
+      "min_charge_output_tokens": 100,
+      "output_rate": 4000000,
+      "min_charge_micro_usdc": 5000,
+      "expected": 5000
+    },
+    {
+      "name": "zero",
+      "min_charge_output_tokens": 0,
+      "output_rate": 4000000,
+      "min_charge_micro_usdc": 0,
+      "expected": 0
+    }
+  ],
+  "max_price": [
+    {
+      "name": "no_fee",
+      "input_count": 1000,
+      "max_output_count": 500,
+      "input_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 0,
+      "extra_base": 0,
+      "fee_bps": 0,
+      "expected": 4000
+    },
+    {
+      "name": "with_fee",
+      "input_count": 1000,
+      "max_output_count": 500,
+      "input_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 0,
+      "extra_base": 0,
+      "fee_bps": 100,
+      "expected": 4040
+    },
+    {
+      "name": "min_floor_bump",
+      "input_count": 1,
+      "max_output_count": 1,
+      "input_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 5000,
+      "extra_base": 0,
+      "fee_bps": 100,
+      "expected": 5050
+    },
+    {
+      "name": "image_tool_budget",
+      "input_count": 1000,
+      "max_output_count": 500,
+      "input_rate": 2000000,
+      "output_rate": 4000000,
+      "min_price": 0,
+      "extra_base": 10000,
+      "fee_bps": 100,
+      "expected": 14140
+    },
+    {
+      "name": "fee_ceil",
+      "input_count": 1,
+      "max_output_count": 0,
+      "input_rate": 1000001,
+      "output_rate": 0,
+      "min_price": 0,
+      "extra_base": 0,
+      "fee_bps": 250,
+      "expected": 3
+    }
+  ],
+  "tool_fee_reserve": [
+    {
+      "name": "nothing_priced",
+      "max_tool_iterations": 20,
+      "max_zs_rate": 0,
+      "call_cap": 0,
+      "max_vendor_rate": 0,
+      "tokens_per_call": 0,
+      "input_rate": 2000000,
+      "expected": 0
+    },
+    {
+      "name": "zs_only",
+      "max_tool_iterations": 20,
+      "max_zs_rate": 4000,
+      "call_cap": 0,
+      "max_vendor_rate": 0,
+      "tokens_per_call": 0,
+      "input_rate": 2000000,
+      "expected": 80000
+    },
+    {
+      "name": "zs_iters_zero",
+      "max_tool_iterations": 0,
+      "max_zs_rate": 4000,
+      "call_cap": 0,
+      "max_vendor_rate": 0,
+      "tokens_per_call": 0,
+      "input_rate": 2000000,
+      "expected": 0
+    },
+    {
+      "name": "vendor_fee_only",
+      "max_tool_iterations": 0,
+      "max_zs_rate": 0,
+      "call_cap": 10,
+      "max_vendor_rate": 6000,
+      "tokens_per_call": 0,
+      "input_rate": 2000000,
+      "expected": 60000
+    },
+    {
+      "name": "vendor_fee_plus_inflation",
+      "max_tool_iterations": 0,
+      "max_zs_rate": 0,
+      "call_cap": 10,
+      "max_vendor_rate": 6000,
+      "tokens_per_call": 3000,
+      "input_rate": 2000000,
+      "expected": 120000
+    },
+    {
+      "name": "inflation_zero_input_rate",
+      "max_tool_iterations": 0,
+      "max_zs_rate": 0,
+      "call_cap": 10,
+      "max_vendor_rate": 6000,
+      "tokens_per_call": 3000,
+      "input_rate": 0,
+      "expected": 60000
+    },
+    {
+      "name": "vendor_rate_no_cap",
+      "max_tool_iterations": 0,
+      "max_zs_rate": 0,
+      "call_cap": 0,
+      "max_vendor_rate": 6000,
+      "tokens_per_call": 3000,
+      "input_rate": 2000000,
+      "expected": 0
+    },
+    {
+      "name": "combined",
+      "max_tool_iterations": 20,
+      "max_zs_rate": 4000,
+      "call_cap": 10,
+      "max_vendor_rate": 6000,
+      "tokens_per_call": 3000,
+      "input_rate": 2000000,
+      "expected": 200000
+    },
+    {
+      "name": "bigint_range",
+      "max_tool_iterations": 20,
+      "max_zs_rate": 1000000,
+      "call_cap": 64,
+      "max_vendor_rate": 1000000,
+      "tokens_per_call": 4000,
+      "input_rate": 1000000000,
+      "expected": 340000000
+    }
+  ],
+  "long_context": [
+    {
+      "name": "below_threshold",
+      "input_count": 199999,
+      "threshold": 200000,
+      "expected": false
+    },
+    {
+      "name": "at_threshold",
+      "input_count": 200000,
+      "threshold": 200000,
+      "expected": true
+    },
+    {
+      "name": "above_threshold",
+      "input_count": 200001,
+      "threshold": 200000,
+      "expected": true
+    },
+    {
+      "name": "zero_input_with_tier",
+      "input_count": 0,
+      "threshold": 200000,
+      "expected": false
+    },
+    {
+      "name": "no_tier_threshold_zero",
+      "input_count": 500000,
+      "threshold": 0,
+      "expected": false
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+' Hayai request/response flow — encrypted envelope choreography.
+' Companion to proto/SPEC.md §§ 3, 4, 5, 6, 7, 9. Function names reference the
+' Go reference implementation in the proto/, proxy/, and node/ modules.
+'
+' Reflects the consensus-verified-operator design (SPEC.md "Operator
+' authentication") — the response carries two operator-signed artifacts
+' so the proxy can finalize settlement atomically without paying outer fees:
+'   * X-Zs-Receipt           non-streaming: header (sealed under HeaderAAD)
+'                               streaming:     event: zs-receipt (sealed under
+'                                              FrameAAD — a content-style frame
+'                                              that advances the frame_index)
+'   * X-Zs-Settle-Group      non-streaming: header (sealed under HeaderAAD)
+'                               streaming:     event: zs-settle-group (sealed
+'                                              under HeaderAAD, no frame_index)
+' All are AEAD-sealed under K_response (SPEC.md §6): the settle group names the
+' payer address and the receipt carries ticket_id, so a forwarding relay must
+' not read either. Consensus still authenticates the group on chain; sealing
+' adds the confidentiality the relay would break.
+
+@startuml flow-request-response
+title Hayai request / response — proxy <-> node encryption choreography
+
+autonumber "<b>[00]</b>"
+skinparam sequence {
+    ArrowColor #444
+    LifeLineBorderColor #888
+    ParticipantBorderColor #444
+    NoteBackgroundColor #FFF8DC
+    NoteBorderColor #C0A000
+}
+
+participant "Client\n(OpenAI SDK)" as Client
+participant "Proxy\nhayai_dispatch.go\n+ hayai/wallet.go" as Proxy
+participant "Node\ninternal/server/handlers.go\n+ receipt.go + settlement worker" as Node
+participant "LLM\n(OpenAI upstream)" as LLM
+
+== Request path (identical for buffered & streaming) ==
+
+Client -> Proxy: POST /v1/chat/completions\nContent-Type: application/json\n(plaintext OpenAI body)
+
+note over Proxy
+  Per-request state (built by dispatchHayai before this block):
+  - tokenize.EstimateWithRegistry(body) -> input_tokens, max_output_tokens
+  - pickCandidates(model, body, sizing) -> ordered operator list
+      (registry filter -> sizing filter -> tool_call affinity re-rank)
+  - reserveClient.Reserve(op, ..., payer_addr) per candidate until one accepts
+      -> ReservedTicket{Ticket, ResponseKey (=K), AgeIdentity (=ephemeral),
+                        PreSignedOpenGroup (node gtxn[1] signed)}
+  - wallet.Open(reserved) submits the 2-tx atomic group (the node's
+      pre-signed gtxn[1] open() + proxy-signed gtxn[0] usdcPayment at
+      fee=0; box MBR drawn from the payer's prepaid pool, openTickets++)
+      -> tx_id = gtxn[1].txid (the open() AppCall txid)
+  - recipient = op's signed ephemeral age recipient (/v1/zs/details,
+      verified under the on-chain signing key; no on-chain anchor — SPEC §8)
+  See flow-ticket-reserve for the admission pre-flight.
+end note
+
+Proxy -> Proxy: admission_tag = proto.ComputeAdmissionTag(K, ticket_id, tx_id, body)\n  HMAC-SHA256(K, "zs-admission-v1\\0" || ticket_id || \\0 ||\n              tx_id || \\0 || sha256(body))\n  proves possession of K_response so the node accepts BEFORE Consume\n  (mempool-race ticket hijack mitigation — proto/docs/admission-tag.md)
+
+Proxy -> Proxy: proto.WrapRequestWithIdentity(body, tx_id, ticket_id,\n                                              admission_tag, ephemeral, op.AgeRecipient)\n  reuses the reserve-time ephemeral as reply_to_public_key (one private\n  key unwraps both wrapped_response_key and X-Zs-Response-Key)\n  frame inner request: "zsrq" || 1 || u32(len) || headerJSON || body\n    headerJSON = {reply_to_public_key, algorand_tx_id, ticket_id, admission_tag}\n  age.Encrypt(inner, op.AgeRecipient) -> ciphertext\n  marshal RequestEnvelope{ciphertext}   (nothing else — SPEC §4)
+
+Proxy -> Node: POST <op.BaseURL>/v1/chat/completions\nContent-Type: application/vnd.zs+json\n(no Authorization — admission is the on-chain seal + admission_tag,\n not a bearer key; the proxy injects no upstream auth)\n{ciphertext}   (identifiers ride inside the seal)
+
+Node -> Node: DecryptRequest(rawBody)\n  age.Decrypt with the in-memory ephemeral X25519 identity\n  (current or overlap-window previous; rotated ~20 min, no\n   long-lived anchor / node.key — SPEC §8)\n  -> {body, reply_to_recipient, tx_id, ticket_id, admission_tag}
+
+Node -> Node: s.tickets.Peek(ticket_id)\n  non-destructive lookup of K_response\n  missing / consumed -> 402 ticket_invalid
+
+Node -> Node: refuseEnvelope: verifyAdmissionTag(rc, K)   (admission.go)\n  expected = ComputeAdmissionTag(K, ticket_id, tx_id, body)\n  hmac.Equal(rc.admissionTag, expected) — constant-time compare\n  missing / mismatched -> 402 admission_tag_invalid\n  *runs on the un-mutated body, BEFORE Consume — a forged tag\n   must not burn the ticket*
+
+Node -> Node: refuseEnvelope: verifyReplyTo(rc, peeked)   (admission.go)\n  inner header's reply_to_public_key MUST equal the ticket's\n  reserve-time proxy_recipient (the one header field the tag\n  does NOT cover); no stored recipient -> fail closed\n  mismatch -> 402 reply_to_mismatch\n  *also BEFORE Consume*
+
+Node -> Node: s.tickets.Consume(ticket_id)\n  flip consumed=true atomically\n  rc.admitted = {K_response, max_price, model, expires_at}\n  defer s.tickets.Release(ticket_id)
+
+Node -> Node: VerifyOpenAppCall(pendingTxn, OpenAppCallSpec{...,\n                  NodeSigningAddr, PayerAddr})\n  asserts Txn.sender == NodeSigningAddr (the serving node's hot key;\n    consensus-verified)\n  asserts ABI args (incl. operatorId, nodeId) match the ticket\n  rc.payerAddr = payerAddr from the payerAddr ABI arg (NOT Txn.Sender)\n  unlocks "zs:" + base64(HMAC(operator_key, payer_addr)) safety-id injection\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket)
+
+Node -> Node: verifyRequestModel(rc.body, rc.admitted.Model)\n  body's model MUST equal the reserved model\n  mismatch -> 400 model_mismatch (sealed, zero-cost receipt)\n  *post-Consume on purpose: escrow is already open, so settle it at zero*
+
+Node -> LLM: plaintext OpenAI body\n(ChatCompletion / Response, or\n ChatCompletionStream / ResponseStream + emit cb)
+
+== Response path — branches on stream flag ==
+
+note over Node, Proxy
+  If node returns response without X-Zs-Response-Key header on a 2xx,
+  the proxy refuses with 502 proxy_error / operator_unsealed_response
+  (SPEC §5.1). Plaintext error responses (status >= 400) pass through
+  so the client sees the cause.
+end note
+
+alt non-streaming (SPEC §5.2)
+
+  LLM --> Node: full plaintext response body
+
+  Node -> Node: buildReceipt(rc, actualInput, actualOutput, bodyHash)\n  charged = chargeFor(...)  receipt.Sign(...) over operator key\n  -> ticket.UsageReceipt{TicketID, ActualInput, ActualOutput,\n                          AmountCharged, BodyHash, Sig}
+
+  Node -> Node: composeSettleGroup (best-effort)\n  escrow.ComposeSettleGroup(SettleArgs{...,\n      OperatorOwnerAddr, AsOperator=true},\n      operator-signer, signing-addr)\n  pre-signs gtxn[0] (op first-half, fee=(2+SettleInnerCount+gapOpUps)*minTxnFee\n  — sized to inners that fire: 5 for a paid ticket, 2 for a free model) against an\n  unsigned gtxn[1] payer-ack template (sender=t.payer, fee=0,\n  identical args). On algod outage: skipped, header omitted.
+
+  Node -> Node: rc.atomicSettleTxID = crypto.GetTxID(group[0].Txn)\n  txid is fixed at compose time (signature has no effect on\n  canonical txn bytes); stamped on the settlement-ledger row\n  via MarkServed.SettleTxID so the row carries the on-chain\n  reference even when the proxy (not the driver) submits finalize.
+
+  Node -> Node: markServed(rc, receipt)\n  settlement.Entry{TicketID, Receipt, MaxPrice, PayerAddr,\n                   ServedAt, NotBefore=now+watchdog,\n                   SettleTxID=rc.atomicSettleTxID}
+
+  Node -> Node: newSealer(rc) -> NewResponseSealerWithKey(replyTo,\n                                  tx_id, ticket_id, admitted.K)\n  age.Encrypt(K, replyTo) -> wrapped_key\n  chacha20poly1305.New(K) -> aead
+
+  Node -> Node: sealer.SealBody(body)\n  nonce = rand(12)\n  aad = BuildBodyAAD(tx_id, ticket_id)   (SPEC §6)\n  ct  = aead.Seal(nil, nonce, body, aad)
+
+  Node --> Proxy: 200 OK\nContent-Type: application/vnd.zs+json\nX-Zs-Response-Key:  <base64(wrapped_key)>\nX-Zs-Receipt:       <base64(nonce || AEAD(UsageReceipt, HeaderAAD(...,"receipt")))>\nX-Zs-Settle-Group:  <base64(nonce || AEAD(settle group, HeaderAAD(...,"settle-group")))>\n{nonce, ciphertext}   (no algorand_tx_id echo)
+
+  Proxy -> Proxy: proto.UnwrapResponseKey(header, ephemeral)\n  age.Decrypt with proxy's ephemeral identity -> K_response
+
+  Proxy -> Proxy: verifyCommitK(ticket, K_response)   (SPEC §3b case (a))\n  sha256(K) == ticket.commit_k -- mismatch -> 502 proxy_error
+
+  Proxy -> Proxy: proto.DecryptBody(respBody, K, tx_id, ticket_id)\n  rebuild BuildBodyAAD(tx_id, ticket_id)   (reconstructed, never on the wire)\n  aead.Open(nil, nonce, ct, aad) -> plaintext\n  a response spliced from another request fails here (SPEC §10 -> 502)
+
+  Proxy -> Proxy: OpenSealedHeader(X-Zs-Receipt / X-Zs-Settle-Group) then decode\n  validate receipt body_hash matches plaintext\n  validate receipt sig under operator's signing pubkey\n  affinity.Record(...) for tool_call ids if any
+
+  Proxy -> Proxy: wallet.AckSettle(ctx, receipt, presignedSettleGroup)\n  if group present:\n    escrow.SubmitPresignedSettleGroup\n      sign gtxn[1] (payer ack, fee=0) in place\n      broadcast [gtxn[0], gtxn[1]] atomically\n      payer ALGO outer-fee = 0\n  else (algod-outage fallback):\n    escrow.ComposeSettleStandalone(asOperator=false,\n      fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee — 5 paid, 2 free)\n    sign + broadcast a single-txn payer ack\n    (rare path; operator's settlement driver becomes sole finalize path\n     when no atomic group was emitted)
+
+  Proxy --> Client: 200 OK\nContent-Type: application/json\n(plaintext; X-Zs-* headers stripped)
+
+else streaming (SPEC §5.3)
+
+  Node -> Node: newSealer(...) — same wrap as non-streaming\n(wrapped_key goes in header, frame_index = 0)
+
+  Node --> Proxy: 200 OK\nContent-Type: text/event-stream\nX-Zs-Response-Key: <base64(wrapped_key)>\n(headers only; body not yet started; settle-group + receipt are\n not headers on streaming responses — they arrive as named SSE events)
+
+  Proxy -> Proxy: UnwrapResponseKey(header, ephemeral) -> K_response\ninitialize frame_index = 0
+
+  loop per LLM chunk (one pass per "event: zs" frame)
+    LLM --> Node: plaintext chunk
+    Node -> Node: sealer.SealStreamFrame(frame)\n  nonce = rand(12)\n  aad = BuildFrameAAD(tx_id, ticket_id, frame_index)   (SPEC §6)\n  ct  = aead.Seal(nil, nonce, frame, aad)\n  frame_index++
+    Node --> Proxy: event: zs\ndata: <base64(nonce || ct)>
+    Proxy -> Proxy: proto.DecryptSSEDataValue(...)\n  rebuild BuildFrameAAD(tx_id, ticket_id, frame_index)\n  aead.Open -> plaintext;  frame_index++
+    Proxy --> Client: data: <plaintext chunk>
+  end
+
+  Node -> Node: buildReceipt + composeSettleGroup + markServed\n(same as non-streaming branch; runs after the final content frame)
+
+  alt settle group composed (algod healthy)
+    Node --> Proxy: event: zs-settle-group\ndata: <base64(nonce || AEAD(settle group, HeaderAAD(...,"settle-group")))>\n  sealed, no frame_index (the zs-receipt frame after it takes the next one)
+    Proxy -> Proxy: OpenSealedHeader(...,"settle-group") -> cache settle group bytes\n  (consumes no frame_index; the node's gtxn[0] signature still\n   authenticates the group on chain)
+  end
+
+  Node --> Proxy: event: zs-receipt\ndata: <base64(nonce || AEAD(canonical UsageReceipt, FrameAAD(tx_id, ticket_id, frame_index)))>\n  sealed via sealer.SealStreamFrame — carries ticket_id, so it must not\n  reach a relay in cleartext; continues the monotonic frame_index sequence\n  (takes the slot the zs-settle-group header frame skipped)
+  Proxy -> Proxy: DecryptSSEDataValue(data, K, tx_id, ticket_id, frame_index) -> UsageReceipt; frame_index++\n  validate receipt + commit_k + body_hash\n  wallet.AckSettle(ctx, receipt, cached_settle_group)\n    -> SubmitPresignedSettleGroup or standalone fallback\n  affinity.Record(...) if tool_calls observed
+
+  note over Node, Proxy
+    Plaintext frames (no "event: zs") and named events
+    (zs-settle-group, zs-receipt) pass through frame_index
+    untouched on both sides (SPEC §5.3, §6).
+  end note
+
+  LLM --> Node: [DONE]
+  Node --> Proxy: data: [DONE]
+  Proxy --> Client: data: [DONE]
+
+end
+
+== Settlement watchdog (operator side, asynchronous) ==
+
+note over Node
+  After hayai.settlement_watchdog_seconds (default 30s) past
+  Entry.NotBefore, the settlement driver sweeps unsettled
+  ledger rows. For each candidate row:
+    1. Pre-flight: BoxChecker.TicketBoxExists(ticketId)
+       - missing  -> proxy already atomic-finalized OR open()
+                     never confirmed
+                     -> markExternallyFinalized (preserves
+                        operator_addr + settle_tx_id) or
+                     mark terminally failed (no retry burn)
+       - present  -> proceed
+    2. Compose + sign a fresh standalone settle(asOperator=true)
+       at fee = (1 + SettleInnerCount + 1 + gapOpUps)*minTxnFee
+       (5 for a paid ticket, 2 for a free model); submit.
+  Eager firing (skipping the watchdog) is harmless — the contract's
+  same-side idempotency tweak makes a later atomic group succeed —
+  but wastes ~5,000 microALGO of operator outer-fee per occurrence.
+end note
+
+Node -> Node: settlement.Driver tick (after NotBefore)\n  pre-flight box check, then standalone settle if needed
+Node -> Node: standalone settle landed\n  -> MarkSettling (stamps OperatorOwnerAddr if absent)\n  -> MarkSettled  (records on-chain settle_tx_id)
+
+note over Proxy
+  After handler returns, proxy's ephemeral X25519 identity is wiped
+  (proto.ZeroEphemeralIdentity) — response-leg forward secrecy (SPEC §8).
+end note
+
+@enduml

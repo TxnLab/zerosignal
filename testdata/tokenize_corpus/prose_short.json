@@ -1,0 +1,10 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "user",
+   "content": "hello world, this is a small question"
+  }
+ ],
+ "stream": true
+}

@@ -1,0 +1,104 @@
+name: Release
+
+# Publishes the TypeScript package to npm when a `ts/vX.Y.Z` tag is pushed.
+# Go needs no job: a `go/vX.Y.Z` tag is itself the release, fetched through
+# the module proxy on first `go get` — provided go/go.mod declares this repo's
+# path.
+#
+# Publishing uses npm trusted publishing (OIDC from this workflow), so there is
+# no NPM_TOKEN secret to rotate. A trusted publisher can only be configured on a
+# package that already exists, so the first publish of each package name is
+# manual; configure the publisher on npmjs.com after it. `--access public` only
+# takes effect on a package's first publish; an existing restricted package
+# needs a one-time `npm access set status=public <name>`.
+
+on:
+  push:
+    tags: ['ts/v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish-ts:
+    name: Publish TypeScript package
+    # This tree also lives in the private predecessor repo, which must never
+    # publish from it.
+    if: github.repository == 'TxnLab/zerosignal'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Not go-version-file — see ci.yml for why.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+
+      # Trusted publishing needs npm >= 11.5.1; Node 22 bundles npm 10.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Tag matches package version
+        run: |
+          want="ts/v$(node -p "require('./ts/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match ts/package.json ($want)" >&2
+            exit 1
+          fi
+
+      # Provenance is rejected unless repository.url names the repo that built
+      # it, and a restricted publishConfig would publish privately — fail here,
+      # with a readable message, rather than at the registry.
+      - name: Package metadata names this repo
+        run: |
+          url="$(node -p "require('./ts/package.json').repository.url")"
+          access="$(node -p "require('./ts/package.json').publishConfig?.access ?? ''")"
+          want="git+https://github.com/${GITHUB_REPOSITORY}.git"
+          if [ "$url" != "$want" ]; then
+            echo "ts/package.json repository.url is $url, want $want" >&2
+            exit 1
+          fi
+          if [ "$access" != "public" ]; then
+            echo "ts/package.json publishConfig.access is '$access', want public" >&2
+            exit 1
+          fi
+          if ! grep -qx "module github.com/${GITHUB_REPOSITORY}/go" go/go.mod; then
+            echo "go/go.mod does not declare github.com/${GITHUB_REPOSITORY}/go" >&2
+            exit 1
+          fi
+
+      - name: Vet, typecheck, and test both implementations
+        run: make vet typecheck test
+
+      # A prerelease must not become `latest`, or every unpinned install
+      # picks it up.
+      - name: Publish
+        working-directory: ts
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *-*) dist_tag=next ;;
+            *)   dist_tag=latest ;;
+          esac
+          npm publish --provenance --access public --tag "$dist_tag"

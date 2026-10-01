@@ -1,0 +1,6 @@
+node_modules/
+ts/dist/
+.DS_Store
+.idea/
+.claude/
+ts/*.tgz

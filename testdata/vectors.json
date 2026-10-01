@@ -1,0 +1,128 @@
+{
+    "version": 6,
+    "comment": "Cross-impl byte-parity vectors for the hayai protocol. Regenerate via: cd proto/go \u0026\u0026 go test ./ticket -run TestVectors -update. Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
+    "aad_body_with_ticket": {
+        "tx_id": "TX-VECTOR-001",
+        "ticket_id": "TKT-VECTOR-001",
+        "expected_hex": "7a7300626f64790054582d564543544f522d30303100544b542d564543544f522d303031"
+    },
+    "aad_body_no_ticket": {
+        "tx_id": "TX-VECTOR-001",
+        "ticket_id": "",
+        "expected_hex": "7a7300626f64790054582d564543544f522d30303100"
+    },
+    "aad_frame": {
+        "tx_id": "TX-VECTOR-001",
+        "ticket_id": "TKT-VECTOR-001",
+        "frame_index": 7,
+        "expected_hex": "7a73006672616d650054582d564543544f522d30303100544b542d564543544f522d303031000000000000000007"
+    },
+    "aad_header_receipt": {
+        "tx_id": "TX-VECTOR-001",
+        "ticket_id": "TKT-VECTOR-001",
+        "name": "receipt",
+        "expected_hex": "7a73006864720054582d564543544f522d30303100544b542d564543544f522d3030310072656365697074"
+    },
+    "aad_header_settle_group": {
+        "tx_id": "TX-VECTOR-001",
+        "ticket_id": "TKT-VECTOR-001",
+        "name": "settle-group",
+        "expected_hex": "7a73006864720054582d564543544f522d30303100544b542d564543544f522d30303100736574746c652d67726f7570"
+    },
+    "admission_tag": {
+        "k_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "ticket_id": "TKT-VECTOR-001",
+        "tx_id": "TX-VECTOR-001",
+        "body_hex": "68656c6c6f20766563746f7220626f6479",
+        "expected_hex": "d0292951152c735a816e70f4285c2f1441a7eef89608683bbd61f6121d96de28"
+    },
+    "body_hash_single": {
+        "body_hex": "68656c6c6f20766563746f7220626f6479",
+        "expected_hex": "af57b85fab95917391e0eb5a0228e2b516f24fc6bac019ddb773972c0442226d"
+    },
+    "body_hash_frames": {
+        "frames_hex": [
+            "6672616d652d30",
+            "6672616d652d31",
+            "6672616d652d32"
+        ],
+        "expected_hex": "58f43140fd8af23893ae63425040b6db4eeae3bd913bc566dbae8da07bdead8d"
+    },
+    "commit_response_key": {
+        "k_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+        "expected_hex": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+    },
+    "ticket": {
+        "value": {
+            "ticket_id": "c2l4dGVlbi1ieXRlLWlkIQ==",
+            "operator_id": 42,
+            "node_id": 7,
+            "input_count": 1234,
+            "max_output_count": 512,
+            "input_rate": 2,
+            "output_rate": 4,
+            "max_price": 4516,
+            "min_price": 50,
+            "expires_at": 1700000000,
+            "model": "gpt-4.1-mini",
+            "stream": true,
+            "commit_k": "Zmh6rfhivXdsj8GLjp+OIAiXFIVu4jOzkCpZHQ1fKSU=",
+            "input_usage_type": 0,
+            "output_usage_type": 2,
+            "cache_read_rate": 1,
+            "sig": ""
+        },
+        "canonical_bytes_hex": "7a732d7469636b65742d7632000000001863326c346447566c626931696558526c4c576c6b49513d3d000000000000002a000000000000000700000000000004d200000000000002000000000000000002000000000000000400000000000011a40000000000000032000000006553f1000000000c6770742d342e312d6d696e69010000002c5a6d683672666869765864736a38474c6a702b4f4941695846495675346a4f7a6b43705a485131664b53553d00020000000000000001",
+        "sig_digest_hex": "5f9e803c54c25675583da90eb383d88d02a26340c50ea70d545fd5a22616716c"
+    },
+    "receipt": {
+        "value": {
+            "ticket_id": "c2l4dGVlbi1ieXRlLWlkIQ==",
+            "actual_input_count": 1100,
+            "actual_output_count": 256,
+            "amount_charged": 4500,
+            "ttft_ms": 120,
+            "decode_ms": 3400,
+            "body_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "input_usage_type": 1,
+            "output_usage_type": 3,
+            "aux_output_usage_type": 2,
+            "aux_output_count": 2,
+            "cached_input_count": 700,
+            "sig": ""
+        },
+        "canonical_bytes_hex": "7a732d726563656970742d7632000000001863326c346447566c626931696558526c4c576c6b49513d3d000000000000044c0000000000000100000000000000119400000000000000780000000000000d480000004061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161010302000000000000000200000000000002bc",
+        "sig_digest_hex": "a22e8fd6e5ae93b4a84878f3ccf0b41aa417f0b6105fb8cca87236eaa2dea2ec"
+    },
+    "ephemeral_advertisement": {
+        "operator_id": 42,
+        "node_id": 7,
+        "value": {
+            "ephemeral_age_pubkey": "age1rc8wp62cfvmldwhm49mdp5lg3gu6qkrs2whhactp0w9nqjk6wp7sl74d8s",
+            "ephemeral_expiry": 1700000000,
+            "ephemeral_issued_at": 1699998500,
+            "ephemeral_sig": ""
+        },
+        "canonical_bytes_hex": "7a732d657068656d6572616c2d763100000000000000002a00000000000000070000003e61676531726338777036326366766d6c6477686d34396d6470356c6733677536716b727332776868616374703077396e716a6b36777037736c3734643873000000006553f100000000006553eb24",
+        "sig_digest_hex": "03cf18d22f547766254ed49336d4a49c601af70fae5d87a7e242746c01ccf15c"
+    },
+    "reserve_request": {
+        "operator_id": 42,
+        "node_id": 7,
+        "value": {
+            "model": "gpt-4.1-mini",
+            "input_count": 1234,
+            "max_output_count": 512,
+            "stream": true,
+            "proxy_recipient": "age1rc8wp62cfvmldwhm49mdp5lg3gu6qkrs2whhactp0w9nqjk6wp7sl74d8s",
+            "payer_addr": "AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP7MUPJQE",
+            "payer_issued_at": 1699999970
+        },
+        "canonical_bytes_hex": "7a732d726573657276652d7631000000003a4141415145415945415544414f43414a424946515944494f423449424345515443514b524d46595944454e4257484135445950374d55504a5145000000000000002a00000000000000070000000c6770742d342e312d6d696e6900000000000004d20000000000000200010000003e61676531726338777036326366766d6c6477686d34396d6470356c6733677536716b727332776868616374703077396e716a6b36777037736c3734643873000000006553f0e2",
+        "sig_digest_hex": "59e53d14f7e982f38e282486bf32900aa4221f633125ee484f2c7677c875cfd0"
+    },
+    "algorand_address": {
+        "pubkey_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "expected_address": "AAAQEAYEAUDAOCAJBIFQYDIOB4IBCEQTCQKRMFYYDENBWHA5DYP7MUPJQE"
+    }
+}

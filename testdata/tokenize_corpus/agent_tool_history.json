@@ -1,0 +1,344 @@
+{
+ "model": "zs-test-model",
+ "messages": [
+  {
+   "role": "system",
+   "content": "You are a coding agent with filesystem access."
+  },
+  {
+   "role": "user",
+   "content": "Fix the failing test in module 0."
+  },
+  {
+   "role": "assistant",
+   "content": null,
+   "tool_calls": [
+    {
+     "id": "call_0",
+     "type": "function",
+     "function": {
+      "name": "read_file",
+      "arguments": "{\"path\": \"src/module_0/handler.ts\", \"end\": 120}"
+     }
+    }
+   ]
+  },
+  {
+   "role": "tool",
+   "tool_call_id": "call_0",
+   "content": "func InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  },
+  {
+   "role": "user",
+   "content": "Fix the failing test in module 1."
+  },
+  {
+   "role": "assistant",
+   "content": null,
+   "tool_calls": [
+    {
+     "id": "call_1",
+     "type": "function",
+     "function": {
+      "name": "read_file",
+      "arguments": "{\"path\": \"src/module_1/handler.ts\", \"end\": 120}"
+     }
+    }
+   ]
+  },
+  {
+   "role": "tool",
+   "tool_call_id": "call_1",
+   "content": "func InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  },
+  {
+   "role": "user",
+   "content": "Fix the failing test in module 2."
+  },
+  {
+   "role": "assistant",
+   "content": null,
+   "tool_calls": [
+    {
+     "id": "call_2",
+     "type": "function",
+     "function": {
+      "name": "read_file",
+      "arguments": "{\"path\": \"src/module_2/handler.ts\", \"end\": 120}"
+     }
+    }
+   ]
+  },
+  {
+   "role": "tool",
+   "tool_call_id": "call_2",
+   "content": "func InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  },
+  {
+   "role": "user",
+   "content": "Fix the failing test in module 3."
+  },
+  {
+   "role": "assistant",
+   "content": null,
+   "tool_calls": [
+    {
+     "id": "call_3",
+     "type": "function",
+     "function": {
+      "name": "read_file",
+      "arguments": "{\"path\": \"src/module_3/handler.ts\", \"end\": 120}"
+     }
+    }
+   ]
+  },
+  {
+   "role": "tool",
+   "tool_call_id": "call_3",
+   "content": "func InputTokenBoundV2(body []byte) uint64 {\n\tbody = bytes.TrimPrefix(body, bomPrefix)\n\tif len(body) == 0 {\n\t\treturn FlatMargin\n\t}\n\turlBytes, imageTokens, ok := imageStatsV2(body)\n\tif !ok {\n\t\treturn saturatingAdd(ceilDivU64(uint64(len(body)), BytesPerToken), FlatMargin)\n\t}\n\ttextBytes := uint64(len(body))\n\tif urlBytes < textBytes {\n\t\ttextBytes -= urlBytes\n\t}\n\treturn saturatingAdd(ceilDivU64(textBytes, BytesPerToken)+imageTokens, FlatMargin)\n}\n"
+  }
+ ],
+ "stream": true,
+ "tools": [
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_0",
+    "description": "Look up record 0 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_1",
+    "description": "Look up record 1 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_2",
+    "description": "Look up record 2 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_3",
+    "description": "Look up record 3 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_4",
+    "description": "Look up record 4 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_5",
+    "description": "Look up record 5 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_6",
+    "description": "Look up record 6 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "lookup_record_7",
+    "description": "Look up record 7 in the datastore and return its fields.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "record_id": {
+       "type": "string",
+       "description": "The record identifier."
+      },
+      "include_deleted": {
+       "type": "boolean",
+       "description": "Include tombstones."
+      },
+      "fields": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Subset of fields to return."
+      }
+     },
+     "required": [
+      "record_id"
+     ]
+    }
+   }
+  }
+ ]
+}

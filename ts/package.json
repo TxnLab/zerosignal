@@ -1,0 +1,111 @@
+{
+    "name": "@txnlab/zs-proto",
+    "version": "0.44.0",
+    "license": "Apache-2.0",
+    "description": "ZeroSignal protocol primitives for TypeScript: envelope sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing, tokenize bounds, transient-error classification, and TEE attestation checks. Byte-compatible with the Go reference implementation via shared golden vectors.",
+    "keywords": [
+        "zerosignal",
+        "private-inference",
+        "llm",
+        "algorand",
+        "encryption",
+        "age",
+        "ed25519",
+        "tee",
+        "attestation"
+    ],
+    "engines": {
+        "node": ">=20.19"
+    },
+    "type": "module",
+    "sideEffects": [
+        "./dist/util/ed25519.js"
+    ],
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./attest": {
+            "types": "./dist/attest/index.d.ts",
+            "import": "./dist/attest/index.js"
+        },
+        "./wire": {
+            "types": "./dist/wire/index.d.ts",
+            "import": "./dist/wire/index.js"
+        },
+        "./ticket": {
+            "types": "./dist/ticket/index.d.ts",
+            "import": "./dist/ticket/index.js"
+        },
+        "./selection": {
+            "types": "./dist/selection/index.d.ts",
+            "import": "./dist/selection/index.js"
+        },
+        "./imageprice": {
+            "types": "./dist/imageprice/index.d.ts",
+            "import": "./dist/imageprice/index.js"
+        },
+        "./tokenize": {
+            "types": "./dist/tokenize/index.d.ts",
+            "import": "./dist/tokenize/index.js"
+        },
+        "./inject": {
+            "types": "./dist/inject/index.d.ts",
+            "import": "./dist/inject/index.js"
+        },
+        "./pricing": {
+            "types": "./dist/pricing/index.d.ts",
+            "import": "./dist/pricing/index.js"
+        },
+        "./relay": {
+            "types": "./dist/relay/index.d.ts",
+            "import": "./dist/relay/index.js"
+        },
+        "./transient": {
+            "types": "./dist/transient/index.d.ts",
+            "import": "./dist/transient/index.js"
+        },
+        "./testdata/*": "./dist/testdata/*",
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TxnLab/zerosignal.git",
+        "directory": "ts"
+    },
+    "homepage": "https://github.com/TxnLab/zerosignal/tree/main/ts#readme",
+    "bugs": {
+        "url": "https://github.com/TxnLab/zerosignal/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/testdata && cp ../testdata/*.json dist/testdata/ && cp -R ../testdata/attest dist/testdata/attest",
+        "prepublishOnly": "pnpm test && pnpm build",
+        "test": "vitest --run",
+        "retest": "vitest --run",
+        "test:watch": "vitest",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@noble/ciphers": "2.2.0",
+        "@noble/ed25519": "2.1.0",
+        "@noble/hashes": "2.2.0",
+        "@scure/base": "2.2.0",
+        "age-encryption": "0.3.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "typescript": "5.6.3",
+        "vitest": "3.2.4"
+    }
+}

@@ -1,0 +1,35 @@
+@startuml
+'skinparam backgroundColor #F6F1E4
+'skinparam sequence {
+'  ArrowColor #0B0F1A
+'  LifeLineBorderColor #0B0F1A
+'  ParticipantBorderColor #0B0F1A
+'  ParticipantBackgroundColor #F6F1E4
+'}
+
+actor "Client / Proxy" as P
+participant "Node" as N
+participant "LLM" as L
+database "ZeroSignal Contract\n(Algorand)" as A
+participant "Treasury" as T
+
+P -> N: POST /v1/zs/reserve\n(sealed request: application/vnd.zs-reserve+json)
+N --> P: sealed response: application/vnd.zs-reserve-response+json\n(ReserveResponse{Ticket{op_id, node_id, max_price}, wrapped K_response,\n presigned_open_txn} age-sealed to proxy_recipient —\n presigned_open_txn names the payer twice, so a relay must not read it)
+== Open atomic 2-tx group (operator pays all fees) ==
+P --> A: pay max USDC (max_price — what might be consumed)
+N --> A: open() ticket (signed by the node's hot key; carries\n(operatorId, nodeId); draws 1 box-MBR slot from the payer's\nprepaid pool — no per-turn MBR leg)
+== Inference request / streaming response ==
+P -> N: sealed envelope comms to Node\n(relayed single-hop by default when privacy is ON — see flow-transport-relay)
+N <--> A: verify ticket in mempool
+N -> L: decrypt + forward\nto LLM
+L --> N:
+N --> P: sealed streamed response(s)
+N --> P: (UsageReceipt)
+== Atomic Dual Settlement (operator pays all fees) ==
+N --> A: settle(ticket, amountCharged, digest, asOperator=true)
+P --> A: settle(ticket, amountCharged, digest, asOperator=false)
+A -->> P: refund unconsumed USDC to client
+A -->> N: pay operator for inference
+A -->> T: pay protocol fee
+note over A, P: box-MBR slot released to the payer's prepaid pool\n(openTickets--; ALGO recoverable from the pool via withdrawMbr)
+@enduml

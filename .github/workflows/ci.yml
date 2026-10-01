@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel the older run when a newer commit lands on the same ref. Nothing here
+# mutates shared state, so unlike client/ipfs.yml this group is ref-scoped and
+# cancelling is free — it only reclaims runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Vet, typecheck, and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Deliberately NOT `go-version-file: go/go.mod`. setup-go feeds the go
+      # directive to semver.satisfies as a RANGE, so the day a dependency
+      # forces a patch-level directive (`go 1.26.0` — golang.org/x/crypto
+      # v0.56.0 did exactly that to zs-proxy) the range matches that ONE patch
+      # and CI silently stops taking Go security releases. `1.26.x` tracks the
+      # latest patch; bump it when moving to a new minor.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ts/pnpm-lock.yaml
+
+      - name: Vet and typecheck
+        run: make vet typecheck
+
+      - name: Test both implementations
+        run: make test
+
+  race:
+    name: Race test Go implementation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Deliberately NOT `go-version-file: go/go.mod`. setup-go feeds the go
+      # directive to semver.satisfies as a RANGE, so the day a dependency
+      # forces a patch-level directive (`go 1.26.0` — golang.org/x/crypto
+      # v0.56.0 did exactly that to zs-proxy) the range matches that ONE patch
+      # and CI silently stops taking Go security releases. `1.26.x` tracks the
+      # latest patch; bump it when moving to a new minor.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go/go.sum
+
+      - name: Test with race detector
+        working-directory: go
+        run: go test -race ./...

@@ -1,0 +1,1295 @@
+{
+  "version": 1,
+  "comment": "Cross-impl vectors for TEE measurement arithmetic. Regenerate via: cd proto/go \u0026\u0026 go test ./attest -run TestVectors -update. Loaded by proto/go/attest/vectors_test.go and proto/ts/test/attest-vectors.test.ts. Inputs are the capture files named below, not inlined here.",
+  "event_log_path": "attest/ds_event_log.json",
+  "quote_path": "attest/ds_quote_hex.txt",
+  "runtime_event_type": 134217729,
+  "replay": {
+    "extends": 10,
+    "rtmr3_hex": "c7fff61c43b6c8358d5f758ee7c7f7943f60157fc075adecca3d495efa45fdc3de4b4bba804cdab930060bf25c7c924a"
+  },
+  "measurements": {
+    "app-id": "ec60405f35f3b999e83e240e4f8d2334d8a2ab58",
+    "boot-mr-done": "",
+    "compose-hash": "6e6f3898b6c20ee50c12713a80453da2c992de95e857d64791b909037f157485",
+    "instance-id": "3ff6970cc19d8126f4433e4749755adfcebaf9ed",
+    "key-provider": "7b226e616d65223a226b6d73222c226964223a223330353933303133303630373261383634386365336430323031303630383261383634386365336430333031303730333432303030343838343465623432636364663863353266643466313734663336326663623962626431396334356664343866316564656332643866316361323335333665633161373430323162346365653631306330373466383239346434333162326237666565326333396535333333666461663061343532326434336662313539643966227d",
+    "mr-kms": "7625e4de98d2f21e1adc646ad3670b78da07895cae0ba9d666d37663762dfe47",
+    "os-image-hash": "bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033",
+    "storage-fs": "7a6673",
+    "system-preparing": "",
+    "system-ready": ""
+  },
+  "quote": {
+    "len": 5010,
+    "tee_type": 129,
+    "mrtd_hex": "f06dfda6dce1cf904d4e2bab1dc370634cf95cefa2ceb2de2eee127c9382698090d7a4a13e14c536ec6c9c3c8fa87077",
+    "rtmr0_hex": "68102e7b524af310f7b7d426ce75481e36c40f5d513a9009c046e9d37e31551f0134d954b496a3357fd61d03f07ffe96",
+    "rtmr1_hex": "07e6f51aa763abfe75c3ddfbf4f425fe3f0ceff66d807a75e049303dce9addf68e7218729bd419638af63a370f65878c",
+    "rtmr2_hex": "df67e467e60edc1737bcf8e682d48131bfb427f523226aa7f197a7608e9b3784783fa759ef5b28191fa12f9ddb36b858",
+    "rtmr3_hex": "c7fff61c43b6c8358d5f758ee7c7f7943f60157fc075adecca3d495efa45fdc3de4b4bba804cdab930060bf25c7c924a",
+    "report_data_hex": "1d2f9ae2df75959798e567366d3412b7bdbc4f24593a46e817a85d954c97aa2d0000000000000000000000000000000000000000000000000000000000000000",
+    "binding_hash_hex": "1d2f9ae2df75959798e567366d3412b7bdbc4f24593a46e817a85d954c97aa2d",
+    "split_error": "aux_binding_absent",
+    "binding_node_pubkey": "age1probeplaceholderrecipientvalue000000000000000000",
+    "binding_operator_id": "42"
+  },
+  "report_data": [
+    {
+      "name": "operator id zero",
+      "node_pubkey": "age1ysu8p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2",
+      "operator_id": "0",
+      "expected_hex": "442d02c7eda67203676f225bc4d9d76a60577285a2f358961ba6bc8d12403680",
+      "expected_b64": "RC0Cx+2mcgNnbyJbxNnXamBXcoWi81iWG6a8jRJANoA="
+    },
+    {
+      "name": "small id",
+      "node_pubkey": "age1ysu8p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2",
+      "operator_id": "42",
+      "expected_hex": "dd235152ba071fb26e2a8b0b605f754635efb9006763f739bd625457eb3cd3e8",
+      "expected_b64": "3SNRUroHH7JuKosLYF91RjXvuQBnY/c5vWJUV+s80+g="
+    },
+    {
+      "name": "above 32 bits",
+      "node_pubkey": "age1ysu8p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2",
+      "operator_id": "8589934592",
+      "expected_hex": "f8823b6607c4188ac2c40a49e6db0f3e9b53952a8aef5d2bbb3ac0aad95c441b",
+      "expected_b64": "+II7ZgfEGIrCxApJ5tsPPptTlSqK710ruzrAqtlcRBs="
+    },
+    {
+      "name": "max uint64",
+      "node_pubkey": "age1ysu8p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2",
+      "operator_id": "18446744073709551615",
+      "expected_hex": "a78c91c5da67e5510b60333a7b9341448603e8cf2a63faed5c30f1a29fde5b64",
+      "expected_b64": "p4yRxdpn5VELYDM6e5NBRIYD6M8qY/rtXDDxop/eW2Q="
+    },
+    {
+      "name": "empty pubkey",
+      "node_pubkey": "",
+      "operator_id": "42",
+      "expected_hex": "a6bb133cb1e3638ad7b8a3ff0539668e9e56f9b850ef1b2a810f5422eaa6c323",
+      "expected_b64": "prsTPLHjY4rXuKP/BTlmjp5W+bhQ7xsqgQ9UIuqmwyM="
+    },
+    {
+      "name": "pubkey with surrounding whitespace",
+      "node_pubkey": "  age1ysu8p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2\n",
+      "operator_id": "42",
+      "expected_hex": "0b48d2f152faad75defa013648243905350b2baaf2868eae4b10165ecd3cdb2a",
+      "expected_b64": "C0jS8VL6rXXe+gE2SCQ5BTULK6ryho6uSxAWXs082yo="
+    },
+    {
+      "name": "pubkey with an interior space",
+      "node_pubkey": "age1ysu8 p4akgwu3rj8h5hcqntxmmhum9rxuy5mz9xsxgkju5q42sd4sswf5t2",
+      "operator_id": "42",
+      "expected_hex": "d89b562427690efdc8e0dc8e9eef89940c82d04459a64fff582ad84ae035ef8d",
+      "expected_b64": "2JtWJCdpDv3I4NyOnu+JlAyC0ERZpk//WCrYSuA1740="
+    },
+    {
+      "name": "pubkey case is significant",
+      "node_pubkey": "AGE1YSU8P4AKGWU3RJ8H5HCQNTXMMHUM9RXUY5MZ9XSXGKJU5Q42SD4SSWF5T2",
+      "operator_id": "42",
+      "expected_hex": "901813abc8ce8cb7a9cfe52728cbe2634e2336c9cb33fb49a38b980d9445f061",
+      "expected_b64": "kBgTq8jOjLepz+UnKMviY04jNsnLM/tJo4uYDZRF8GE="
+    },
+    {
+      "name": "pubkey with a NUL byte",
+      "node_pubkey": "abc\u0000def",
+      "operator_id": "42",
+      "expected_hex": "7b61ed155add2a38ce4c5d7febedf3f74abc325a49ab0fe897913d7eb07abab5",
+      "expected_b64": "e2HtFVrdKjjOTF1/6+3z90q8MlpJqw/ol5E9frB6urU="
+    },
+    {
+      "name": "non-ASCII pubkey is hashed as UTF-8",
+      "node_pubkey": "kéy-π",
+      "operator_id": "42",
+      "expected_hex": "e3071cc484e3ff1f2b89743d4edcf102df8ab6c27bf620716b77e979bfae73cb",
+      "expected_b64": "4wccxITj/x8riXQ9TtzxAt+KtsJ79iBxa3fpeb+uc8s="
+    }
+  ],
+  "h_app": [
+    {
+      "name": "empty catalog is the pending value",
+      "why": "Must equal HAppPending. Neither may be 32 zero bytes, or a booting node is indistinguishable from a pre-9.9 one and the check is skipped exactly when it is least earned.",
+      "entries": [],
+      "error": "",
+      "expected_hex": "86097ce8ac700d38448258745c15beca14c43ecff86f94ec1dce3f1767be0e8b"
+    },
+    {
+      "name": "one measured model",
+      "why": "The ordinary case.",
+      "entries": [
+        {
+          "model_id": "a-model",
+          "source": "hf/a-model",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "a9ca507659346f5eb2d0ba7c4af78f2b91af78c1ee521a50ff8b9d6e28679e7f"
+    },
+    {
+      "name": "one declared model",
+      "why": "THE PAIR for 'one measured model': byte-identical to it except the state, so the digests differ ONLY because the state byte does. A mirror collapsing the two states produces one digest for two different claims, and this is the case that catches it — which it cannot do if any other field also moves.",
+      "entries": [
+        {
+          "model_id": "a-model",
+          "source": "hf/a-model",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 2
+        }
+      ],
+      "error": "",
+      "expected_hex": "b77138036861d141cc5e1e02c59565d03269bad6d5adad17d47c82fa8be76747"
+    },
+    {
+      "name": "one unverifiable model carries no digest",
+      "why": "Hosted passthrough. The empty digest is the point: absence is a VALUE here, so this must not collide with a model omitted from the catalog entirely.",
+      "entries": [
+        {
+          "model_id": "gpt-ish",
+          "source": "",
+          "weights_digest": "",
+          "weights_state": 3
+        }
+      ],
+      "error": "",
+      "expected_hex": "9e36c7ccd775815ea8a3d4039394b8255c2f4951ae803790d613321aa049e7d5"
+    },
+    {
+      "name": "three models, given sorted",
+      "why": "Paired with the next case: both must produce the SAME digest, which is what pins that sorting happens inside HApp rather than being the caller's duty.",
+      "entries": [
+        {
+          "model_id": "aaa",
+          "source": "hf/aaa",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "bbb",
+          "source": "hf/bbb",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "ccc",
+          "source": "hf/ccc",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "b7c7f38df15afd9d88c483298bd5465abb6d01e7c9542248fab85f238492c9f6"
+    },
+    {
+      "name": "three models, given unsorted",
+      "why": "THE PAIR. A node builds its catalog from maps and discovery order; if input order changed the digest, a node and a verifier holding identical sets would disagree with nothing to diagnose it.",
+      "entries": [
+        {
+          "model_id": "ccc",
+          "source": "hf/ccc",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "aaa",
+          "source": "hf/aaa",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "bbb",
+          "source": "hf/bbb",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "b7c7f38df15afd9d88c483298bd5465abb6d01e7c9542248fab85f238492c9f6"
+    },
+    {
+      "name": "model ids sort by BYTES, not by case",
+      "why": "'Z' (0x5a) sorts BELOW 'a' (0x61). A mirror using localeCompare or a case-insensitive sort orders these the other way and digests a different preimage.",
+      "entries": [
+        {
+          "model_id": "a-model",
+          "source": "hf/a-model",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "Z-model",
+          "source": "hf/Z-model",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "94778f57cdf03c5e7f6168ad8108177cf716fe6c7692d9e32e9f7008711f796f"
+    },
+    {
+      "name": "non-ASCII model id is length-prefixed in BYTES",
+      "why": "lenStr counts UTF-8 bytes; JavaScript's String.length counts UTF-16 units, and they differ here. A mirror using .length writes a short length and every following field slides.",
+      "entries": [
+        {
+          "model_id": "modèl-π",
+          "source": "hf/modèl-π",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "85995edba7c3750f3508ea8e062acdee6488884ce5a53d07e7febc9b9d439db0"
+    },
+    {
+      "name": "sort order is UTF-8 BYTES, not UTF-16 code units",
+      "why": "THE ONLY CASE THAT CAN CATCH A PLAIN `a \u003c b` IN THE MIRROR. Go compares strings bytewise, JavaScript's \u003c compares UTF-16 code units, and these two ids order OPPOSITELY under the two rules: U+FFFD is EF BF BD in UTF-8 and 0xFFFD in UTF-16, while U+1F600 is F0 9F 98 80 in UTF-8 and the surrogate pair 0xD83D 0xDE00 in UTF-16 — so UTF-8 puts U+FFFD first and UTF-16 puts the emoji first. Every other multi-entry case here is ASCII, where the two rules agree, so deleting the TS compareUtf8 helper passes the whole suite without this one. Unreachable over the wire today; it is here because the divergence it pins is silent and the vector is free.",
+      "entries": [
+        {
+          "model_id": "�",
+          "source": "hf/�",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "😀",
+          "source": "hf/😀",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "418e0fe57cf710aa90801f7e9bfa21c3e2a893ed8997720e477e08cdc76fa147"
+    },
+    {
+      "name": "empty source is allowed",
+      "why": "A model whose provenance the node resolved to nothing is legitimate, and its empty lenStr must still occupy four bytes.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "9360f31e11793dfc89d13fd93ae168fa5e84a40f91bff84f3eb6ad6ddfeaa573"
+    },
+    {
+      "name": "duplicate model ids are REFUSED even when nothing else matches",
+      "why": "They cannot both answer 'what is this node serving as m', and a minter and a verifier breaking the tie differently compute different digests from identical input. The two entries agree on the ID AND NOTHING ELSE on purpose: a check that also compared source or state would still refuse two exact clones, so only a pair like this one — the shape an operator would actually build to slip a substituted model past an id-matching verifier — pins that the ID ALONE is the key.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "hf/m",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "m",
+          "source": "hosted/elsewhere",
+          "weights_digest": "",
+          "weights_state": 3
+        }
+      ],
+      "error": "duplicate_model_id",
+      "expected_hex": ""
+    },
+    {
+      "name": "duplicate detected across an unsorted input",
+      "why": "The dedup runs after the sort, so an adjacent-pair check must still catch a pair the caller separated. These two ARE exact clones, which is what keeps that easier case covered once the vector above stopped being one.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "hf/m",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "z",
+          "source": "hf/z",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "m",
+          "source": "hf/m",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "duplicate_model_id",
+      "expected_hex": ""
+    },
+    {
+      "name": "model ids that are PREFIXES of one another",
+      "why": "Sorting falls through to the length tiebreak only when one id is a prefix of the other, and every other multi-entry case here differs at some byte or has equal lengths — so this is the only case that pins the tail of the comparison. Unlike the surrogate-pair case above, this shape is not exotic: 'llama-3' and 'llama-3-instruct' is what a real catalog looks like, so a mirror reversing the tiebreak diverges on ordinary input.",
+      "entries": [
+        {
+          "model_id": "llama-3-instruct",
+          "source": "hf/llama-3-instruct",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        },
+        {
+          "model_id": "llama-3",
+          "source": "hf/llama-3",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "",
+      "expected_hex": "b24628a8559c24241ec2e0c008e400c482ac2d4b79b23426904566c960a190a8"
+    },
+    {
+      "name": "empty model id is REFUSED",
+      "why": "Nothing can match it against a request, so it can only pad the count.",
+      "entries": [
+        {
+          "model_id": "",
+          "source": "s",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 1
+        }
+      ],
+      "error": "empty_model_id",
+      "expected_hex": ""
+    },
+    {
+      "name": "measured with no digest is REFUSED",
+      "why": "The state claims the node hashed something and the entry shows nothing.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "s",
+          "weights_digest": "",
+          "weights_state": 1
+        }
+      ],
+      "error": "state_digest_disagree",
+      "expected_hex": ""
+    },
+    {
+      "name": "DECLARED with no digest is REFUSED",
+      "why": "THE THIRD CORNER of the state/digest matrix, and the one a mirror is likeliest to drop: measured and declared share a branch here, so splitting them and letting declared through refuses nothing the other two cases test. Declared is a weaker claim than measured but it is still a claim, and an entry asserting it while showing no digest would otherwise fold into an attested catalog with nothing behind it.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "s",
+          "weights_digest": "",
+          "weights_state": 2
+        }
+      ],
+      "error": "state_digest_disagree",
+      "expected_hex": ""
+    },
+    {
+      "name": "unverifiable WITH a digest is REFUSED",
+      "why": "The other direction, and the one a lenient mirror is likelier to allow: it looks like extra information rather than a contradiction.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "s",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 3
+        }
+      ],
+      "error": "state_digest_disagree",
+      "expected_hex": ""
+    },
+    {
+      "name": "an unknown state byte is REFUSED",
+      "why": "Fail closed. A newer node's state would otherwise be hashed as one this verifier thinks it understands.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "s",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 4
+        }
+      ],
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "state zero is REFUSED",
+      "why": "0 is the Go zero value and what a lenient JSON decoder yields for a missing weights_state. It must not mean measured, the strongest claim.",
+      "entries": [
+        {
+          "model_id": "m",
+          "source": "s",
+          "weights_digest": "sha256:ab12",
+          "weights_state": 0
+        }
+      ],
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "an entry breaking TWO rules reports the FIRST one",
+      "why": "Pins the check order, so Go and TypeScript report the same code for one input. The empty id is checked before the state.",
+      "entries": [
+        {
+          "model_id": "",
+          "source": "s",
+          "weights_digest": "",
+          "weights_state": 4
+        }
+      ],
+      "error": "empty_model_id",
+      "expected_hex": ""
+    }
+  ],
+  "aux_binding": [
+    {
+      "name": "node id zero, pending catalog",
+      "why": "A little-endian implementation agrees with a big-endian one on id 0 and on nothing else, so this case alone cannot tell them apart — it is here to pair with the ones below.",
+      "node_id": "0",
+      "h_app_hex": "86097ce8ac700d38448258745c15beca14c43ecff86f94ec1dce3f1767be0e8b",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "",
+      "expected_hex": "f03878f77ab5dfd9ebf16f1fd9497283514342fb378a1d06cf0bba50ab6726e8"
+    },
+    {
+      "name": "small node id",
+      "why": "The ordinary case.",
+      "node_id": "42",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "",
+      "expected_hex": "58b7559f921471ee2b2f298e7bbccd3514c6816eec8d5b9cd42e89d57a6c6e8f"
+    },
+    {
+      "name": "node id above 32 bits",
+      "why": "Catches a 32-bit truncation that every small id hides.",
+      "node_id": "8589934592",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "",
+      "expected_hex": "4b9aa258374f8c904de828a8f9117f6e943ba5b4c5fa4b785845fbe653d7dfa4"
+    },
+    {
+      "name": "max uint64 node id",
+      "why": "The boundary that forces node_id to ride as a decimal string rather than a JSON number.",
+      "node_id": "18446744073709551615",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "",
+      "expected_hex": "884251ffca08b2c21177311770c7d3b7a2c59a3bb69882d42cd169ce0d8a9238"
+    },
+    {
+      "name": "absent nonce",
+      "why": "Paired with the next case.",
+      "node_id": "7",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "",
+      "expected_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe"
+    },
+    {
+      "name": "explicit all-zero nonce",
+      "why": "THE PAIR: it must produce the IDENTICAL digest to an absent nonce, because absent IS 32 zero bytes. That is why 'I supplied a nonce and got zeros back' cannot be detected here and must be a verifier-side failure — this function cannot see what was asked for.",
+      "node_id": "7",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "expected_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe"
+    },
+    {
+      "name": "a real nonce",
+      "why": "The on-demand ?nonce= path. Different digest for the same catalog and node, which is the whole point of liveness.",
+      "node_id": "7",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32",
+      "nonce_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "expected_hex": "45be50db1df05e80620adceded9bd9f8b9fd1be1c6b88b343a176d4b6db30c43"
+    },
+    {
+      "name": "a named-upstream posture",
+      "why": "H_posture sits between H_app and the nonce; swapping the two 32-byte fields must change the digest, which only a case with both non-trivial can show.",
+      "node_id": "7",
+      "h_app_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5",
+      "h_posture_hex": "dc63cd7878a74bb255c412a3546d96fa4eb4e78db6e974cf57afd0ab234281cf",
+      "nonce_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "expected_hex": "c8d91efa99e0fe331fe20948ce808ae46fe9bc762a8e14dfb55e45cb5066dce1"
+    }
+  ],
+  "h_app_json": [
+    {
+      "name": "well-formed entry",
+      "why": "The control for the cases below.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "error": "",
+      "expected_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5"
+    },
+    {
+      "name": "measured entry with weights_digest missing",
+      "why": "A lenient decoder reads the missing digest as \"\" and refuses measured-without-digest; JavaScript reads undefined, which is not \"\", and used to hash it as a measured claim with no digest. Both must refuse it as malformed.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_state\":1}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "measured entry with a null weights_digest",
+      "why": "JavaScript's TextEncoder encodes null as the four bytes \"null\".",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":null,\"weights_state\":1}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "null source",
+      "why": "Go decodes null into a string as \"\"; JavaScript keeps null.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":null,\"weights_digest\":\"\",\"weights_state\":3}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "model_id missing",
+      "why": "Go decodes it as \"\" and reports an empty id; JavaScript used to hash undefined as an empty string without the empty-id check firing.",
+      "entries_json": "[{\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state missing",
+      "why": "A lenient Go decoder reads 0.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\"}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state zero",
+      "why": "A present 0 is well-formed JSON and an unknown state.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":0}]",
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state above 255",
+      "why": "Go cannot store 300 in a uint8. It must be an unknown state in both implementations, not a decode failure in one.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":300}]",
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state 257",
+      "why": "257 truncates to 1 in a uint8, so a decoder missing the upper bound reads it as measured. 300 truncates to 44, still unknown, and cannot tell.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":257}]",
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state -255",
+      "why": "-255 wraps to 1 in a uint8, so a decoder missing the lower bound reads it as measured.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":-255}]",
+      "error": "unknown_weights_state",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state null",
+      "why": "Malformed, not unknown: null into a Go float64 is a silent 0.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":null}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state 1.0",
+      "why": "JSON.parse yields 1, so Go accepts it too. Same digest as the well-formed entry.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1.0}]",
+      "error": "",
+      "expected_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5"
+    },
+    {
+      "name": "weights_state 1.5",
+      "why": "Not an integer.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1.5}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "weights_state as a string",
+      "why": "Wrong type.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":\"1\"}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "model_id as a number",
+      "why": "Wrong type.",
+      "entries_json": "[{\"model_id\":7,\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "key in the wrong case",
+      "why": "Go's default struct decoding matches keys case-insensitively; JavaScript does not. The strict decoder matches exactly.",
+      "entries_json": "[{\"Model_ID\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "an extra key is ignored",
+      "why": "Both implementations ignore unknown keys. Same digest as the well-formed entry.",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1,\"note\":\"x\"}]",
+      "error": "",
+      "expected_hex": "24ef47a813ffc809daf76687bc76cd9b244398c15bf7f8dfb1412de8c9409aa5"
+    },
+    {
+      "name": "a null entry",
+      "why": "Not an object.",
+      "entries_json": "[null]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "a number entry",
+      "why": "Not an object.",
+      "entries_json": "[7]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "lone surrogates decode to one id",
+      "why": "Go's decoder turns an unpaired surrogate escape into U+FFFD, so these are duplicates in Go. JavaScript keeps the lone surrogates as distinct strings; its verifier must compare UTF-8 bytes, where TextEncoder also writes U+FFFD.",
+      "entries_json": "[{\"model_id\":\"\\ud800\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"\\udc00\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3}]",
+      "error": "duplicate_model_id",
+      "expected_hex": ""
+    },
+    {
+      "name": "malformed is checked before the per-entry rules",
+      "why": "The empty-id entry sorts first, but the malformed-entry pass runs over the whole list before sorting, so the code is malformed_model_entry.",
+      "entries_json": "[{\"model_id\":\"\",\"source\":\"s\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1},{\"model_id\":\"b\"}]",
+      "error": "malformed_model_entry",
+      "expected_hex": ""
+    },
+    {
+      "name": "duplicate ids keep their input order",
+      "why": "The sort is stable, so the valid \"dup\" stays first and the second is reported as a duplicate. An unstable sort (Go's pdqsort above 12 elements) can put the bad-state copy first and report unknown_weights_state instead.",
+      "entries_json": "[{\"model_id\":\"m19\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m18\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m17\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m16\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m15\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m14\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m13\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m12\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m11\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m10\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m09\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m08\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m07\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m06\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m05\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m04\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m03\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m02\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m01\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m00\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"dup\",\"source\":\"\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1},{\"model_id\":\"dup\",\"source\":\"\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":9}]",
+      "error": "duplicate_model_id",
+      "expected_hex": ""
+    }
+  ],
+  "aux_verify": [
+    {
+      "name": "unchallenged cached bundle",
+      "why": "The ordinary case.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "challenged, echo matches",
+      "why": "The ?nonce= path.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "45be50db1df05e80620adceded9bd9f8b9fd1be1c6b88b343a176d4b6db30c43",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "challenged, echo in upper case",
+      "why": "Both implementations decode hex case-insensitively and compare bytes.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "45be50db1df05e80620adceded9bd9f8b9fd1be1c6b88b343a176d4b6db30c43",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "challenged, echo absent",
+      "why": "A replayed cached bundle. Hashing 32 zero bytes would verify it; the verifier must refuse because it asked for a nonce.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "nonce_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "challenged, echo is another caller's nonce",
+      "why": "A replayed bundle minted for someone else's challenge. Its binding is valid for the nonce it carries, so hashing the echo would verify it.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "f0efeeedecebeae9e8e7e6e5e4e3e2e1e0dfdedddcdbdad9d8d7d6d5d4d3d2d1",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "9cd9c7e4e58d5b281bfe00e275cac7836c798302e25623740b55eb2b64c3038e",
+      "error": "nonce_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "challenged, echo malformed",
+      "why": "Refused as a nonce mismatch, not a malformed nonce: the verifier asked for a specific value.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "zz",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "45be50db1df05e80620adceded9bd9f8b9fd1be1c6b88b343a176d4b6db30c43",
+      "error": "nonce_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "unchallenged, bundle carries a nonce",
+      "why": "A bundle minted for another caller's challenge still verifies for a verifier that sent none.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "f0efeeedecebeae9e8e7e6e5e4e3e2e1e0dfdedddcdbdad9d8d7d6d5d4d3d2d1",
+      "challenge_hex": "",
+      "aux_hex": "9cd9c7e4e58d5b281bfe00e275cac7836c798302e25623740b55eb2b64c3038e",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "unchallenged, nonce not hex",
+      "why": "Refused rather than read as absent.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "malformed_nonce",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "unchallenged, nonce too short",
+      "why": "Exactly 64 hex characters or refused.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "malformed_nonce",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "sibling node's bundle",
+      "why": "Minted by node 8, checked against node 7's chain-resolved id.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "b0288f11972c78a998de8b8882c09ddf65d6d46b3409308021a3bcb8d43b4a51",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "empty catalog, honest",
+      "why": "A node serving nothing, or still booting. Verifies.",
+      "node_id": "7",
+      "entries_json": "",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "6e9d5eba30b9f5f99c7faf4ac58e4f828d26de731da8264657ace8a1b8efceaf",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "catalog withheld",
+      "why": "The quote commits to a catalog the bundle does not publish.",
+      "node_id": "7",
+      "entries_json": "",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "happ_preimage_missing",
+      "tag": "happ_preimage_missing"
+    },
+    {
+      "name": "sibling node's empty-catalog bundle",
+      "why": "Also happ_preimage_missing: with no entries, a node-id mismatch and a withheld catalog cannot be told apart.",
+      "node_id": "7",
+      "entries_json": "",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "29677c14f06364f07a42b79d6e6191dfa28266f9c4e763621ed1e473226c03a8",
+      "error": "happ_preimage_missing",
+      "tag": "happ_preimage_missing"
+    },
+    {
+      "name": "catalog edited in transit",
+      "why": "A relay changed a digest.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ff99\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "malformed catalog",
+      "why": "Refused before the comparison.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "malformed_model_entry",
+      "tag": "happ_preimage_invalid"
+    },
+    {
+      "name": "nonce is checked before the catalog",
+      "why": "Pins the order: a nonce mismatch is reported even when the catalog is also malformed.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "nonce_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "challenge is all zero",
+      "why": "Zeros hash the same as no nonce, so a cached bundle with a 64-zero nonce field would pass as fresh. The verifier's own challenge is refused.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0000000000000000000000000000000000000000000000000000000000000000",
+      "challenge_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "zero_challenge",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "challenge starts with a zero byte",
+      "why": "Only an all-zero challenge is refused. A check on the first byte would refuse one honest random challenge in 256.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0002030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "challenge_hex": "0002030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "aux_hex": "6e1975a51448165cbd104843a332742bac016fb68f2587a269c2e31cbc55513a",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "app_models is null",
+      "why": "Go decodes null as an absent list; TypeScript must treat it the same, not as a malformed list.",
+      "node_id": "7",
+      "entries_json": "null",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "6e9d5eba30b9f5f99c7faf4ac58e4f828d26de731da8264657ace8a1b8efceaf",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "app_models is null, catalog withheld",
+      "why": "null must reach the missing-catalog check, not fail on reading the list.",
+      "node_id": "7",
+      "entries_json": "null",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "happ_preimage_missing",
+      "tag": "happ_preimage_missing"
+    },
+    {
+      "name": "app_models is [], catalog withheld",
+      "why": "An explicit empty list is the same claim as an absent one.",
+      "node_id": "7",
+      "entries_json": "[]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "happ_preimage_missing",
+      "tag": "happ_preimage_missing"
+    },
+    {
+      "name": "unchallenged, nonce too long",
+      "why": "The echo is node-controlled; 66 hex characters must be refused, not decoded into 32 bytes past the end.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2000",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "malformed_nonce",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "catalog with a duplicate id",
+      "why": "Each HApp refusal is happ_preimage_invalid, not a disagreement.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3},{\"model_id\":\"m\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "duplicate_model_id",
+      "tag": "happ_preimage_invalid"
+    },
+    {
+      "name": "catalog with an empty id",
+      "why": "As above.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":3}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "empty_model_id",
+      "tag": "happ_preimage_invalid"
+    },
+    {
+      "name": "catalog whose state contradicts its digest",
+      "why": "As above.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"\",\"weights_digest\":\"\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "state_digest_disagree",
+      "tag": "happ_preimage_invalid"
+    },
+    {
+      "name": "catalog with an unknown state",
+      "why": "As above.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":9}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "unknown_weights_state",
+      "tag": "happ_preimage_invalid"
+    },
+    {
+      "name": "posture honest",
+      "why": "The attested_passthrough case: the published posture is the one the quote commits to.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "e2230ab9f594b5e9ed33f4ecd3cfe9c106f42aa478d4e27895a9306c1e468438",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "posture URL rewritten in transit",
+      "why": "The lookalike attack against an honest node: the binary signed api.x.ai, a relay publishes an attacker host. Refused.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai.attacker.example/v1\",\"zero_retention\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "e2230ab9f594b5e9ed33f4ecd3cfe9c106f42aa478d4e27895a9306c1e468438",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "posture signed with the lookalike",
+      "why": "The binding verifies — it proves only what the binary derived. Judging the URL is the verifier's next step, not this one.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai.attacker.example/v1\",\"zero_retention\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "d9cf77cd776984119749e07c7ffcde99d3725ed50217882f46c3d0a759836df1",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "zero_retention flipped on",
+      "why": "A relay upgrading the flag.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "0c7ac92bdaaef0b3e5c7fd3f7226b6ae5386e3ed31c3adbbb3d720e0cf3100ec",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "posture stripped",
+      "why": "The quote commits to a posture the bundle no longer carries.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "e2230ab9f594b5e9ed33f4ecd3cfe9c106f42aa478d4e27895a9306c1e468438",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "posture added",
+      "why": "The quote commits to no posture; the bundle carries one.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    },
+    {
+      "name": "posture null",
+      "why": "null is absent: the same digest, so it verifies against an absent-posture quote.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "null",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "12855f91459111ba6fde167ec23e9c7877e44f86d4c15a086c0909e55baa4efe",
+      "error": "",
+      "tag": ""
+    },
+    {
+      "name": "posture stripped, empty catalog",
+      "why": "With no entries every mismatch reads happ_preimage_missing — the digest cannot say which input moved.",
+      "node_id": "7",
+      "entries_json": "",
+      "posture_json": "",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "c7a127cae022d2738d139282ebfa2d5fa72971dcbfa6de88d0c94c4bab6a11f9",
+      "error": "happ_preimage_missing",
+      "tag": "happ_preimage_missing"
+    },
+    {
+      "name": "upstream_attested set in transit",
+      "why": "A relay claiming the node appraises its upstream, to pair with an injected upstream_attestation block. Refused.",
+      "node_id": "7",
+      "entries_json": "[{\"model_id\":\"m\",\"source\":\"hf/m\",\"weights_digest\":\"sha256:ab12\",\"weights_state\":1}]",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://gateway.example/v1\",\"upstream_attested\":true}",
+      "echoed_nonce": "",
+      "challenge_hex": "",
+      "aux_hex": "f331c259a400f9b61c1a934407ea09f1e19f5dd6c38a68153b2f51c325995a1d",
+      "error": "aux_binding_mismatch",
+      "tag": "aux_binding_mismatch"
+    }
+  ],
+  "h_posture": [
+    {
+      "name": "absent",
+      "why": "No posture field. Committed as absent, so a relay cannot add one.",
+      "posture_json": "",
+      "expected_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32"
+    },
+    {
+      "name": "null",
+      "why": "Go decodes null into a nil pointer: the same claim as absent, and the same digest.",
+      "posture_json": "null",
+      "expected_hex": "f60e38bb5e542d1c5f6af42de0784e8ddb9ba689b881e80c3b60731954affd32"
+    },
+    {
+      "name": "in_enclave",
+      "why": "The sealed_local posture: no upstream, no zero-retention flag.",
+      "posture_json": "{\"plaintext_terminates\":\"in_enclave\"}",
+      "expected_hex": "487cc2a3da667c623a1e965f57b96eb6fdf30d1bbf731bfbcd3d6240ace78041"
+    },
+    {
+      "name": "named upstream, xAI",
+      "why": "The attested_passthrough case this binding exists for.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":true}",
+      "expected_hex": "dc63cd7878a74bb255c412a3546d96fa4eb4e78db6e974cf57afd0ab234281cf"
+    },
+    {
+      "name": "named upstream, zero_retention false",
+      "why": "Paired with the previous case: the flag alone must move the digest.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"zero_retention\":false}",
+      "expected_hex": "c45545e9bdf70790acd03683ec205ab54f2ecc4a63d42ec38643d992562f71de"
+    },
+    {
+      "name": "named upstream, lookalike host",
+      "why": "One changed host: a different digest, so a relay cannot swap the URL a verifier judges.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai.attacker.example/v1\",\"zero_retention\":true}",
+      "expected_hex": "61b4a12e38b02d00c06a0ce192acc99604022ceb0624f62b13a001eae9c962dd"
+    },
+    {
+      "name": "explicit nulls inside",
+      "why": "Go leaves a string or bool field at its zero value on null; TypeScript must read null as '' and false, or the two hash different postures.",
+      "posture_json": "{\"plaintext_terminates\":\"in_enclave\",\"upstream_base_url\":null,\"zero_retention\":null}",
+      "expected_hex": "487cc2a3da667c623a1e965f57b96eb6fdf30d1bbf731bfbcd3d6240ace78041"
+    },
+    {
+      "name": "empty object",
+      "why": "Present but empty is NOT absent: the presence byte differs.",
+      "posture_json": "{}",
+      "expected_hex": "e7280e6827a43818078fad75cb6a303f48e27c75bffaa1ef742502df732c9535"
+    },
+    {
+      "name": "unknown key",
+      "why": "An unrecognised key is ignored by both decoders and does not enter the preimage.",
+      "posture_json": "{\"plaintext_terminates\":\"in_enclave\",\"future_field\":\"x\"}",
+      "expected_hex": "487cc2a3da667c623a1e965f57b96eb6fdf30d1bbf731bfbcd3d6240ace78041"
+    },
+    {
+      "name": "non-ASCII URL",
+      "why": "Lengths are UTF-8 byte counts, not UTF-16 code units.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://exämple.test/v1\"}",
+      "expected_hex": "b8eb944fd099fb0ed5ee327f5e1d375245944a19aed9197626feab8e7e2276f9"
+    },
+    {
+      "name": "field boundary",
+      "why": "lenStr framing: moving bytes between two adjacent strings must change the digest.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstreamh\",\"upstream_base_url\":\"ttps://x\"}",
+      "expected_hex": "8d975d784d8651c610ec9c3dee46b660bb0fcf765b965d1c58d559f3fbfe3f8d"
+    },
+    {
+      "name": "named upstream, attested gateway",
+      "why": "The ACI gateway posture: the bound upstream_attested bit, which a relay cannot set.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://gateway.example/v1\",\"upstream_attested\":true}",
+      "expected_hex": "2b38a4eed61958279fbf96a6c6d5e4ca2a362293bc0f87538432c1ce5a2323e9"
+    },
+    {
+      "name": "bool order",
+      "why": "zero_retention and upstream_attested swapped: the two flag bytes are positional.",
+      "posture_json": "{\"plaintext_terminates\":\"named_upstream\",\"upstream_base_url\":\"https://api.x.ai/v1\",\"upstream_attested\":true}",
+      "expected_hex": "1597570bb421160a38f8c896fbd45b5c9b6b611904cfb8da5d80114cd9247b68"
+    }
+  ],
+  "hostile": [
+    {
+      "name": "uppercase hex payload",
+      "why": "Go's hex.DecodeString takes either case; a mirror that lowercased its charset would reject a log Go accepts.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"AABBCC\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "ccc76512635535bc82353699cd79a4a236f95251731ca6771baabfa99509c6d19221ddd8211bb58e1efa061d182f7407",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "aabbcc"
+      }
+    },
+    {
+      "name": "lowercase 0x prefix",
+      "why": "Trimmed by both, so this is the case that keeps the next one from being read as 'prefixes are rejected'.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"0xaabbcc\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "ccc76512635535bc82353699cd79a4a236f95251731ca6771baabfa99509c6d19221ddd8211bb58e1efa061d182f7407",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "aabbcc"
+      }
+    },
+    {
+      "name": "uppercase 0X prefix",
+      "why": "THE DIVERGENCE. Go trims only lowercase, so 0X reaches hex.DecodeString and fails; a mirror accepting 0X decodes and routes on evidence Go refuses.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"0Xaabbcc\"}]",
+      "replay_error": "undecodable_payload",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {
+        "compose-hash": "0xaabbcc"
+      }
+    },
+    {
+      "name": "null event name",
+      "why": "JSON null lands as the empty string in Go. A mirror using a non-nullish coalesce hashes the four bytes 'null' and gets a different RTMR3 from the same log.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":null,\"event_payload\":\"aa\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "adbab1e519e51008924f16492af0dd211a98bd9d83fc6445847e63693c74a38eee9e6df7e9b96ce36c19c84f99c37cfe",
+      "extends": 1,
+      "measurements": {}
+    },
+    {
+      "name": "absent event_payload",
+      "why": "Absent decodes to the empty payload and still extends. A mirror that treated undefined as undecodable would refuse a log Go accepts.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "ef6bfeffec2e4b8ef47e54b77ed7f962437eab5828364e55f97f84da94d285e25205a893596b61ee3f5d82b9b0de274f",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": ""
+      }
+    },
+    {
+      "name": "empty event name is measured by nobody",
+      "why": "RuntimeMeasurements skips it; a mirror dropping that guard mints an empty-string key.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"\",\"event_payload\":\"aa\"},{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"bb\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "f992954a81363b99ce7c6791ef887891dd6d7363c336432b7babd5cb5a1bee21a9e930fcdcdcda3bdc9b179655a61ff2",
+      "extends": 2,
+      "measurements": {
+        "compose-hash": "bb"
+      }
+    },
+    {
+      "name": "a later duplicate cannot displace a measured value",
+      "why": "First occurrence wins, so an appended event cannot overwrite one the hardware measured.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"AA\"},{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"bb\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "aa9cf7bf0d77fce328d83363419d9c65d410fd430a290c548398747769a0a4989fdd710868c1143542d366453cfc2c0a",
+      "extends": 2,
+      "measurements": {
+        "compose-hash": "aa"
+      }
+    },
+    {
+      "name": "a non-empty digest field is still ignored",
+      "why": "dstack leaves digest empty; a mirror that trusted a populated one would extend with attacker-chosen bytes.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"dededededededededededededededededededededededededededededededededededededededededededededededede\",\"event\":\"compose-hash\",\"event_payload\":\"aa\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "81b91503ffd4f38aaaf6b0ef96b7475e64cb7ba290536e77d5f56867ec5291213aff0989deddceec1660e9701e4b314d",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "aa"
+      }
+    },
+    {
+      "name": "imr 3 but not a runtime event",
+      "why": "Filtering on imr rather than event_type selects this; the two predicates disagree here and agree on the real capture.",
+      "log": "[{\"imr\":3,\"event_type\":4,\"digest\":\"\",\"event\":\"boot-ish\",\"event_payload\":\"aa\"}]",
+      "replay_error": "empty_replay",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {}
+    },
+    {
+      "name": "runtime event outside imr 3",
+      "why": "The converse: an imr filter would MISS this one.",
+      "log": "[{\"imr\":1,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"aa\"}]",
+      "replay_error": "",
+      "rtmr3_hex": "81b91503ffd4f38aaaf6b0ef96b7475e64cb7ba290536e77d5f56867ec5291213aff0989deddceec1660e9701e4b314d",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "aa"
+      }
+    },
+    {
+      "name": "odd-length payload",
+      "why": "Not decodable as bytes; skipping it silently would yield a partial replay indistinguishable from a whole one.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"abc\"}]",
+      "replay_error": "undecodable_payload",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {
+        "compose-hash": "abc"
+      }
+    }
+  ]
+}
