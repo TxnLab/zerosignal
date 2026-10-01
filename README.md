@@ -117,6 +117,11 @@ byte-format drift between the two implementations fails on either side. `make up
 regenerates them all; `make check-vector-generators` (part of `make test`) fails if a generator
 is missing from that target.
 
+Two fixtures pin the sealing framing instead, and are captured rather than derived (nonces and
+age wrapping are random): `sealed_vectors.json` is sealed by Go and opened by TS, and
+`ts_sealed_vectors.json` is sealed by TS and opened by Go. Regenerate them only when the framing
+changes on purpose, with `make update-sealed-vectors` and `make update-ts-sealed-vectors`.
+
 ## Setup (shared across services)
 
 **Algorand network.** Every service that touches chain reads `algod.network: localnet | testnet | mainnet` (with optional `algod.endpoint` / `algod.token` overrides). Resolves to nodely.dev for testnet/mainnet, `http://localhost:4001` for localnet.
@@ -132,7 +137,7 @@ is missing from that target.
 ```bash
 make test                  # vector-generator check + Go suite + TS suite
 make vet typecheck
-make verify-vectors        # read-only: every fixture matches current Go output
+make verify-vectors        # read-only: every fixture matches current Go output; Go opens the TS-sealed one
 make update-vectors        # regenerate fixtures after an intentional format change
 cd go && go test -race ./...   # before crypto/streaming changes
 cd ts && pnpm build

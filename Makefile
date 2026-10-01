@@ -4,17 +4,19 @@
 #   go/  — github.com/TxnLab/zerosignal/go    (canonical impl; generates the golden vectors)
 #   ts/  — @txnlab/zs-proto                   (browser impl; mirrors the vectored go/ packages)
 #
-# testdata/*.json are the cross-impl golden fixtures: regenerated from the Go
-# side (`make update-vectors`) and consumed read-only by both test suites — each
-# go/<pkg>/*vectors_test.go bytes.Equal-checks its fixture, and the matching
-# ts/test/*-vectors.test.ts loads it. So a green `make test` means go/, ts/, and
-# the shared fixtures all agree.
+# testdata/*.json are the cross-impl golden fixtures. Most are DERIVED: regenerated
+# from the Go side (`make update-vectors`), each go/<pkg>/*vectors_test.go
+# bytes.Equal-checks its fixture, and the matching ts/test/*-vectors.test.ts loads
+# it. Two are CAPTURED sealing output, checked by opening rather than byte
+# comparison: sealed_vectors.json (Go seals, TS opens) and ts_sealed_vectors.json
+# (TS seals, Go opens) — see update-sealed-vectors below. So a green `make test`
+# means go/, ts/, and the shared fixtures all agree.
 
 GO   ?= go
 PNPM ?= pnpm
 
 .PHONY: test test-go test-ts verify-vectors update-vectors update-sealed-vectors \
-	check-vector-generators vet typecheck
+	update-ts-sealed-vectors check-vector-generators vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
@@ -28,10 +30,11 @@ test-ts: ts/node_modules
 	cd ts && $(PNPM) test
 
 # Read-only check that every testdata fixture matches what the current Go code
-# emits. No -update — on drift it fails with the "run ... -update" hint. This is
-# a subset of test-go, exposed on its own for CI / quick local checks.
+# emits, and that Go still opens the TS-sealed fixture. No -update — on drift it
+# fails with the "run ... -update" hint. This is a subset of test-go, exposed on
+# its own for CI / quick local checks.
 verify-vectors:
-	cd go && $(GO) test ./... -run 'Vectors$$' -count 1
+	cd go && $(GO) test ./... -run 'Vectors$$|TestOpensTSSealedArtifacts' -count 1
 
 # Fails when a Test*Vectors generator has no line below, which is how three of
 # them came to be silently skipped by update-vectors.
@@ -61,13 +64,18 @@ update-vectors:
 	cd go && $(GO) test ./attest     -run TestVectors               -update
 	cd go && $(GO) test ./attest     -run TestComposeVectors        -update-compose
 
-# testdata/sealed_vectors.json is CAPTURED, not derived: sealing draws a fresh
-# nonce per call and age-wrapping is randomized, so regenerating it always
-# produces a different file even with no code change. That churn is meaningless —
-# regenerate it only when the response framing actually changed, which is why it
-# is not part of update-vectors.
+# testdata/sealed_vectors.json (Go seals, TS opens) and ts_sealed_vectors.json
+# (TS seals, Go opens) are CAPTURED, not derived: sealing draws a fresh nonce per
+# call and age-wrapping is randomized, so regenerating either always produces a
+# different file even with no code change. That churn is meaningless — regenerate
+# one only when the framing its sealer emits actually changed, which is why
+# neither is part of update-vectors.
 update-sealed-vectors:
 	cd go && $(GO) test ./wire       -run TestSealedVectors         -update
+
+update-ts-sealed-vectors: ts/node_modules
+	cd ts && ZS_UPDATE_TS_SEALED_VECTORS=1 $(PNPM) vitest --run test/ts-sealed-vectors.test.ts
+	cd go && $(GO) test ./wire       -run TestOpensTSSealedArtifacts -count 1
 
 vet:
 	cd go && $(GO) vet ./...

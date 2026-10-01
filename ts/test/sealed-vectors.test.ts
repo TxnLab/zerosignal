@@ -20,6 +20,10 @@
 // Opening Go-produced bytes closes that loop. Combined with wire.test.ts
 // (TS sealer ≡ TS opener), this gives Go format ≡ TS opener ≡ TS sealer.
 //
+// The fixture also carries a Go-sealed reserve response (plain age; its TS round
+// trip is reserveSeal.test.ts), since the client opens it in production. The
+// reverse direction, TS sealing for Go to open, is ts-sealed-vectors.test.ts.
+//
 // If this fails, the two implementations have drifted on response framing.
 // Fix the divergence — do NOT regenerate the fixture to make it pass unless the
 // framing changed deliberately, in which case update proto/SPEC.md § 5 / § 6
@@ -34,6 +38,7 @@ import { hex } from '@scure/base'
 import {
     decryptBody,
     decryptSSEDataValue,
+    openReserveResponse,
     openSealedHeader,
     unwrapResponseKey,
     RESPONSE_KEY_SIZE,
@@ -64,6 +69,8 @@ interface SealedVectorsFile {
     body_envelope_json: string
     frames: SealedFrame[]
     headers: SealedHeader[]
+    reserve_response_plaintext_hex: string
+    reserve_response_envelope_json: string
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -87,6 +94,17 @@ describe('sealed_vectors.json', () => {
             recipient: v.age_recipient,
         })
         expect(got).toEqual(key)
+    })
+
+    // The client opens a node's sealed 200 reserve response in TS; a node only
+    // ever seals it in Go.
+    it('opens the reserve response the Go sealer produced', async () => {
+        const got = await openReserveResponse(enc.encode(v.reserve_response_envelope_json), {
+            secret: v.age_identity,
+            recipient: v.age_recipient,
+        })
+        expect(got).toEqual(hex.decode(v.reserve_response_plaintext_hex))
+        expect(got.length).toBeGreaterThan(0)
     })
 
     it('opens the non-streaming body envelope the Go sealer produced', () => {
