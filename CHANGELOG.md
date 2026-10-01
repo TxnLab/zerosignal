@@ -50,6 +50,12 @@ access. Exported identifiers no longer carry the old project name:
 dependency name (npm) and the identifiers above. Nothing on the wire changes and no golden
 vector moves.
 
+First public release: **0.1.1** of both — Go `go/v0.1.1` (`go get …/zerosignal/go@v0.1.1`) and
+npm `@txnlab/zs-proto@0.1.1`. From here the two release in **lockstep**: every release tags
+`go/vX.Y.Z` and `ts/vX.Y.Z` on the same commit, so equal version numbers mean the two
+implementations agree byte-for-byte. Under 0.x a minor bump is breaking, a patch is not.
+(`go/v0.1.0` exists on the seed commit with the same Go code; it predates the lockstep rule.)
+
 ### 2026-09-25 — the root-backdoor carve-out now requires a scanned guest image
 
 `ComposePolicy.AllowedRootBackdoorEnvs` used to be honoured on any guest image. It is now

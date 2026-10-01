@@ -1,6 +1,6 @@
 {
     "name": "@txnlab/zs-proto",
-    "version": "0.44.0",
+    "version": "0.1.1",
     "license": "Apache-2.0",
     "description": "ZeroSignal protocol primitives for TypeScript: envelope sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing, tokenize bounds, transient-error classification, and TEE attestation checks. Byte-compatible with the Go reference implementation via shared golden vectors.",
     "keywords": [

@@ -138,6 +138,21 @@ cd go && go test -race ./...   # before crypto/streaming changes
 cd ts && pnpm build
 ```
 
+## Releasing
+
+Go and TypeScript release in lockstep: one version number, both tags on the same commit.
+
+1. Set `ts/package.json` `version` to `X.Y.Z` and commit.
+2. Tag that commit `go/vX.Y.Z` and `ts/vX.Y.Z`, then push both tags.
+3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`).
+   The `ts/v*` tag runs [`release.yml`](./.github/workflows/release.yml), which tests both
+   implementations and **stages** the npm package. It does not publish it.
+4. A maintainer approves the staged package with 2FA, either in the package's *Staged Packages*
+   tab on npmjs.com or with `npm stage approve <id>`. Only then is it installable.
+
+Under 0.x a minor bump is a breaking change and a patch bump is not. Never move or delete a
+pushed `go/v*` tag: the Go checksum database has already recorded it.
+
 ## License
 
 Apache-2.0 — see [`LICENSE`](./LICENSE).

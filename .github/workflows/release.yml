@@ -1,16 +1,16 @@
 name: Release
 
-# Publishes the TypeScript package to npm when a `ts/vX.Y.Z` tag is pushed.
-# Go needs no job: a `go/vX.Y.Z` tag is itself the release, fetched through
-# the module proxy on first `go get` — provided go/go.mod declares this repo's
-# path.
+# Stages the TypeScript package on npm when a `ts/vX.Y.Z` tag is pushed. Go
+# needs no job: a `go/vX.Y.Z` tag is itself the release, fetched through the
+# module proxy on first `go get` (as `@vX.Y.Z`) — provided go/go.mod declares
+# this repo's path.
 #
-# Publishing uses npm trusted publishing (OIDC from this workflow), so there is
-# no NPM_TOKEN secret to rotate. A trusted publisher can only be configured on a
-# package that already exists, so the first publish of each package name is
-# manual; configure the publisher on npmjs.com after it. `--access public` only
-# takes effect on a package's first publish; an existing restricted package
-# needs a one-time `npm access set status=public <name>`.
+# This workflow can only STAGE. Its trusted-publisher entry on npmjs.com allows
+# `npm stage publish` alone, so nothing it uploads is installable until a
+# maintainer approves it with 2FA (`npm stage approve <id>`, or the package's
+# "Staged Packages" tab). A compromised workflow, dependency, or token can
+# therefore never ship a release by itself. Trusted publishing (OIDC) means
+# there is no NPM_TOKEN secret to rotate.
 
 on:
   push:
@@ -55,9 +55,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
 
-      # Trusted publishing needs npm >= 11.5.1; Node 22 bundles npm 10.
+      # `npm stage` needs npm >= 11.15.0 (and Node >= 22.14, which "22"
+      # resolves to); Node 22 bundles npm 10.
       - name: Update npm
-        run: npm install -g npm@^11.5.1
+        run: npm install -g npm@^11.15.0
 
       - name: Tag matches package version
         run: |
@@ -91,9 +92,15 @@ jobs:
       - name: Vet, typecheck, and test both implementations
         run: make vet typecheck test
 
+      # Built explicitly rather than left to prepublishOnly, so the tarball
+      # never depends on which lifecycle scripts `npm stage publish` runs.
+      - name: Build
+        working-directory: ts
+        run: pnpm build
+
       # A prerelease must not become `latest`, or every unpinned install
       # picks it up.
-      - name: Publish
+      - name: Stage for approval
         working-directory: ts
         run: |
           version="$(node -p "require('./package.json').version")"
@@ -101,4 +108,4 @@ jobs:
             *-*) dist_tag=next ;;
             *)   dist_tag=latest ;;
           esac
-          npm publish --provenance --access public --tag "$dist_tag"
+          npm stage publish --provenance --access public --tag "$dist_tag"
