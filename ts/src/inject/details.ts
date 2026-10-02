@@ -30,21 +30,23 @@ export const RETENTION_UPSTREAM_ENFORCED = 'upstream_enforced'
 export const RETENTION_NO_UPSTREAM = 'no_upstream'
 export const RETENTION_OPERATOR_DECLARED = 'operator_declared'
 
-export const KNOWN_RETENTION_TIERS: readonly string[] = Object.freeze([
+export const KNOWN_RETENTION_TIERS = Object.freeze([
   RETENTION_TEE_ATTESTED,
   RETENTION_UPSTREAM_CONFIRMED,
   RETENTION_UPSTREAM_ENFORCED,
   RETENTION_NO_UPSTREAM,
   RETENTION_OPERATOR_DECLARED,
-])
+] as const)
+
+export type RetentionTier = (typeof KNOWN_RETENTION_TIERS)[number]
 
 /**
  * Whether s names a retention tier this package defines. An unrecognized value
  * is unknown, the same as empty: the field is node-authored, and showing an
  * unknown label verbatim would let a node mint its own reassuring one.
  */
-export function isKnownRetention(s: unknown): s is string {
-  return typeof s === 'string' && KNOWN_RETENTION_TIERS.includes(s)
+export function isKnownRetention(s: unknown): s is RetentionTier {
+  return typeof s === 'string' && (KNOWN_RETENTION_TIERS as readonly string[]).includes(s)
 }
 
 /**
@@ -239,41 +241,89 @@ function parseCoordinates(v: unknown): ModelCoordinates | undefined {
   return Object.keys(out).length > 0 ? out : undefined
 }
 
-function parseToolRates(v: unknown): Record<string, number> | undefined {
+// Marks a field that routing or pricing reads as present but malformed.
+const MALFORMED = Symbol('malformed')
+
+// Reads a field routing or pricing depends on. Absent and null are undefined, as
+// Go decodes them into an omitted field; anything else read rejects is MALFORMED.
+function strict<T>(v: unknown, read: (v: unknown) => T | undefined): T | undefined | typeof MALFORMED {
+  if (v === undefined || v === null) return undefined
+  const out = read(v)
+  return out === undefined ? MALFORMED : out
+}
+
+// Every element must be a string: filtering out an image entry would leave a
+// list that reads as "text only".
+function modalities(v: unknown): string[] | undefined {
+  if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) return undefined
+  return v as string[]
+}
+
+// One malformed entry rejects the map: dropping it would read that tool as
+// unpriced, which for a zs_ tool means free.
+function toolRates(v: unknown): Record<string, number> | undefined {
   if (!isObj(v)) return undefined
   const out: Record<string, number> = {}
   for (const [k, raw] of Object.entries(v)) {
     const n = uint(raw)
-    if (n !== undefined) out[k] = n
+    if (n === undefined) return undefined
+    out[k] = n
   }
-  return Object.keys(out).length > 0 ? out : undefined
+  return out
 }
 
-// A model entry is dropped, not repaired, when a field that routing or pricing
-// reads is present but malformed: a garbled modality list must not read as
-// "text only", and a garbled rate must not read as free.
+function nonEmpty<T extends object>(v: T | undefined): T | undefined {
+  return v !== undefined && Object.keys(v).length > 0 ? v : undefined
+}
+
+// A model entry is dropped, not repaired, when a field that routing, sizing or
+// pricing reads is present but malformed. Dropping just the field would turn
+// garbage into a claim the node never made: a garbled modality list into "text
+// only", a garbled rate or threshold into "free" or "flat". A null base rate is
+// dropped too, though Go reads it as 0: null is not a price anyone wrote.
 function parseModel(v: unknown): OperatorDetailsModel | null {
   if (!isObj(v)) return null
   const id = str(v.id)
   if (id === undefined) return null
-  for (const k of ['input_modalities', 'output_modalities'] as const) {
-    if (v[k] !== undefined && !Array.isArray(v[k])) return null
-  }
   const input = v.input_rate_usd_per_1m === undefined ? 0 : rate(v.input_rate_usd_per_1m)
   const output = v.output_rate_usd_per_1m === undefined ? 0 : rate(v.output_rate_usd_per_1m)
   if (input === undefined || output === undefined) return null
 
+  const priced = {
+    cache_read_rate_usd_per_1m: strict(v.cache_read_rate_usd_per_1m, rate),
+    long_context_threshold_tokens: strict(v.long_context_threshold_tokens, uint),
+    long_context_input_rate_usd_per_1m: strict(v.long_context_input_rate_usd_per_1m, rate),
+    long_context_output_rate_usd_per_1m: strict(v.long_context_output_rate_usd_per_1m, rate),
+    long_context_cache_read_rate_usd_per_1m: strict(v.long_context_cache_read_rate_usd_per_1m, rate),
+    context_window: strict(v.context_window, uint),
+    max_output_tokens: strict(v.max_output_tokens, uint),
+    input_modalities: strict(v.input_modalities, modalities),
+    output_modalities: strict(v.output_modalities, modalities),
+    image_tool_rate_micro_usdc: strict(v.image_tool_rate_micro_usdc, uint),
+    image_edit_tool_rate_micro_usdc: strict(v.image_edit_tool_rate_micro_usdc, uint),
+    image_tool_base_micro_usdc: strict(v.image_tool_base_micro_usdc, uint),
+    image_edit_tool_base_micro_usdc: strict(v.image_edit_tool_base_micro_usdc, uint),
+    image_rate_micro_usdc: strict(v.image_rate_micro_usdc, uint),
+    image_edit_rate_micro_usdc: strict(v.image_edit_rate_micro_usdc, uint),
+    image_default_micro_usdc: strict(v.image_default_micro_usdc, uint),
+    image_edit_default_micro_usdc: strict(v.image_edit_default_micro_usdc, uint),
+    image_cap_micro_usdc: strict(v.image_cap_micro_usdc, uint),
+    image_edit_cap_micro_usdc: strict(v.image_edit_cap_micro_usdc, uint),
+    tool_call_rates_micro_usdc: strict(v.tool_call_rates_micro_usdc, toolRates),
+    vendor_tool_catchall_micro_usdc: strict(v.vendor_tool_catchall_micro_usdc, uint),
+    vendor_tool_call_cap: strict(v.vendor_tool_call_cap, uint),
+    vendor_tool_tokens_per_call: strict(v.vendor_tool_tokens_per_call, uint),
+  }
+  if (Object.values(priced).includes(MALFORMED)) return null
+
   const out: OperatorDetailsModel = { id, input_rate_usd_per_1m: input, output_rate_usd_per_1m: output }
+  setDefined(out, priced as Partial<OperatorDetailsModel>)
+  // Go omits an empty list or map; an empty one read as present would claim,
+  // say, that the model accepts no input at all.
+  for (const k of ['input_modalities', 'output_modalities', 'tool_call_rates_micro_usdc'] as const) {
+    if (nonEmpty(out[k]) === undefined) delete out[k]
+  }
   setDefined(out, {
-    cache_read_rate_usd_per_1m: rate(v.cache_read_rate_usd_per_1m),
-    long_context_threshold_tokens: uint(v.long_context_threshold_tokens),
-    long_context_input_rate_usd_per_1m: rate(v.long_context_input_rate_usd_per_1m),
-    long_context_output_rate_usd_per_1m: rate(v.long_context_output_rate_usd_per_1m),
-    long_context_cache_read_rate_usd_per_1m: rate(v.long_context_cache_read_rate_usd_per_1m),
-    context_window: uint(v.context_window),
-    max_output_tokens: uint(v.max_output_tokens),
-    input_modalities: strings(v.input_modalities),
-    output_modalities: strings(v.output_modalities),
     reasoning: parseReasoning(v.reasoning),
     tool_use: bool(v.tool_use),
     tags: strings(v.tags),
@@ -289,33 +339,21 @@ function parseModel(v: unknown): OperatorDetailsModel | null {
     weights_registry_match: str(v.weights_registry_match),
     weights_registry_path: str(v.weights_registry_path),
     weights_mismatch: bool(v.weights_mismatch),
-    image_tool_rate_micro_usdc: uint(v.image_tool_rate_micro_usdc),
-    image_edit_tool_rate_micro_usdc: uint(v.image_edit_tool_rate_micro_usdc),
-    image_tool_base_micro_usdc: uint(v.image_tool_base_micro_usdc),
-    image_edit_tool_base_micro_usdc: uint(v.image_edit_tool_base_micro_usdc),
-    image_rate_micro_usdc: uint(v.image_rate_micro_usdc),
-    image_edit_rate_micro_usdc: uint(v.image_edit_rate_micro_usdc),
-    image_default_micro_usdc: uint(v.image_default_micro_usdc),
-    image_edit_default_micro_usdc: uint(v.image_edit_default_micro_usdc),
-    image_cap_micro_usdc: uint(v.image_cap_micro_usdc),
-    image_edit_cap_micro_usdc: uint(v.image_edit_cap_micro_usdc),
     serves_image_gen: bool(v.serves_image_gen),
     serves_image_edit: bool(v.serves_image_edit),
-    tool_call_rates_micro_usdc: parseToolRates(v.tool_call_rates_micro_usdc),
-    vendor_tool_catchall_micro_usdc: uint(v.vendor_tool_catchall_micro_usdc),
-    vendor_tool_call_cap: uint(v.vendor_tool_call_cap),
-    vendor_tool_tokens_per_call: uint(v.vendor_tool_tokens_per_call),
   })
   return out
 }
 
 // A mode is a dispatch key a verifier must answer for, so an unrecognized one
 // is carried through: dropping it would render a newer node as advertising no
-// TEE at all, where "cannot verify this mode" is the honest answer.
+// TEE at all, where "cannot verify this mode" is the honest answer. "none" is
+// the one mode that means no TEE, so it reads as no block, and `tee` present
+// always means a TEE claim.
 function parseTEE(v: unknown): TEEAdvertisement | undefined {
   if (!isObj(v)) return undefined
   const mode = str(v.mode)
-  if (mode === undefined) return undefined
+  if (mode === undefined || mode === TEE_MODE_NONE) return undefined
   const out: TEEAdvertisement = { mode }
   setDefined(out, { attested_at: time(v.attested_at), evidence_url: str(v.evidence_url) })
   return out
@@ -323,9 +361,10 @@ function parseTEE(v: unknown): TEEAdvertisement | undefined {
 
 function parseBuiltinTools(v: unknown): BuiltinToolAdvert[] | undefined {
   if (!Array.isArray(v)) return undefined
-  return v
+  const out = v
     .filter((t): t is { type: string } => isObj(t) && typeof t.type === 'string' && t.type.startsWith('zs_'))
     .map((t) => ({ type: t.type }))
+  return out.length > 0 ? out : undefined
 }
 
 /**
@@ -334,8 +373,10 @@ function parseBuiltinTools(v: unknown): BuiltinToolAdvert[] | undefined {
  *
  * Deliberately more lenient than Go, whose decoder rejects the whole body over
  * one wrong-typed field: here a malformed field is dropped and the rest parses,
- * so one bad advertisement doesn't hide a node. Two exceptions skip a model
- * entry rather than a field — see parseModel. Values are also checked beyond
+ * so one bad advertisement doesn't hide a node. A model entry is skipped rather
+ * than repaired when a routing, sizing or pricing field is malformed — see
+ * parseModel. A malformed top-level min-charge or tool-loop field reads as
+ * absent, which its type marks as unknown, not 0. Values are also checked beyond
  * their JSON type (integers must be non-negative safe integers, rates
  * non-negative and finite, retention a known tier, built-in tools `zs_*`), and
  * the empty-string, zero-time and empty-collection forms Go would have omitted

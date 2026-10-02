@@ -101,19 +101,50 @@ describe('parseOperatorDetails leniency (TS only)', () => {
     expect(got?.models.map((m) => m.id)).toEqual(['m'])
   })
 
-  // A garbled modality list must not read as "text only", nor a garbled rate as free.
-  it('skips a model whose modalities or rates are present but malformed', () => {
+  // Dropping only the field would turn garbage into a claim: "text only", "free", "flat".
+  it('skips a model whose routing, sizing or pricing field is present but malformed', () => {
+    const bad: Json[] = [
+      { input_modalities: 'text' },
+      { output_modalities: { 0: 'text' } },
+      { input_modalities: ['text', { type: 'image' }] },
+      { input_modalities: [null] },
+      { input_rate_usd_per_1m: '0.4' },
+      { output_rate_usd_per_1m: -1 },
+      { input_rate_usd_per_1m: Number.NaN },
+      { input_rate_usd_per_1m: null },
+      { cache_read_rate_usd_per_1m: '0.1' },
+      { long_context_threshold_tokens: '128000', long_context_input_rate_usd_per_1m: 0.8 },
+      { long_context_output_rate_usd_per_1m: -2 },
+      { context_window: 1.5 },
+      { max_output_tokens: -1 },
+      { serves_image_gen: true, image_rate_micro_usdc: '30000' },
+      { image_tool_rate_micro_usdc: 2 ** 53 },
+      { image_edit_cap_micro_usdc: {} },
+      { tool_call_rates_micro_usdc: { zs_web_search: -1, web_search: 10 } },
+      { tool_call_rates_micro_usdc: [10] },
+      { vendor_tool_call_cap: '5' },
+      { vendor_tool_catchall_micro_usdc: -1 },
+      { vendor_tool_tokens_per_call: 0.5 },
+    ]
     const got = parseOperatorDetails({
-      models: [
-        model({ id: 'a', input_modalities: 'text' }),
-        model({ id: 'b', output_modalities: { 0: 'text' } }),
-        model({ id: 'c', input_rate_usd_per_1m: '0.4' }),
-        model({ id: 'd', output_rate_usd_per_1m: -1 }),
-        model({ id: 'e', input_rate_usd_per_1m: Number.NaN }),
-        model({ id: 'ok' }),
-      ],
+      models: [...bad.map((extra, i) => model({ id: `bad${i}`, ...extra })), model({ id: 'ok' })],
     })
     expect(got?.models.map((m) => m.id)).toEqual(['ok'])
+  })
+
+  // Go decodes null into an omitted field.
+  it('reads null on an optional priced field as absent, keeping the model', () => {
+    const got = parseOperatorDetails({
+      models: [model({ cache_read_rate_usd_per_1m: null, context_window: null, tool_call_rates_micro_usdc: null })],
+    })
+    expect(got?.models[0]).toStrictEqual(model())
+  })
+
+  it('reads an empty modality list or tool-rate map as absent', () => {
+    const got = parseOperatorDetails({
+      models: [model({ input_modalities: [], tool_call_rates_micro_usdc: {} })],
+    })
+    expect(got?.models[0]).toStrictEqual(model())
   })
 
   it('reads an absent base rate as 0, as Go decodes it', () => {
@@ -121,11 +152,15 @@ describe('parseOperatorDetails leniency (TS only)', () => {
     expect(got?.models[0]).toStrictEqual({ id: 'm', input_rate_usd_per_1m: 0, output_rate_usd_per_1m: 0 })
   })
 
-  it('drops integers that are negative, fractional, or past 2^53', () => {
+  it('drops top-level integers that are negative, fractional, or past 2^53', () => {
     const got = parseOperatorDetails({
-      models: [model({ context_window: -1, max_output_tokens: 1.5, long_context_threshold_tokens: 2 ** 53 })],
+      operator_id: -1,
+      min_charge_output_tokens: 1.5,
+      max_tool_iterations: 2 ** 53,
+      tool_headroom_per_iteration: 4000,
+      models: [],
     })
-    expect(got?.models[0]).toStrictEqual(model())
+    expect(got).toStrictEqual({ models: [], oracle_healthy: false, tool_headroom_per_iteration: 4000 })
   })
 
   // The tier is node-authored; an unrecognized one would let a node mint its own label.
@@ -138,9 +173,10 @@ describe('parseOperatorDetails leniency (TS only)', () => {
 
   // A mode is a verifier dispatch key: dropping a newer one would hide that the
   // node claims a TEE at all.
-  it('carries an unrecognized TEE mode, and drops a block with no mode', () => {
+  it('carries an unrecognized TEE mode, and drops a block with no mode or mode none', () => {
     expect(parseOperatorDetails({ tee: { mode: 'sev-snp-v9' } })?.tee).toStrictEqual({ mode: 'sev-snp-v9' })
     expect(parseOperatorDetails({ tee: { mode: '' } })?.tee).toBeUndefined()
+    expect(parseOperatorDetails({ tee: { mode: TEE_MODE_NONE, evidence_url: '/x' } })?.tee).toBeUndefined()
     expect(parseOperatorDetails({ tee: { evidence_url: '/x' } })?.tee).toBeUndefined()
     expect(parseOperatorDetails({ tee: 'dstack-tdx' })?.tee).toBeUndefined()
   })
@@ -160,6 +196,8 @@ describe('parseOperatorDetails leniency (TS only)', () => {
     })
     expect(got?.builtin_tools).toStrictEqual([{ type: 'zs_web_search' }])
     expect(parseOperatorDetails({ builtin_tools: { type: 'zs_web_search' } })?.builtin_tools).toBeUndefined()
+    expect(parseOperatorDetails({ builtin_tools: [] })?.builtin_tools).toBeUndefined()
+    expect(parseOperatorDetails({ builtin_tools: [{ type: 'web_search' }] })?.builtin_tools).toBeUndefined()
   })
 
   it('drops reasoning without a boolean supported, and filters its efforts', () => {
@@ -173,15 +211,11 @@ describe('parseOperatorDetails leniency (TS only)', () => {
     expect(got?.models[1]?.reasoning).toStrictEqual({ supported: false, allowed_efforts: ['low'] })
   })
 
-  it('drops coordinates and tool rates with nothing usable in them', () => {
+  it('drops display-only fields with nothing usable in them, keeping the model', () => {
     const got = parseOperatorDetails({
       models: [
-        model({
-          coordinates: { family: '', parameters: -5 },
-          tool_call_rates_micro_usdc: { web_search: '10', zs_web_search: -1 },
-          tags: [1, 2],
-        }),
-        model({ id: 'n', coordinates: { variant: 'instruct' }, tool_call_rates_micro_usdc: { web_search: 0, x: 'y' } }),
+        model({ coordinates: { family: '', parameters: -5 }, tags: [1, 2], tool_use: 'yes', source: 3 }),
+        model({ id: 'n', coordinates: { variant: 'instruct' }, tool_call_rates_micro_usdc: { web_search: 0 } }),
       ],
     })
     expect(got?.models[0]).toStrictEqual(model())

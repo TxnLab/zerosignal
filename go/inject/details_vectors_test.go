@@ -208,10 +208,7 @@ func buildDetailsVectors(t *testing.T) detailsVectorsFile {
 		Minimal:        minimal,
 		KnownRetention: inject.KnownRetentionTiers(),
 		Combine:        combine,
-		TEEModes: []string{
-			inject.TEEModeNone, inject.TEEModeStub, inject.TEEModeNvidiaCCTDX,
-			inject.TEEModeNvidiaCCSEVSNP, inject.TEEModeDstackTDX,
-		},
+		TEEModes:       inject.KnownTEEModes(),
 	}
 }
 
