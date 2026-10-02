@@ -42,6 +42,8 @@ import {
     openSealedHeader,
     unwrapResponseKey,
     RESPONSE_KEY_SIZE,
+    SEALED_HEADER_RECEIPT,
+    SEALED_HEADER_SETTLE_GROUP,
 } from '../src/wire/index.js'
 
 interface SealedFrame {
@@ -131,6 +133,13 @@ describe('sealed_vectors.json', () => {
     })
 
     describe('sealed headers', () => {
+        // The name is bound into the AAD, and the client opens receipts and
+        // settle groups with these TS constants — so they must equal the names
+        // Go sealed under, not merely whatever name the fixture carries.
+        it('were sealed under the TS header-name constants', () => {
+            expect(v.headers.map((h) => h.name)).toEqual([SEALED_HEADER_SETTLE_GROUP, SEALED_HEADER_RECEIPT])
+        })
+
         for (const h of v.headers) {
             it(`opens the ${h.name} header the Go sealer produced`, () => {
                 const got = openSealedHeader(h.value_b64, key, v.tx_id, v.ticket_id, h.name)

@@ -181,6 +181,21 @@ func TestOpensTSSealedArtifacts(t *testing.T) {
 			}
 		})
 	}
+	// The header name is bound into the AAD, so it must be compared to Go's own
+	// constant: opening with the name the fixture carries would let TS and Go
+	// disagree on it and still agree on every artifact.
+	wantNames := map[string]int{wire.SealedHeaderReceipt: 0, wire.SealedHeaderSettleGroup: 0}
+	for _, h := range v.Headers {
+		if _, ok := wantNames[h.Name]; !ok {
+			t.Fatalf("TS sealed a header named %q; Go knows only %q and %q", h.Name, wire.SealedHeaderReceipt, wire.SealedHeaderSettleGroup)
+		}
+		wantNames[h.Name]++
+	}
+	for name, n := range wantNames {
+		if n != 1 {
+			t.Fatalf("fixture carries %d %q headers, want exactly 1", n, name)
+		}
+	}
 	for _, h := range v.Headers {
 		t.Run("header_"+h.Name, func(t *testing.T) {
 			got, err := wire.OpenSealedHeader(h.ValueB64, key, v.TxID, v.TicketID, h.Name)
