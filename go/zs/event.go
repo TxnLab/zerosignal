@@ -35,7 +35,7 @@ type RouteCandidates struct {
 	SizeMisses []NodeRef
 }
 
-// HopReason says why a RelayHop event fired.
+// HopReason says why a HopChanged event fired.
 type HopReason string
 
 const (
@@ -43,10 +43,10 @@ const (
 	HopRotated HopReason = "rotated"
 )
 
-// RelayHop fires when the SDK picks a relay, and again on each pre-payment
-// rotation. Relay is nil for a direct connection, which only happens under
-// PrivacyDirect.
-type RelayHop struct {
+// HopChanged fires when the SDK picks a relay, and again on each
+// pre-payment rotation. Relay is nil for a direct connection, which only
+// happens under PrivacyDirect.
+type HopChanged struct {
 	Relay  *NodeRef
 	Target NodeRef
 	Reason HopReason
@@ -205,7 +205,7 @@ type Done struct {
 }
 
 func (RouteCandidates) EventType() string  { return "route.candidates" }
-func (RelayHop) EventType() string         { return "relay.hop" }
+func (HopChanged) EventType() string       { return "relay.hop" }
 func (ReserveStarted) EventType() string   { return "reserve.started" }
 func (ReserveRetrying) EventType() string  { return "reserve.retrying" }
 func (ReserveSucceeded) EventType() string { return "reserve.succeeded" }
@@ -228,7 +228,7 @@ func (NodeExcluded) EventType() string     { return "node.excluded" }
 func (Done) EventType() string             { return "done" }
 
 func (RouteCandidates) event()  {}
-func (RelayHop) event()         {}
+func (HopChanged) event()       {}
 func (ReserveStarted) event()   {}
 func (ReserveRetrying) event()  {}
 func (ReserveSucceeded) event() {}

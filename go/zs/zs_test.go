@@ -50,6 +50,7 @@ func TestPublicStrings(t *testing.T) {
 		{string(AffinityPrefer), "prefer"},
 		{string(AffinityStrict), "strict"},
 		{string(AffinityNone), "none"},
+		{NodeRef{Op: 3, Node: 7}.String(), "3/7"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -95,7 +96,7 @@ var eventTypeCases = []struct {
 	want string
 }{
 	{RouteCandidates{}, "route.candidates"},
-	{RelayHop{}, "relay.hop"},
+	{HopChanged{}, "relay.hop"},
 	{ReserveStarted{}, "reserve.started"},
 	{ReserveRetrying{}, "reserve.retrying"},
 	{ReserveSucceeded{}, "reserve.succeeded"},

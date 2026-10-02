@@ -51,17 +51,9 @@ const (
 	PrivacyDirect Privacy = "direct"
 )
 
-// AffinityPolicy controls how strictly a continuation returns to the node
-// that served the turn it continues. previous_response_id continuations are
-// always strict: their session state lives on that node.
-type AffinityPolicy string
-
-const (
-	AffinityPrefer AffinityPolicy = "prefer"
-	AffinityStrict AffinityPolicy = "strict"
-	AffinityNone   AffinityPolicy = "none"
-)
-
+// Affinity configures continuation pinning (see AffinityPolicy).
+// previous_response_id continuations are always strict: their session state
+// lives on one node.
 type Affinity struct {
 	Policy AffinityPolicy
 	TTL    time.Duration
@@ -140,19 +132,8 @@ func defaultHTTPClient() *http.Client {
 }
 
 const (
-	defaultAffinityTTL        = 10 * time.Minute
-	defaultAffinityMax        = 1024
-	defaultConcurrentSlots    = 10
-	defaultReserveTimeout     = 5 * time.Second
-	defaultRefreshInterval    = 5 * time.Minute
-	defaultRefreshTimeout     = 30 * time.Second
-	defaultProbeBudget        = 96
-	defaultTargetTopK         = 8
-	defaultMaxCacheAge        = 15 * time.Minute
-	defaultMaxCarryAge        = 90 * time.Minute
-	defaultLatencyStateMax    = 4096
-	defaultDetailsTimeout     = 2 * time.Second
-	defaultDetailsConcurrency = 24
+	defaultAffinityTTL = 10 * time.Minute
+	defaultAffinityMax = 1024
 )
 
 // withDefaults returns c with every zero field set to its default.
@@ -166,19 +147,19 @@ func (c Config) withDefaults() Config {
 	c.Affinity.TTL = orDefault(c.Affinity.TTL, defaultAffinityTTL)
 	c.Affinity.Max = orDefault(c.Affinity.Max, defaultAffinityMax)
 	c.MaxOutputCeiling = orDefault(c.MaxOutputCeiling, selection.DefaultMaxOutputCeiling)
-	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, defaultConcurrentSlots)
-	c.ReserveTimeout = orDefault(c.ReserveTimeout, defaultReserveTimeout)
+	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, DefaultDepositSlots)
+	c.ReserveTimeout = orDefault(c.ReserveTimeout, DefaultReserveTimeout)
 
 	d := &c.Discovery
-	d.RefreshInterval = orDefault(d.RefreshInterval, defaultRefreshInterval)
-	d.RefreshTimeout = orDefault(d.RefreshTimeout, defaultRefreshTimeout)
-	d.ProbeBudget = orDefault(d.ProbeBudget, defaultProbeBudget)
-	d.TargetTopK = orDefault(d.TargetTopK, defaultTargetTopK)
-	d.MaxCacheAge = orDefault(d.MaxCacheAge, defaultMaxCacheAge)
-	d.MaxCarryAge = orDefault(d.MaxCarryAge, defaultMaxCarryAge)
-	d.LatencyStateMax = orDefault(d.LatencyStateMax, defaultLatencyStateMax)
-	d.DetailsTimeout = orDefault(d.DetailsTimeout, defaultDetailsTimeout)
-	d.DetailsConcurrency = orDefault(d.DetailsConcurrency, defaultDetailsConcurrency)
+	d.RefreshInterval = orDefault(d.RefreshInterval, DefaultRefreshInterval)
+	d.RefreshTimeout = orDefault(d.RefreshTimeout, DefaultRefreshTimeout)
+	d.ProbeBudget = orDefault(d.ProbeBudget, DefaultProbeBudget)
+	d.TargetTopK = orDefault(d.TargetTopK, DefaultTargetTopK)
+	d.MaxCacheAge = orDefault(d.MaxCacheAge, DefaultMaxCacheAge)
+	d.MaxCarryAge = orDefault(d.MaxCarryAge, DefaultMaxCarryAge)
+	d.LatencyStateMax = orDefault(d.LatencyStateMax, DefaultLatencyStateMax)
+	d.DetailsTimeout = orDefault(d.DetailsTimeout, DefaultDetailsFetchTimeout)
+	d.DetailsConcurrency = orDefault(d.DetailsConcurrency, DefaultDetailsConcurrency)
 
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)

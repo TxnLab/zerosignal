@@ -5,22 +5,7 @@
 
 package zs
 
-import (
-	"fmt"
-
-	"github.com/TxnLab/zerosignal/go/ticket"
-)
-
-// NodeRef addresses one node: the (operator id, node id) pair every routing
-// store keys by. Operator id alone is correct only for owner-level concerns
-// (payout, relay owner diversity), because one operator runs many nodes with
-// independent health and continuation state.
-type NodeRef struct {
-	Op   uint64
-	Node uint64
-}
-
-func (r NodeRef) String() string { return fmt.Sprintf("%d/%d", r.Op, r.Node) }
+import "github.com/TxnLab/zerosignal/go/ticket"
 
 // Ticket is one paid reservation and its open escrow box: the only handle
 // that can move that ticket's money. A Stream drives it to settle, protest or
