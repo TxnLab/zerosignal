@@ -281,9 +281,9 @@ func TestDynamicRegistry_AllOperatorsKeepsWireIncompatible(t *testing.T) {
 }
 
 // TestStaticRegistry_AggregatesExcludeWireIncompatible is the static mirror of
-// the gate above, and it is not redundant: every internal/server discovery test
-// runs on StaticRegistryProvider, so this is the provider a handler-layer
-// regression actually surfaces on. Without it, deleting the wireIncompatible
+// the gate above, and it is not redundant: all but one zs/handler discovery
+// test runs on StaticRegistryProvider, so this is the provider a handler-layer
+// regression usually surfaces on. Without it, deleting the wireIncompatible
 // conjunct from the static advertisable leaves the whole suite green.
 func TestStaticRegistry_AggregatesExcludeWireIncompatible(t *testing.T) {
 	prod := reachableOp(1, "m")

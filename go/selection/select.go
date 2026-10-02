@@ -246,7 +246,7 @@ type TargetResult struct {
 }
 
 // SelectTargets reproduces the proxy's candidate-selection policy as a pure
-// function. Order of operations matches proxy/internal/server/hayai_dispatch.go
+// function. Order of operations matches proto/go/zs/handler/hayai_dispatch.go
 // ::pickCandidates exactly: model eligibility → caller only/ignore filter →
 // sizing → image-factor → wire-version → TEE → staging exclusion → signer
 // funding → caller max_price filter → price sort → built-in-tool partition (or hard filter when RequireTools) →

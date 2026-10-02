@@ -466,7 +466,7 @@ type ModelCapacity struct {
 	// A mismatch is "weights differ", not fraud, and never drives pricing or
 	// settlement. It DOES drive one soft routing move: the dispatch path demotes
 	// a candidate whose digest contradicts a ≥2-distinct-OWNER peer consensus to
-	// the tail of the candidate list — see internal/server/weights_trust.go for
+	// the tail of the candidate list — see handler/weights_trust.go for
 	// what that catches and what it doesn't. The aggregate above is display
 	// only; the demotion is computed per request from per-operator evidence.
 	WeightsDigest       string

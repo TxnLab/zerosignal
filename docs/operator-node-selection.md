@@ -43,7 +43,7 @@ Out of Phase 1 you get **a price-ordered list of nodes that can actually serve m
 
 ### Phase 2 — app-side: responsiveness banding
 
-Now the metrics enter. The proxy (`pickCandidates` → `bandByResponsiveness`, `proxy/internal/server/hayai_dispatch.go`) and client (`resolveDispatchCandidates`, `client/src/operators/dispatch-candidates.ts`) compute a **combined expected response time** per candidate — additive, all in milliseconds:
+Now the metrics enter. The proxy (`pickCandidates` → `bandByResponsiveness`, `proto/go/zs/handler/hayai_dispatch.go`) and client (`resolveDispatchCandidates`, `client/src/operators/dispatch-candidates.ts`) compute a **combined expected response time** per candidate — additive, all in milliseconds:
 
 ```
 score = network_RTT      # client-observed target-aggregate EWMA, counted only when samples >= 2
@@ -148,8 +148,8 @@ This is symmetric by design: the proxy is a **localhost single-user (payer) proc
 
 | Concern | Shared (proto) | Proxy (Go) | Client (TS) |
 |---|---|---|---|
-| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `proto/go/zs/operator.go`, `proto/go/zs/sizing.go`, `internal/server/hayai_dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, used by `operators/dispatch-candidates.ts` |
-| Responsiveness banding | — (app-side only) | `internal/server/hayai_dispatch.go::responsivenessScore,bandByResponsiveness` (`decodeNormTokens=128`, `targetResponsivenessBandMS=500`) | `operators/dispatch-candidates.ts::responsivenessScore,bandByResponsiveness` (`DECODE_NORM_TOKENS=128`, `TARGET_RESPONSIVENESS_BAND_MS=500`) |
+| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `proto/go/zs/operator.go`, `proto/go/zs/sizing.go`, `proto/go/zs/handler/hayai_dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, used by `operators/dispatch-candidates.ts` |
+| Responsiveness banding | — (app-side only) | `proto/go/zs/handler/hayai_dispatch.go::responsivenessTerms,bandByResponsiveness` (`decodeNormTokens=32`, `targetResponsivenessBandMS=500`) | `operators/dispatch-candidates.ts::responsivenessTerms,bandByResponsiveness` (`DECODE_NORM_TOKENS=32`, `TARGET_RESPONSIVENESS_BAND_MS=500`) |
 | Relay eligibility (diversity) | `proto/go/selection/select.go::EligibleRelays,SelectRelay,diverseSubnet` | (consumes the shared fn) | (consumes the shared fn) |
 | Relay weighted pick | — (app-side only) | `proto/go/zs/relayrouter.go::SelectRelayHopWeighted,weightedRelayPick` (`latencyWeightBiasMS=50`, `latencyFloorFraction=0.15`) | `operators/relay-router.ts::selectRelayHopWeighted,weightedPick`; orchestrated by `operators/relay-decision.ts::resolveRelayDecision` |
 | Latency EWMA store | — | `proto/go/zs/relay_latency.go` (α=0.3, stale 5m, min 2) | `operators/latency-store.ts` (same constants) |

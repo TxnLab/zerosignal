@@ -467,7 +467,7 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 - `proto/go/pricing` (`ExpectedMaxPrice`, `ExpectedBaseMax`, `RateBasedMaxPrice`, `ReserveMinPrice`, `MinChargeFloor`, `AlgoTxnFloorMicroUSDC`, `GrossUpForFee`, `CeilInputCost`, `ChargeFor`, `ToolFeeReserveMicroUSDC`, `IsLongContext`, `VerifyTicketPrice`, `DefaultPolicy`), with TS mirror `proto/ts/src/pricing`, pinned by `proto/testdata/pricing_vectors.json`.
 - The **node prices with the same code the payer verifies with**: `node/internal/server/reserve.go` and `receipt.go::chargeFor` delegate to it.
 - `DefaultPolicy` is `RateMaxMultiple: 2.0`, `InputCountTolerance: 0.10` (the node's `input_budget_tolerance`), `FailOpen: true`.
-- Proxy: `proxy/internal/server/hayai_dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
+- Proxy: `proto/go/zs/handler/hayai_dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
 - Client: `client/src/stream/ticket-price-gate.ts`, called from `envelope-fetch.ts`, raises the `ticket_price_exceeded` blocker.
 
 ### Response (refusal)
@@ -731,7 +731,7 @@ OpenAI's Chat Completions and Responses APIs accept a top-level boolean `store`,
 
 **Operator override.** An operator that requires unconditional non-retention can add middleware that forces `store: false` whatever the caller sent; that is a few lines on top of `inject.DefaultStoreFalse`. The protocol does not require it, and doing it removes `previous_response_id` continuation for that operator's clients.
 
-Reference: `inject.DefaultStoreFalse`; the injection step in `proxy/internal/server/hayai_dispatch.go` (`dispatchHayai`); the injection step in `node/internal/server/handlers.go` (`handleStreamable`, right after `safety_identifier` injection); and `tui/main.go`, which sends `Store: openai.Bool(false)` by default and `true` with `--retain-upstream`.
+Reference: `inject.DefaultStoreFalse`; the injection step in `proto/go/zs/handler/hayai_dispatch.go` (`dispatchHayai`); the injection step in `node/internal/server/handlers.go` (`handleStreamable`, right after `safety_identifier` injection); and `tui/main.go`, which sends `Store: openai.Bool(false)` by default and `true` with `--retain-upstream`.
 
 **`store: false` is not zero data retention, and where the upstream can express ZDR the node MUST take it.** `store` asks a provider not to keep the request *for the operator's own use*. It says nothing about the provider's separate audit or abuse retention, which on some upstreams is an unrelated setting. So a conformant node does not leave zero data retention to `store` or to the caller. Wherever the upstream offers a ZDR mechanism, the node applies it **by default, and what it advertises reflects what it applied**: a payer is never told a constraint is in force when it is not. The two mechanisms work in opposite directions, because the upstreams do, and `models[].retention` reports which one applies:
 
@@ -1486,7 +1486,7 @@ The asymmetry lets a coordinated `proto_version` bump announce "this generation 
 - `inject.OperatorDetails` / `inject.OperatorDetailsModel` (`inject/details.go`) — canonical response shape; both proxy and node import it.
 - `node/internal/server/handlers.go::handleDetails` — node-side handler that builds the response from the operator's advertised catalog (`Server.advertisedModels`: ids in `model_pricing`, plus upstream-discovered ids when `default_pricing` is set), with metadata hydrated from upstream discovery and overridden by `model_context_windows`, plus oracle and tool-registry state.
 - `proto/go/zs/details.go::DetailsClient.Fetch` — Go payer SDK probe used by the operator-registry refresh loop.
-- `wire/version.go` and `ts/src/wire/version.ts` — version constants, parsing, compatibility, and minor capability gates. The proxy's major-version filter is `pickCandidates` in `proxy/internal/server/hayai_dispatch.go`.
+- `wire/version.go` and `ts/src/wire/version.ts` — version constants, parsing, compatibility, and minor capability gates. The proxy's major-version filter is `pickCandidates` in `proto/go/zs/handler/hayai_dispatch.go`.
 
 ### On-chain reliability metrics
 
@@ -2123,7 +2123,7 @@ The cost is that a request issued *before* the verifier's next refresh runs agai
 - `proto/go/attest` + `proto/ts/src/attest` — the shared measurement arithmetic: TDX quote field access, the RTMR3 replay above, and `ReportData`. Golden-vectored against each other; see the note under "Measurement replay".
 - `proto/go/zs/attestation.go` — Go payer SDK `AttestationClient`, `TEEVerifier` interface, and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
 - `proto/go/zs/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
-- `proxy/internal/server/hayai_dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `dispatchHayai`'s `503 no_tee_capacity`.
+- `proto/go/zs/handler/hayai_dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `dispatchHayai`'s `503 no_tee_capacity`.
 - See [`TEE.md`](./TEE.md) for the threat model, encryption layers, and trust shift.
 
 ## 3f. Transport privacy (single-hop operator-as-relay)
@@ -2669,12 +2669,12 @@ and `proto/ts` has no `inject` twin to mirror into.
 
 ### Reference implementation
 
-- `proto/go/inject/promptcachekey.go` — `DropPromptCacheKey`, applied pre-seal at the proxy's dispatch site (`proxy/internal/server/hayai_dispatch.go`).
+- `proto/go/inject/promptcachekey.go` — `DropPromptCacheKey`, applied pre-seal at the proxy's dispatch site (`proto/go/zs/handler/hayai_dispatch.go`).
 - `proto/go/wire/envelope.go` — `RelayPath`, `RelayTargetHeader`, `RelayPathHeader`, `RelayMethodHeader` (mirrored in `proto/ts/src/wire/constants.ts`).
 - `proto/go/relay` — `BuildRequest` (relay indirection builder), `IsAllowedInnerPath` (the allow-list / SSRF boundary), mirrored in `proto/ts/src/relay`.
 - `proto/go/selection` — `SelectTargets`, `SelectRelay`, the affinity-key derivation helpers, mirrored in `proto/ts/src/selection`; pinned across implementations by `proto/testdata/selection_vectors.json`.
 - `node/internal/server` — the `/v1/zs/relay` handler + the node-local cached operator directory.
-- `proxy/internal/server` / `proto/go/zs` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
+- `proto/go/zs/handler` / `proto/go/zs` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
 
 ## 4. Request format
 
@@ -2885,7 +2885,7 @@ A frame is terminal when it is either:
 
 A consumer that treats an error frame as "stop reading" therefore turns every post-admission failure into an unverifiable, uncontestable charge.
 
-**Reference implementation.** `proto/go/wire/stream_terminal.go` (`ClassifyStreamFrame`, `StreamErrorMessage`) and `proto/ts/src/wire/streamTerminal.ts` (`classifyStreamFrame`, `streamErrorMessage`), pinned against each other by `proto/testdata/stream_vectors.json` (regenerate: `cd proto/go && go test ./wire -run TestStreamTerminalVectors -update`). The classification is shared rather than re-derived per consumer because it is a payer-safety property, and two implementations answering it differently is exactly the failure above. Consumers: `proxy/internal/server/sse.go::forwardRawStream` (drain-vs-cancel on client disconnect, armed by `buildHayaiFrameFactory`) and the reference client's stream pipeline.
+**Reference implementation.** `proto/go/wire/stream_terminal.go` (`ClassifyStreamFrame`, `StreamErrorMessage`) and `proto/ts/src/wire/streamTerminal.ts` (`classifyStreamFrame`, `streamErrorMessage`), pinned against each other by `proto/testdata/stream_vectors.json` (regenerate: `cd proto/go && go test ./wire -run TestStreamTerminalVectors -update`). The classification is shared rather than re-derived per consumer because it is a payer-safety property, and two implementations answering it differently is exactly the failure above. Consumers: `proto/go/zs/handler/sse.go::forwardRawStream` (drain-vs-cancel on client disconnect, armed by `buildHayaiFrameFactory`) and the reference client's stream pipeline.
 
 #### 5.3.1 Node-originated status events (ZeroSignal tool rounds)
 
