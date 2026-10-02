@@ -220,8 +220,8 @@ func TestDispatchHayai_MbrPoolExhausted_429(t *testing.T) {
 	if w.Result().StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status = %d body=%s; want 429", w.Result().StatusCode, w.Body.String())
 	}
-	if got := w.Header().Get("Retry-After"); got == "" {
-		t.Error("missing Retry-After — the condition self-heals, so the nudge is honest")
+	if got := w.Header().Get("Retry-After"); got != "2" {
+		t.Errorf("Retry-After = %q, want 2 — the condition self-heals, so the nudge is honest", got)
 	}
 	body := w.Body.String()
 	if !strings.Contains(body, `"mbr_pool_exhausted"`) {

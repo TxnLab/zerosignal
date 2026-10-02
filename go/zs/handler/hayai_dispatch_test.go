@@ -1450,8 +1450,8 @@ func TestDispatchHayai_AllGatewayErrors_OperatorsUnreachable(t *testing.T) {
 	if strings.Contains(w.Body.String(), "operators_busy") {
 		t.Error("gateway failures were laundered into operators_busy")
 	}
-	if w.Header().Get("Retry-After") == "" {
-		t.Error("missing Retry-After on operators_unreachable")
+	if got := w.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After = %q on operators_unreachable, want 30", got)
 	}
 	// Both candidates were tried, and the pool as a whole saw more attempts than
 	// candidates — i.e. at least one 504 was actually retried rather than the

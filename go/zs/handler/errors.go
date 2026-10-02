@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 type openAIErrorEnvelope struct {
@@ -36,6 +38,95 @@ func writeOpenAIError(w http.ResponseWriter, status int, errType, code, message 
 			Code:    code,
 		},
 	})
+}
+
+// errorShape is one dispatch error code's Kind and how the OpenAI-compatible
+// surface renders it. The code decides both, so a site names only the code and
+// its message: Kind and status can't drift apart between two sites that
+// report the same condition.
+type errorShape struct {
+	kind    zs.Kind
+	status  int
+	errType string
+}
+
+var errorShapes = map[string]errorShape{
+	"missing_model":                   {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"bad_image_request":               {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"bad_image_edit_request":          {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"max_output_required":             {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"pin_conflicts_with_continuation": {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"unsupported_tool":                {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	"context_length_exceeded":         {zs.KindContextExceeded, http.StatusBadRequest, "invalid_request_error"},
+	"price_ceiling_exceeded":          {zs.KindPriceRejected, http.StatusBadRequest, "invalid_request_error"},
+
+	"no_operator":            {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_compatible_operator": {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_production_operator": {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_pinned_operator":     {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_funded_operator":     {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_tee_capacity":        {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_tool_capacity":       {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_ephemeral_capacity":  {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"no_relay_available":     {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	"operators_busy":         {zs.KindBusy, http.StatusServiceUnavailable, "service_unavailable"},
+	"operators_unreachable":  {zs.KindUnreachable, http.StatusServiceUnavailable, "service_unavailable"},
+	"mbr_pool_exhausted":     {zs.KindBusy, http.StatusTooManyRequests, "rate_limit_exceeded"},
+
+	"free_quota_exhausted":  {zs.KindFunds, http.StatusForbidden, "invalid_request_error"},
+	"wallet_unfunded":       {zs.KindFunds, http.StatusPaymentRequired, "insufficient_quota"},
+	"mbr_pool_underfunded":  {zs.KindFunds, http.StatusPaymentRequired, "insufficient_quota"},
+	"spend_cap_exceeded":    {zs.KindSpendCap, http.StatusPaymentRequired, "insufficient_quota"},
+	"ticket_price_rejected": {zs.KindOperatorFault, http.StatusBadGateway, "bad_gateway"},
+	"operator_ticket_reuse": {zs.KindOperatorFault, http.StatusBadGateway, "bad_gateway"},
+
+	"registry":     {zs.KindInternal, http.StatusBadGateway, "proxy_error"},
+	"tokenize":     {zs.KindInternal, http.StatusBadGateway, "proxy_error"},
+	"wrap_request": {zs.KindInternal, http.StatusBadGateway, "proxy_error"},
+	// Not Unreachable: the code also covers an operator's bad presigned group
+	// and a submit that timed out after algod may have accepted it, and a
+	// caller reads Unreachable as nothing paid, safe to retry.
+	"wallet_open": {zs.KindInternal, http.StatusBadGateway, "proxy_error"},
+}
+
+// kindShapes renders a code errorShapes doesn't list. The one site that can
+// reach it is the payer refusal, whose code comes from payerRefusalCodes, so
+// KindFunds renders as that site's 403 rather than the table's 402.
+var kindShapes = map[zs.Kind]errorShape{
+	zs.KindInvalidRequest:  {zs.KindInvalidRequest, http.StatusBadRequest, "invalid_request_error"},
+	zs.KindContextExceeded: {zs.KindContextExceeded, http.StatusBadRequest, "invalid_request_error"},
+	zs.KindPriceRejected:   {zs.KindPriceRejected, http.StatusBadRequest, "invalid_request_error"},
+	zs.KindNoRoute:         {zs.KindNoRoute, http.StatusServiceUnavailable, "service_unavailable"},
+	zs.KindBusy:            {zs.KindBusy, http.StatusServiceUnavailable, "service_unavailable"},
+	zs.KindUnreachable:     {zs.KindUnreachable, http.StatusServiceUnavailable, "service_unavailable"},
+	zs.KindFunds:           {zs.KindFunds, http.StatusForbidden, "invalid_request_error"},
+	zs.KindSpendCap:        {zs.KindSpendCap, http.StatusPaymentRequired, "insufficient_quota"},
+	zs.KindOperatorFault:   {zs.KindOperatorFault, http.StatusBadGateway, "bad_gateway"},
+	zs.KindUpstream:        {zs.KindUpstream, http.StatusBadGateway, "bad_gateway"},
+	zs.KindInterrupted:     {zs.KindInterrupted, http.StatusBadGateway, "bad_gateway"},
+	zs.KindInternal:        {zs.KindInternal, http.StatusInternalServerError, "proxy_error"},
+}
+
+// newError builds the Error for a code in errorShapes. An unlisted code is
+// KindInternal, which TestErrorCodesAreListed keeps from happening by accident.
+func newError(code, message string) *zs.Error {
+	kind := zs.KindInternal
+	if sh, ok := errorShapes[code]; ok {
+		kind = sh.kind
+	}
+	return &zs.Error{Kind: kind, Code: code, Message: message}
+}
+
+// writeError renders e as an OpenAI-shaped error response.
+func writeError(w http.ResponseWriter, e *zs.Error) {
+	sh, ok := errorShapes[e.Code]
+	if !ok {
+		sh = kindShapes[e.Kind]
+	}
+	if e.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(e.RetryAfter.Seconds())))
+	}
+	writeOpenAIError(w, sh.status, sh.errType, e.Code, e.Message)
 }
 
 // underfundedOpenSignatures are the algod ledger-eval substrings that mean the
