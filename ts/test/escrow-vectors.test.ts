@@ -343,6 +343,23 @@ describe('escrow input guards (TS only)', () => {
         expect(() => ticketBoxKey(new Uint8Array(17))).toThrow(/must be 16 bytes \(got 17\)/)
     })
 
+    // Go decodes this box and keeps the raw bytes; TS refuses it rather than
+    // return a U+FFFD-substituted URL that differs from the stored one.
+    it('refuses a node base URL that is not valid UTF-8', () => {
+        const base = (v.records.nodes as Json[]).find((c) => !c.error)!
+        const data = hex.decode(base.data_hex)
+        const url = new Uint8Array([...new TextEncoder().encode('https://'), 0xff, 0xfe])
+        data[33] = url.length
+        data.fill(0, 34, 34 + 248)
+        data.set(url, 34)
+        expect(() => decodeNodeRecord(BigInt(base.operator_id), BigInt(base.node_id), data)).toThrow(
+            /baseUrl is not valid UTF-8/,
+        )
+        // The same bytes with the invalid tail cut off by the length byte decode.
+        data[33] = url.length - 2
+        expect(decodeNodeRecord(BigInt(base.operator_id), BigInt(base.node_id), data).baseUrl).toBe('https://')
+    })
+
     // A short ring would otherwise read its missing slots as zero revenue.
     it('refuses a revenue ring that is not 30 buckets', () => {
         expect(() => windowedRingRevenue(1n, Array<bigint>(29).fill(1n), 1n, 1n)).toThrow(

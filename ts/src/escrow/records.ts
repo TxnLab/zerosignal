@@ -239,7 +239,17 @@ export function decodeNodeRecord(operatorId: bigint, nodeId: bigint, data: Uint8
     while (end > 0 && urlField[end - 1] === 0) end--
     // ignoreBOM keeps a leading U+FEFF, as Go's string conversion does; the
     // default decoder would silently drop it.
-    const baseUrl = new TextDecoder('utf-8', { ignoreBOM: true }).decode(urlField.subarray(0, end))
+    //
+    // fatal refuses invalid UTF-8, where Go keeps the raw bytes. A JS string
+    // can't hold them, and substituting U+FFFD would hand back a URL that
+    // differs from the stored one while decoding as if nothing were wrong.
+    // Neither form is fetchable, so refusing costs nothing a caller could use.
+    let baseUrl: string
+    try {
+        baseUrl = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(urlField.subarray(0, end))
+    } catch {
+        throw new Error(`node ${operatorId}/${nodeId} baseUrl is not valid UTF-8`)
+    }
     const metrics = readMetrics(r)
     const usdcEscrowed = r.u64()
     const staging = r.u8()

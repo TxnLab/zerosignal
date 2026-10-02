@@ -61,7 +61,7 @@ Function names use camelCase. Constants use UPPER_SNAKE.
 
 Go's `uint64` / `int64` fields are typed as `number` here. Real values stay well within JS's safe-integer range (token counts, microUSDC totals up to ~10^12). Internally, the canonical-bytes encoder coerces via `BigInt` before writing the 8-byte big-endian form, so values up to 2^53−1 are encoded correctly.
 
-`escrow` is the exception: it decodes on-chain boxes, whose `uint64` fields can hold any value, so they are `bigint`. Fields the contract stores in one or two bytes (statuses, the pending side, usage types, fee bps, staging) are `number`. Its arithmetic is unbounded where Go's `uint64` wraps, so the two agree only on values the contract can actually produce; the fee functions accept fee bps as either type.
+`escrow` is the exception: it decodes on-chain boxes, whose `uint64` fields can hold any value, so they are `bigint`. Fields the contract stores in one or two bytes (statuses, the pending side, usage types, fee bps, staging) are `number`. Its arithmetic is unbounded where Go's `uint64` wraps, so the two agree only on values the contract can actually produce; the fee functions accept fee bps as either type. `decodeNodeRecord` refuses a base URL that is not valid UTF-8, which Go decodes with the raw bytes kept.
 
 ## Secret-key lifetime
 
