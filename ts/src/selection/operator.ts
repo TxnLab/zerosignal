@@ -164,8 +164,8 @@ export function fits(op: Operator, model: string, inputTokens: number, maxOutput
     return true
 }
 
-// Constants for deriveMaxOutput's proportionate fallback. Mirror of
-// proto/go/selection/operator.go (and the client's own config.ts constants).
+// Constants for deriveMaxOutput's fallbacks. Mirror of
+// proto/go/selection/operator.go.
 /** Floors the proportionate branch so a degenerate context window still yields a
  *  positive reservation (the admission layer rejects max_output <= 0). */
 export const MIN_DERIVED_MAX_OUTPUT = 256
@@ -187,10 +187,9 @@ export const DEFAULT_MAX_OUTPUT_CEILING = 32768
 /**
  * deriveMaxOutput computes a per-operator worst-case completion reservation for a
  * request that did NOT specify max_output_tokens, from the operator's declared
- * capacity. Mirror of proto/go/selection/operator.go::DeriveMaxOutput (and
- * behaviorally the client's deriveMaxOutputTokens) — the single source of truth
- * the sizing filter (Constraints.max_output_unspecified) and the caller's reserve
- * leg both use. Three branches:
+ * capacity. Mirror of proto/go/selection/operator.go::DeriveMaxOutput — the
+ * single source of truth the sizing filter (Constraints.max_output_unspecified)
+ * and the caller's reserve leg both use. Three branches:
  *   - declaredMax > 0 → returned unchanged (the operator's advertised cap is
  *     authoritative);
  *   - else contextWindow > 0 → clamp(contextWindow/DENOM, MIN, baseCeiling);

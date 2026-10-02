@@ -1327,9 +1327,7 @@ func buildRelayCases() []relayCase {
 // The default_ceiling_* rows are the routing-parity pin: proxy and client both
 // pass DefaultMaxOutputCeiling, so these are the numbers that must match between
 // them for the sizing filter and the reserve leg to agree about the same
-// operator. They are also the rows the client's hand-rolled copy
-// (client/src/stream/config.ts) is checked against by hand — it does not import
-// the shared function, so nothing but this table keeps it honest.
+// operator.
 func buildDeriveCases() []deriveCase {
 	cases := []deriveCase{
 		// Neither declared → flat base ceiling.

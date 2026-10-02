@@ -356,9 +356,7 @@ func EffectiveInputTokens(protoVersion string, inputTokens, inputTokensV2 uint64
 	return inputTokens
 }
 
-// Constants for DeriveMaxOutput's proportionate fallback. They mirror the
-// client's deriveMaxOutputTokens (client/src/stream/config.ts) so the two
-// implementations produce the same reservation for the same operator.
+// Constants for DeriveMaxOutput's fallbacks.
 const (
 	// MinDerivedMaxOutput floors the proportionate branch: the admission layer
 	// rejects max_output_tokens <= 0, so a degenerate context window (e.g. 32)
@@ -390,10 +388,9 @@ const (
 
 // DeriveMaxOutput computes a per-operator worst-case completion reservation for a
 // request that did NOT specify max_output_tokens, from the operator's declared
-// capacity. It mirrors the client's deriveMaxOutputTokens, and is the single
-// source of truth both the sizing filter (Constraints.MaxOutputUnspecified) and
-// the caller's reserve leg use — so what the filter admits and what the ticket
-// escrows never disagree. Three branches:
+// capacity. It is the single source of truth that both the sizing filter
+// (Constraints.MaxOutputUnspecified) and the caller's reserve leg use — so what
+// the filter admits and what the ticket escrows never disagree. Three branches:
 //
 //   - declaredMax > 0 → returned unchanged (the operator's advertised cap is
 //     authoritative; requesting more would just bounce off its own reserve gate);
