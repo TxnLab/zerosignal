@@ -58,15 +58,16 @@ const maxImageToolBudgetPerRequest uint64 = 64
 
 // dispatchHayai answers an HTTP client through dispatch.
 func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
-	s.dispatch(r.Context(), newHTTPEmitter(w, r), turnFromHTTP(r, endpoint, body, format))
+	s.dispatch(r.Context(), newHTTPEmitter(w, r, format), turnFromHTTP(r, endpoint, body))
 }
 
 // turn is one request as dispatch sees it. The request headers it honors are
-// read into it by the HTTP surface, so dispatch never sees the request.
+// read into it by the HTTP surface, so dispatch never sees the request. How
+// the response is shaped for the caller (legacy completions, the zs.usage
+// frame) is the emitter's business, not the turn's.
 type turn struct {
 	endpoint string
 	body     []byte
-	format   clientFormat
 	// contentType is the body's media type; an image edit is multipart.
 	contentType string
 	// requireTEE is the caller's per-request TEE opt-in (X-Zs-Require-TEE).
@@ -74,20 +75,15 @@ type turn struct {
 	// relay is the caller's normalized relay preference (X-Zs-Relay); a
 	// `provider.relay` in the body outranks it.
 	relay string
-	// usageFrame asks for the non-OpenAI zs.usage stream frame
-	// (X-Zs-Usage-Frame).
-	usageFrame bool
 }
 
-func turnFromHTTP(r *http.Request, endpoint string, body []byte, format clientFormat) turn {
+func turnFromHTTP(r *http.Request, endpoint string, body []byte) turn {
 	return turn{
 		endpoint:    endpoint,
 		body:        body,
-		format:      format,
 		contentType: r.Header.Get("Content-Type"),
 		requireTEE:  strings.TrimSpace(r.Header.Get("X-Zs-Require-TEE")) != "",
 		relay:       selection.NormalizeRelay(r.Header.Get("X-Zs-Relay")),
-		usageFrame:  strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
 	}
 }
 
@@ -109,7 +105,7 @@ func turnFromHTTP(r *http.Request, endpoint string, body []byte, format clientFo
 // propagated from the shortest operator hint — the admission layer is
 // doing its job and no payment has happened.
 func (s *client) dispatch(ctx context.Context, em emitter, t turn) {
-	endpoint, body, format := t.endpoint, t.body, t.format
+	endpoint, body := t.endpoint, t.body
 
 	isImage := endpoint == endpointImages
 	isImageEdit := endpoint == endpointImageEdits
@@ -884,7 +880,7 @@ func (s *client) dispatch(ctx context.Context, em emitter, t turn) {
 					}
 					s.log.LogAttrs(ctx, slog.LevelDebug, "reserve response", attrs...)
 				}
-				s.runHayaiSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, t.usageFrame, hop, format)
+				s.runHayaiSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
 				return
 			case hayai.IsBusy(err):
 				// A considered refusal, so it ends the sweeps — tracked separately
@@ -2452,9 +2448,8 @@ func (s *client) runHayaiSealed(
 	body []byte,
 	op hayai.Operator,
 	rt *hayai.ReservedTicket,
-	wantsStream, emitUsageFrame bool,
+	wantsStream bool,
 	hop *hayai.RelayHop,
-	format clientFormat,
 ) {
 	ticket := rt.Ticket
 	algoUSDPrice := rt.AlgoUSDPrice
@@ -2633,7 +2628,7 @@ func (s *client) runHayaiSealed(
 	// it only exposes the dispute/settle surface).
 	var sh settlementHandle = openHandle
 	openFees := openHandle.OpenFeesMicroalgos
-	nonStreamRespond := s.buildHayaiNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, format)
+	nonStreamRespond := s.buildHayaiNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
 
 	// Transport-privacy routing. With no hop, send directly to the target
 	// (fwdBaseURL = op.BaseURL, fwdEndpoint = endpoint, no extra headers) —
@@ -2662,11 +2657,7 @@ func (s *client) runHayaiSealed(
 		// (node already done → pay the operator for delivered content) or
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
-		// emitUsageFrame is opt-in: the non-OpenAI `event: zs.usage` frame goes
-		// out only when the client asked for it (hayai-aware: ui/, tui/). Default
-		// off keeps the stream a clean OpenAI stream for strict clients
-		// (JetBrains/Koog).
-		factory := s.buildHayaiFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, emitUsageFrame, format)
+		factory := s.buildHayaiFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete)
 		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
 		return
 	}
@@ -2994,7 +2985,6 @@ func (s *client) buildHayaiNonStreamResponder(
 	algoUSDPrice float64,
 	openFees uint64,
 	hop *hayai.RelayHop,
-	format clientFormat,
 ) nonStreamResponder {
 	return func(em emitter, upstreamResp *http.Response, respBody []byte) error {
 		wrappedKey := upstreamResp.Header.Get(wire.ResponseKeyHeader)
@@ -3185,16 +3175,7 @@ func (s *client) buildHayaiNonStreamResponder(
 			usage = &usageReport{receipt: receipt, ticket: ticket, op: op, openFees: openFees, settleFees: settleFees,
 				algoUSDPrice: algoUSDPrice, feeBps: feeBps, discountBps: retiredDiscountBps, haveFee: haveFee}
 		}
-		// Legacy /v1/completions emulation: reshape the verified chat-completion
-		// body into text-completion shape for the client. Done AFTER receipt /
-		// body_hash verification (which must run on the node's original chat
-		// bytes) and only to the bytes written out. No-op for formatChat, and a
-		// pass-through for anything that isn't a chat completion (sealed errors).
-		out := plaintext
-		if format == formatLegacyCompletions {
-			out = completionsResponseFromChat(plaintext)
-		}
-		em.reply(upstreamResp.StatusCode, upstreamResp.Header, out, usage)
+		em.reply(upstreamResp.StatusCode, upstreamResp.Header, plaintext, usage)
 		return nil
 	}
 }
@@ -4136,9 +4117,9 @@ func flattenFrames(frames [][]byte) []byte {
 // wrapped key arrives), decrypts content frames in order, accumulates
 // their plaintext for body_hash, and on the terminal zs-receipt
 // event runs the same three verification checks as the non-stream
-// responder. The signed receipt itself is not forwarded — but a
-// small, unsigned `zs.usage` SSE frame is emitted in its place so
-// streaming clients can render per-request usage + microUSDC cost.
+// responder. The signed receipt itself is not forwarded; what the
+// payer is told it cost goes to the emitter as a usageReport in its
+// place.
 func (s *client) buildHayaiFrameFactory(
 	ctx context.Context,
 	ephemeral *age.X25519Identity,
@@ -4152,8 +4133,6 @@ func (s *client) buildHayaiFrameFactory(
 	openFees uint64,
 	hop *hayai.RelayHop,
 	genComplete *atomic.Bool,
-	emitUsageFrame bool,
-	format clientFormat,
 ) frameTransformFactory {
 	return func(upstreamResp *http.Response) (frameTransform, error) {
 		wrappedKey := upstreamResp.Header.Get(wire.ResponseKeyHeader)
@@ -4216,7 +4195,7 @@ func (s *client) buildHayaiFrameFactory(
 			// the payer's only defense against exactly that operator.
 			receiptSeen bool
 		)
-		return func(f transform.SSEFrame) (transform.SSEFrame, error) {
+		return func(f transform.SSEFrame) (outFrame, error) {
 			switch f.Event {
 			case wire.StreamEventMarker:
 				// Sealed hayai frame. Shape of the plaintext is opaque
@@ -4232,7 +4211,7 @@ func (s *client) buildHayaiFrameFactory(
 				plaintext, err := opener.OpenNextFrame(f.Data)
 				timer.recordDecrypt(time.Since(tf))
 				if err != nil {
-					return transform.SSEFrame{}, fmt.Errorf("decrypt sse frame: %w", err)
+					return outFrame{}, fmt.Errorf("decrypt sse frame: %w", err)
 				}
 				// -debug-bodies escape hatch: dump each decrypted frame as we
 				// forward it, so a cancelled stream still shows what (if
@@ -4289,16 +4268,12 @@ func (s *client) buildHayaiFrameFactory(
 				// Copy before keeping — the SSE pump reuses buffers. The
 				// accumulator MUST hold the node's original chat bytes: the
 				// receipt's body_hash is computed over them (BodyHashFromFrames),
-				// so the legacy-completions reshape below applies only to the
-				// bytes forwarded to the client, never to contentFrames.
+				// so an emitter's reshape of the frame (legacy completions) must
+				// never reach contentFrames.
 				stored := make([]byte, len(plaintext))
 				copy(stored, plaintext)
 				contentFrames = append(contentFrames, stored)
-				out := plaintext
-				if format == formatLegacyCompletions {
-					out = completionsChunkFromChat(plaintext)
-				}
-				return transform.SSEFrame{Data: out}, nil
+				return outFrame{frame: transform.SSEFrame{Data: plaintext}, content: true}, nil
 
 			case wire.StreamEventSettleGroup:
 				// Sealed SSE frame carrying the operator's pre-signed atomic
@@ -4312,7 +4287,7 @@ func (s *client) buildHayaiFrameFactory(
 				// than a rule this branch has to remember.
 				sg := openSealedResponseMeta(s, string(f.Data), opener, tkt, wire.SealedHeaderSettleGroup, op, hop)
 				presignedSettleGroup = decodeSettleGroupHeader(s, sg, op, tkt, hop)
-				return transform.SSEFrame{}, nil // swallowed; client doesn't see it
+				return outFrame{}, nil // swallowed; client doesn't see it
 
 			case wire.StreamEventReceipt:
 				tf := time.Now()
@@ -4328,7 +4303,7 @@ func (s *client) buildHayaiFrameFactory(
 					// OpenNextFrame. This branch used to advance it, which the
 					// reference client never did; no observer distinguished the
 					// two only because the receipt is the last sealed frame.
-					return transform.SSEFrame{}, nil // swallow; client doesn't see the receipt
+					return outFrame{}, nil // swallow; client doesn't see the receipt
 				}
 				var receipt ticket.UsageReceipt
 				if err := json.Unmarshal(plaintext, &receipt); err != nil {
@@ -4337,7 +4312,7 @@ func (s *client) buildHayaiFrameFactory(
 						relayAttr(hop),
 						slog.String("ticket_id", tkt.TicketID),
 						slog.Any("err", err))
-					return transform.SSEFrame{}, nil
+					return outFrame{}, nil
 				}
 				if receiptSeen {
 					// Second (or later) receipt for this stream: settlement already
@@ -4347,7 +4322,7 @@ func (s *client) buildHayaiFrameFactory(
 						opAttr(op),
 						relayAttr(hop),
 						slog.String("ticket_id", tkt.TicketID))
-					return transform.SSEFrame{}, nil
+					return outFrame{}, nil
 				}
 				receiptSeen = true
 				// Reconstructed plaintext for the dispute-excerpt path.
@@ -4369,21 +4344,23 @@ func (s *client) buildHayaiFrameFactory(
 					presignedSettleGroup,
 					hop,
 				)
-				if !emitUsageFrame {
-					// OpenAI-compatible default: settlement ran above; we just
-					// don't inject the non-OpenAI `zs.usage` frame that
-					// strict clients (JetBrains/Koog) can't parse. Swallow it
-					// like the settle-group frame — the client sees only the
-					// standard content stream + [DONE].
-					return transform.SSEFrame{}, nil
-				}
 				// Payer-facing fee breakdown from the proxy payer's cached
 				// protocolFeeBps (background-refreshed; non-blocking).
 				feeBps, haveFee := s.feeRateNow()
-				return hayaiUsageFrame(&receipt, tkt, op, openFees, settleFees, algoUSDPrice, feeBps, retiredDiscountBps, haveFee), nil
+				return outFrame{usage: &usageReport{
+					receipt:      &receipt,
+					ticket:       tkt,
+					op:           op,
+					openFees:     openFees,
+					settleFees:   settleFees,
+					algoUSDPrice: algoUSDPrice,
+					feeBps:       feeBps,
+					discountBps:  retiredDiscountBps,
+					haveFee:      haveFee,
+				}}, nil
 
 			default:
-				return f, nil // non-hayai event (e.g. [DONE]) passes through
+				return outFrame{frame: f}, nil // non-hayai event (e.g. [DONE]) passes through
 			}
 		}, nil
 	}

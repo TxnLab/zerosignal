@@ -142,10 +142,22 @@ func (cw *clientAwareWriter) Write(p []byte) (int, error) {
 	return cw.w.Write(p)
 }
 
+// outFrame is what one upstream frame becomes for the caller: a frame to pass
+// on, or the verified usage the receipt frame carried, or neither.
+type outFrame struct {
+	frame transform.SSEFrame
+	// content marks a frame decrypted from the node's sealed stream, as
+	// opposed to one passed through as sent (`[DONE]`, a comment).
+	content bool
+	usage   *usageReport
+}
+
+func (o outFrame) isEmpty() bool { return o.frame.IsEmpty() && o.usage == nil }
+
 // frameTransform is the per-frame hook used by pumpSSE. For hayai it
 // decrypts frames tagged with `event: zs` under a per-request symmetric
 // key.
-type frameTransform func(transform.SSEFrame) (transform.SSEFrame, error)
+type frameTransform func(transform.SSEFrame) (outFrame, error)
 
 // frameTransformFactory builds the per-frame hook from the upstream response
 // headers. Hayai needs this because the symmetric key used to AEAD-open each
@@ -329,7 +341,7 @@ func (s *client) forwardRawStream(
 // hands the result to emit. Returns nil on clean EOF.
 func pumpSSE(
 	ctx context.Context,
-	emit func(transform.SSEFrame) (int, error),
+	emit func(outFrame) (int, error),
 	upstream io.Reader,
 	frameFn frameTransform,
 	tally *streamTally,
@@ -355,14 +367,18 @@ func pumpSSE(
 		if err != nil {
 			return fmt.Errorf("transform stream chunk: %w", err)
 		}
-		if out.IsEmpty() {
+		if out.isEmpty() {
 			return nil
 		}
 		n, err := emit(out)
 		if err != nil {
 			return err
 		}
-		tally.record(n)
+		// Zero bytes is a frame the caller chose not to receive (the usage
+		// frame without its opt-in), so it isn't counted as forwarded.
+		if n > 0 {
+			tally.record(n)
+		}
 		return nil
 	}
 

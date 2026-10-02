@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs"
-	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
 // emitter receives what a dispatch produces for its caller. Dispatch decides
@@ -37,7 +37,7 @@ type emitter interface {
 	open(status int) error
 	// frame delivers one stream frame and returns the bytes written, for the
 	// stream tally.
-	frame(f transform.SSEFrame) (int, error)
+	frame(f outFrame) (int, error)
 	// interrupt ends an open stream that broke before its end.
 	interrupt()
 }
@@ -82,10 +82,22 @@ type httpEmitter struct {
 	// and frames are swallowed so the receipt tail can still be drained.
 	clientCtx context.Context
 	flusher   http.Flusher
+	// format is the shape the client called in; the node always answers in
+	// chat shape.
+	format clientFormat
+	// usageFrame is the client's opt-in (X-Zs-Usage-Frame) to the non-OpenAI
+	// zs.usage stream frame. Off by default: strict OpenAI clients
+	// (JetBrains/Koog) fail on an event they cannot parse.
+	usageFrame bool
 }
 
-func newHTTPEmitter(w http.ResponseWriter, r *http.Request) *httpEmitter {
-	return &httpEmitter{w: w, clientCtx: r.Context()}
+func newHTTPEmitter(w http.ResponseWriter, r *http.Request, format clientFormat) *httpEmitter {
+	return &httpEmitter{
+		w:          w,
+		clientCtx:  r.Context(),
+		format:     format,
+		usageFrame: strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
+	}
 }
 
 func (e *httpEmitter) clamped(ceiling uint64) {
@@ -128,6 +140,11 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 	if usage != nil {
 		usage.setHeaders(h)
 	}
+	// A pass-through for anything that isn't a chat completion (a sealed
+	// error).
+	if e.format == formatLegacyCompletions {
+		body = completionsResponseFromChat(body)
+	}
 	e.w.WriteHeader(status)
 	_, _ = e.w.Write(body)
 }
@@ -149,7 +166,18 @@ func (e *httpEmitter) open(status int) error {
 	return nil
 }
 
-func (e *httpEmitter) frame(f transform.SSEFrame) (int, error) {
+func (e *httpEmitter) frame(out outFrame) (int, error) {
+	f := out.frame
+	switch {
+	case out.usage != nil:
+		if !e.usageFrame {
+			return 0, nil
+		}
+		u := out.usage
+		f = hayaiUsageFrame(u.receipt, u.ticket, u.op, u.openFees, u.settleFees, u.algoUSDPrice, u.feeBps, u.discountBps, u.haveFee)
+	case out.content && e.format == formatLegacyCompletions:
+		f.Data = completionsChunkFromChat(f.Data)
+	}
 	n, err := writeSSEFrame(&clientAwareWriter{w: e.w, clientCtx: e.clientCtx}, f)
 	if err != nil {
 		return n, err

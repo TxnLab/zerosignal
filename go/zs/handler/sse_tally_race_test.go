@@ -82,12 +82,12 @@ func TestForwardRawStream_TallyNoRaceOnMidStreamDisconnect(t *testing.T) {
 	go func() {
 		defer close(done)
 		s.forwardRawStream(
-			clientCtx, newHTTPEmitter(w, r),
+			clientCtx, newHTTPEmitter(w, r, formatChat),
 			upstream.URL, "",
 			[]byte("{}"), "application/json", nil,
 			nil, // direct route: no relay hop
 			func(*http.Response) (frameTransform, error) {
-				return func(f transform.SSEFrame) (transform.SSEFrame, error) { return f, nil }, nil
+				return func(f transform.SSEFrame) (outFrame, error) { return outFrame{frame: f}, nil }, nil
 			},
 			func(emitter, *http.Response, []byte) error { return nil },
 			&genComplete,

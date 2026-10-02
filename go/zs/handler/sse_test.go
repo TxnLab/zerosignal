@@ -29,10 +29,10 @@ func newFlushWriter() (*bytes.Buffer, *fakeFlusher) {
 	return &bytes.Buffer{}, &fakeFlusher{}
 }
 
-func identityFrame(f transform.SSEFrame) (transform.SSEFrame, error) { return f, nil }
+func identityFrame(f transform.SSEFrame) (outFrame, error) { return outFrame{frame: f}, nil }
 
 // emitTo is the frame sink an open httpEmitter hands pumpSSE, writing into buf.
-func emitTo(buf *bytes.Buffer, f *fakeFlusher) func(transform.SSEFrame) (int, error) {
+func emitTo(buf *bytes.Buffer, f *fakeFlusher) func(outFrame) (int, error) {
 	e := &httpEmitter{w: bufferWriter{buf}, clientCtx: context.Background(), flusher: f}
 	return e.frame
 }
@@ -245,11 +245,11 @@ func TestPumpSSE_FrameTransformDrops(t *testing.T) {
 	in := strings.NewReader("data: one\n\ndata: drop-me\n\ndata: three\n\n")
 	buf, f := newFlushWriter()
 
-	drop := func(fr transform.SSEFrame) (transform.SSEFrame, error) {
+	drop := func(fr transform.SSEFrame) (outFrame, error) {
 		if bytes.Equal(fr.Data, []byte("drop-me")) {
-			return transform.SSEFrame{}, nil
+			return outFrame{}, nil
 		}
-		return fr, nil
+		return outFrame{frame: fr}, nil
 	}
 
 	if err := pumpSSE(context.Background(), emitTo(buf, f), in, drop, &streamTally{}); err != nil {
@@ -268,8 +268,8 @@ func TestPumpSSE_FrameTransformError(t *testing.T) {
 	in := strings.NewReader("data: one\n\n")
 	buf, f := newFlushWriter()
 
-	fail := func(transform.SSEFrame) (transform.SSEFrame, error) {
-		return transform.SSEFrame{}, errors.New("transform boom")
+	fail := func(transform.SSEFrame) (outFrame, error) {
+		return outFrame{}, errors.New("transform boom")
 	}
 
 	err := pumpSSE(context.Background(), emitTo(buf, f), in, fail, &streamTally{})

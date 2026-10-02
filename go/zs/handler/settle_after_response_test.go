@@ -114,11 +114,11 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 	s := &client{cfg: &Config{Privacy: hayai.PrivacyDirect}, log: discard, refunds: hayai.NewRefundWatchdog(discard)}
 	handle := &blockingSettlementHandle{started: make(chan struct{}), release: make(chan struct{})}
 	responder := s.buildHayaiNonStreamResponder(context.Background(), ephemeral, txID, tkt, op, handle,
-		nil, endpointChatCompletions, "test-model", 0.20, 0, nil, formatChat)
+		nil, endpointChatCompletions, "test-model", 0.20, 0, nil)
 
 	w := httptest.NewRecorder()
 	returned := make(chan error, 1)
-	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), formatChat)
 	go func() { returned <- responder(em, upstream, body) }()
 
 	select {

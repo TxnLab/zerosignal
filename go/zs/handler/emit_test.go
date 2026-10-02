@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
@@ -31,14 +32,14 @@ func (r *recordingEmitter) clamped(uint64)                               {}
 func (r *recordingEmitter) fail(e *zs.Error)                             { r.failed = e }
 func (r *recordingEmitter) reply(int, http.Header, []byte, *usageReport) { r.replied = true }
 func (r *recordingEmitter) open(int) error                               { return nil }
-func (r *recordingEmitter) frame(f transform.SSEFrame) (int, error)      { return len(f.Data), nil }
+func (r *recordingEmitter) frame(f outFrame) (int, error)                { return len(f.frame.Data), nil }
 func (r *recordingEmitter) interrupt()                                   {}
 
 // An operator's own error passes through with its status and body, and the
 // proxy's X-Zs-* headers survive the strip while the node's do not.
 func TestHTTPEmitter_PassThrough(t *testing.T) {
 	w := httptest.NewRecorder()
-	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), formatChat)
 	em.clamped(100)
 
 	body := []byte(`{"error":{"message":"m","type":"invalid_request_error","code":"ticket_invalid"}}`)
@@ -73,7 +74,7 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 	// A body the proxy wrote in place of one it could not parse is JSON
 	// whatever the operator labelled its page.
 	w = httptest.NewRecorder()
-	em = newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/", nil))
+	em = newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/", nil), formatChat)
 	html := http.Header{}
 	html.Set("Content-Type", "text/html")
 	em.fail(&zs.Error{Kind: zs.KindInterrupted, Err: &upstreamReply{status: 504, header: html, body: []byte("{}\n"), contentType: "application/json"}})
@@ -85,7 +86,7 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 // A stream starts with the node's status, as SSE.
 func TestHTTPEmitter_OpenUsesUpstreamStatus(t *testing.T) {
 	w := httptest.NewRecorder()
-	if err := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/", nil)).open(http.StatusAccepted); err != nil {
+	if err := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/", nil), formatChat).open(http.StatusAccepted); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != http.StatusAccepted || w.Header().Get("Content-Type") != "text/event-stream" {
@@ -103,7 +104,7 @@ func (n noFlushWriter) WriteHeader(code int)        { n.rec.WriteHeader(code) }
 // A writer that can't flush gets an error, not a stream that never arrives.
 func TestHTTPEmitter_OpenWithoutFlusherFails(t *testing.T) {
 	rec := httptest.NewRecorder()
-	em := newHTTPEmitter(noFlushWriter{rec}, httptest.NewRequest(http.MethodPost, "/", nil))
+	em := newHTTPEmitter(noFlushWriter{rec}, httptest.NewRequest(http.MethodPost, "/", nil), formatChat)
 	if em.open(http.StatusOK) == nil {
 		t.Fatal("open succeeded without a Flusher")
 	}
@@ -112,6 +113,76 @@ func TestHTTPEmitter_OpenWithoutFlusherFails(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type %q, want the error's application/json", ct)
+	}
+}
+
+// A /v1/completions caller gets its content in text-completion shape, but a
+// frame the node did not seal (a `data:` passed through as sent) reaches it
+// unchanged, and a chat caller's content is never reshaped.
+func TestHTTPEmitter_LegacyCompletionsReshapesContentOnly(t *testing.T) {
+	chunk := []byte(`{"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}`)
+	r := httptest.NewRequest(http.MethodPost, "/v1/completions", nil)
+	r.Header.Set(hayaiUsageFrameHeader, "1")
+	w := httptest.NewRecorder()
+	em := newHTTPEmitter(w, r, formatLegacyCompletions)
+	if err := em.open(http.StatusOK); err != nil {
+		t.Fatal(err)
+	}
+	usage := &usageReport{receipt: &ticket.UsageReceipt{TicketID: "tid"}, ticket: &ticket.Ticket{}}
+	for _, f := range []outFrame{
+		{frame: transform.SSEFrame{Data: chunk}, content: true},
+		{frame: transform.SSEFrame{Data: chunk}},
+		{usage: usage},
+	} {
+		if _, err := em.frame(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := strings.Split(strings.TrimSpace(w.Body.String()), "\n\n")
+	if len(got) != 3 {
+		t.Fatalf("got %d frames, want 3: %q", len(got), w.Body.String())
+	}
+	if !strings.Contains(got[0], `"text_completion"`) || !strings.Contains(got[0], `"Hi"`) {
+		t.Errorf("content frame not reshaped: %s", got[0])
+	}
+	if got[1] != "data: "+string(chunk) {
+		t.Errorf("pass-through frame changed: %s", got[1])
+	}
+	if !strings.HasPrefix(got[2], "event: "+hayaiUsageFrameEvent) {
+		t.Errorf("usage frame: %s", got[2])
+	}
+
+	w = httptest.NewRecorder()
+	chat := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), formatChat)
+	if err := chat.open(http.StatusOK); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.frame(outFrame{frame: transform.SSEFrame{Data: chunk}, content: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "data: "+string(chunk) {
+		t.Errorf("chat content frame changed: %s", got)
+	}
+
+	w = httptest.NewRecorder()
+	newHTTPEmitter(w, r, formatLegacyCompletions).reply(http.StatusOK, http.Header{},
+		[]byte(`{"id":"c","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop"}]}`), nil)
+	if !strings.Contains(w.Body.String(), `"text_completion"`) {
+		t.Errorf("reply not reshaped: %s", w.Body.String())
+	}
+}
+
+// The usage frame is the caller's opt-in; without it the report is dropped,
+// and the dropped frame counts no bytes toward the stream tally.
+func TestHTTPEmitter_UsageFrameNeedsOptIn(t *testing.T) {
+	w := httptest.NewRecorder()
+	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), formatChat)
+	if err := em.open(http.StatusOK); err != nil {
+		t.Fatal(err)
+	}
+	n, err := em.frame(outFrame{usage: &usageReport{receipt: &ticket.UsageReceipt{TicketID: "tid"}, ticket: &ticket.Ticket{}}})
+	if err != nil || n != 0 || w.Body.Len() != 0 {
+		t.Errorf("frame = (%d, %v), body %q; want nothing written", n, err, w.Body.String())
 	}
 }
 
@@ -171,7 +242,7 @@ func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T
 
 	var genComplete, sawTail atomic.Bool
 	factory := func(*http.Response) (frameTransform, error) {
-		return func(f transform.SSEFrame) (transform.SSEFrame, error) {
+		return func(f transform.SSEFrame) (outFrame, error) {
 			switch string(f.Data) {
 			case "done":
 				genComplete.Store(true)
@@ -180,10 +251,10 @@ func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T
 			case "tail":
 				sawTail.Store(true)
 			}
-			return f, nil
+			return outFrame{frame: f}, nil
 		}, nil
 	}
-	s.forwardRawStream(clientCtx, newHTTPEmitter(w, r), upstream.URL, "", []byte("{}"), "application/json", nil, nil,
+	s.forwardRawStream(clientCtx, newHTTPEmitter(w, r, formatChat), upstream.URL, "", []byte("{}"), "application/json", nil, nil,
 		factory, func(emitter, *http.Response, []byte) error { return nil }, &genComplete)
 
 	if !sawTail.Load() {
@@ -205,7 +276,7 @@ func TestForwardRawNonStream_Posts(t *testing.T) {
 
 	s := &client{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	s.forwardRawNonStream(context.Background(), newHTTPEmitter(httptest.NewRecorder(), r), upstream.URL, "", []byte("{}"),
+	s.forwardRawNonStream(context.Background(), newHTTPEmitter(httptest.NewRecorder(), r, formatChat), upstream.URL, "", []byte("{}"),
 		"application/json", nil, nil, func(emitter, *http.Response, []byte) error { return nil })
 	if method != http.MethodPost {
 		t.Errorf("forward used method %q, want POST", method)
@@ -217,7 +288,7 @@ func TestForwardRawNonStream_Posts(t *testing.T) {
 func TestNonStreamResponder_PreEnvelopeErrorIsInterrupted(t *testing.T) {
 	s := &client{cfg: &Config{}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	responder := s.buildHayaiNonStreamResponder(context.Background(), nil, "", nil, zs.Operator{}, nil,
-		nil, endpointChatCompletions, "m", 0, 0, nil, formatChat)
+		nil, endpointChatCompletions, "m", 0, 0, nil)
 
 	for _, tc := range []struct {
 		name, body, wantCode string
