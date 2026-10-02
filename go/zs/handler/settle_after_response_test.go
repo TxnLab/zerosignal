@@ -118,7 +118,8 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	returned := make(chan error, 1)
-	go func() { returned <- responder(w, upstream, body) }()
+	em := newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	go func() { returned <- responder(em, upstream, body) }()
 
 	select {
 	case err := <-returned:

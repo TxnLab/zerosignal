@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,17 @@ func newFlushWriter() (*bytes.Buffer, *fakeFlusher) {
 }
 
 func identityFrame(f transform.SSEFrame) (transform.SSEFrame, error) { return f, nil }
+
+// emitTo is the frame sink an open httpEmitter hands pumpSSE, writing into buf.
+func emitTo(buf *bytes.Buffer, f *fakeFlusher) func(transform.SSEFrame) (int, error) {
+	e := &httpEmitter{w: bufferWriter{buf}, clientCtx: context.Background(), flusher: f}
+	return e.frame
+}
+
+type bufferWriter struct{ *bytes.Buffer }
+
+func (bufferWriter) Header() http.Header { return http.Header{} }
+func (bufferWriter) WriteHeader(int)     {}
 
 // clientAwareWriter forwards while the client context is live and silently
 // swallows once it's cancelled — so a tail drain after a client disconnect
@@ -159,7 +171,7 @@ func TestPumpSSE_BasicFrames(t *testing.T) {
 	in := strings.NewReader("data: one\n\ndata: two\n\ndata: three\n\n")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatalf("pumpSSE: %v", err)
 	}
 	out := buf.String()
@@ -177,7 +189,7 @@ func TestPumpSSE_MultiLineData(t *testing.T) {
 	in := strings.NewReader("data: l1\ndata: l2\n\n")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -191,7 +203,7 @@ func TestPumpSSE_EventAndID(t *testing.T) {
 	in := strings.NewReader("event: msg\nid: 7\ndata: payload\n\n")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -206,7 +218,7 @@ func TestPumpSSE_CommentLine(t *testing.T) {
 	in := strings.NewReader(": keepalive\n\ndata: hi\n\n")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -221,7 +233,7 @@ func TestPumpSSE_LargeFrame(t *testing.T) {
 	in := strings.NewReader("data: " + big + "\n\n")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatalf("pumpSSE large frame: %v", err)
 	}
 	if !strings.Contains(buf.String(), big) {
@@ -240,7 +252,7 @@ func TestPumpSSE_FrameTransformDrops(t *testing.T) {
 		return fr, nil
 	}
 
-	if err := pumpSSE(context.Background(), buf, f, in, drop, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, drop, &streamTally{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -260,7 +272,7 @@ func TestPumpSSE_FrameTransformError(t *testing.T) {
 		return transform.SSEFrame{}, errors.New("transform boom")
 	}
 
-	err := pumpSSE(context.Background(), buf, f, in, fail, &streamTally{})
+	err := pumpSSE(context.Background(), emitTo(buf, f), in, fail, &streamTally{})
 	if err == nil || !strings.Contains(err.Error(), "transform stream chunk") {
 		t.Errorf("err = %v", err)
 	}
@@ -273,7 +285,7 @@ func TestPumpSSE_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := pumpSSE(ctx, buf, f, in, identityFrame, &streamTally{})
+	err := pumpSSE(ctx, emitTo(buf, f), in, identityFrame, &streamTally{})
 	if err == nil {
 		t.Fatal("want ctx.Err()")
 	}
@@ -287,7 +299,7 @@ func TestPumpSSE_EOFFlushesTrailingFrame(t *testing.T) {
 	in := strings.NewReader("data: trailing")
 	buf, f := newFlushWriter()
 
-	if err := pumpSSE(context.Background(), buf, f, in, identityFrame, &streamTally{}); err != nil {
+	if err := pumpSSE(context.Background(), emitTo(buf, f), in, identityFrame, &streamTally{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "data: trailing") {

@@ -56,7 +56,12 @@ import (
 // depth, not a product limit — lift to config if a real workload needs more.
 const maxImageToolBudgetPerRequest uint64 = 64
 
-// dispatchHayai runs the two-phase admission flow:
+// dispatchHayai answers an HTTP client through dispatch.
+func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
+	s.dispatch(newHTTPEmitter(w, r), r, endpoint, body, format)
+}
+
+// dispatch runs the two-phase admission flow, sending its outcome to em:
 //
 //  1. Select candidate operators from the registry, preferring an
 //     affinity-matched operator when the request contains tool_call_id
@@ -73,7 +78,7 @@ const maxImageToolBudgetPerRequest uint64 = 64
 // If every candidate refuses, the client gets a 503 with Retry-After
 // propagated from the shortest operator hint — the admission layer is
 // doing its job and no payment has happened.
-func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
+func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []byte, format clientFormat) {
 	ctx := r.Context()
 
 	isImage := endpoint == endpointImages
@@ -151,7 +156,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	case isImageEdit:
 		m, n, size, quality, stream, err := parseImageEditMultipart(r.Header.Get("Content-Type"), body)
 		if err != nil {
-			writeError(w, newError("bad_image_edit_request", err.Error()))
+			em.fail(newError("bad_image_edit_request", err.Error()))
 			return
 		}
 		model = m
@@ -161,12 +166,12 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	case isImage:
 		model = hayai.ExtractModel(body)
 		if model == "" {
-			writeError(w, newError("missing_model", "request body has no model field"))
+			em.fail(newError("missing_model", "request body has no model field"))
 			return
 		}
 		n, size, quality, err := parseImageRequestN(body)
 		if err != nil {
-			writeError(w, newError("bad_image_request", err.Error()))
+			em.fail(newError("bad_image_request", err.Error()))
 			return
 		}
 		imageN = n
@@ -174,7 +179,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	default:
 		model = hayai.ExtractModel(body)
 		if model == "" {
-			writeError(w, newError("missing_model", "request body has no model field"))
+			em.fail(newError("missing_model", "request body has no model field"))
 			return
 		}
 	}
@@ -244,7 +249,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// model, drew the line. Set before any write (including the error
 			// paths below), so a request that gets clamped and STILL misses on
 			// context window reports both facts.
-			w.Header().Set("X-Zs-Max-Output-Clamped", strconv.FormatUint(ceiling, 10))
+			em.clamped(ceiling)
 			// Debug, not Info: a tool that hardcodes an over-large ceiling in its
 			// model card sends one on every single request, so this fires per
 			// request for the entire life of that integration. The response header
@@ -261,7 +266,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// estimateTokens writes its own structured error response so the
 			// client gets unsupported_model / max_output_required shapes that
 			// match the reserve endpoint's own errors.
-			s.writeTokenizeError(w, endpoint, model, err)
+			s.writeTokenizeError(em, endpoint, model, err)
 			return
 		}
 	}
@@ -339,7 +344,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			slog.String("endpoint", endpoint),
 			slog.String("model", model),
 			slog.Any("err", err))
-		writeError(w, newError("registry", "operator selection failed"))
+		em.fail(newError("registry", "operator selection failed"))
 		return
 	}
 	if len(pick.Operators) == 0 {
@@ -354,7 +359,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// no_operator / no_tee_capacity so a client retry-loop
 			// can recognize "upgrade required" — a retry against the
 			// same fleet will keep failing until either side moves.
-			writeError(w, newError("no_compatible_operator",
+			em.fail(newError("no_compatible_operator",
 				"no operator advertises a compatible wire protocol version ("+wire.ProtoVersion+")"))
 		case pick.TEEBlocked:
 			// Required TEE attestation — none of the otherwise-fitting
@@ -365,7 +370,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// client can retry on a different cadence (TEE recovery
 			// usually means a node refreshing its evidence rather
 			// than provisioning new capacity).
-			writeError(w, newError("no_tee_capacity",
+			em.fail(newError("no_tee_capacity",
 				"no operator with current TEE attestation can serve this request"))
 		case pick.StagingBlocked:
 			// Operators advertise the model but every otherwise-fitting node is
@@ -373,7 +378,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// them. 503 (not 400): the request is well-formed; there's just no
 			// production node for the model right now. Distinct code so the owner
 			// sees the actionable hint rather than a generic no_operator.
-			writeError(w, newError("no_production_operator",
+			em.fail(newError("no_production_operator",
 				fmt.Sprintf("the model %q is only served by staging nodes; enable zs.allow_staging (or --allow-staging) to route to them", model)))
 		case pick.SignerUnderfundedBlocked:
 			// Every otherwise-eligible node (or the strict-affinity pin) has a
@@ -386,13 +391,13 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 				msg = fmt.Sprintf("every node serving the model %q has less than %d ALGO spendable in its signing account to pay network fees; retry later or pick another model",
 					model, selection.MinSignerSpendableMicroAlgos/1_000_000)
 			}
-			writeError(w, newError("no_funded_operator", msg))
+			em.fail(newError("no_funded_operator", msg))
 		case pick.RegistryCount == 0:
 			// Name the model — this is the most common 503 (a client like
 			// Codex asking for a model id no operator in the pool serves), and
 			// the model id is loggable/surfaceable (not prompt content), so
 			// saying which one turns "no idea why" into a one-line diagnosis.
-			writeError(w, newError("no_operator",
+			em.fail(newError("no_operator",
 				fmt.Sprintf("no operator is currently advertising the model %q", model)))
 		case pick.ImageEndpointUnsupported:
 			// Operators advertise the model id but none publish the
@@ -408,7 +413,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			} else {
 				which = "image edits"
 			}
-			writeError(w, newError("no_operator",
+			em.fail(newError("no_operator",
 				fmt.Sprintf("no operator advertises %s for %s", model, which)))
 		case pick.AffinityBlocked:
 			// Strict affinity pinned this conversation to a specific
@@ -427,14 +432,14 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 					"reduce prompt size or switch affinity_policy to \"prefer\"",
 					model, sizing.InputTokens, sizing.MaxOutputTokens)
 			}
-			writeError(w, newError("context_length_exceeded", msg))
+			em.fail(newError("context_length_exceeded", msg))
 		case pick.PinConflict:
 			// A previous_response_id continuation resolves to an operator the
 			// caller's hard preferences exclude — a client contradiction (serve
 			// EITHER the continuation OR the pin, not both). 400: retrying the
 			// same body can't resolve it; the client drops the pin or starts a
 			// new conversation. Distinct from no_pinned_operator (availability).
-			writeError(w, newError("pin_conflicts_with_continuation", pick.PinConflictReason))
+			em.fail(newError("pin_conflicts_with_continuation", pick.PinConflictReason))
 		case pick.ProviderPinBlocked:
 			// A caller routing preference (`provider.only`, or `provider.order`
 			// with allow_fallbacks=false) matched no operator that can serve
@@ -444,7 +449,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// no_tee_capacity, and a retry can succeed once the pinned
 			// operator/node reappears. Distinct code so a client can tell "my
 			// pin is unsatisfiable right now" from a generic pool outage.
-			writeError(w, newError("no_pinned_operator",
+			em.fail(newError("no_pinned_operator",
 				fmt.Sprintf("no operator matching your provider preferences is currently available "+
 					"to serve %s; adjust provider.only / provider.order or remove the pin", model)))
 		case pick.PriceBlocked:
@@ -453,7 +458,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// expensive). 400, like OpenRouter's "no provider meets the
 			// price cap" — the request can't execute as priced; the client
 			// raises the ceiling or removes it.
-			writeError(w, newError("price_ceiling_exceeded",
+			em.fail(newError("price_ceiling_exceeded",
 				fmt.Sprintf("no operator serves %s within your provider.max_price ceiling; "+
 					"raise or remove the ceiling", model)))
 		case pick.ToolUnsupported:
@@ -461,7 +466,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// requested zs_* tool. 503 (like no_tee_capacity): this is a
 			// required-capability gap in the pool, not a malformed request —
 			// a retry may succeed once a capable operator appears.
-			writeError(w, newError("no_tool_capacity",
+			em.fail(newError("no_tool_capacity",
 				fmt.Sprintf("no operator advertises every requested built-in tool for %s "+
 					"(provider.require_tools is set)", model)))
 		default:
@@ -471,7 +476,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			// per-operator breakdown turns "nobody fits" into a
 			// directly actionable error: the client sees which limit
 			// is being blown out and by how much for each candidate.
-			writeError(w, newError("context_length_exceeded", formatNoFitMessage(model, sizing, pick.SizingMisses)))
+			em.fail(newError("context_length_exceeded", formatNoFitMessage(model, sizing, pick.SizingMisses)))
 		}
 		return
 	}
@@ -850,7 +855,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 					}
 					s.log.LogAttrs(ctx, slog.LevelDebug, "reserve response", attrs...)
 				}
-				s.runHayaiSealed(w, r, endpoint, model, body, op, rt, wantsStream, hop, format)
+				s.runHayaiSealed(em, r, endpoint, model, body, op, rt, wantsStream, hop, format)
 				return
 			case hayai.IsBusy(err):
 				// A considered refusal, so it ends the sweeps — tracked separately
@@ -923,7 +928,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 				// payerRefusalCodes without an errorShapes entry still renders
 				// as a payer refusal.
 				e := &hayai.Error{Kind: hayai.KindFunds, Code: payerRefusal.Code, Message: payerRefusal.Message, RetryAfter: payerRefusal.RetryAfter}
-				writeError(w, e)
+				em.fail(e)
 				return
 			case hayai.IsNoEphemeral(err):
 				// This operator has no valid, unexpired forward-secrecy ephemeral
@@ -1070,7 +1075,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	// affinity with a busy operator) keep returning 503 + Retry-After
 	// unchanged.
 	if len(reserveSizeRejections) > 0 || len(pick.SizingMisses) > 0 {
-		writeError(w, newError("context_length_exceeded",
+		em.fail(newError("context_length_exceeded",
 			formatReserveSizeFailureMessage(model, sizing, reserveSizeRejections, pick.SizingMisses)))
 		return
 	}
@@ -1086,7 +1091,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	// 400 ahead of the retryable 503 would wrongly tell the client to give
 	// up. Those retryable outcomes win below.
 	if toolFactorMissing && !anyBusy && !relayUnavailable {
-		writeError(w, newError("unsupported_tool",
+		em.fail(newError("unsupported_tool",
 			fmt.Sprintf("no operator serves a built-in image tool for model %s — the model does not advertise an image-tool factor", model)))
 		return
 	}
@@ -1095,7 +1100,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	// privacy-fleet gap (too few operators, or all share the target's owner)
 	// from genuine capacity exhaustion. We never route direct to recover.
 	if relayUnavailable {
-		writeError(w, newError("no_relay_available",
+		em.fail(newError("no_relay_available",
 			"transport-privacy mode is enabled but no eligible relay operator is available for the selected target(s)"))
 		return
 	}
@@ -1106,7 +1111,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	// can tell a forward-secrecy posture gap from genuine capacity exhaustion;
 	// mirrors no_tee_capacity. There is no durable-key fallback.
 	if ephemeralMissing && !anyBusy && !relayUnavailable {
-		writeError(w, newError("no_ephemeral_capacity",
+		em.fail(newError("no_ephemeral_capacity",
 			"no operator with a valid forward-secrecy ephemeral recipient can serve this request"))
 		return
 	}
@@ -1115,7 +1120,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 	// side misbehaviour (a mis-priced or internally-inconsistent ticket), so a 502
 	// distinct from operators_busy. Ranks below the retryable busy/relay outcomes.
 	if priceRejected && !anyBusy && !relayUnavailable {
-		writeError(w, newError("ticket_price_rejected",
+		em.fail(newError("ticket_price_rejected",
 			"every eligible operator returned a ticket whose price failed verification (mis-priced or internally inconsistent)"))
 		return
 	}
@@ -1131,12 +1136,12 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 			fmt.Sprintf("every operator serving %s is currently unreachable through its gateway, "+
 				"and none refused the request; this usually clears within a minute — retry after the hint", model))
 		e.RetryAfter = transientRetryAfterHint
-		writeError(w, e)
+		em.fail(e)
 		return
 	}
 	e := newError("operators_busy", "all eligible operators are at capacity; retry after the hint")
 	e.RetryAfter = busyHint
-	writeError(w, e)
+	em.fail(e)
 }
 
 // transientRetryAfterHint is the Retry-After we give a client when the whole
@@ -2412,7 +2417,7 @@ func bandByResponsiveness(ops []hayai.Operator, preferred *hayai.Operator, lat h
 // ticket_id bound into the envelope, and hands the response to the decrypt
 // pipeline.
 func (s *Server) runHayaiSealed(
-	w http.ResponseWriter,
+	em emitter,
 	r *http.Request,
 	endpoint, model string,
 	body []byte,
@@ -2449,7 +2454,7 @@ func (s *Server) runHayaiSealed(
 					relayAttr(hop),
 					slog.String("ticket_id", ticket.TicketID),
 					slog.Any("err", err))
-				writeError(w, newError("operator_ticket_reuse",
+				em.fail(newError("operator_ticket_reuse",
 					"the operator issued a ticket id that is already in flight for this payer; no payment was made"))
 				return
 			}
@@ -2457,7 +2462,7 @@ func (s *Server) runHayaiSealed(
 				slog.String("endpoint", endpoint),
 				slog.Uint64("max_price_microusdc", ticket.MaxPrice),
 				slog.Any("err", err))
-			writeError(w, newError("spend_cap_exceeded",
+			em.fail(newError("spend_cap_exceeded",
 				"spend cap reached: this request would exceed the configured USDC limit — raise spend.daily_cap_usdc / spend.per_request_cap_usdc, or wait for the UTC day to roll over"))
 			return
 		}
@@ -2495,7 +2500,7 @@ func (s *Server) runHayaiSealed(
 					"raise zs.concurrent_slots (run `zs-proxy slots <n>`, which also funds the pool), or retry once in-flight requests settle.",
 					s.cfg.PayerAddr, s.cfg.Network))
 			e.RetryAfter = 2 * time.Second
-			writeError(w, e)
+			em.fail(e)
 			return
 		}
 		// Prepaid MBR pool can't be funded: the payer holds USDC but is short on
@@ -2511,7 +2516,7 @@ func (s *Server) runHayaiSealed(
 		// slot to serve on is the same actionable condition — the wallet needs
 		// more ALGO — and its message names the remaining shortfall the same way.
 		if errors.Is(err, hayai.ErrDepositUnaffordable) || errors.Is(err, hayai.ErrDepositBelowTarget) {
-			writeError(w, newError("mbr_pool_underfunded",
+			em.fail(newError("mbr_pool_underfunded",
 				fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
 					"Add ALGO with `zs-proxy fund`.", s.cfg.PayerAddr, s.cfg.Network, err)))
 			return
@@ -2529,12 +2534,12 @@ func (s *Server) runHayaiSealed(
 				hint = "add funds in the web app (" + s.cfg.FundingURL + ") if this is your web account, " +
 					"or run `zs-proxy fund` for a deposit address."
 			}
-			writeError(w, newError("wallet_unfunded",
+			em.fail(newError("wallet_unfunded",
 				fmt.Sprintf("zerosignal wallet %s can't pay for this request on %s — %s",
 					s.cfg.PayerAddr, s.cfg.Network, hint)))
 			return
 		}
-		writeError(w, newError("wallet_open", "payment group could not be submitted"))
+		em.fail(newError("wallet_open", "payment group could not be submitted"))
 		return
 	}
 	// Open committed: the reservation stays on the tally (settlement reconciles
@@ -2589,7 +2594,7 @@ func (s *Server) runHayaiSealed(
 			opAttr(op),
 			relayAttr(hop),
 			slog.Any("err", err))
-		writeError(w, newError("wrap_request", "request could not be wrapped"))
+		em.fail(newError("wrap_request", "request could not be wrapped"))
 		return
 	}
 	defer wire.ZeroEphemeralIdentity(ephemeral)
@@ -2634,10 +2639,10 @@ func (s *Server) runHayaiSealed(
 		// stream a clean OpenAI stream for strict clients (JetBrains/Koog).
 		emitUsageFrame := strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != ""
 		factory := s.buildHayaiFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, emitUsageFrame, format)
-		s.forwardRawStream(ctx, w, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
+		s.forwardRawStream(ctx, em, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
 		return
 	}
-	s.forwardRawNonStream(ctx, w, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
+	s.forwardRawNonStream(ctx, em, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
 }
 
 // resolveUsePrivacy applies a per-request relay preference on top of the proxy
@@ -2963,12 +2968,7 @@ func (s *Server) buildHayaiNonStreamResponder(
 	hop *hayai.RelayHop,
 	format clientFormat,
 ) nonStreamResponder {
-	return func(w http.ResponseWriter, upstreamResp *http.Response, respBody []byte) error {
-		// Captured before the first copyResponseHeaders: the X-Zs-* the proxy
-		// itself set earlier in dispatch (the max_output clamp marker) would
-		// otherwise be deleted along with the node's by stripHayaiHeaders. The
-		// streaming path never strips, so this is the only place it can be lost.
-		proxyHdrs := snapshotHayaiHeaders(w.Header())
+	return func(em emitter, upstreamResp *http.Response, respBody []byte) error {
 		wrappedKey := upstreamResp.Header.Get(wire.ResponseKeyHeader)
 		ct := upstreamResp.Header.Get("Content-Type")
 		if wrappedKey == "" {
@@ -2984,8 +2984,7 @@ func (s *Server) buildHayaiNonStreamResponder(
 					opAttr(op),
 					relayAttr(hop),
 					slog.Int("upstream_status", upstreamResp.StatusCode))
-				writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "operator_unsealed_response",
-					"operator returned a response without sealing it")
+				em.fail(newError("operator_unsealed_response", "operator returned a response without sealing it"))
 				return nil
 			}
 			// Transport-level error from the node (status >= 400,
@@ -3018,13 +3017,11 @@ func (s *Server) buildHayaiNonStreamResponder(
 					slog.Int("upstream_status", upstreamResp.StatusCode),
 					slog.String("content_type", ctSafe),
 					slog.Int("body_bytes", len(respBody)))
-				// Preserve Retry-After before writing our own body. An edge rate
-				// limiter (Cloudflare, nginx limit_req) answers 429/503 with an HTML
-				// page, which lands here — dropping its hint would make the client
-				// retry blind. writeOpenAIError Sets Content-Type, so it still wins.
-				copyResponseHeaders(w.Header(), upstreamResp.Header)
-				stripNodeHayaiHeaders(w.Header(), proxyHdrs)
-				w.Header().Del("Content-Length")
+				// The operator's headers still go through, Retry-After among them.
+				// An edge rate limiter (Cloudflare, nginx limit_req) answers 429/503
+				// with an HTML page, which lands here — dropping its hint would make
+				// the client retry blind.
+				//
 				// Deliberately NOT claiming which layer answered. The proxy cannot
 				// tell an operator's CDN from the node's own mux — Go's ServeMux
 				// answers an unregistered route with a text/plain "404 page not
@@ -3035,23 +3032,29 @@ func (s *Server) buildHayaiNonStreamResponder(
 				// transient.Classify recognizes out-of-tree infrastructure as
 				// retryable, and inventing one would flip a recoverable gateway blip
 				// into a terminal refusal for any caller that classifies our response.
-				writeOpenAIError(w, upstreamResp.StatusCode, "server_error", "",
-					fmt.Sprintf("operator returned HTTP %d with a body this proxy could not parse as an OpenAI error (content-type %q)",
-						upstreamResp.StatusCode, ctSafe))
+				msg := fmt.Sprintf("operator returned HTTP %d with a body this proxy could not parse as an OpenAI error (content-type %q)",
+					upstreamResp.StatusCode, ctSafe)
+				em.fail(&hayai.Error{Kind: hayai.KindInterrupted, Message: msg, Err: &upstreamReply{
+					status:      upstreamResp.StatusCode,
+					header:      upstreamResp.Header,
+					body:        openAIErrorBody("server_error", "", msg),
+					contentType: "application/json",
+				}})
 				return nil
 			}
 			s.log.Warn("operator returned pre-envelope error",
 				opAttr(op), relayAttr(hop),
 				slog.Int("upstream_status", upstreamResp.StatusCode),
 				slog.String("error", msg))
-			copyResponseHeaders(w.Header(), upstreamResp.Header)
-			// Same §5.2-step-4 hygiene as the sealed success path: even on a
-			// pre-envelope error, no node-set X-Zs-* header reaches the
-			// client (a hostile node could stuff arbitrary values here).
-			stripNodeHayaiHeaders(w.Header(), proxyHdrs)
-			w.Header().Del("Content-Length")
-			w.WriteHeader(upstreamResp.StatusCode)
-			_, _ = w.Write(respBody)
+			// Paid, and the node refused admission: its own code and body go
+			// back to the caller (ticket_required, ticket_invalid, ...). Even
+			// here no node-set X-Zs-* header reaches the client, since a hostile
+			// node could stuff arbitrary values into them.
+			em.fail(&hayai.Error{Kind: hayai.KindInterrupted, Code: openAIErrorCode(respBody), Message: msg, Err: &upstreamReply{
+				status: upstreamResp.StatusCode,
+				header: upstreamResp.Header,
+				body:   respBody,
+			}})
 			return nil
 		}
 
@@ -3061,8 +3064,7 @@ func (s *Server) buildHayaiNonStreamResponder(
 				opAttr(op),
 				relayAttr(hop),
 				slog.String("content_type", ct))
-			writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "operator_inconsistent_response",
-				"operator returned a response key but did not seal the body")
+			em.fail(newError("operator_inconsistent_response", "operator returned a response key but did not seal the body"))
 			return nil
 		}
 
@@ -3142,20 +3144,18 @@ func (s *Server) buildHayaiNonStreamResponder(
 		// unless the flag is on. See debug.go.
 		s.debugDumpResponseBody(endpoint, op.ID, ticket.TicketID, plaintext)
 
-		copyResponseHeaders(w.Header(), upstreamResp.Header)
-		// SPEC §5.2 step 4: no node-set X-Zs-* header reaches the client —
-		// not just the response key and receipt, but X-Zs-Settle-Group and
-		// anything a future node adds. setHayaiUsageHeaders re-adds the
-		// proxy-owned usage headers below.
-		stripNodeHayaiHeaders(w.Header(), proxyHdrs)
-		w.Header().Del("Content-Length")
-		w.Header().Set("Content-Type", "application/json")
+		// SPEC §5.2 step 4: the emitter passes none of the node's X-Zs-*
+		// headers on — not just the response key and receipt, but
+		// X-Zs-Settle-Group and anything a future node adds. Usage is the
+		// proxy's own report of the verified charge.
+		var usage *usageReport
 		if receipt != nil {
 			// Payer-facing fee breakdown from the proxy payer's cached
 			// protocolFeeBps (background-refreshed via a direct global read —
 			// never blocks this path). ok==false degrades to no breakdown.
 			feeBps, haveFee := s.feeRateNow()
-			setHayaiUsageHeaders(w.Header(), receipt, ticket, op, openFees, settleFees, algoUSDPrice, feeBps, retiredDiscountBps, haveFee)
+			usage = &usageReport{receipt: receipt, ticket: ticket, op: op, openFees: openFees, settleFees: settleFees,
+				algoUSDPrice: algoUSDPrice, feeBps: feeBps, discountBps: retiredDiscountBps, haveFee: haveFee}
 		}
 		// Legacy /v1/completions emulation: reshape the verified chat-completion
 		// body into text-completion shape for the client. Done AFTER receipt /
@@ -3166,8 +3166,7 @@ func (s *Server) buildHayaiNonStreamResponder(
 		if format == formatLegacyCompletions {
 			out = completionsResponseFromChat(plaintext)
 		}
-		w.WriteHeader(upstreamResp.StatusCode)
-		_, _ = w.Write(out)
+		em.reply(upstreamResp.StatusCode, upstreamResp.Header, out, usage)
 		return nil
 	}
 }
@@ -4504,17 +4503,17 @@ func (s *Server) estimateTokens(model, endpoint string, body []byte) (tokenize.E
 // writeTokenizeError maps tokenize errors to the OpenAI-shaped response
 // surfaces the reserve endpoint itself would produce, so the client sees
 // the same error code whether the proxy refused up front or the node did.
-func (s *Server) writeTokenizeError(w http.ResponseWriter, endpoint, model string, err error) {
+func (s *Server) writeTokenizeError(em emitter, endpoint, model string, err error) {
 	switch {
 	case errors.Is(err, tokenize.ErrMaxOutputRequired):
-		writeError(w, newError("max_output_required",
+		em.fail(newError("max_output_required",
 			"request omits max_tokens/max_completion_tokens/max_output_tokens and no default is configured for this model"))
 	default:
 		s.log.Warn("tokenize failed",
 			slog.String("endpoint", endpoint),
 			slog.String("model", model),
 			slog.Any("err", err))
-		writeError(w, newError("tokenize", "input tokenization failed"))
+		em.fail(newError("tokenize", "input tokenization failed"))
 	}
 }
 

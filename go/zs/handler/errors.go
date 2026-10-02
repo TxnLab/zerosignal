@@ -31,13 +31,19 @@ type openAIError struct {
 func writeOpenAIError(w http.ResponseWriter, status int, errType, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(openAIErrorEnvelope{
+	_, _ = w.Write(openAIErrorBody(errType, code, message))
+}
+
+// openAIErrorBody is the JSON body writeOpenAIError sends, newline included.
+func openAIErrorBody(errType, code, message string) []byte {
+	b, _ := json.Marshal(openAIErrorEnvelope{
 		Error: openAIError{
 			Message: message,
 			Type:    errType,
 			Code:    code,
 		},
 	})
+	return append(b, '\n')
 }
 
 // errorShape is one dispatch error code's Kind and how the OpenAI-compatible
@@ -87,6 +93,17 @@ var errorShapes = map[string]errorShape{
 	// and a submit that timed out after algod may have accepted it, and a
 	// caller reads Unreachable as nothing paid, safe to retry.
 	"wallet_open": {zs.KindInternal, http.StatusBadGateway, "proxy_error"},
+
+	// After the open: escrow holds the payer's money from here on.
+	// build_request fails on the operator- or relay-published base URL.
+	"build_request":                  {zs.KindOperatorFault, http.StatusBadGateway, "proxy_error"},
+	"upstream_unreachable":           {zs.KindInterrupted, http.StatusBadGateway, "proxy_error"},
+	"read_upstream":                  {zs.KindInterrupted, http.StatusBadGateway, "proxy_error"},
+	"response_handler":               {zs.KindOperatorFault, http.StatusBadGateway, "proxy_error"},
+	"stream_setup":                   {zs.KindOperatorFault, http.StatusBadGateway, "proxy_error"},
+	"operator_unsealed_response":     {zs.KindOperatorFault, http.StatusBadGateway, "proxy_error"},
+	"operator_inconsistent_response": {zs.KindOperatorFault, http.StatusBadGateway, "proxy_error"},
+	"no_flusher":                     {zs.KindInternal, http.StatusInternalServerError, "proxy_error"},
 }
 
 // kindShapes renders a code errorShapes doesn't list. The one site that can

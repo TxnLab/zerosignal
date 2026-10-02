@@ -56,6 +56,14 @@ func TestErrorShapes(t *testing.T) {
 		"tokenize":                        {zs.KindInternal, 502, "proxy_error"},
 		"wrap_request":                    {zs.KindInternal, 502, "proxy_error"},
 		"wallet_open":                     {zs.KindInternal, 502, "proxy_error"},
+		"build_request":                   {zs.KindOperatorFault, 502, "proxy_error"},
+		"upstream_unreachable":            {zs.KindInterrupted, 502, "proxy_error"},
+		"read_upstream":                   {zs.KindInterrupted, 502, "proxy_error"},
+		"response_handler":                {zs.KindOperatorFault, 502, "proxy_error"},
+		"stream_setup":                    {zs.KindOperatorFault, 502, "proxy_error"},
+		"operator_unsealed_response":      {zs.KindOperatorFault, 502, "proxy_error"},
+		"operator_inconsistent_response":  {zs.KindOperatorFault, 502, "proxy_error"},
+		"no_flusher":                      {zs.KindInternal, 500, "proxy_error"},
 	}
 	if len(errorShapes) != len(want) {
 		t.Errorf("errorShapes has %d codes, this test pins %d", len(errorShapes), len(want))
@@ -131,6 +139,9 @@ func TestWriteError(t *testing.T) {
 	}
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type %q", ct)
+	}
+	if got, want := w.Body.String(), `{"error":{"message":"msg","type":"service_unavailable","code":"operators_busy"}}`+"\n"; got != want {
+		t.Errorf("body %q, want %q", got, want)
 	}
 
 	e := newError("operators_busy", "msg")

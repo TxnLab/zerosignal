@@ -161,7 +161,7 @@ type frameTransformFactory func(upstreamResp *http.Response) (frameTransform, er
 // baseURL is the per-operator URL from the registry; it must be non-empty.
 func (s *Server) forwardRawStream(
 	ctx context.Context,
-	w http.ResponseWriter,
+	em emitter,
 	r *http.Request,
 	baseURL, endpoint string,
 	body []byte,
@@ -186,7 +186,7 @@ func (s *Server) forwardRawStream(
 
 	upstreamReq, err := s.buildOperatorRequest(upstreamCtx, baseURL, r.Method, endpoint, body, outboundContentType, extraHeaders)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "build_request", err.Error())
+		em.fail(newError("build_request", err.Error()))
 		return
 	}
 	upstreamReq.Header.Set("Accept", "text/event-stream")
@@ -204,7 +204,7 @@ func (s *Server) forwardRawStream(
 		// whose transport genuinely failed while the payer happened to be gone.
 		s.attributeRelayHop(upstreamCtx, hop, transient.TransportFailureStatus, nil, nil)
 		s.log.Error("upstream request failed", slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "upstream_unreachable", err.Error())
+		em.fail(newError("upstream_unreachable", err.Error()))
 		return
 	}
 	defer upstreamResp.Body.Close()
@@ -213,15 +213,15 @@ func (s *Server) forwardRawStream(
 	if !strings.HasPrefix(ct, "text/event-stream") {
 		respBody, err := io.ReadAll(upstreamResp.Body)
 		if err != nil {
-			writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "read_upstream", err.Error())
+			em.fail(newError("read_upstream", err.Error()))
 			return
 		}
 		// Non-stream response on the streaming path: classify it as a relay
 		// hop outcome (a relay-generated hop error deprioritizes the relay).
 		s.attributeRelayHop(upstreamCtx, hop, upstreamResp.StatusCode, upstreamResp.Header, respBody)
-		if err := nonStreamFallback(w, upstreamResp, respBody); err != nil {
+		if err := nonStreamFallback(em, upstreamResp, respBody); err != nil {
 			s.log.Error("non-stream fallback failed", slog.String("endpoint", endpoint), slog.Any("err", err))
-			writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "response_handler", "upstream response could not be processed")
+			em.fail(newError("response_handler", "upstream response could not be processed"))
 		}
 		return
 	}
@@ -234,22 +234,13 @@ func (s *Server) forwardRawStream(
 	frameFn, err := frameFnFactory(upstreamResp)
 	if err != nil {
 		s.log.Error("frame transform setup failed", slog.String("endpoint", endpoint), slog.Any("err", err))
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "stream_setup", "stream could not be initialized")
+		em.fail(newError("stream_setup", "stream could not be initialized"))
 		return
 	}
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeOpenAIError(w, http.StatusInternalServerError, "proxy_error", "no_flusher", "streaming not supported by server writer")
+	if em.open(upstreamResp.StatusCode) != nil {
 		return
 	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(upstreamResp.StatusCode)
-	flusher.Flush()
 
 	// Watch for a client disconnect. If the node already finished generating,
 	// give it a bounded window to deliver the receipt/settle tail; otherwise
@@ -300,11 +291,11 @@ func (s *Server) forwardRawStream(
 		}
 	}()
 
-	// Writes are gated on the client connection: once the client is gone they
-	// are swallowed so a dead-socket write error can't abort a tail drain
-	// before it reaches the receipt frame. The pump itself stops on upstreamCtx
-	// (clean EOF, or cancelUpstream from the watcher).
-	pumpErr := pumpSSE(upstreamCtx, &clientAwareWriter{w: w, clientCtx: ctx}, flusher, upstreamResp.Body, frameFn, &tally)
+	// The emitter swallows frames once the caller is gone, so a dead-socket
+	// write error can't abort a tail drain before it reaches the receipt frame.
+	// The pump itself stops on upstreamCtx (clean EOF, or cancelUpstream from
+	// the watcher).
+	pumpErr := pumpSSE(upstreamCtx, em.frame, upstreamResp.Body, frameFn, &tally)
 	close(pumpDone)
 	// The pump has stopped, so the tally is settled and safe to read.
 	//
@@ -330,17 +321,16 @@ func (s *Server) forwardRawStream(
 		// Only surface a stream error to the client if it's still connected; a
 		// drain that ended because the client left has nothing to write to.
 		if ctx.Err() == nil {
-			writeSSEError(w, flusher)
+			em.interrupt()
 		}
 	}
 }
 
 // pumpSSE reads SSE frames from upstream, passes each through frameFn, and
-// writes the result to the client. Returns nil on clean EOF.
+// hands the result to emit. Returns nil on clean EOF.
 func pumpSSE(
 	ctx context.Context,
-	w io.Writer,
-	flusher http.Flusher,
+	emit func(transform.SSEFrame) (int, error),
 	upstream io.Reader,
 	frameFn frameTransform,
 	tally *streamTally,
@@ -369,11 +359,10 @@ func pumpSSE(
 		if out.IsEmpty() {
 			return nil
 		}
-		n, err := writeSSEFrame(w, out)
+		n, err := emit(out)
 		if err != nil {
 			return err
 		}
-		flusher.Flush()
 		tally.record(n)
 		return nil
 	}

@@ -107,9 +107,10 @@ func (s *Server) buildOperatorRequest(
 }
 
 // nonStreamResponder handles an operator response after the raw forwarder
-// has buffered it. The responder owns writing to the client (headers, status,
-// body). Returning an error is treated as a proxy-side failure.
-type nonStreamResponder func(w http.ResponseWriter, upstreamResp *http.Response, respBody []byte) error
+// has buffered it. The responder owns what the caller sees (em.reply or
+// em.fail). Returning an error means it emitted nothing, and the forwarder
+// reports it.
+type nonStreamResponder func(em emitter, upstreamResp *http.Response, respBody []byte) error
 
 // forwardRawNonStream is the low-level non-streaming forwarder used by the
 // hayai dispatcher. It does not invoke the RequestTransformer — the caller
@@ -119,7 +120,7 @@ type nonStreamResponder func(w http.ResponseWriter, upstreamResp *http.Response,
 // baseURL is the per-operator URL from the registry; it must be non-empty.
 func (s *Server) forwardRawNonStream(
 	ctx context.Context,
-	w http.ResponseWriter,
+	em emitter,
 	r *http.Request,
 	baseURL, endpoint string,
 	body []byte,
@@ -130,7 +131,7 @@ func (s *Server) forwardRawNonStream(
 ) {
 	upstreamReq, err := s.buildOperatorRequest(ctx, baseURL, r.Method, endpoint, body, outboundContentType, extraHeaders)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "build_request", err.Error())
+		em.fail(newError("build_request", err.Error()))
 		return
 	}
 
@@ -145,14 +146,14 @@ func (s *Server) forwardRawNonStream(
 		// wrote to the reputation store directly.
 		s.attributeRelayHop(ctx, hop, transient.TransportFailureStatus, nil, nil)
 		s.log.Error("operator request failed", slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "upstream_unreachable", err.Error())
+		em.fail(newError("upstream_unreachable", err.Error()))
 		return
 	}
 	defer upstreamResp.Body.Close()
 
 	respBody, err := io.ReadAll(upstreamResp.Body)
 	if err != nil {
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "read_upstream", err.Error())
+		em.fail(newError("read_upstream", err.Error()))
 		return
 	}
 
@@ -160,11 +161,11 @@ func (s *Server) forwardRawNonStream(
 	// deprioritizes the relay; anything else (target error or success) credits it.
 	s.attributeRelayHop(ctx, hop, upstreamResp.StatusCode, upstreamResp.Header, respBody)
 
-	if err := respond(w, upstreamResp, respBody); err != nil {
+	if err := respond(em, upstreamResp, respBody); err != nil {
 		// Full detail goes to the log; client sees a generic proxy_error so
 		// we don't leak transform/decrypt internals to callers.
 		s.log.Error("response handling failed", slog.String("endpoint", endpoint), slog.Any("err", err))
-		writeOpenAIError(w, http.StatusBadGateway, "proxy_error", "response_handler", "operator response could not be processed")
+		em.fail(newError("response_handler", "operator response could not be processed"))
 	}
 }
 

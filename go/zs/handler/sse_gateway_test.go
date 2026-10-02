@@ -48,8 +48,8 @@ func TestForwardStream_NonOpenAIErrorBody_ReplacedWithStructuredError(t *testing
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
 		t.Fatalf("body is not parseable JSON (%v): %s", err, body)
 	}
-	if env.Error.Message == "" || env.Error.Type == "" {
-		t.Errorf("error envelope missing message/type: %s", body)
+	if env.Error.Message == "" || env.Error.Type != "server_error" {
+		t.Errorf("error envelope wants a message and type server_error: %s", body)
 	}
 	// No error.code, deliberately: a code-less 5xx is how transient.Classify
 	// recognizes out-of-tree infrastructure as retryable. Inventing one here would

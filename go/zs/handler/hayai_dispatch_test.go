@@ -2614,6 +2614,40 @@ func TestDispatchHayai_Receipt_NonStream_HappyPath(t *testing.T) {
 	if got := w.Header().Get(wire.ReceiptHeader); got != "" {
 		t.Errorf("receipt header leaked to client: %q", got)
 	}
+	// The payer's report of the verified charge, from the receipt above.
+	for h, want := range map[string]string{
+		"X-Zs-Inference-Amount":    "31",
+		"X-Zs-Actual-Input-Count":  "8",
+		"X-Zs-Actual-Output-Count": "3",
+		"X-Zs-Operator-Id":         fmt.Sprint(node.operator.ID),
+	} {
+		if got := w.Header().Get(h); got != want {
+			t.Errorf("%s = %q, want %q", h, got, want)
+		}
+	}
+	// The node's Content-Length measured the sealed envelope, not the
+	// plaintext written here.
+	if got := w.Header().Get("Content-Length"); got != "" {
+		t.Errorf("Content-Length %q passed through from the sealed reply", got)
+	}
+}
+
+// The streaming twin of TestDispatchHayai_NonStream_TamperedCiphertextFails: a
+// stream request the node answers with a sealed non-SSE body still fails
+// closed when that body won't open.
+func TestDispatchHayai_Stream_NonSSETamperedCiphertextFails(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamTamperedCiphertext,
+		replyPlaintext: []byte(`{"x":1}`),
+	})
+	cfg := testConfig()
+	s := testServer(cfg, setupHayai(t, cfg, node))
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","stream":true}`))
+	if w.Result().StatusCode != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"response_handler"`) {
+		t.Errorf("status = %d body=%s, want 502 response_handler", w.Result().StatusCode, w.Body.String())
+	}
 }
 
 // TestDispatchHayai_Receipt_BodyHashMismatch_DrivesProtest: with a

@@ -65,8 +65,8 @@ func TestForwardRawNonStream_CallerHangUpChargesNoRelay(t *testing.T) {
 		cancel()
 	}()
 
-	s.forwardRawNonStream(ctx, w, r, upstream.URL, "", []byte("{}"), "application/json", nil, hop,
-		func(http.ResponseWriter, *http.Response, []byte) error { return nil })
+	s.forwardRawNonStream(ctx, newHTTPEmitter(w, r), r, upstream.URL, "", []byte("{}"), "application/json", nil, hop,
+		func(emitter, *http.Response, []byte) error { return nil })
 
 	if len(rep.outcomes) != 0 {
 		t.Errorf("recorded %v after the payer hung up; the proxy cancelled that socket, not the relay",
@@ -93,8 +93,8 @@ func TestForwardRawNonStream_UnreachableRelayIsCharged(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}")).WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	s.forwardRawNonStream(ctx, w, r, deadURL, "", []byte("{}"), "application/json", nil, hop,
-		func(http.ResponseWriter, *http.Response, []byte) error { return nil })
+	s.forwardRawNonStream(ctx, newHTTPEmitter(w, r), r, deadURL, "", []byte("{}"), "application/json", nil, hop,
+		func(emitter, *http.Response, []byte) error { return nil })
 
 	got, ok := rep.last(hop.RelayRef())
 	if !ok {
@@ -128,11 +128,11 @@ func TestForwardRawStream_UnreachableRelayIsChargedDespiteCallerHangUp(t *testin
 	w := httptest.NewRecorder()
 	var genComplete atomic.Bool
 
-	s.forwardRawStream(ctx, w, r, deadURL, "", []byte("{}"), "application/json", nil, hop,
+	s.forwardRawStream(ctx, newHTTPEmitter(w, r), r, deadURL, "", []byte("{}"), "application/json", nil, hop,
 		func(*http.Response) (frameTransform, error) {
 			return func(f transform.SSEFrame) (transform.SSEFrame, error) { return f, nil }, nil
 		},
-		func(http.ResponseWriter, *http.Response, []byte) error { return nil },
+		func(emitter, *http.Response, []byte) error { return nil },
 		&genComplete)
 
 	got, ok := rep.last(hop.RelayRef())
