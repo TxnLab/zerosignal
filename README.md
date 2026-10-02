@@ -85,7 +85,7 @@ The canonical implementation; it generates every golden vector.
 | `pricing` | Token-pricing math; `VerifyTicketPrice` checks a signed ticket's price before a payer escrows it. |
 | `imageprice` | Deterministic image-generation pricing from (size, quality) and an operator's image rate. |
 | `tokenize` | Model-agnostic input-token bound used to size a reserve and enforce it at inference time. |
-| `transient` | Classifies a failed request as retryable or terminal, with the shared retry schedule. |
+| `transient` | Classifies a failed request as retryable or terminal, with the shared retry schedule; the reserve `429` busy codes and `RetryableBusyCode`; `RetryableAfterPayment`. |
 | `steering` | The arithmetic behind a payer's own routing signals: relay-reputation decay, target backoff windows, and the weights-digest consensus. The stores they feed stay app-side. |
 | `relay` | Relay-indirection metadata and the closed allow-list of inner paths a relay forwards. |
 | `attest` | TEE measurement checks: Intel TDX quote parsing, dstack event-log replay into RTMR3, compose-file policy, PCK chain and collateral. |

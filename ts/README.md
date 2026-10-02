@@ -33,7 +33,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/pricing` | Token pricing and `verifyTicketPrice` |
 | `…/imageprice` | Image-generation pricing |
 | `…/tokenize` | Input-token bound used to size a reserve |
-| `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule |
+| `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule; the reserve `429` `BusyCode`s with `retryableBusyCode`; `retryableAfterPayment` |
 | `…/steering` | The arithmetic behind a payer's own routing signals: relay-reputation `decay` / `bump` / `relayDownranked`, target backoff (`backoffWindowMs`, `recordFailure`, `backoffRemaining`), and the weights-digest `weightsConsensus`. The stores they feed stay with the payer |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
 | `…/tools` | What a payer reads off a tool-bearing stream: the sealed tool-status and image progress / partial / completed frames with `parseStatusEvent` and `partialImageDataUrl`, `ToolAction` and its source icons (`iconHostKey`, `iconDataUrl`, `sanitizeIcons`), `isLinkableUrl` for any URL that becomes an href, and the usage shapes with `generatedOutputTokens` |

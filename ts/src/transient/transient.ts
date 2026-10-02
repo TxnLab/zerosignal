@@ -39,11 +39,11 @@ export const Attribution = {
     /** Accompanies a non-retryable verdict. */
     None: '',
     /**
-     * The relay itself failed and the target provably never saw the request.
-     * This is the only attribution safe to retry AFTER payment has committed:
-     * the ticket cannot have been consumed, so re-sending the byte-identical
-     * sealed envelope through a different relay can't collide with an inference
-     * already running.
+     * The relay hop is at fault: a relay hop code, or a relayed failure
+     * narrowRelayed pinned on the relay. It charges the relay's reputation. It
+     * does NOT by itself make a post-payment retry safe: a connection that
+     * dropped after the relay forwarded is Relay too, and the target may be
+     * mid-generation. retryableAfterPayment decides that.
      */
     Relay: 'relay',
     /**

@@ -475,6 +475,9 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 | Condition | Status | Body / Headers |
 |---|---|---|
 | Operator at capacity (`active tickets >= max_active_tickets`) | `429 Too Many Requests` | code `no_capacity`, OpenAI-shaped, with `Retry-After: <seconds>`. The value is small and fixed (~2s): a full pool is almost always active inference, and slots free as requests complete, so the wait is seconds, not the ticket TTL. |
+| This payer already holds its per-model concurrent-reserve cap | `429 Too Many Requests` | code `payer_slot_cap`, with `Retry-After`. Each refusal of a signed reserve is a strike against the payer's abuse budget, so re-asking earns a ban. Do not re-ask this operator. |
+| Per-IP or per-payer reserve rate limit exceeded | `429 Too Many Requests` | code `rate_limited`, with `Retry-After` and `X-RateLimit-Limit` when the limit is known. The answer holds for the rest of the window. |
+| Payer is in the abuse penalty box (persistent reserve-and-abandon, or repeated `payer_slot_cap` trips) | `429 Too Many Requests` | code `reserve_temporarily_banned`, with `Retry-After` (a minute to a day). Signed reserves only. |
 | Unknown or unpriced model, or a priced model the operator's upstream LLM backend isn't currently serving | `400` | code `unsupported_model` |
 | Operator's upstream LLM backend unreachable: it failed the node's periodic health probe (in this state the operator advertises zero models on `/v1/zs/details`) | `503 Service Unavailable` | code `provider_unavailable`. Transient: the proxy should try another operator and re-check `/v1/zs/details` before routing back. |
 | Plaintext request body (not `application/vnd.zs-reserve+json`) | `415 Unsupported Media Type` | code `bad_content_type`; the reserve is sealed-only (see "Endpoint" above) |
@@ -3193,16 +3196,24 @@ Two invariants bound this:
   price, payer-scoped, busy). That is the real error, and the caller gets it
   immediately.
 - A sweep can only run **pre-payment**. Once `escrow.open` has committed, the
-  only retryable failure is a relay-generated hop error. That proves the target
-  never received the envelope and so never consumed the ticket, so the
-  byte-identical sealed request may be re-sent through a different relay. An
-  ambiguous post-payment failure (a target-side `504`, a transport error) is
-  **not** retried: the node may be mid-generation, and a second submission would
-  collide with a ticket already consumed.
+  only failure a caller **may** retry is a relay-generated hop error: the relay
+  asserts it never forwarded the envelope, so the byte-identical sealed request
+  may be re-sent through a different relay. Nothing authenticates that claim; a
+  relay that forwarded anyway costs the payer the turn (the second submission
+  hits a consumed ticket), not a second charge. An ambiguous post-payment
+  failure (a target-side `504`, a transport error) must **not** be retried: the
+  node may be mid-generation, and a second submission would collide with a
+  ticket already consumed. Neither reference port resends after payment today;
+  this bounds any that does.
 
 Reference: the status set is `proto/go/transient`'s `retryableStatuses`. The
 classifier is `proto/go/transient`, mirrored in `proto/ts/src/transient` and
-golden-vectored in `proto/testdata/transient_vectors.json`.
+golden-vectored in `proto/testdata/transient_vectors.json`. Two more predicates
+there decide what a coded response permits: `RetryableBusyCode` (only
+`no_capacity` of the four reserve `429` codes may be re-asked; an absent or
+unknown code may not) and `RetryableAfterPayment` (only a relay hop code). The
+fixture's `code_cases` table gives all three answers for every code a node or
+relay emits.
 
 Attribution follows the same verdict. A relay-generated code faults the relay,
 and a `relay_upstream_unreachable` claim is treated differentially (§ 3f).
