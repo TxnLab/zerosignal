@@ -12,58 +12,56 @@ import (
 	"go/token"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// The status and type a client sees for each code are the contract the move to
-// zs.Error must not change, so they are spelled out here rather than read back
-// from errorShapes.
+// The status and type a client sees for each code are the contract, so they
+// are spelled out here rather than read back from errorShapes.
 func TestErrorShapes(t *testing.T) {
 	want := map[string]errorShape{
-		"missing_model":                   {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"bad_image_request":               {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"bad_image_edit_request":          {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"max_output_required":             {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"pin_conflicts_with_continuation": {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"unsupported_tool":                {zs.KindInvalidRequest, 400, "invalid_request_error"},
-		"context_length_exceeded":         {zs.KindContextExceeded, 400, "invalid_request_error"},
-		"price_ceiling_exceeded":          {zs.KindPriceRejected, 400, "invalid_request_error"},
-		"no_operator":                     {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_compatible_operator":          {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_production_operator":          {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_pinned_operator":              {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_funded_operator":              {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_tee_capacity":                 {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_tool_capacity":                {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_ephemeral_capacity":           {zs.KindNoRoute, 503, "service_unavailable"},
-		"no_relay_available":              {zs.KindNoRoute, 503, "service_unavailable"},
-		"operators_busy":                  {zs.KindBusy, 503, "service_unavailable"},
-		"operators_unreachable":           {zs.KindUnreachable, 503, "service_unavailable"},
-		"mbr_pool_exhausted":              {zs.KindBusy, 429, "rate_limit_exceeded"},
-		"free_quota_exhausted":            {zs.KindFunds, 403, "invalid_request_error"},
-		"wallet_unfunded":                 {zs.KindFunds, 402, "insufficient_quota"},
-		"mbr_pool_underfunded":            {zs.KindFunds, 402, "insufficient_quota"},
-		"spend_cap_exceeded":              {zs.KindSpendCap, 402, "insufficient_quota"},
-		"ticket_price_rejected":           {zs.KindOperatorFault, 502, "bad_gateway"},
-		"operator_ticket_reuse":           {zs.KindOperatorFault, 502, "bad_gateway"},
-		"registry":                        {zs.KindInternal, 502, "proxy_error"},
-		"tokenize":                        {zs.KindInternal, 502, "proxy_error"},
-		"wrap_request":                    {zs.KindInternal, 502, "proxy_error"},
-		"wallet_open":                     {zs.KindInternal, 502, "proxy_error"},
-		"build_request":                   {zs.KindOperatorFault, 502, "proxy_error"},
-		"upstream_unreachable":            {zs.KindInterrupted, 502, "proxy_error"},
-		"read_upstream":                   {zs.KindInterrupted, 502, "proxy_error"},
-		"response_handler":                {zs.KindOperatorFault, 502, "proxy_error"},
-		"stream_setup":                    {zs.KindOperatorFault, 502, "proxy_error"},
-		"operator_unsealed_response":      {zs.KindOperatorFault, 502, "proxy_error"},
-		"operator_inconsistent_response":  {zs.KindOperatorFault, 502, "proxy_error"},
-		"no_flusher":                      {zs.KindInternal, 500, "proxy_error"},
+		"missing_model":                   {400, "invalid_request_error"},
+		"bad_image_request":               {400, "invalid_request_error"},
+		"bad_image_edit_request":          {400, "invalid_request_error"},
+		"max_output_required":             {400, "invalid_request_error"},
+		"pin_conflicts_with_continuation": {400, "invalid_request_error"},
+		"unsupported_tool":                {400, "invalid_request_error"},
+		"context_length_exceeded":         {400, "invalid_request_error"},
+		"price_ceiling_exceeded":          {400, "invalid_request_error"},
+		"no_operator":                     {503, "service_unavailable"},
+		"no_compatible_operator":          {503, "service_unavailable"},
+		"no_production_operator":          {503, "service_unavailable"},
+		"no_pinned_operator":              {503, "service_unavailable"},
+		"no_funded_operator":              {503, "service_unavailable"},
+		"no_tee_capacity":                 {503, "service_unavailable"},
+		"no_tool_capacity":                {503, "service_unavailable"},
+		"no_ephemeral_capacity":           {503, "service_unavailable"},
+		"no_relay_available":              {503, "service_unavailable"},
+		"operators_busy":                  {503, "service_unavailable"},
+		"operators_unreachable":           {503, "service_unavailable"},
+		"mbr_pool_exhausted":              {429, "rate_limit_exceeded"},
+		"free_quota_exhausted":            {403, "invalid_request_error"},
+		"wallet_unfunded":                 {402, "insufficient_quota"},
+		"mbr_pool_underfunded":            {402, "insufficient_quota"},
+		"spend_cap_exceeded":              {402, "insufficient_quota"},
+		"ticket_price_rejected":           {502, "bad_gateway"},
+		"operator_ticket_reuse":           {502, "bad_gateway"},
+		"registry":                        {502, "proxy_error"},
+		"tokenize":                        {502, "proxy_error"},
+		"wrap_request":                    {502, "proxy_error"},
+		"wallet_open":                     {502, "proxy_error"},
+		"build_request":                   {502, "proxy_error"},
+		"upstream_unreachable":            {502, "proxy_error"},
+		"read_upstream":                   {502, "proxy_error"},
+		"response_handler":                {502, "proxy_error"},
+		"stream_setup":                    {502, "proxy_error"},
+		"operator_unsealed_response":      {502, "proxy_error"},
+		"operator_inconsistent_response":  {502, "proxy_error"},
+		"stream_interrupted":              {502, "proxy_error"},
+		"no_flusher":                      {500, "proxy_error"},
 	}
 	if len(errorShapes) != len(want) {
 		t.Errorf("errorShapes has %d codes, this test pins %d", len(errorShapes), len(want))
@@ -75,46 +73,40 @@ func TestErrorShapes(t *testing.T) {
 	}
 }
 
-// An unlisted code would build a KindInternal error and render by kind, so a
-// typo or a new site that skips the table changes what the client sees.
-func TestErrorCodesAreListed(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+// Every code the Client reports must have a shape here: an unlisted one falls
+// back to its Kind's, which for several kinds is a different status than the
+// code has always had. The Client's table is unexported, so it is read from
+// source.
+func TestErrorShapesCoverEveryClientCode(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "../codes.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fset := token.NewFileSet()
 	seen := 0
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
+	ast.Inspect(file, func(n ast.Node) bool {
+		vs, ok := n.(*ast.ValueSpec)
+		if !ok || len(vs.Names) != 1 || vs.Names[0].Name != "errorKinds" || len(vs.Values) != 1 {
+			return true
 		}
-		file, err := parser.ParseFile(fset, f, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", f, err)
+		lit, ok := vs.Values[0].(*ast.CompositeLit)
+		if !ok {
+			t.Fatal("errorKinds is not a composite literal")
 		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
+		for _, elt := range lit.Elts {
+			kv := elt.(*ast.KeyValueExpr)
+			code, err := strconv.Unquote(kv.Key.(*ast.BasicLit).Value)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != "newError" || len(call.Args) == 0 {
-				return true
-			}
-			lit, ok := call.Args[0].(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				t.Errorf("%s: newError with a non-literal code; list it in errorShapes and pass the literal", fset.Position(call.Pos()))
-				return true
-			}
-			code, _ := strconv.Unquote(lit.Value)
 			if _, ok := errorShapes[code]; !ok {
-				t.Errorf("%s: code %q is not in errorShapes", fset.Position(call.Pos()), code)
+				t.Errorf("Client code %q has no entry in errorShapes", code)
 			}
 			seen++
-			return true
-		})
-	}
+		}
+		return false
+	})
 	if seen < 30 {
-		t.Fatalf("found %d newError calls; the scan is looking in the wrong place", seen)
+		t.Fatalf("read %d codes from errorKinds; the scan is looking in the wrong place", seen)
 	}
 }
 
@@ -130,7 +122,8 @@ func TestWriteError(t *testing.T) {
 		return w, env
 	}
 
-	w, env := render(newError("operators_busy", "msg"))
+	busy := func() *zs.Error { return &zs.Error{Kind: zs.KindBusy, Code: "operators_busy", Message: "msg"} }
+	w, env := render(busy())
 	if w.Code != http.StatusServiceUnavailable || env.Error.Type != "service_unavailable" || env.Error.Code != "operators_busy" || env.Error.Message != "msg" {
 		t.Errorf("listed code: status %d, body %+v", w.Code, env)
 	}
@@ -144,7 +137,7 @@ func TestWriteError(t *testing.T) {
 		t.Errorf("body %q, want %q", got, want)
 	}
 
-	e := newError("operators_busy", "msg")
+	e := busy()
 	e.RetryAfter = 7 * time.Second
 	if w, _ := render(e); w.Header().Get("Retry-After") != "7" {
 		t.Errorf("Retry-After = %q, want 7", w.Header().Get("Retry-After"))
@@ -156,31 +149,25 @@ func TestWriteError(t *testing.T) {
 	if w.Code != http.StatusForbidden || env.Error.Type != "invalid_request_error" || env.Error.Code != "new_payer_refusal" {
 		t.Errorf("unlisted code: status %d, body %+v", w.Code, env)
 	}
-
-	if e := newError("not_a_code", "m"); e.Kind != zs.KindInternal {
-		t.Errorf("unlisted code got Kind %q, want internal", e.Kind)
-	}
 }
 
-// A payer refusal is built at its site rather than through newError, so the
-// table test doesn't reach it. Its Retry-After is when the quota resets, and it
-// ends the sweep: every other operator would refuse the same payer.
+// A payer refusal is built at its site rather than from the Client's code
+// table, so the table tests don't reach it. Its Retry-After is when the quota
+// resets, and it ends the sweep: every other operator would refuse the same
+// payer.
 //
 // The unlisted code is one added to payerRefusalCodes without an errorShapes
 // entry: the Kind set at the site is all that keeps it a 403 payer refusal.
 func TestDispatch_PayerRefusalRendersNodeCodeAndRetryAfter(t *testing.T) {
 	for _, code := range []string{"free_quota_exhausted", "unlisted_payer_refusal"} {
 		t.Run(code, func(t *testing.T) {
-			refusal := &zs.PayerRefusalError{Code: code, Message: "daily free tickets used", RetryAfter: time.Hour}
-			rc := &scriptedReserveClient{script: []error{refusal, refusal}}
-			s := retryServer(t, false, rc, []zs.Operator{retryOp(1, "OWNER_A"), retryOp(2, "OWNER_B")})
-			s.cfg = &Config{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}
-			s.tokenizer = testTokenizer()
-			s.wallet = &fakeWallet{}
+			rc := &refusingReserveClient{err: &zs.PayerRefusalError{Code: code, Message: "daily free tickets used", RetryAfter: time.Hour}}
+			s := gatesServer(t, &Config{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}, rc,
+				gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"))
 
-			body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
 			w := httptest.NewRecorder()
-			s.dispatchHayai(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), endpointChatCompletions, body, formatChat)
+			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
+				`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
 
 			var env openAIErrorEnvelope
 			if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
@@ -192,7 +179,7 @@ func TestDispatch_PayerRefusalRendersNodeCodeAndRetryAfter(t *testing.T) {
 			if got := w.Header().Get("Retry-After"); got != "3600" {
 				t.Errorf("Retry-After = %q, want 3600", got)
 			}
-			if n := rc.calls(); n != 1 {
+			if n := len(rc.ops); n != 1 {
 				t.Errorf("%d reserves, want 1: a payer refusal must end the sweep", n)
 			}
 		})
@@ -205,7 +192,7 @@ func TestKindShapesCoverEveryKind(t *testing.T) {
 		zs.KindUnreachable, zs.KindPriceRejected, zs.KindFunds, zs.KindSpendCap,
 		zs.KindOperatorFault, zs.KindUpstream, zs.KindInterrupted, zs.KindInternal,
 	} {
-		if sh, ok := kindShapes[k]; !ok || sh.status == 0 || sh.errType == "" || sh.kind != k {
+		if sh, ok := kindShapes[k]; !ok || sh.status == 0 || sh.errType == "" {
 			t.Errorf("kindShapes[%s] = %+v, %v", k, sh, ok)
 		}
 	}

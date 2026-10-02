@@ -29,7 +29,7 @@ import (
 	"filippo.io/age"
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
@@ -822,8 +822,10 @@ func setupHayai(t *testing.T, cfg *testCfg, nodes ...*fakeNode) Options {
 	}
 	cfg.ResolvedOperators = ops
 	cfg.Affinity = hayai.AffinityPrefer
+	sr := &swapRegistry{}
+	sr.set(registry)
 	return Options{
-		RegistryProvider: registry,
+		RegistryProvider: sr,
 		ReserveClient:    &hayai.HTTPReserveClient{HTTPClient: http.DefaultClient},
 		ToolAffinity:     hayai.NewIDAffinity(64, time.Minute, nil),
 		ResponseAffinity: hayai.NewIDAffinity(64, time.Minute, nil),
@@ -833,6 +835,48 @@ func setupHayai(t *testing.T, cfg *testCfg, nodes ...*fakeNode) Options {
 		},
 		Tokenizer: testTokenizer(),
 	}
+}
+
+// swapRegistry lets a test change the fleet between turns of one Server, as
+// a discovery refresh does: the Client holds this, and set replaces what it
+// reads through.
+type swapRegistry struct{ inner atomic.Value }
+
+func (r *swapRegistry) set(p hayai.RegistryProvider) { r.inner.Store(&p) }
+func (r *swapRegistry) get() hayai.RegistryProvider  { return *r.inner.Load().(*hayai.RegistryProvider) }
+
+func (r *swapRegistry) Operators(ctx context.Context, model string) ([]hayai.Operator, error) {
+	return r.get().Operators(ctx, model)
+}
+func (r *swapRegistry) Resolve(ctx context.Context, op, node uint64) (hayai.Operator, error) {
+	return r.get().Resolve(ctx, op, node)
+}
+func (r *swapRegistry) AllModels(ctx context.Context) []string { return r.get().AllModels(ctx) }
+func (r *swapRegistry) AllBuiltinTools(ctx context.Context) []hayai.BuiltinToolDef {
+	return r.get().AllBuiltinTools(ctx)
+}
+func (r *swapRegistry) AllModelDetails(ctx context.Context) []inject.OperatorDetailsModel {
+	return r.get().AllModelDetails(ctx)
+}
+func (r *swapRegistry) AllNodeVersions(ctx context.Context) []string {
+	return r.get().AllNodeVersions(ctx)
+}
+func (r *swapRegistry) AllOperators(ctx context.Context) []hayai.Operator {
+	return r.get().AllOperators(ctx)
+}
+func (r *swapRegistry) ReprobeEphemeral(ctx context.Context, op hayai.Operator) (hayai.Operator, bool) {
+	return r.get().ReprobeEphemeral(ctx, op)
+}
+func (r *swapRegistry) RecordModelDemand(model string) { r.get().RecordModelDemand(model) }
+
+// setFleet replaces the operators the Server built from opts routes over.
+func setFleet(t *testing.T, opts Options, ops ...hayai.Operator) {
+	t.Helper()
+	registry, err := hayai.NewStaticRegistryProvider(ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.RegistryProvider.(*swapRegistry).set(registry)
 }
 
 // testTokenizer returns a tokenize.Registry that returns a deterministic
@@ -906,7 +950,7 @@ func (n *fakeNode) buildSignedStreamReceipt(t *testing.T, cfg *nodeConfig, ticke
 	if cfg.buildReceipt == nil {
 		return nil
 	}
-	r := cfg.buildReceipt(flattenFrames(cfg.streamFrames))
+	r := cfg.buildReceipt(bytes.Join(cfg.streamFrames, nil))
 	if r == nil {
 		return nil
 	}
@@ -1346,13 +1390,14 @@ func TestDispatchHayai_MissingModel(t *testing.T) {
 // An operator that stays busy for the whole budget still terminates in
 // 503 operators_busy + Retry-After. The busy re-sweep bounds the waiting; it
 // must not turn a persistently-full pool into a hang or a different code.
-// fastSweeps zeroes the waits — without it the clamped Retry-After makes this
-// sleep for the whole busyRetryBudget.
+// noSweepDelay zeroes the waits — without it the clamped Retry-After makes
+// this sleep for the whole busyRetryBudget.
 func TestDispatchHayai_AllBusy_503(t *testing.T) {
 	busy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 5})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, busy))
-	s.fastSweeps = true
+	opts := setupHayai(t, cfg, busy)
+	opts.SweepDelay = noSweepDelay
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -1386,8 +1431,9 @@ func TestDispatchHayai_BusyThenServes_Succeeds(t *testing.T) {
 		retryAfterSeconds:  1,
 	})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
-	s.fastSweeps = true
+	opts := setupHayai(t, cfg, node)
+	opts.SweepDelay = noSweepDelay
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -1405,8 +1451,9 @@ func TestDispatchHayai_BusyPlusSizeRejection_NoBusyResweep(t *testing.T) {
 	busy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 1})
 	sized := newFakeNode(t, &nodeConfig{mode: modeReserveSizeRejected})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, busy, sized))
-	s.fastSweeps = true
+	opts := setupHayai(t, cfg, busy, sized)
+	opts.SweepDelay = noSweepDelay
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -1430,13 +1477,14 @@ func TestDispatchHayai_AllGatewayErrors_OperatorsUnreachable(t *testing.T) {
 	gwA := newFakeNode(t, &nodeConfig{mode: modeReserveGatewayError})
 	gwB := newFakeNode(t, &nodeConfig{mode: modeReserveGatewayError})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, gwA, gwB))
+	opts := setupHayai(t, cfg, gwA, gwB)
 	// Shrink the budget: the production schedule deliberately sleeps for up to a
 	// minute before giving up, which is correct in production and useless here.
 	// The budget is shared across the WHOLE request, so this also bounds how far
 	// down the candidate list the retries get — 1.5s buys each of the two nodes
 	// its first retry (inner delays 0 / 500ms) and stops before the 1500ms third.
-	s.retryBudget = 1500 * time.Millisecond
+	opts.RetryBudget = 1500 * time.Millisecond
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -1472,15 +1520,16 @@ func TestDispatchHayai_AllGatewayErrors_OperatorsUnreachable(t *testing.T) {
 // sweep 0 (pure weather) and used to be sticky, so a sweep-1 refusal wrongly
 // surfaced "none refused the request". Here the node 504s on sweep 0 then
 // returns provider_unavailable, and the terminal must be operators_busy, not
-// operators_unreachable. Needs ≥2 sweeps, so fastSweeps zeros the backoff (the
+// operators_unreachable. Needs ≥2 sweeps, so noSweepDelay zeros the backoff (the
 // original test used a 1.5s budget that never reached sweep 1, which is why the
 // bug shipped green).
 func TestDispatchHayai_LateSweepRefusal_NotOperatorsUnreachable(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{gatewayThenRefuseAfter: 1})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
-	s.fastSweeps = true
-	s.retryBudget = 300 * time.Millisecond // small enough that sweep 0 makes one attempt
+	opts := setupHayai(t, cfg, node)
+	opts.SweepDelay = noSweepDelay
+	opts.RetryBudget = 300 * time.Millisecond // small enough that sweep 0 makes one attempt
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -1873,12 +1922,7 @@ func TestDispatchHayai_Affinity_PrefersRecordedOperator(t *testing.T) {
 	// Turn 2: continuation carrying tool_call_id → affinity must pin to A.
 	// We simulate the registry preferring B this time by hand-building a
 	// reordered registry. In practice the affinity cache overrides order.
-	cfg.ResolvedOperators = []hayai.Operator{opB.operator, opA.operator}
-	registry, err := hayai.NewStaticRegistryProvider(cfg.ResolvedOperators)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.registryProvider = registry
+	setFleet(t, opts, opB.operator, opA.operator)
 
 	turn2Body := `{"model":"gpt-test","messages":[{"role":"tool","tool_call_id":"call-1","content":"result"}]}`
 	w2 := httptest.NewRecorder()
@@ -1926,12 +1970,7 @@ func TestDispatchHayai_ResponseID_NonStream_PinsToOriginalOperator(t *testing.T)
 
 	// Reorder registry so opB is preferred by default; the response-id
 	// pin must override that preference.
-	cfg.ResolvedOperators = []hayai.Operator{opB.operator, opA.operator}
-	registry, err := hayai.NewStaticRegistryProvider(cfg.ResolvedOperators)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.registryProvider = registry
+	setFleet(t, opts, opB.operator, opA.operator)
 
 	w2 := httptest.NewRecorder()
 	s.mux.ServeHTTP(w2, clientReq(http.MethodPost, "/v1/responses",
@@ -1962,6 +2001,7 @@ func TestDispatchHayai_ResponseID_StrictRegardlessOfPolicy(t *testing.T) {
 
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, opA, opB)
+	cfg.Affinity = hayai.AffinityNone
 	s := testServer(cfg, opts)
 
 	// Turn 1: warm the cache.
@@ -1970,16 +2010,13 @@ func TestDispatchHayai_ResponseID_StrictRegardlessOfPolicy(t *testing.T) {
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("turn 1 status = %d body=%s", w.Result().StatusCode, w.Body.String())
 	}
+	if !bytes.Equal(w.Body.Bytes(), opAReply) {
+		t.Fatalf("turn 1 should have gone to A, the first in the registry; got %s", w.Body.String())
+	}
 	bBeforeTurn2 := opB.callCount
 
-	// Now disable affinity and reorder so opB is preferred.
-	s.cfg.Affinity = hayai.AffinityNone
-	cfg.ResolvedOperators = []hayai.Operator{opB.operator, opA.operator}
-	registry, err := hayai.NewStaticRegistryProvider(cfg.ResolvedOperators)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.registryProvider = registry
+	// Reorder so opB is preferred.
+	setFleet(t, opts, opB.operator, opA.operator)
 
 	w2 := httptest.NewRecorder()
 	s.mux.ServeHTTP(w2, clientReq(http.MethodPost, "/v1/responses",
@@ -2044,12 +2081,7 @@ func TestDispatchHayai_ResponseID_OperatorUnregistered_400(t *testing.T) {
 	bCalls := opB.callCount
 
 	// Drop opA from the registry — opB is the only remaining operator.
-	cfg.ResolvedOperators = []hayai.Operator{opB.operator}
-	registry, err := hayai.NewStaticRegistryProvider(cfg.ResolvedOperators)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.registryProvider = registry
+	setFleet(t, opts, opB.operator)
 
 	w2 := httptest.NewRecorder()
 	s.mux.ServeHTTP(w2, clientReq(http.MethodPost, "/v1/responses",
@@ -2102,12 +2134,7 @@ func TestDispatchHayai_ResponseID_Stream_RecordsFromCreatedEvent(t *testing.T) {
 	bCalls := opB.callCount
 
 	// Reorder so opB is preferred; the resp_S pin must still send turn 2 to opA.
-	cfg.ResolvedOperators = []hayai.Operator{opB.operator, opA.operator}
-	registry, err := hayai.NewStaticRegistryProvider(cfg.ResolvedOperators)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.registryProvider = registry
+	setFleet(t, opts, opB.operator, opA.operator)
 
 	w2 := httptest.NewRecorder()
 	s.mux.ServeHTTP(w2, clientReq(http.MethodPost, "/v1/responses",
@@ -2127,8 +2154,8 @@ func TestDispatchHayai_WalletOpenError(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
+	opts.Wallet = &fakeWallet{err: errors.New("algod down")}
 	s := testServer(cfg, opts)
-	s.wallet = &fakeWallet{err: errors.New("algod down")}
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2253,95 +2280,6 @@ func TestDispatchHayai_Sizing_NoFit_PerOperatorReasons(t *testing.T) {
 	}
 }
 
-// TestDescribeMiss covers the pure formatter that picks which limit
-// each operator was rejected against. The branches mirror Fits's check
-// order — context-window first, max_output cap second — and a 0 limit
-// must not be blamed as the cause (Fits treats 0 as unbounded).
-//
-// The gap math reads the miss's own EffectiveMaxOutput, never
-// req.MaxOutputTokens — so req carries a deliberately large flat display
-// ceiling (a flat display ceiling the caller never sent) that must NOT
-// leak into any message; a regression to req.MaxOutputTokens would blow every
-// expected number up by ~32k.
-func TestDescribeMiss(t *testing.T) {
-	req := hayai.SizingRequest{Model: "m", InputTokens: 8, MaxOutputTokens: 32000, DeriveMaxOutput: true}
-	cases := []struct {
-		name string
-		miss sizingMiss
-		want string
-	}{
-		{
-			name: "context_window violation",
-			miss: sizingMiss{OperatorID: 7, ContextWindow: 4, EffectiveMaxOutput: 128},
-			want: "op 7: context_window=4 (request needs 136)",
-		},
-		{
-			name: "max_output_tokens violation",
-			miss: sizingMiss{OperatorID: 11, MaxOutputTokens: 64, EffectiveMaxOutput: 128},
-			want: "op 11: max_output_tokens=64 (over by 64)",
-		},
-		{
-			name: "context_window prioritised over max_output",
-			miss: sizingMiss{OperatorID: 13, ContextWindow: 4, MaxOutputTokens: 64, EffectiveMaxOutput: 128},
-			want: "op 13: context_window=4 (request needs 136)",
-		},
-		{
-			// Derive mode: the operator was fit-checked against its own derived
-			// ctx/4=1024 slice, not the flat 32000. The reported gap must be the
-			// derived one (8+1024=1032), proving the flat display ceiling is ignored.
-			name: "derive mode uses per-operator effective, not flat ceiling",
-			miss: sizingMiss{OperatorID: 15, ContextWindow: 512, EffectiveMaxOutput: 1024},
-			want: "op 15: context_window=512 (request needs 1032)",
-		},
-		{
-			name: "all-zero (defensive fallback)",
-			miss: sizingMiss{OperatorID: 17},
-			want: "op 17: declared capacity does not fit (context_window=0, max_output_tokens=0)",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := describeMiss(tc.miss, req); got != tc.want {
-				t.Errorf("describeMiss = %q\nwant %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestNoFitMaxOutputLabel pins the no-fit header's max_output rendering: the
-// concrete flat value when the caller specified one, and a non-numeric
-// "derived-per-operator" marker in derive mode (where there is no single
-// request-level ceiling — each operator got its own, shown in the breakdown).
-func TestNoFitMaxOutputLabel(t *testing.T) {
-	if got := noFitMaxOutputLabel(hayai.SizingRequest{MaxOutputTokens: 4096}); got != "4096" {
-		t.Errorf("flat label = %q, want 4096", got)
-	}
-	derive := hayai.SizingRequest{MaxOutputTokens: 32000, DeriveMaxOutput: true}
-	if got := noFitMaxOutputLabel(derive); got != "derived-per-operator" {
-		t.Errorf("derive label = %q, want derived-per-operator", got)
-	}
-	// The flat display ceiling must not leak into the header.
-	head := formatNoFitMessage("m", hayai.SizingRequest{Model: "m", InputTokens: 8, MaxOutputTokens: 32000, DeriveMaxOutput: true}, nil)
-	if strings.Contains(head, "32000") {
-		t.Errorf("derive-mode header leaked the flat ceiling: %q", head)
-	}
-}
-
-// TestFormatNoFitMessage_NoMissesPreservesOriginalLine pins the
-// backwards-compatible behaviour: when no per-operator misses were
-// captured (e.g. the registry is empty for some other reason and we
-// somehow reach this branch), the message body is exactly the original
-// "no operator serves" line. Clients that string-match on that prefix
-// keep working.
-func TestFormatNoFitMessage_NoMissesPreservesOriginalLine(t *testing.T) {
-	req := hayai.SizingRequest{Model: "m", InputTokens: 5, MaxOutputTokens: 7}
-	got := formatNoFitMessage("m", req, nil)
-	want := "no operator serves m with input_tokens=5 max_output_tokens=7"
-	if got != want {
-		t.Errorf("formatNoFitMessage = %q\nwant %q", got, want)
-	}
-}
-
 func TestDispatchHayai_Sizing_StrictAffinity_TargetMisfit_400(t *testing.T) {
 	// Two operators: opA (strict-affinity target) has a tiny context
 	// window; opB has unbounded capacity and WOULD fit. Under strict
@@ -2396,12 +2334,12 @@ func TestDispatchHayai_UnknownModelGetsSafeEstimate(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
+	// Empty registry: no per-model override AND no max-output default.
+	// Body supplies max_tokens so dispatch can produce a complete estimate.
+	opts.Tokenizer = tokenize.NewRegistry()
 	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
-	// Empty registry: no per-model override AND no max-output default.
-	// Body supplies max_tokens so dispatch can produce a complete estimate.
-	s.tokenizer = tokenize.NewRegistry()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
 		`{"model":"gpt-test","max_tokens":64}`))
 	if w.Result().StatusCode != http.StatusOK {
@@ -2413,12 +2351,11 @@ func TestDispatchHayai_MissingMaxOutput_400(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
-
 	// Register a tokenizer whose Estimate returns 0 for max out, and no default.
 	reg := tokenize.NewRegistry()
 	reg.Register("gpt-test", fakeEstimate{input: 10, maxOut: 0})
-	s.tokenizer = reg
+	opts.Tokenizer = reg
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2492,9 +2429,14 @@ type fakeWallet struct {
 	lastOp      hayai.Operator
 	lastTID     string
 	err         error
+	// payer overrides the default payer address.
+	payer string
 }
 
 func (f *fakeWallet) PayerAddr() string {
+	if f.payer != "" {
+		return f.payer
+	}
 	return "TESTPAYERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXAAAAAA"
 }
 
@@ -2519,8 +2461,6 @@ func TestDispatchHayai_WalletPath_ThreadsAppCallTxIDIntoEnvelope(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: reply})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
-
 	// Swap in the fake wallet — dispatch should prefer it over the
 	// stub txid provider for the envelope's AlgorandTxID, and it must
 	// send the app-call txid (NOT the group id — that's retained for
@@ -2529,7 +2469,8 @@ func TestDispatchHayai_WalletPath_ThreadsAppCallTxIDIntoEnvelope(t *testing.T) {
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 		groupID:     "WALLETGROUPID0000000000000000000000000000000000000000",
 	}
-	s.wallet = fw
+	opts.Wallet = fw
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2555,9 +2496,8 @@ func TestDispatchHayai_WalletPath_OpenFailure_502(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
+	opts.Wallet = &fakeWallet{err: errors.New("algod unreachable")}
 	s := testServer(cfg, opts)
-
-	s.wallet = &fakeWallet{err: errors.New("algod unreachable")}
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2677,13 +2617,13 @@ func TestDispatchHayai_Receipt_BodyHashMismatch_DrivesProtest(t *testing.T) {
 	opts := setupHayai(t, cfg, node)
 
 	var logBuf bytes.Buffer
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
 	// Inject the fake wallet so the receipt path runs through the
 	// "wallet is present, drive Protest" branch.
-	s.wallet = &fakeWallet{
+	opts.Wallet = &fakeWallet{
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 		groupID:     "WALLETGROUPID0000000000000000000000000000000000000000",
 	}
+	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2825,113 +2765,6 @@ func TestDispatchHayai_Receipt_MissingHeader_Tolerated(t *testing.T) {
 	}
 }
 
-// TestProtestReasonForViolation pins the wire mapping between the
-// proxy's local violation enum and the on-chain reason code carried on
-// protest(). Today only BodyHash actually reaches Protest at the call
-// site, but the mapper has cases for the others so future protest
-// triggers slot in without a wire-format break.
-func TestProtestReasonForViolation(t *testing.T) {
-	cases := []struct {
-		violation hayai.ReceiptViolation
-		want      escrow.ProtestReasonCode
-	}{
-		{hayai.ReceiptViolationBodyHash, escrow.ProtestReasonBodyHash},
-		{hayai.ReceiptViolationSig, escrow.ProtestReasonReceiptSig},
-		{hayai.ReceiptViolationAmount, escrow.ProtestReasonAmount},
-		{hayai.ReceiptOK, escrow.ProtestReasonUnspecified},
-	}
-	for _, tc := range cases {
-		if got := protestReasonForViolation(tc.violation); got != tc.want {
-			t.Errorf("protestReasonForViolation(%s) = %d, want %d",
-				tc.violation, got, tc.want)
-		}
-	}
-}
-
-// The exhaustive frame-shape table now lives in proto/testdata/stream_vectors.json
-// (wire.ClassifyStreamFrame), shared with the reference client so the two can't
-// drift on which frames end a stream. What stays proxy-local — and is what this
-// asserts — is the route-to-vocabulary mapping feeding it: get that wrong and
-// every frame classifies against the other endpoint's needles, so the drain
-// never arms and every ticket loses its in-band settle.
-func TestStreamAPIForEndpoint(t *testing.T) {
-	cases := []struct {
-		endpoint string
-		want     wire.StreamAPI
-	}{
-		{endpointResponses, wire.StreamAPIResponses},
-		{endpointChatCompletions, wire.StreamAPIChat},
-		// /v1/completions is emulated by re-dispatching as chat
-		// (completions.go), so it never reaches here as its own endpoint —
-		// anything unrecognized must still fall back to chat, not silently
-		// classify against the Responses needles.
-		{endpointImages, wire.StreamAPIChat},
-		{"", wire.StreamAPIChat},
-	}
-	for _, tc := range cases {
-		if got := streamAPIFor(tc.endpoint); got != tc.want {
-			t.Errorf("streamAPIFor(%q) = %q, want %q", tc.endpoint, got, tc.want)
-		}
-	}
-	// The two properties the drain depends on, asserted through the proxy's own
-	// mapping rather than proto's: a terminal chat chunk and an error frame both
-	// arm it, a mid-stream delta does not.
-	armed := func(frame, endpoint string) bool {
-		return wire.ClassifyStreamFrame([]byte(frame), streamAPIFor(endpoint)).Terminal
-	}
-	if !armed(`{"choices":[{"finish_reason":"stop"}]}`, endpointChatCompletions) {
-		t.Error("chat stop chunk did not arm the tail drain")
-	}
-	if !armed(`{"error":{"message":"invalid temperature: only 1 is allowed for this model"}}`, endpointChatCompletions) {
-		t.Error("chat error frame did not arm the tail drain — the ticket would lapse unverified")
-	}
-	if !armed(`{"type":"error","message":"boom"}`, endpointResponses) {
-		t.Error("responses error event did not arm the tail drain — the ticket would lapse unverified")
-	}
-	if armed(`{"choices":[{"delta":{"content":"hi"}}]}`, endpointChatCompletions) {
-		t.Error("mid-stream delta armed the tail drain; disconnects would stop cancelling promptly")
-	}
-}
-
-// responseErrorMessage surfaces operator/upstream error envelopes (logged at
-// WARN, default-on) while NOT mistaking normal chunks — including the empty-
-// choices usage chunk or a delta that merely mentions "error" — for errors.
-func TestResponseErrorMessage(t *testing.T) {
-	cases := []struct {
-		name    string
-		in      string
-		wantOK  bool
-		wantMsg string
-	}{
-		{"error envelope", `{"error":{"message":"tools must not be empty","type":"server_error"}}`, true, "tools must not be empty"},
-		{"error without message", `{"error":{"code":"x"}}`, true, `{"code":"x"}`},
-		{"content chunk", `{"id":"c","object":"chat.completion.chunk","choices":[{"delta":{"content":"hi"}}]}`, false, ""},
-		{"usage chunk empty choices", `{"choices":[],"usage":{"prompt_tokens":3}}`, false, ""},
-		{"delta mentioning error", `{"choices":[{"delta":{"content":"the error was X"}}]}`, false, ""},
-		{"error null", `{"error":null,"choices":[]}`, false, ""},
-		{"no error key", `{"id":"c","choices":[{"delta":{}}]}`, false, ""},
-		{"not json", `nope`, false, ""},
-		// Responses-API error event: no top-level "error" object at all, so the
-		// chat-shape branch alone reported false and the frame went both
-		// unlogged and (via the shared predicate) undrained.
-		{"responses error event", `{"type":"error","code":"context_length_exceeded","message":"too long"}`, true, "too long"},
-		{"responses error event without message", `{"type":"error","code":"x"}`, true, "error"},
-		// response.failed nests its error under "response" — already terminal
-		// via the lifecycle needles, and must not match the type discriminator.
-		{"responses failed event", `{"type":"response.failed","response":{"error":{"message":"nope"}}}`, false, ""},
-		{"responses delta mentioning error", `{"type":"response.output_text.delta","delta":"error"}`, false, ""},
-	}
-	for _, tc := range cases {
-		msg, ok := responseErrorMessage([]byte(tc.in))
-		if ok != tc.wantOK {
-			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.wantOK)
-		}
-		if ok && msg != tc.wantMsg {
-			t.Errorf("%s: msg = %q, want %q", tc.name, msg, tc.wantMsg)
-		}
-	}
-}
-
 // busyCodeOr returns the 429 error.code a fake node should emit, defaulting to
 // the one re-askable condition. A literal rather than transient.BusyCodeNoCapacity
 // so the fake speaks the wire string and a renamed constant fails the re-sweep tests.
@@ -2972,8 +2805,9 @@ func TestDispatchHayai_BusyNonRetryableCodes_NoResweep(t *testing.T) {
 			cfgNode := &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 1, busyCode: tc.code, busyNoCode: tc.noCode}
 			busy := newFakeNode(t, cfgNode)
 			cfg := testConfig()
-			s := testServer(cfg, setupHayai(t, cfg, busy))
-			s.fastSweeps = true
+			opts := setupHayai(t, cfg, busy)
+			opts.SweepDelay = noSweepDelay
+			s := testServer(cfg, opts)
 
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -3012,8 +2846,9 @@ func TestDispatchHayai_HintlessBusyOutranksEphemeralGap(t *testing.T) {
 	noEph.operator.EphemeralIssuedAt = 0
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, busy, noEph))
-	s.fastSweeps = true
+	opts := setupHayai(t, cfg, busy, noEph)
+	opts.SweepDelay = noSweepDelay
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))

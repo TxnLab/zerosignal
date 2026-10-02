@@ -54,13 +54,13 @@ func streamReceiptServer(t *testing.T, mode nodeMode) (*Server, *bytes.Buffer) {
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
 	var logBuf bytes.Buffer
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
 	// A wired wallet makes the protest path reachable, so a fired protest is
 	// observable in the logs (the negatives assert it does NOT fire).
-	s.wallet = &fakeWallet{
+	opts.Wallet = &fakeWallet{
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 		groupID:     "WALLETGROUPID0000000000000000000000000000000000000000",
 	}
+	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
 	return s, &logBuf
 }
 

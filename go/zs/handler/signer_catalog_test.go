@@ -6,7 +6,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -28,7 +27,7 @@ func fundedCatalogOp(id uint64, model string, spendable *uint64) hayai.Operator 
 func TestSignerCatalogAndDispatchAgree(t *testing.T) {
 	ops := []hayai.Operator{
 		fundedCatalogOp(1, "funded-model", nil),
-		fundedCatalogOp(2, "broke-only", micro(selection.MinSignerSpendableMicroAlgos-1)),
+		fundedCatalogOp(2, "broke-only", new(selection.MinSignerSpendableMicroAlgos-1)),
 	}
 
 	for name, s := range map[string]*Server{
@@ -36,8 +35,6 @@ func TestSignerCatalogAndDispatchAgree(t *testing.T) {
 		"dynamic": dynamicCatalogServer(t, false, ops...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			s.tokenizer = testTokenizer()
-
 			ids := listedModelIDs(t, s)
 			if !ids["funded-model"] || ids["broke-only"] {
 				t.Errorf("/v1/models = %v, want funded-model only", ids)
@@ -76,17 +73,5 @@ func TestSignerCatalogAndDispatchAgree(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// Target-only: the relay pool still includes a broke node, since a relay pays
-// no fee for the request it forwards.
-func TestRelayPoolKeepsUnderfundedNodes(t *testing.T) {
-	s := catalogServer(t, false,
-		fundedCatalogOp(1, "m", micro(0)),
-		fundedCatalogOp(2, "m", micro(0)),
-	)
-	if pool := s.relayPool(context.Background()); len(pool) != 2 {
-		t.Fatalf("relayPool = %d nodes, want 2 — underfunded nodes are still valid relay hops", len(pool))
 	}
 }

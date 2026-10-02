@@ -7,6 +7,7 @@ package zs
 
 import (
 	"encoding/json"
+	"net/http"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
@@ -20,6 +21,11 @@ import (
 // TypeScript SDK uses as its discriminant.
 //
 // The set is closed: only this package implements Event.
+//
+// Some types are declared ahead of the code that emits them. A Stream yields
+// MaxOutputClamped, ReserveSucceeded, PaymentCommitted, ResponseStarted,
+// Frame, ReceiptVerified and Done; content arrives only as Frame.Data, and
+// Done carries Empty alone.
 type Event interface {
 	EventType() string
 	event()
@@ -83,6 +89,42 @@ type PaymentCommitted struct {
 	TicketID       string
 	OpenTxID       string
 	FeesMicroAlgos uint64
+}
+
+// MaxOutputClamped fires before any reserve when the request asked for more
+// output than the routable nodes allow, and was lowered to Ceiling rather than
+// refused.
+type MaxOutputClamped struct {
+	Ceiling uint64
+}
+
+// ResponseStarted fires once, when the node answers. Header is the node's
+// response header set without its X-Zs-* fields, which are protocol plumbing
+// rather than part of the response. Streaming is false for a single-body
+// reply, which then arrives as one Frame.
+type ResponseStarted struct {
+	Status    int
+	Header    http.Header
+	Streaming bool
+}
+
+// Frame is one Server-Sent Event of the node's response, as an
+// OpenAI-compatible endpoint would have written it, so an adapter can re-emit
+// the original bytes (Frame.SSE). Sealed frames were decrypted from the node's
+// sealed stream; the rest (the `[DONE]` sentinel, keepalive comments) pass
+// through as the node sent them. A non-streaming response is one sealed Frame
+// holding the whole body.
+type Frame struct {
+	Event   string
+	ID      string
+	Data    []byte
+	Comment string
+	Retry   int
+	Sealed  bool
+}
+
+func (f Frame) isEmpty() bool {
+	return len(f.Data) == 0 && f.Event == "" && f.ID == "" && f.Retry == 0 && f.Comment == ""
 }
 
 // Item is one output item of the response (a message, reasoning block,
@@ -159,9 +201,27 @@ type Usage struct {
 }
 
 // ReceiptVerified fires once, before done, when the node's signed receipt
-// checks out against the ticket and the content delivered.
+// checks out against the ticket and the content delivered. The fee fields are
+// the payer's own: what it paid in ALGO network fees for the open and, on a
+// stream, the settle, which a non-streaming reply reports as 0 because the
+// settle is submitted after the reply.
 type ReceiptVerified struct {
 	Receipt ticket.UsageReceipt
+	// Ticket is the signed ticket the receipt settles; its MaxPrice and
+	// MinPrice bound the charge.
+	Ticket ticket.Ticket
+	Target NodeRef
+	// OwnerAddr is the operator's owner account.
+	OwnerAddr            string
+	OpenFeesMicroAlgos   uint64
+	SettleFeesMicroAlgos uint64
+	// AlgoUSD is the ALGO/USD rate the reserve priced at; 0 when unknown.
+	AlgoUSD float64
+	// FeeBps is the protocol fee rate on top of the operator's charge, valid
+	// only when FeeBpsKnown: the rate is read from chain in the background and
+	// is unknown until that read first succeeds.
+	FeeBps      uint64
+	FeeBpsKnown bool
 }
 
 // ReceiptViolated replaces ReceiptVerified when a check fails. ProtestTxID is
@@ -210,6 +270,9 @@ func (ReserveStarted) EventType() string   { return "reserve.started" }
 func (ReserveRetrying) EventType() string  { return "reserve.retrying" }
 func (ReserveSucceeded) EventType() string { return "reserve.succeeded" }
 func (PaymentCommitted) EventType() string { return "payment.committed" }
+func (MaxOutputClamped) EventType() string { return "max_output.clamped" }
+func (ResponseStarted) EventType() string  { return "response.started" }
+func (Frame) EventType() string            { return "frame" }
 func (ItemOpened) EventType() string       { return "item.opened" }
 func (ItemClosed) EventType() string       { return "item.closed" }
 func (TextDelta) EventType() string        { return "delta.text" }
@@ -233,6 +296,9 @@ func (ReserveStarted) event()   {}
 func (ReserveRetrying) event()  {}
 func (ReserveSucceeded) event() {}
 func (PaymentCommitted) event() {}
+func (MaxOutputClamped) event() {}
+func (ResponseStarted) event()  {}
+func (Frame) event()            {}
 func (ItemOpened) event()       {}
 func (ItemClosed) event()       {}
 func (TextDelta) event()        {}

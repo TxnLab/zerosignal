@@ -170,17 +170,3 @@ func TestDispatchHayai_ImageEdit_SkipsOperatorMissingEditFactor(t *testing.T) {
 		t.Errorf("node.callCount = %d, want 0 — skipped operator must not be reserved", node.callCount)
 	}
 }
-
-func TestParseImageEditMultipart_ProxySide(t *testing.T) {
-	body, ct := buildEditBody(t, "flux2", "hello", 3, []byte("X"), nil)
-	model, n, _, _, _, err := parseImageEditMultipart(ct, body)
-	if err != nil {
-		t.Fatalf("parseImageEditMultipart: %v", err)
-	}
-	if model != "flux2" {
-		t.Errorf("model = %q", model)
-	}
-	if n != 3 {
-		t.Errorf("n = %d", n)
-	}
-}

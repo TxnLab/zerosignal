@@ -20,26 +20,6 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
-// An SDK caller who never sets Privacy must not send direct: a direct send
-// shows the target the payer's IP. Only PrivacyDirect opts out; anything
-// else, including a typo, relays.
-func TestConfig_RelaysUnlessDirect(t *testing.T) {
-	for _, tc := range []struct {
-		privacy hayai.Privacy
-		want    bool
-	}{
-		{"", true},
-		{hayai.PrivacyRelayRequired, true},
-		{"relay-required", true},
-		{hayai.PrivacyDirect, false},
-	} {
-		c := &Config{Privacy: tc.privacy}
-		if got := c.relayByDefault(); got != tc.want {
-			t.Errorf("Privacy %q: relayByDefault = %v, want %v", tc.privacy, got, tc.want)
-		}
-	}
-}
-
 func TestNew_WiresFields(t *testing.T) {
 	cfg := testConfig()
 	s := testServer(cfg, Options{})
@@ -57,25 +37,6 @@ func TestNew_WiresFields(t *testing.T) {
 	}
 	if _, ok := s.respTx.(transform.Passthrough); !ok {
 		t.Error("respTx not passthrough")
-	}
-}
-
-func TestNew_HayaiProvidersOptional(t *testing.T) {
-	s := testServer(testConfig(), Options{})
-	if s.registryProvider != nil {
-		t.Error("registryProvider should be nil when not supplied")
-	}
-	if s.reserveClient != nil {
-		t.Error("reserveClient should be nil when not supplied")
-	}
-	if s.toolAffinity != nil {
-		t.Error("toolAffinity should be nil when not supplied")
-	}
-	if s.responseAffinity != nil {
-		t.Error("responseAffinity should be nil when not supplied")
-	}
-	if s.wallet != nil {
-		t.Error("wallet should be nil when not supplied")
 	}
 }
 

@@ -268,7 +268,7 @@ type OpenHandle struct {
 	// group — so this is 0 in practice. The ticket-box MBR is no longer
 	// a per-turn ALGO leg; it is drawn from the payer's prepaid pool.
 	// Surfaced via
-	// setHayaiUsageHeaders / zs.usage so the caller (the TUI) sees
+	// PaymentCommitted and ReceiptVerified so the caller (the TUI) sees
 	// only what the payer actually paid in ALGO fees, not the
 	// operator's pool. The total committed group fee remains
 	// recoverable from algod / the indexer for audit.

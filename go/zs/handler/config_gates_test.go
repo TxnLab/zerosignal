@@ -6,53 +6,96 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/wire"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
-// These pin each Config field at the point dispatch reads it. A helper test
-// alone (relayByDefault, teeRequired) leaves the call site free to stop using
-// the helper, and every field here is either a privacy or a security gate.
+// These pin each Config field and request header at the point the handler
+// hands it to the Client. Every one is a privacy or a security gate, and the
+// Client's own tests cannot see the handler drop or rename one.
 
-// dispatchRelayHops drives one chat request through dispatchHayai against a
-// target and a relay of distinct owners, with a reserve client that refuses
-// every call, and returns the hop each reserve rode. The refusal ends the
-// request before payment, so no wallet is needed.
+// refusingReserveClient refuses every reserve, with err or else a plain 400,
+// and records the target and hop of each. The refusal ends the request before
+// payment, so no wallet is needed.
+type refusingReserveClient struct {
+	err  error
+	mu   sync.Mutex
+	ops  []hayai.Operator
+	hops []*hayai.RelayHop
+}
+
+func (c *refusingReserveClient) Reserve(_ context.Context, op hayai.Operator, _ ticket.ReserveRequest, hop *hayai.RelayHop) (*hayai.ReservedTicket, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ops = append(c.ops, op)
+	c.hops = append(c.hops, hop)
+	if c.err != nil {
+		return nil, c.err
+	}
+	return nil, &hayai.ReserveHTTPError{Status: http.StatusBadRequest, Code: "invalid_request"}
+}
+
+// gatesOp is a reachable, version-compatible operator. Distinct owners matter:
+// a relay must not share its target's owner.
+func gatesOp(id uint64, owner string) hayai.Operator {
+	return hayai.Operator{
+		ID:           id,
+		NodeID:       1,
+		OwnerAddr:    owner,
+		BaseURL:      "http://op.example",
+		ProtoVersion: wire.ProtoVersion,
+		Reachable:    true,
+		Models:       []string{"gpt-test"},
+	}
+}
+
+// gatesServer builds a Server over ops whose reserves are all refused.
+func gatesServer(t *testing.T, cfg *Config, rc hayai.ReserveClient, ops ...hayai.Operator) *Server {
+	t.Helper()
+	registry, err := hayai.NewStaticRegistryProvider(ops)
+	if err != nil {
+		t.Fatalf("NewStaticRegistryProvider: %v", err)
+	}
+	return New(cfg, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{
+		RegistryProvider: registry,
+		ReserveClient:    rc,
+		Tokenizer:        testTokenizer(),
+		Wallet:           &fakeWallet{},
+	})
+}
+
+// dispatchRelayHops sends one chat request against a target and a relay of
+// distinct owners and returns the hop each reserve rode.
 func dispatchRelayHops(t *testing.T, cfg *Config, relayHeader, bodyRelay string) []*hayai.RelayHop {
 	t.Helper()
-	refuse := &hayai.ReserveHTTPError{Status: http.StatusBadRequest, Code: "invalid_request"}
-	rc := &scriptedReserveClient{script: []error{refuse}}
-	s := retryServer(t, true, rc, []hayai.Operator{retryOp(1, "OWNER_A"), retryOp(2, "OWNER_B")})
-	s.cfg = cfg
-	s.tokenizer = testTokenizer()
-	s.wallet = &fakeWallet{}
+	rc := &refusingReserveClient{}
+	s := gatesServer(t, cfg, rc, gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"))
 
 	provider := ""
 	if bodyRelay != "" {
 		provider = `,"provider":{"relay":"` + bodyRelay + `"}`
 	}
-	body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]` + provider + `}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	req := clientReq(http.MethodPost, "/v1/chat/completions",
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]`+provider+`}`)
 	if relayHeader != "" {
 		req.Header.Set("X-Zs-Relay", relayHeader)
 	}
-	s.dispatchHayai(httptest.NewRecorder(), req, endpointChatCompletions, body, formatChat)
+	s.mux.ServeHTTP(httptest.NewRecorder(), req)
 
-	if rc.calls() == 0 {
+	if len(rc.hops) == 0 {
 		t.Fatal("no reserve was attempted; the test reached no routing decision")
 	}
-	hops := make([]*hayai.RelayHop, rc.calls())
-	for i := range hops {
-		hops[i] = rc.hopAt(i)
-	}
-	return hops
+	return rc.hops
 }
 
 func TestDispatch_RelayPosture(t *testing.T) {
@@ -63,8 +106,10 @@ func TestDispatch_RelayPosture(t *testing.T) {
 		bodyRelay string
 		wantRelay bool
 	}{
-		// An SDK caller who never set Privacy.
+		// A caller who never set Privacy.
 		{"zero Privacy relays", &Config{Affinity: hayai.AffinityNone}, "", "", true},
+		// A typo is not an opt-out.
+		{"unknown Privacy relays", &Config{Privacy: "relay-required", Affinity: hayai.AffinityNone}, "", "", true},
 		{"direct sends direct", &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone}, "", "", false},
 		// A caller's relay=off must not override a payer who didn't allow it.
 		{"off refused without override", &Config{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone}, "off", "", true},
@@ -75,6 +120,7 @@ func TestDispatch_RelayPosture(t *testing.T) {
 		{"body off beats header required", &Config{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "required", "off", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.cfg.AllowPrivateOperators = true
 			for i, hop := range dispatchRelayHops(t, tc.cfg, tc.header, tc.bodyRelay) {
 				if (hop != nil) != tc.wantRelay {
 					t.Errorf("reserve %d: relayed = %v, want %v", i, hop != nil, tc.wantRelay)
@@ -84,92 +130,160 @@ func TestDispatch_RelayPosture(t *testing.T) {
 	}
 }
 
-func TestConfig_TEERequiredOnlyForListedModels(t *testing.T) {
-	c := &Config{TEERequiredModels: []string{"listed"}}
-	if !c.teeRequired("listed") {
-		t.Error("a listed model is not TEE-required")
-	}
-	if c.teeRequired("other") {
-		t.Error("an unlisted model is TEE-required; one entry must not gate every model")
-	}
-	if (&Config{}).teeRequired("listed") {
-		t.Error("an empty list requires TEE")
+// A TEE requirement reaches routing from either source — the payer's per-model
+// list or the caller's header — and only for what it names. Every candidate
+// here is unattested, so a requirement that arrives ends in no_tee_capacity
+// before any reserve; one that is dropped reaches the reserve.
+func TestDispatch_TEERequirement(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		models  []string
+		header  string
+		wantTEE bool
+	}{
+		{"listed model", []string{"gpt-test"}, "", true},
+		{"unlisted model", []string{"other"}, "", false},
+		{"header", nil, "nvidia-cc", true},
+		{"neither", nil, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &refusingReserveClient{}
+			cfg := &Config{Privacy: hayai.PrivacyDirect, TEERequiredModels: tc.models}
+			s := gatesServer(t, cfg, rc, gatesOp(1, "OWNER_A"))
+			req := clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","max_completion_tokens":100}`)
+			if tc.header != "" {
+				req.Header.Set("X-Zs-Require-TEE", tc.header)
+			}
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, req)
+
+			gotTEE := strings.Contains(w.Body.String(), `"no_tee_capacity"`)
+			if gotTEE != tc.wantTEE {
+				t.Errorf("no_tee_capacity = %v, want %v (status %d body %s)", gotTEE, tc.wantTEE, w.Code, w.Body.String())
+			}
+			if tc.wantTEE && (w.Code != http.StatusServiceUnavailable || len(rc.hops) != 0) {
+				t.Errorf("status %d after %d reserves, want 503 before any", w.Code, len(rc.hops))
+			}
+		})
 	}
 }
 
-// The Config doc promises a zero Affinity behaves as prefer: the tool-call pin
-// leads. AffinityNone is the control that shows the pin is what moved it.
-func TestPickCandidates_ZeroAffinityPinsLikePrefer(t *testing.T) {
-	const model = "gpt-4o-mini"
-	// The pin takes the higher id so a tie-break can't put it first by itself.
-	pinned, peer := signerOp(9, model, nil), signerOp(8, model, nil)
-	body := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`)
+// Each routing store in Options reaches the Client. The fraud ban is the one
+// that matters most — a dropped NodeExcluder silently routes to a node proven
+// to have tried to take the payer's money — but a dropped store of any kind
+// leaves routing blind to evidence the proxy is still collecting.
+func TestNew_PassesRoutingStores(t *testing.T) {
+	ref := func(op hayai.Operator) hayai.NodeRef { return hayai.RefOf(op) }
+	op1, op2, op3 := gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"), gatesOp(3, "OWNER_C")
 
-	first := func(policy hayai.AffinityPolicy) uint64 {
-		srv := minimalTEEServer(t, []hayai.Operator{peer, pinned})
-		srv.cfg.Affinity = policy
-		srv.toolAffinity = hayai.NewIDAffinity(16, time.Minute, time.Now)
-		srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
-		got := pickChat(t, srv, model, body)
-		if len(got.Operators) != 2 {
-			t.Fatalf("policy %q: got %v, want both operators", policy, opIDSet(got.Operators))
+	// reserved dispatches one chat request in direct mode and returns the
+	// operators reserved against, in order. Every reserve is refused with a
+	// code, so every candidate is asked once.
+	reserved := func(t *testing.T, opts func(*Options)) []uint64 {
+		t.Helper()
+		registry, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+		if err != nil {
+			t.Fatalf("NewStaticRegistryProvider: %v", err)
 		}
-		return got.Operators[0].ID
+		rc := &refusingReserveClient{}
+		o := Options{RegistryProvider: registry, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}}
+		opts(&o)
+		s := New(&Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone, AllowPrivateOperators: true},
+			silentLogger(), transform.Passthrough{}, transform.Passthrough{}, o)
+		s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/chat/completions",
+			`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
+		var ids []uint64
+		for _, op := range rc.ops {
+			ids = append(ids, op.ID)
+		}
+		return ids
 	}
-	if got := first(hayai.AffinityNone); got == pinned.ID {
-		t.Fatal("control: the pinned node leads with affinity off, so this test can't tell")
+
+	// The control: with no store, op 1 is asked first. Each case below moves it.
+	if got := reserved(t, func(*Options) {}); len(got) != 2 || got[0] != 1 {
+		t.Fatalf("control: reserved %v, want op 1 then op 2", got)
 	}
-	if got := first(""); got != pinned.ID {
-		t.Errorf("zero Affinity: %d leads, want the pinned %d", got, pinned.ID)
-	}
+
+	t.Run("NodeExcluder", func(t *testing.T) {
+		src := &hayai.ChainOperatorSource{}
+		src.ExcludeNode(ref(op1))
+		if got := reserved(t, func(o *Options) { o.NodeExcluder = src }); len(got) != 1 || got[0] != 2 {
+			t.Errorf("reserved %v, want only op 2", got)
+		}
+	})
+	t.Run("TargetBackoff", func(t *testing.T) {
+		src := &hayai.ChainOperatorSource{}
+		src.RecordTargetOutcome(ref(op1), false)
+		if got := reserved(t, func(o *Options) { o.TargetBackoff = src }); len(got) != 2 || got[0] != 2 {
+			t.Errorf("reserved %v, want op 2 first", got)
+		}
+	})
+	t.Run("RelayLatency", func(t *testing.T) {
+		src := &hayai.ChainOperatorSource{}
+		for range hayai.LatencyMinSamples {
+			src.RecordDirectRTT(ref(op1), 10*time.Second)
+			src.RecordDirectRTT(ref(op2), 10*time.Millisecond)
+		}
+		if got := reserved(t, func(o *Options) { o.RelayLatency = src }); len(got) != 2 || got[0] != 2 {
+			t.Errorf("reserved %v, want op 2 first", got)
+		}
+	})
+	t.Run("RelayReputation", func(t *testing.T) {
+		// A downranked relay is a fallback, never a drop, so it is chosen only
+		// when no other relay can carry the target. With three owners every
+		// target has another, so op 2 must never relay.
+		src := &hayai.ChainOperatorSource{}
+		for !src.RelayDownranked(ref(op2)) {
+			src.RecordRelayOutcome(ref(op2), false)
+		}
+		registry, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2, op3})
+		if err != nil {
+			t.Fatalf("NewStaticRegistryProvider: %v", err)
+		}
+		rc := &refusingReserveClient{}
+		s := New(&Config{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone, AllowPrivateOperators: true},
+			silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{
+				RegistryProvider: registry, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{},
+				RelayReputation: src,
+			})
+		// Relay choice is random; 8 requests × 3 targets leave a dropped store
+		// a 2^-24 chance of passing.
+		for range 8 {
+			s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/chat/completions",
+				`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
+		}
+		if len(rc.hops) == 0 {
+			t.Fatal("no reserve was attempted")
+		}
+		for i, hop := range rc.hops {
+			if hop == nil || hop.RelayRef() == ref(op2) {
+				t.Fatalf("reserve %d rode %+v; the downranked relay was used", i, hop)
+			}
+		}
+	})
 }
 
-// Under prefer, an underfunded pin with no funded peer is a model-wide outage.
-// Naming the pin and "affinity_policy: strict" would send the payer to a knob
-// they already have set the way the message recommends.
-func TestPickCandidates_ToolAffinityPrefer_UnderfundedPinNotReportedAsStrict(t *testing.T) {
-	const model = "gpt-4o-mini"
-	pinned := signerOp(7, model, micro(0))
-	srv := minimalTEEServer(t, []hayai.Operator{pinned})
-	srv.cfg.Affinity = hayai.AffinityPrefer
-	srv.toolAffinity = hayai.NewIDAffinity(16, time.Minute, time.Now)
-	srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
-
-	body := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`)
-	pick := pickChat(t, srv, model, body)
-	if !pick.SignerUnderfundedBlocked {
-		t.Fatalf("got %+v, want SignerUnderfundedBlocked", pick)
-	}
-	if r := pick.SignerUnderfundedReason; r != "" {
-		t.Errorf("reason = %q, want empty so the model-wide message is used", r)
-	}
-}
-
-// The SSRF dial guard is on unless the caller opts out: a malicious operator's
-// loopback BaseURL must not let it probe the payer's own machine.
+// The SSRF dial guard is on unless the payer opts out: a malicious operator's
+// loopback BaseURL must not let it probe the payer's own machine. The fake
+// node's reserve runs on its own client, so what the guard decides is whether
+// the paid request reaches the node.
 func TestNew_BlocksPrivateTargetsUnlessAllowed(t *testing.T) {
-	var hits atomic.Int32
-	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-	}))
-	defer local.Close()
+	for _, allow := range []bool{false, true} {
+		node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
+		cfg := testConfig()
+		opts := setupHayai(t, cfg, node)
+		cfg.AllowPrivateOperators = allow
+		s := New(&cfg.Config, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, opts)
 
-	guarded := New(&Config{}, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{})
-	if resp, err := guarded.httpClient.Get(local.URL); err == nil {
-		resp.Body.Close()
-		t.Error("default Config dialed a loopback target")
-	}
-	if n := hits.Load(); n != 0 {
-		t.Fatalf("loopback server saw %d requests through the guard", n)
-	}
+		w := httptest.NewRecorder()
+		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
 
-	open := New(&Config{AllowPrivateOperators: true}, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{})
-	resp, err := open.httpClient.Get(local.URL)
-	if err != nil {
-		t.Fatalf("AllowPrivateOperators: %v", err)
-	}
-	resp.Body.Close()
-	if hits.Load() != 1 {
-		t.Error("control: AllowPrivateOperators did not reach the loopback server")
+		reached := node.lastSealedAlgorandTxID != ""
+		if reached != allow {
+			t.Errorf("AllowPrivateOperators=%v: loopback node reached = %v (status %d)", allow, reached, w.Code)
+		}
+		if allow && w.Code != http.StatusOK {
+			t.Errorf("control: AllowPrivateOperators did not serve: status %d body %s", w.Code, w.Body.String())
+		}
 	}
 }

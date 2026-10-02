@@ -13,6 +13,7 @@ import (
 	"go/token"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -95,12 +96,15 @@ var eventTypeCases = []struct {
 	ev   Event
 	want string
 }{
+	{MaxOutputClamped{}, "max_output.clamped"},
 	{RouteCandidates{}, "route.candidates"},
 	{HopChanged{}, "relay.hop"},
 	{ReserveStarted{}, "reserve.started"},
 	{ReserveRetrying{}, "reserve.retrying"},
 	{ReserveSucceeded{}, "reserve.succeeded"},
 	{PaymentCommitted{}, "payment.committed"},
+	{ResponseStarted{}, "response.started"},
+	{Frame{}, "frame"},
 	{ItemOpened{}, "item.opened"},
 	{ItemClosed{}, "item.closed"},
 	{TextDelta{}, "delta.text"},
@@ -221,6 +225,24 @@ func TestDefaultHTTPClientIgnoresEnvironmentProxy(t *testing.T) {
 	if tr.Proxy != nil {
 		t.Error("default transport consults the environment proxy")
 	}
+}
+
+// The default client refuses to dial a private address unless the caller
+// allows it: an operator's registered BaseURL must not make the payer probe
+// its own machine or LAN.
+func TestDefaultHTTPClientBlocksPrivateTargets(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+
+	if resp, err := defaultHTTPClient(false).Get(srv.URL); err == nil {
+		resp.Body.Close()
+		t.Error("default client reached a loopback server")
+	}
+	resp, err := defaultHTTPClient(true).Get(srv.URL)
+	if err != nil {
+		t.Fatalf("AllowPrivateHosts client: %v", err)
+	}
+	resp.Body.Close()
 }
 
 // otherSigner holds a key, but not the one its Address names.

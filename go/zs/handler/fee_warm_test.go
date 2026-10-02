@@ -108,7 +108,7 @@ func TestWarmFeeRate_PricesTheCatalogBeforeTheFirstRequest(t *testing.T) {
 	// rather than the call — the call alone doesn't mean the cache is warm.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, ok := s.feeRateNow(); ok {
+		if _, ok := s.FeeRate(); ok {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -140,7 +140,7 @@ func TestWarmFeeRate_IsANoOpForAFeeBlindWallet(t *testing.T) {
 
 	s.WarmFeeRate()
 
-	if _, ok := s.feeRateNow(); ok {
+	if _, ok := s.FeeRate(); ok {
 		t.Fatal("fee reported known for a wallet that cannot read it")
 	}
 	if got := pricedIDs(t, getJSON(t, "/v1/models", s.handleListModels)); len(got) != 0 {

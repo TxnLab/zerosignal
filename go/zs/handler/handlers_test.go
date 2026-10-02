@@ -14,36 +14,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/wire"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 )
-
-func TestStreamableRequest(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want bool
-	}{
-		{"stream true", `{"stream":true}`, true},
-		{"stream false", `{"stream":false}`, false},
-		{"missing", `{}`, false},
-		{"null", `{"stream":null}`, false},
-		{"invalid JSON", `{not-json`, false},
-		{"stream with siblings", `{"model":"x","stream":true,"temperature":0}`, true},
-		{"stream as string", `{"stream":"true"}`, false},
-		{"empty", ``, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := streamableRequest([]byte(tc.body)); got != tc.want {
-				t.Errorf("got %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
 
 func TestHandleHealth(t *testing.T) {
 	s := testServer(testConfig(), Options{})
@@ -302,13 +277,10 @@ func TestHandleHayaiDetails_EmitsFeeBps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
-	// Warm the fee cache: feeRateNow needs a fee-capable wallet AND a fresh
+	// Warm the fee cache: the fee rate needs a fee-capable wallet AND a fresh
 	// cache entry (a cold cache would kick a background refresh and report 0).
-	s.wallet = fakeFeeWallet{fee: 200}
-	s.feeRate.feeBps = 200
-	s.feeRate.ok = true
-	s.feeRate.fetchedAt = time.Now()
+	s := testServer(testConfig(), Options{RegistryProvider: reg, Wallet: feeWallet{&fakeWallet{}, 200}})
+	warmFee(t, s)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()

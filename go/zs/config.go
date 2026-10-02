@@ -13,8 +13,10 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algo"
 	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
 // Signer holds the payer's key. It signs raw Ed25519 digests (the reserve
@@ -73,11 +75,25 @@ type Discovery struct {
 	DetailsConcurrency int
 }
 
-// Stores are the stateful pieces a process may want to persist.
+// Stores are the stateful pieces a process may want to persist or share.
 type Stores struct {
 	// Journal records open tickets. The in-memory default forgets them on
 	// exit, so a long-running process should supply a durable one.
 	Journal TicketJournal
+
+	// The routing signals: per-relay forward reputation, observed network
+	// latency, per-target failure backoff, and nodes proven to have handed a
+	// fraudulent settle group. A nil store keeps no such signal.
+	RelayReputation RelayReputation
+	RelayLatency    RelayLatency
+	TargetBackoff   TargetBackoff
+	NodeExclusions  NodeExcluder
+
+	// ToolAffinity pins tool-call continuations by tool_call_id, and
+	// ResponseAffinity pins previous_response_id continuations by response
+	// id. Nil builds one from Config.Affinity.
+	ToolAffinity     *IDAffinity
+	ResponseAffinity *IDAffinity
 }
 
 // Config configures a Client. Signer and Network are required; every other
@@ -86,7 +102,14 @@ type Config struct {
 	Signer  Signer
 	Network Network
 
-	Privacy  Privacy  // PrivacyRelayRequired
+	Privacy Privacy // PrivacyRelayRequired
+	// AllowPrivacyOverride lets a request's relay preference turn relaying
+	// off (Request.Relay, or the body's provider.relay); without it such an
+	// opt-out is ignored. Asking for a relay is always honored.
+	AllowPrivacyOverride bool
+	// RequireTEEModels route only to attested nodes.
+	RequireTEEModels []string
+
 	Affinity Affinity // AffinityPrefer, 10m, 1024 entries
 
 	// MaxOutputCeiling caps the output reservation when the request omits
@@ -108,6 +131,15 @@ type Config struct {
 
 	ReserveTimeout time.Duration // per attempt (5s)
 
+	// RetryBudget bounds one request's retrying of transient failures, all
+	// before payment (transient.OverallDeadline). The client app shares the
+	// default, so the two ride out an outage for the same time.
+	RetryBudget time.Duration
+	// SweepDelay is the wait before the given retry sweep over the candidate
+	// list (transient.SweepDelay). Set, it also replaces the wait before a
+	// busy re-sweep, the node's Retry-After included.
+	SweepDelay func(sweep int) time.Duration
+
 	// AllowStaging and AllowPrivateHosts admit staging nodes and nodes on
 	// private addresses. Development only.
 	AllowStaging      bool
@@ -116,19 +148,40 @@ type Config struct {
 	Stores     Stores
 	SpendGuard SpendGuard // none: no cap
 
+	// Registry, ReserveClient and Wallet are the network-facing parts:
+	// operator discovery, the reserve call, and escrow. For now a Client
+	// needs all three; New will build them from Signer and Network when they
+	// are nil.
+	Registry      RegistryProvider
+	ReserveClient ReserveClient
+	Wallet        WalletOpener
+	// Tokenizer estimates input tokens and resolves the output reservation;
+	// nil builds one from MaxOutputByModel, MaxOutputCeiling and
+	// RequireMaxOutput.
+	Tokenizer *tokenize.Registry
+
+	// DebugLogBodies writes every plaintext request body and decrypted
+	// response to stderr. It deliberately breaks the rule that prompt and
+	// response content is never logged, so it is for local debugging only.
+	DebugLogBodies bool
+
 	Logger     *slog.Logger     // discards
 	Clock      func() time.Time // time.Now
 	HTTPClient *http.Client     // see defaultHTTPClient
 }
 
-// defaultHTTPClient has no timeout, because streams end by context, and no
-// environment proxy: http.DefaultTransport honours HTTP_PROXY, which would
-// route around the private-address dial guard and contradict "the SDK reads
-// no environment".
-func defaultHTTPClient() *http.Client {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = nil
-	return &http.Client{Transport: t}
+// defaultHTTPClient has no overall timeout, because streams end by context;
+// a response-header backstop, so a connected but silent node is given up on;
+// the private-address dial guard unless AllowPrivateHosts; and no environment
+// proxy: http.DefaultTransport honours HTTP_PROXY, which would route around
+// the dial guard and contradict "the SDK reads no environment".
+func defaultHTTPClient(allowPrivateHosts bool) *http.Client {
+	c := httpx.Client(0, httpx.Options{
+		ResponseHeaderTimeout: httpx.ForwardHeaderBackstop,
+		BlockPrivateTargets:   !allowPrivateHosts,
+	})
+	c.Transport.(*http.Transport).Proxy = nil
+	return c
 }
 
 const (
@@ -168,7 +221,7 @@ func (c Config) withDefaults() Config {
 		c.Clock = time.Now
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = defaultHTTPClient()
+		c.HTTPClient = defaultHTTPClient(c.AllowPrivateHosts)
 	}
 	return c
 }

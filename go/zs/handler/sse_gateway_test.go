@@ -7,12 +7,10 @@ package handler
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // An operator's CDN answering the inference forward with an HTML error page must
@@ -105,78 +103,5 @@ func TestForwardStream_NonOpenAIErrorBody_TruncatesContentType(t *testing.T) {
 
 	if n := len(w.Body.String()); n > 512 {
 		t.Errorf("error body is %d bytes; an unbounded upstream Content-Type reached the client", n)
-	}
-}
-
-// The tally is the disconnect diagnostic's whole value, so it has to measure the
-// two things that distinguish a client's total-elapsed deadline from an idle
-// timeout: how much actually got delivered, and the longest silence between
-// frames. A wrong maxGap sends the next investigation at the wrong fix.
-func TestStreamTally_RecordsVolumeAndLargestGap(t *testing.T) {
-	var tally streamTally
-	start := time.Now()
-
-	// No frames yet: ttfb must read as zero rather than "the whole elapsed time",
-	// which would make a stream that never produced anything look slow-but-alive.
-	if tally.frames != 0 || tally.maxGap != 0 {
-		t.Fatalf("fresh tally = %+v, want zero", tally)
-	}
-
-	tally.record(10)
-	tally.record(20)
-	// A deliberate pause, then another frame: this gap must be the recorded max.
-	time.Sleep(40 * time.Millisecond)
-	tally.record(30)
-	tally.record(40)
-
-	if tally.frames != 4 {
-		t.Errorf("frames = %d, want 4", tally.frames)
-	}
-	if tally.bytes != 100 {
-		t.Errorf("bytes = %d, want 100", tally.bytes)
-	}
-	if tally.maxGap < 30*time.Millisecond {
-		t.Errorf("maxGap = %s, want >= 30ms (the deliberate pause)", tally.maxGap)
-	}
-	// The gap must be an INTER-frame measure, not total elapsed: the two fast
-	// frames after the pause must not have widened it.
-	if tally.maxGap > 5*time.Second {
-		t.Errorf("maxGap = %s; looks like total elapsed rather than an inter-frame gap", tally.maxGap)
-	}
-
-	// attrs must report a non-zero ttfb once a frame has landed, measured from the
-	// forward start so it includes the reserve + escrow-open preamble the client
-	// also waited through.
-	var ttfb time.Duration
-	for _, a := range tally.attrs(start) {
-		if sa, ok := a.(slog.Attr); ok && sa.Key == "ttfb" {
-			ttfb = sa.Value.Duration()
-		}
-	}
-	if ttfb <= 0 {
-		t.Errorf("ttfb attr = %s, want > 0 once a frame has been delivered", ttfb)
-	}
-}
-
-// A stream that delivered nothing must report ttfb=0, not the elapsed time —
-// otherwise "we waited 25s and got nothing" reads as "first byte took 25s".
-func TestStreamTally_NoFramesReportsZeroTTFB(t *testing.T) {
-	var tally streamTally
-	start := time.Now().Add(-2 * time.Second)
-	for _, a := range tally.attrs(start) {
-		sa, ok := a.(slog.Attr)
-		if !ok {
-			continue
-		}
-		switch sa.Key {
-		case "ttfb":
-			if sa.Value.Duration() != 0 {
-				t.Errorf("ttfb = %s, want 0 when no frame was delivered", sa.Value.Duration())
-			}
-		case "elapsed":
-			if sa.Value.Duration() < time.Second {
-				t.Errorf("elapsed = %s, want the real wall clock (>=1s)", sa.Value.Duration())
-			}
-		}
 	}
 }

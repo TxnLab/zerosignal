@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/wire"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 )
@@ -58,13 +57,20 @@ func catalogOp(id uint64, model string, staging bool) hayai.Operator {
 // fixture that sets only one would test a state that cannot occur.
 func catalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator) *Server {
 	t.Helper()
+	return catalogServerWith(t, allowStaging, &refusingReserveClient{}, ops...)
+}
+
+// catalogServerWith is catalogServer over rc. A request that routes ends at
+// rc's refusal, before any payment.
+func catalogServerWith(t *testing.T, allowStaging bool, rc hayai.ReserveClient, ops ...hayai.Operator) *Server {
+	t.Helper()
 	reg, err := hayai.NewStaticRegistryProviderWithConfig(ops, hayai.StaticRegistryConfig{AllowStaging: allowStaging})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
 	cfg := testConfig()
 	cfg.AllowStaging = allowStaging
-	return testServer(cfg, Options{RegistryProvider: reg})
+	return testServer(cfg, Options{RegistryProvider: reg, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
 }
 
 func listedModelIDs(t *testing.T, s *Server) map[string]bool {
@@ -220,7 +226,6 @@ func TestStagingCatalogAndDispatchAgree(t *testing.T) {
 
 	t.Run("knob off", func(t *testing.T) {
 		s := catalogServer(t, false, ops...)
-		s.tokenizer = testTokenizer()
 
 		ids := listedModelIDs(t, s)
 		if !ids["prod-model"] || ids["staging-only"] {
@@ -233,35 +238,25 @@ func TestStagingCatalogAndDispatchAgree(t *testing.T) {
 	})
 
 	t.Run("knob on", func(t *testing.T) {
-		s := catalogServer(t, true, ops...)
-		s.tokenizer = testTokenizer()
+		rc := &refusingReserveClient{}
+		s := catalogServerWith(t, true, rc, ops...)
 
 		if ids := listedModelIDs(t, s); !ids["staging-only"] {
 			t.Fatalf("/v1/models = %v, want staging-only listed once opted in", ids)
 		}
-		// Routable too. Asserted at pickCandidates rather than end-to-end
-		// because a full dispatch continues into the wallet/reserve path, which
-		// this fixture has no need to wire — the staging gate is upstream of it.
-		pick, err := s.pickCandidates(context.Background(), endpointChatCompletions, "staging-only",
-			[]byte(`{"model":"staging-only"}`),
-			hayai.SizingRequest{Model: "staging-only", InputTokens: 100, MaxOutputTokens: 100},
-			false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
-		if err != nil {
-			t.Fatalf("pickCandidates: %v", err)
-		}
-		if pick.StagingBlocked || len(pick.Operators) != 1 {
-			t.Errorf("pickCandidates = %d operators, StagingBlocked=%v; want 1 candidate and no block",
-				len(pick.Operators), pick.StagingBlocked)
+		// Routable too: the request reaches the staging node's reserve, where
+		// the fixture's refusal ends it before payment.
+		postChat(t, s, "staging-only")
+		if len(rc.ops) == 0 || rc.ops[0].ID != 2 {
+			t.Errorf("reserves went to %v, want the staging node 2", rc.ops)
 		}
 	})
 }
 
 func postChat(t *testing.T, s *Server, model string) (int, string) {
 	t.Helper()
-	body := []byte(`{"model":"` + model + `","max_completion_tokens":100}`)
-	req := httptest.NewRequest(http.MethodPost, endpointChatCompletions, strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
-	s.dispatchHayai(w, req, endpointChatCompletions, body, formatChat)
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, endpointChatCompletions, `{"model":"`+model+`","max_completion_tokens":100}`))
 	return w.Code, w.Body.String()
 }
 
@@ -290,7 +285,7 @@ func dynamicCatalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator
 	}
 	cfg := testConfig()
 	cfg.AllowStaging = allowStaging
-	return testServer(cfg, Options{RegistryProvider: reg})
+	return testServer(cfg, Options{RegistryProvider: reg, ReserveClient: &refusingReserveClient{}, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
 }
 
 // TestDiscoveryHandlersOverDynamicRegistry is the shipped-path pin, and the one
@@ -378,25 +373,18 @@ func detailsModelIDs(t *testing.T, s *Server) map[string]bool {
 	return ids
 }
 
-// TestRelayPoolKeepsStagingNodes is the consumer-side half of the hard
-// constraint (the provider-side half is
-// TestDynamicRegistry_AllOperatorsKeepsStagingForRelayUse). proto/SPEC.md: the
-// staging flag "gates TARGET selection only. Staging nodes remain usable as
-// relays, since a relay forwards bytes and runs no inference." Pinning it at both
-// layers means neither a provider refactor nor a "filter everywhere in the
-// handler layer" refactor can shrink the relay pool quietly.
-func TestRelayPoolKeepsStagingNodes(t *testing.T) {
+// proto/SPEC.md: the staging flag "gates TARGET selection only. Staging nodes
+// remain usable as relays, since a relay forwards bytes and runs no
+// inference." The relay pool keeping them is pinned in zs
+// (TestRelayPoolKeepsStagingNodes); this is the payer-facing directory, which
+// hides them.
+func TestOperatorsDirectoryHidesStagingNodes(t *testing.T) {
 	s := catalogServer(t, false,
 		catalogOp(1, "staging-only", true),
 		catalogOp(2, "staging-only", true),
 	)
-
-	pool := s.relayPool(context.Background())
-	if len(pool) != 2 {
-		t.Fatalf("relayPool = %d nodes, want 2 — staging nodes are still valid relay hops", len(pool))
-	}
-	// And the payer-facing directory still hides them, so this is the deliberate
-	// asymmetry rather than a missing filter.
+	// The payer-facing directory hides them while relaying keeps them, so this
+	// is the deliberate asymmetry rather than a missing filter.
 	if ops := operatorsPayload(t, s); len(ops) != 0 {
 		t.Fatalf("/v1/zs/operators = %d entries, want 0 while allow_staging is off", len(ops))
 	}

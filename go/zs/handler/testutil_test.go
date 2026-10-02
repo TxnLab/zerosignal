@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 
@@ -69,6 +70,10 @@ func testServerWithTransforms(cfg *testCfg, reqTx transform.RequestTransformer, 
 	cfg.AllowPrivateOperators = true
 	return New(&cfg.Config, silentLogger(), reqTx, respTx, opts)
 }
+
+// noSweepDelay is an Options.SweepDelay that never waits, so a test can run
+// several retry or busy sweeps without sleeping through the real schedule.
+func noSweepDelay(int) time.Duration { return 0 }
 
 func mustNewIdentity(t *testing.T) *age.X25519Identity {
 	t.Helper()

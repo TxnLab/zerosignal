@@ -7,79 +7,47 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
+	"iter"
 	"net/http"
 	"strconv"
 	"strings"
 
-	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// emitter receives what a dispatch produces for its caller. Dispatch decides
-// what happened; the emitter decides how the caller sees it, so the dispatch
-// core has no ResponseWriter to hand and can answer an SDK caller as well as
-// an HTTP client.
-//
-// A request ends in exactly one of: fail, reply, or open followed by frames
-// (and interrupt if the stream breaks). clamped may precede any of them.
-type emitter interface {
-	// clamped reports that the request's max_output was lowered to ceiling.
-	clamped(ceiling uint64)
-	// fail ends the request with e before any response has started.
-	fail(e *zs.Error)
-	// reply delivers a complete response. header is the node's response
-	// header set; usage is nil when no receipt verified.
-	reply(status int, header http.Header, body []byte, usage *usageReport)
-	// open starts a stream. A non-nil error means it could not start and the
-	// caller has already been told.
-	open(status int) error
-	// frame delivers one stream frame and returns the bytes written, for the
-	// stream tally.
-	frame(f outFrame) (int, error)
-	// interrupt ends an open stream that broke before its end.
-	interrupt()
+// dispatchHayai answers an HTTP client with one turn of the Client. The
+// request headers the turn honors are read here, so the Client never sees the
+// request.
+func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
+	req := zs.Request{
+		Endpoint:    zs.Endpoint(endpoint),
+		Body:        body,
+		ContentType: r.Header.Get("Content-Type"),
+		RequireTEE:  strings.TrimSpace(r.Header.Get("X-Zs-Require-TEE")) != "",
+		Relay:       r.Header.Get("X-Zs-Relay"),
+	}
+	newHTTPEmitter(w, r, format, s.fundingHint()).serve(s.Client.Stream(r.Context(), req).Events())
 }
 
-// usageReport is what the payer is told a verified turn cost.
-type usageReport struct {
-	receipt      *ticket.UsageReceipt
-	ticket       *ticket.Ticket
-	op           zs.Operator
-	openFees     uint64
-	settleFees   uint64
-	algoUSDPrice float64
-	feeBps       uint64
-	discountBps  uint64
-	haveFee      bool
+// fundingHint is what a wallet_unfunded error tells the payer to do. The web
+// app is offered only on mainnet: the hosted client is built for one network,
+// so a testnet payer sent there would fund the wrong chain.
+func (s *Server) fundingHint() string {
+	if s.cfg.Network == "mainnet" && s.cfg.FundingURL != "" {
+		return "add funds in the web app (" + s.cfg.FundingURL + ") if this is your web account, " +
+			"or run `zs-proxy fund` for a deposit address."
+	}
+	return "run `zs-proxy fund`."
 }
 
-func (u *usageReport) setHeaders(h http.Header) {
-	setHayaiUsageHeaders(h, u.receipt, u.ticket, u.op, u.openFees, u.settleFees, u.algoUSDPrice, u.feeBps, u.discountBps, u.haveFee)
-}
-
-// upstreamReply is an operator's own error response, kept as the cause of a
-// zs.Error so the HTTP surface can pass it through with the node's status
-// and body rather than a proxy-authored one.
-type upstreamReply struct {
-	status int
-	header http.Header
-	body   []byte
-	// contentType replaces the node's when the body is one the proxy wrote
-	// in place of a body it could not parse.
-	contentType string
-}
-
-func (u *upstreamReply) Error() string {
-	return fmt.Sprintf("operator returned HTTP %d", u.status)
-}
-
-// httpEmitter renders a dispatch as an OpenAI-compatible HTTP response.
+// httpEmitter renders a Stream as an OpenAI-compatible HTTP response.
 type httpEmitter struct {
 	w http.ResponseWriter
 	// clientCtx is the request's context: once it is done the client is gone,
-	// and frames are swallowed so the receipt tail can still be drained.
+	// and frames are swallowed (see clientAwareWriter).
 	clientCtx context.Context
 	flusher   http.Flusher
 	// format is the shape the client called in; the node always answers in
@@ -89,14 +57,67 @@ type httpEmitter struct {
 	// zs.usage stream frame. Off by default: strict OpenAI clients
 	// (JetBrains/Koog) fail on an event they cannot parse.
 	usageFrame bool
+	// fundingHint completes a wallet_unfunded message.
+	fundingHint string
 }
 
-func newHTTPEmitter(w http.ResponseWriter, r *http.Request, format clientFormat) *httpEmitter {
+func newHTTPEmitter(w http.ResponseWriter, r *http.Request, format clientFormat, fundingHint string) *httpEmitter {
 	return &httpEmitter{
-		w:          w,
-		clientCtx:  r.Context(),
-		format:     format,
-		usageFrame: strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
+		w:           w,
+		clientCtx:   r.Context(),
+		format:      format,
+		usageFrame:  strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
+		fundingHint: fundingHint,
+	}
+}
+
+// serve writes a turn's events. A non-streaming reply is held until done,
+// because its usage headers must precede its body. Returning before the
+// events end stops the turn, which the Client treats as the client leaving.
+func (e *httpEmitter) serve(events iter.Seq2[zs.Event, error]) {
+	var (
+		started *zs.ResponseStarted
+		body    []byte
+		usage   *zs.ReceiptVerified
+	)
+	for ev, err := range events {
+		if err != nil {
+			if started != nil && started.Streaming {
+				e.interrupt()
+				return
+			}
+			e.fail(err)
+			return
+		}
+		switch ev := ev.(type) {
+		case zs.MaxOutputClamped:
+			e.clamped(ev.Ceiling)
+		case zs.ResponseStarted:
+			started = &ev
+			if ev.Streaming && e.open(ev.Status) != nil {
+				return
+			}
+		case zs.Frame:
+			if started == nil || !started.Streaming {
+				body = ev.Data
+				continue
+			}
+			if e.frame(ev) != nil {
+				return
+			}
+		case zs.ReceiptVerified:
+			if started == nil || !started.Streaming {
+				usage = &ev
+				continue
+			}
+			if e.usageFrame && e.frame(usageFrame(ev)) != nil {
+				return
+			}
+		case zs.Done:
+			if started != nil && !started.Streaming {
+				e.reply(started.Status, started.Header, body, usage)
+			}
+		}
 	}
 }
 
@@ -104,30 +125,40 @@ func (e *httpEmitter) clamped(ceiling uint64) {
 	e.w.Header().Set("X-Zs-Max-Output-Clamped", strconv.FormatUint(ceiling, 10))
 }
 
-func (e *httpEmitter) fail(err *zs.Error) {
-	if up, ok := errors.AsType[*upstreamReply](err.Err); ok {
+func (e *httpEmitter) fail(err error) {
+	ze, ok := errors.AsType[*zs.Error](err)
+	if !ok {
+		writeOpenAIError(e.w, http.StatusInternalServerError, "proxy_error", "", err.Error())
+		return
+	}
+	if up, ok := errors.AsType[*zs.NodeReply](ze.Err); ok {
 		e.passThrough(up)
 		return
 	}
-	writeError(e.w, err)
+	if ze.Code == "wallet_unfunded" {
+		c := *ze
+		c.Message += " — " + e.fundingHint
+		ze = &c
+	}
+	writeError(e.w, ze)
 }
 
 // passThrough writes an operator's error response. No node-set X-Zs-* header
 // reaches the client (SPEC §5.2 step 4); the proxy's own are kept.
-func (e *httpEmitter) passThrough(up *upstreamReply) {
+func (e *httpEmitter) passThrough(up *zs.NodeReply) {
 	h := e.w.Header()
 	proxyHdrs := snapshotHayaiHeaders(h)
-	copyResponseHeaders(h, up.header)
+	copyResponseHeaders(h, up.Header)
 	stripNodeHayaiHeaders(h, proxyHdrs)
 	h.Del("Content-Length")
-	if up.contentType != "" {
-		h.Set("Content-Type", up.contentType)
+	if up.ContentType != "" {
+		h.Set("Content-Type", up.ContentType)
 	}
-	e.w.WriteHeader(up.status)
-	_, _ = e.w.Write(up.body)
+	e.w.WriteHeader(up.Status)
+	_, _ = e.w.Write(up.Body)
 }
 
-func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *usageReport) {
+func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *zs.ReceiptVerified) {
 	h := e.w.Header()
 	// Captured before the copy: the X-Zs-* the proxy itself set earlier in
 	// dispatch (the max_output clamp marker) would otherwise be deleted along
@@ -138,7 +169,7 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 	h.Del("Content-Length")
 	h.Set("Content-Type", "application/json")
 	if usage != nil {
-		usage.setHeaders(h)
+		setUsageHeaders(h, *usage)
 	}
 	// A pass-through for anything that isn't a chat completion (a sealed
 	// error).
@@ -152,7 +183,7 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 func (e *httpEmitter) open(status int) error {
 	flusher, ok := e.w.(http.Flusher)
 	if !ok {
-		writeError(e.w, newError("no_flusher", "streaming not supported by server writer"))
+		writeError(e.w, &zs.Error{Kind: zs.KindInternal, Code: "no_flusher", Message: "streaming not supported by server writer"})
 		return errors.New("response writer cannot flush")
 	}
 	e.flusher = flusher
@@ -166,26 +197,51 @@ func (e *httpEmitter) open(status int) error {
 	return nil
 }
 
-func (e *httpEmitter) frame(out outFrame) (int, error) {
-	f := out.frame
-	switch {
-	case out.usage != nil:
-		if !e.usageFrame {
-			return 0, nil
-		}
-		u := out.usage
-		f = hayaiUsageFrame(u.receipt, u.ticket, u.op, u.openFees, u.settleFees, u.algoUSDPrice, u.feeBps, u.discountBps, u.haveFee)
-	case out.content && e.format == formatLegacyCompletions:
+func (e *httpEmitter) frame(f zs.Frame) error {
+	if f.Sealed && e.format == formatLegacyCompletions {
 		f.Data = completionsChunkFromChat(f.Data)
 	}
-	n, err := writeSSEFrame(&clientAwareWriter{w: e.w, clientCtx: e.clientCtx}, f)
-	if err != nil {
-		return n, err
+	if _, err := (&clientAwareWriter{w: e.w, clientCtx: e.clientCtx}).Write(f.SSE()); err != nil {
+		return err
 	}
 	e.flusher.Flush()
-	return n, nil
+	return nil
 }
 
 func (e *httpEmitter) interrupt() {
 	writeSSEError(e.w, e.flusher)
+}
+
+// clientAwareWriter forwards writes to the client until the client's request
+// context is cancelled, after which it silently swallows them, so serve keeps
+// ranging to the turn's end rather than stopping on a dead socket. It is not
+// what saves the receipt tail: the turn runs on the request's context, so a
+// departed client already reads to the forwarder as a disconnect, and a turn
+// that serve stops reads the same way.
+type clientAwareWriter struct {
+	w         io.Writer
+	clientCtx context.Context
+}
+
+func (cw *clientAwareWriter) Write(p []byte) (int, error) {
+	if cw.clientCtx.Err() != nil {
+		return len(p), nil
+	}
+	return cw.w.Write(p)
+}
+
+// writeSSEError emits an OpenAI-shaped error frame followed by [DONE].
+// Safe to call after the stream has already started writing. The client
+// sees a generic message only — the real cause is already in the log.
+func writeSSEError(w io.Writer, flusher http.Flusher) {
+	payload, _ := json.Marshal(openAIErrorEnvelope{
+		Error: openAIError{
+			Message: "stream interrupted",
+			Type:    "proxy_error",
+			Code:    "stream_error",
+		},
+	})
+	_, _ = w.Write(zs.Frame{Data: payload}.SSE())
+	_, _ = w.Write(zs.Frame{Data: []byte("[DONE]")}.SSE())
+	flusher.Flush()
 }

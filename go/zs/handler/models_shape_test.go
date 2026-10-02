@@ -51,32 +51,48 @@ func pathModelID(path string) string {
 	return id
 }
 
-// feeWallet is a fakeWallet that also advertises a protocol fee — the optional
-// capability client.feeRateNow gates on.
-type feeWallet struct{ *fakeWallet }
+// feeWallet is a fakeWallet that also advertises a protocol fee of bps — the
+// optional capability the Client's fee rate gates on.
+type feeWallet struct {
+	*fakeWallet
+	bps uint64
+}
 
-func (feeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) { return 1000, nil }
+func (w feeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) { return w.bps, nil }
 
 // feeServer builds a proxy whose protocol fee is KNOWN, at feeBps.
 //
-// Both halves are needed and for different reasons. feeRateNow type-asserts the
-// wallet for feeRateCapable BEFORE reading the cache, so a plain fake leaves
-// the fee permanently unknown — under which modelEntryFor publishes no price at
-// all, and every pricing assertion below would be testing the wrong branch. And
-// the cache must be SEEDED rather than filled through the wallet: a cold read
-// returns (0, false) and kicks an ASYNC refresh, so fetching the rate the
-// production way would race that goroutine. A non-stale entry takes
-// feeRateCache.get's fast path and never refreshes.
+// Both halves are needed and for different reasons. The fee rate type-asserts
+// the wallet for the fee capability BEFORE reading its cache, so a plain fake
+// leaves the fee permanently unknown — under which modelEntryFor publishes no
+// price at all, and every pricing assertion below would be testing the wrong
+// branch. And the cache must be warm before the first request: a cold read
+// returns (0, false) and kicks an ASYNC refresh, so a request racing that
+// goroutine would see either branch.
 func feeServer(t *testing.T, ops []hayai.Operator, feeBps uint64) *Server {
 	t.Helper()
 	s := testServer(testConfig(), Options{
 		RegistryProvider: modelsRegistry(t, ops),
-		Wallet:           feeWallet{&fakeWallet{}},
+		Wallet:           feeWallet{&fakeWallet{}, feeBps},
 	})
-	s.feeRate.mu.Lock()
-	s.feeRate.feeBps, s.feeRate.ok, s.feeRate.fetchedAt = feeBps, true, time.Now()
-	s.feeRate.mu.Unlock()
+	warmFee(t, s)
 	return s
+}
+
+// warmFee fills s's fee cache and waits until the rate reads as known.
+func warmFee(t *testing.T, s *Server) {
+	t.Helper()
+	s.WarmFeeRate()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := s.FeeRate(); ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fee rate never became known")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // richOperator serves one model with every advertisable field declared, so a
@@ -256,10 +272,8 @@ func TestHandleListModels_PricingIsGrossedUpByTheProtocolFee(t *testing.T) {
 	// every request. memoizingRegistry is that provider; the second read must
 	// return the same number.
 	memo := &memoizingRegistry{inner: modelsRegistry(t, []hayai.Operator{op})}
-	s2 := testServer(testConfig(), Options{RegistryProvider: memo, Wallet: feeWallet{&fakeWallet{}}})
-	s2.feeRate.mu.Lock()
-	s2.feeRate.feeBps, s2.feeRate.ok, s2.feeRate.fetchedAt = 1000, true, time.Now()
-	s2.feeRate.mu.Unlock()
+	s2 := testServer(testConfig(), Options{RegistryProvider: memo, Wallet: feeWallet{&fakeWallet{}, 1000}})
+	warmFee(t, s2)
 
 	var first, second inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s2.handleListModels), &first); err != nil {

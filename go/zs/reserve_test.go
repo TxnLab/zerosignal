@@ -357,7 +357,7 @@ func TestHTTPReserveClient_Non200NonBusy(t *testing.T) {
 }
 
 // A 400 carrying the node's OpenAI-shaped "context_length_exceeded"
-// error must come back as *SizeError so dispatchHayai can prefer
+// error must come back as *SizeError so dispatch can prefer
 // 400 context_length_exceeded over 503 operators_busy when every
 // reserve attempt refuses for size.
 func TestHTTPReserveClient_ContextLengthExceeded_ReturnsSizeError(t *testing.T) {

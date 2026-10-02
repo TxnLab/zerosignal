@@ -230,6 +230,9 @@ func TestDispatchHayai_ToolBudgets_EditSizesReserve(t *testing.T) {
 // asserting the forwarded ImageToolBudget == ceiling proves the budget is bounded.
 func TestDispatchHayai_ToolBudgets_ClampsMaxN(t *testing.T) {
 	const factor uint64 = 100_000
+	// The SDK's per-request image-tool ceiling, pinned as a literal so a
+	// change to it is a deliberate edit here too.
+	const maxImageToolBudgetPerRequest uint64 = 64
 
 	var reserves []ticket.ReserveRequest
 	node := newFakeNode(t, &nodeConfig{

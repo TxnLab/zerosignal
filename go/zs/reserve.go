@@ -53,7 +53,7 @@ type ReservedTicket struct {
 	// SealRecipient is the age recipient this reserve's body was actually
 	// sealed to — the operator's verified, unexpired ephemeral recipient
 	// (mandatory forward secrecy; there is no anchor). Dispatch MUST seal the
-	// follow-up inference request to this exact recipient (hayai_dispatch.go
+	// follow-up inference request to this exact recipient (dispatch.go
 	// WrapRequestWithIdentity) rather than re-deriving from the operator
 	// record: a mid-flight registry refresh could rotate the operator's
 	// ephemeral between reserve and inference, and the node only guarantees
@@ -616,7 +616,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 		// Node-side sizing rejections (max_output_tokens > the operator's
 		// per-model cap, or max_output_tokens >= context_window) come
 		// back as 400 with an OpenAI-shaped body and a known code. Tag
-		// them as *SizeError so dispatchHayai can prefer
+		// them as *SizeError so dispatch can prefer
 		// context_length_exceeded over operators_busy when every
 		// candidate refuses for size. Other 400s (malformed envelope,
 		// invalid_payer_addr, etc.) keep falling through to the generic
@@ -708,7 +708,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 	// different K can't make us burn tx fees + lock escrow on a request its own
 	// admission tag will then reject. This mirrors the client's LZ7
 	// (client/src/stream/envelope-fetch.ts) and the proxy's own response-time
-	// verifyCommitK (server/hayai_dispatch.go) — same base64(sha256(K)) ==
+	// verifyCommitK (dispatch.go) — same base64(sha256(K)) ==
 	// ticket.commit_k comparison, using the shared ticket.CommitResponseKey
 	// primitive. SPEC §3a.
 	if commit := ticket.CommitResponseKey(key); base64.StdEncoding.EncodeToString(commit[:]) != parsed.Ticket.CommitK {

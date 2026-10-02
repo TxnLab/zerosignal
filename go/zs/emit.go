@@ -1,0 +1,194 @@
+/*
+ * Copyright (c) 2026. TxnLab Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package zs
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/TxnLab/zerosignal/go/ticket"
+)
+
+// emitter receives what a dispatch produces. Dispatch decides what happened;
+// the emitter turns it into the caller's view, which for a Stream is its
+// event sequence.
+//
+// A request ends in exactly one of: fail, reply, or open followed by frames
+// (and interrupt if the stream breaks). clamped, reserved and committed may
+// precede any of them.
+type emitter interface {
+	// clamped reports that the request's max_output was lowered to ceiling.
+	clamped(ceiling uint64)
+	// reserved reports the ticket a node signed.
+	reserved(rt *ReservedTicket, op Operator)
+	// committed reports the escrow open; nothing is resent after it.
+	committed(ticketID, openTxID string, feesMicroAlgos uint64)
+	// fail ends the request with e before any response has started.
+	fail(e *Error)
+	// reply delivers a complete response. header is the node's response
+	// header set; usage is nil when no receipt verified.
+	reply(status int, header http.Header, body []byte, usage *usageReport)
+	// open starts a stream. A non-nil error means it could not start and the
+	// caller has already been told.
+	open(status int, header http.Header) error
+	// frame delivers one stream frame and returns its size on the wire, for
+	// the stream tally; a usage report is not a frame and counts 0.
+	frame(f outFrame) (int, error)
+	// interrupt ends an open stream that broke before its end.
+	interrupt()
+}
+
+// usageReport is what the payer is told a verified turn cost.
+type usageReport struct {
+	receipt      *ticket.UsageReceipt
+	ticket       *ticket.Ticket
+	op           Operator
+	openFees     uint64
+	settleFees   uint64
+	algoUSDPrice float64
+	feeBps       uint64
+	haveFee      bool
+}
+
+func (u *usageReport) event() ReceiptVerified {
+	return ReceiptVerified{
+		Receipt:              *u.receipt,
+		Ticket:               *u.ticket,
+		Target:               RefOf(u.op),
+		OwnerAddr:            u.op.OwnerAddr,
+		OpenFeesMicroAlgos:   u.openFees,
+		SettleFeesMicroAlgos: u.settleFees,
+		AlgoUSD:              u.algoUSDPrice,
+		FeeBps:               u.feeBps,
+		FeeBpsKnown:          u.haveFee,
+	}
+}
+
+// NodeReply is a node's own error response, kept as the cause of an Error so
+// an adapter can answer its caller with the node's status and body rather than
+// one of its own. Header excludes the node's X-Zs-* fields.
+type NodeReply struct {
+	Status int
+	Header http.Header
+	Body   []byte
+	// ContentType replaces the node's when Body is one the SDK wrote in place
+	// of a body it could not parse.
+	ContentType string
+}
+
+func (r *NodeReply) Error() string {
+	return fmt.Sprintf("operator returned HTTP %d", r.Status)
+}
+
+// doneSentinel is the OpenAI stream terminator, passed through as the node
+// sent it.
+var doneSentinel = []byte("[DONE]")
+
+// streamEmitter is the emitter behind Stream.Events: each call becomes events
+// handed to the range loop's yield. A loop that stops ranging is a caller who
+// left, so it cancels the dispatch context, which the forwarder already reads
+// as a disconnect (drain the receipt tail if generation completed, cancel the
+// upstream if not); from then on events are dropped.
+type streamEmitter struct {
+	yield  func(Event, error) bool
+	cancel context.CancelFunc
+
+	stopped bool
+	ticket  *Ticket
+	paid    bool
+	content bool
+	err     *Error
+}
+
+// emit hands ev to the caller unless it has already stopped ranging.
+func (e *streamEmitter) emit(ev Event) bool {
+	if e.stopped {
+		return false
+	}
+	if !e.yield(ev, nil) {
+		e.stopped = true
+		e.cancel()
+		return false
+	}
+	return true
+}
+
+// end delivers the terminal error. Once the request is paid, the error says
+// so and names the ticket, because nothing is resent after the open.
+func (e *streamEmitter) end(err *Error) {
+	if e.paid {
+		err.Paid = true
+		if err.Ticket == nil {
+			err.Ticket = e.ticket
+		}
+	}
+	e.err = err
+	if !e.stopped {
+		e.stopped = true
+		e.yield(nil, err)
+	}
+}
+
+func (e *streamEmitter) clamped(ceiling uint64) { e.emit(MaxOutputClamped{Ceiling: ceiling}) }
+
+func (e *streamEmitter) reserved(rt *ReservedTicket, op Operator) {
+	t := rt.Ticket
+	e.ticket = &Ticket{ID: t.TicketID, Signed: *t, Target: RefOf(op)}
+	e.emit(ReserveSucceeded{
+		TicketID:  t.TicketID,
+		Target:    RefOf(op),
+		MaxPrice:  t.MaxPrice,
+		ExpiresAt: time.Unix(t.ExpiresAt, 0),
+	})
+}
+
+func (e *streamEmitter) committed(ticketID, openTxID string, feesMicroAlgos uint64) {
+	e.paid = true
+	e.emit(PaymentCommitted{TicketID: ticketID, OpenTxID: openTxID, FeesMicroAlgos: feesMicroAlgos})
+}
+
+func (e *streamEmitter) fail(err *Error) { e.end(err) }
+
+func (e *streamEmitter) reply(status int, header http.Header, body []byte, usage *usageReport) {
+	if !e.emit(ResponseStarted{Status: status, Header: nodeHeader(header)}) {
+		return
+	}
+	if !e.emit(Frame{Data: body, Sealed: true}) {
+		return
+	}
+	if usage != nil && !e.emit(usage.event()) {
+		return
+	}
+	e.emit(Done{Empty: len(body) == 0})
+}
+
+func (e *streamEmitter) open(status int, header http.Header) error {
+	e.emit(ResponseStarted{Status: status, Header: nodeHeader(header), Streaming: true})
+	return nil
+}
+
+func (e *streamEmitter) frame(out outFrame) (int, error) {
+	if out.usage != nil {
+		e.emit(out.usage.event())
+		return 0, nil
+	}
+	f := out.frame
+	n := len(f.SSE())
+	if f.Sealed {
+		e.content = true
+	}
+	if e.emit(f) && !f.Sealed && bytes.Equal(f.Data, doneSentinel) {
+		e.emit(Done{Empty: !e.content})
+	}
+	return n, nil
+}
+
+func (e *streamEmitter) interrupt() {
+	e.end(newError("stream_interrupted", "the stream broke before its end"))
+}

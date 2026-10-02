@@ -11,28 +11,27 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
-	"github.com/algorand/go-algorand-sdk/v2/types"
-
-	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/keystore"
-	"github.com/TxnLab/zerosignal/go/ticket"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
+	"github.com/TxnLab/zerosignal/go/zs/internal/cryptotimer"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
-// Config is the payer policy the handler reads per request. New keeps the
-// pointer, so a caller that changes it after New changes the running
-// handler; nothing synchronizes that, so finish configuring before serving.
+// Config is the payer policy. New copies the routing fields into the Client
+// and keeps the pointer for the rest, so a change after New reaches some
+// reads and not others: finish configuring before New.
 type Config struct {
 	// Network names the chain ("mainnet", "testnet", …) in funding errors.
 	// "mainnet" also switches the payer-facing hint to the web app.
 	Network string
-	// PayerAddr is the payer account, named in funding errors.
+	// PayerAddr is the payer account.
+	//
+	// Deprecated: unread. Funding errors name the Wallet's own address.
 	PayerAddr string
 	// FundingURL is the web app a mainnet funding error points the payer at.
 	FundingURL string
@@ -59,14 +58,6 @@ type Config struct {
 	TEERequiredModels []string
 }
 
-func (c *Config) relayByDefault() bool {
-	return c.Privacy != hayai.PrivacyDirect
-}
-
-func (c *Config) teeRequired(model string) bool {
-	return slices.Contains(c.TEERequiredModels, model)
-}
-
 // ListenConfig is what HTTPServer needs beyond the handler itself.
 type ListenConfig struct {
 	Addr         string
@@ -75,8 +66,15 @@ type ListenConfig struct {
 	IdleTimeout  time.Duration
 }
 
+// Server is the OpenAI-compatible HTTP surface over a zs.Client.
 type Server struct {
-	*client
+	*hayai.Client
+
+	cfg *Config
+	log *slog.Logger
+	// registryProvider backs the catalog routes (/v1/models, /v1/zs/details,
+	// /v1/zs/operators); the Client holds the same one for routing.
+	registryProvider hayai.RegistryProvider
 
 	reqTx  transform.RequestTransformer
 	respTx transform.ResponseTransformer
@@ -160,15 +158,45 @@ type Options struct {
 	// Shutdown is invoked by the POST /shutdown handler to trigger the same
 	// graceful drain a SIGTERM does (app.Run wires it to cancel the run ctx).
 	Shutdown func()
+	// RetryBudget and SweepDelay are zs.Config's: zero takes the shared
+	// transient-retry schedule.
+	RetryBudget time.Duration
+	SweepDelay  func(sweep int) time.Duration
 }
 
 // New builds a Server wired with the given config, logger, and
 // request/response transformers. Pass Options to supply optional
 // dependencies like the hayai recipient/tx-id providers.
 func New(cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
-	c := &client{
-		cfg: cfg,
-		log: log,
+	var spend hayai.SpendGuard
+	if opts.SpendGuard != nil {
+		spend = admitAll{opts.SpendGuard}
+	}
+	c, err := hayai.New(context.Background(), hayai.Config{
+		Network:              hayai.Network{Algod: algod.Config{Network: cfg.Network}},
+		Privacy:              cfg.Privacy,
+		AllowPrivacyOverride: cfg.AllowPrivacyOverride,
+		RequireTEEModels:     cfg.TEERequiredModels,
+		Affinity:             hayai.Affinity{Policy: cfg.Affinity},
+		AllowStaging:         cfg.AllowStaging,
+		AllowPrivateHosts:    cfg.AllowPrivateOperators,
+		RetryBudget:          opts.RetryBudget,
+		SweepDelay:           opts.SweepDelay,
+		Stores: hayai.Stores{
+			RelayReputation:  opts.RelayReputation,
+			RelayLatency:     opts.RelayLatency,
+			TargetBackoff:    opts.TargetBackoff,
+			NodeExclusions:   opts.NodeExcluder,
+			ToolAffinity:     opts.ToolAffinity,
+			ResponseAffinity: opts.ResponseAffinity,
+		},
+		SpendGuard:     spend,
+		Registry:       opts.RegistryProvider,
+		ReserveClient:  opts.ReserveClient,
+		Wallet:         opts.Wallet,
+		Tokenizer:      opts.Tokenizer,
+		DebugLogBodies: opts.DebugLogBodies,
+		Logger:         log,
 		// 0 = no timeout; required for long SSE streams. Per-request
 		// cancellation comes from the request context. The tuned transport
 		// adds a short dial timeout (an unreachable operator fails over fast
@@ -188,23 +216,20 @@ func New(cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, resp
 		// register a loopback/RFC1918 BaseURL and make the proxy probe the
 		// user's own LAN. Default on; allow_private_operators is the localnet
 		// dev opt-out.
-		httpClient:       httpx.Client(0, httpx.Options{ResponseHeaderTimeout: httpx.ForwardHeaderBackstop, BlockPrivateTargets: !cfg.AllowPrivateOperators}),
-		registryProvider: opts.RegistryProvider,
-		reserveClient:    opts.ReserveClient,
-		toolAffinity:     opts.ToolAffinity,
-		responseAffinity: opts.ResponseAffinity,
-		tokenizer:        opts.Tokenizer,
-		relayRep:         opts.RelayReputation,
-		relayLatency:     opts.RelayLatency,
-		targetBackoff:    opts.TargetBackoff,
-		nodeExcluder:     opts.NodeExcluder,
-		debugLogBodies:   opts.DebugLogBodies,
-		spend:            opts.SpendGuard,
-		refunds:          hayai.NewRefundWatchdog(log),
-		wallet:           opts.Wallet,
+		//
+		// It keeps http.DefaultTransport's environment proxy, which the SDK's
+		// own default drops.
+		HTTPClient: httpx.Client(0, httpx.Options{ResponseHeaderTimeout: httpx.ForwardHeaderBackstop, BlockPrivateTargets: !cfg.AllowPrivateOperators}),
+	})
+	if err != nil {
+		// hayai.New refuses nothing this Config can hold.
+		panic("handler.New: " + err.Error())
 	}
 	s := &Server{
-		client:           c,
+		Client:           c,
+		cfg:              cfg,
+		log:              log,
+		registryProvider: opts.RegistryProvider,
 		reqTx:            reqTx,
 		respTx:           respTx,
 		mux:              http.NewServeMux(),
@@ -295,9 +320,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 
 		ctx := r.Context()
-		var timer *cryptoTimer
+		var timer *cryptotimer.Timer
 		if s.trackCryptoTimes {
-			ctx, timer = withCryptoTimer(ctx)
+			ctx, timer = cryptotimer.With(ctx)
 			r = r.WithContext(ctx)
 		}
 
@@ -311,7 +336,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			slog.Int("status", rw.status),
 			slog.Duration("duration", time.Since(start)),
 		}
-		attrs = append(attrs, timer.logAttrs()...)
+		attrs = append(attrs, timer.LogAttrs()...)
 
 		level := slog.LevelInfo
 		if rw.status >= 400 {
@@ -331,37 +356,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// settlementHandle is the subset of *hayai.OpenHandle that
-// runReceiptChecks drives after receipt verification completes. Tests
-// inject a fake to assert which escrow method got called and with
-// what receipt; production wiring passes the real handle unchanged.
-type settlementHandle interface {
-	// AckSettle finalizes the ticket. When presignedSettleGroup is
-	// non-empty, it's the operator's pre-signed atomic settle group
-	// from X-Zs-Settle-Group — the wallet signs the payer-ack
-	// member and submits as a 2-tx group (payer pays 0 ALGO at
-	// settle). When empty, falls back to the standalone path
-	// (payer pays ~5,000 µALGO outer fee).
-	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, presignedSettleGroup []types.SignedTxn) (txid string, feeMicroalgos uint64, groupRejected bool, err error)
-	Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, error)
-}
-
-// WalletOpener is the subset of *hayai.Wallet the dispatch path
-// depends on. Extracting it as an interface lets tests inject a fake
-// without requiring a live algod client or keystore; the production
-// wiring in main.go passes a concrete *hayai.Wallet.
-//
-// Open takes the operator's pre-signed 2-tx open group from the reserve
-// response (gtxn[1] = open() AppCall signed by operator; gtxn[0] =
-// usdcPayment template for the wallet to sign as the payer) and submits
-// it. The per-ticket box MBR is drawn from the payer's prepaid MBR pool
-// at open(), not a funding leg in this group. PayerAddr is used by the
-// dispatch composer to populate ReserveRequest.PayerAddr so the operator
-// can pre-sign the open group bound to this address.
-type WalletOpener interface {
-	Open(ctx context.Context, ticket *ticket.Ticket, op hayai.Operator, presignedOpenGroup []types.SignedTxn) (*hayai.OpenHandle, error)
-	PayerAddr() string
-}
+// WalletOpener is the escrow side of the payer the Client opens tickets
+// through.
+type WalletOpener = hayai.WalletOpener
 
 // SpendGuard is the subset of zs.SpendGuard the dispatch path uses: an atomic
 // Reserve of the ticket's MaxPrice ceiling against the caller's USDC caps
@@ -386,6 +383,13 @@ type SpendGuard interface {
 	Settle(ticketID string, spentMicroUSDC uint64)
 	Release(ticketID string)
 }
+
+// admitAll is a SpendGuard as a zs.SpendGuard: its caps are checked at
+// Reserve, against the signed max_price, and it admits every request before
+// that.
+type admitAll struct{ SpendGuard }
+
+func (admitAll) Admit(uint64) error { return nil }
 
 // maxCapturedErrBody caps how many bytes of an error (status >= 400) response
 // body statusRecorder buffers for the request log line. The proxy's own error
@@ -484,7 +488,7 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 	// Explicit list rather than `*` so the X-Zs-* response headers stay
 	// readable off cross-origin responses by name. The X-Zs-* entries
-	// mirror setHayaiUsageHeaders in hayai_dispatch.go — keep them in sync
+	// mirror setHayaiUsageHeaders in usage.go — keep them in sync
 	// when adding a new non-streaming response header.
 	h.Set("Access-Control-Expose-Headers",
 		"Content-Type, Retry-After, "+

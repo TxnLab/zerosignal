@@ -85,10 +85,10 @@ func TestDispatchHayai_WalletUnfunded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
-	s.wallet = &fakeWallet{err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
+	opts.Wallet = &fakeWallet{err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
 	guard := &fakeSpendGuard{}
-	s.spend = guard
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -126,11 +126,10 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			cfg := testConfig()
 			cfg.Network = tc.network
 			cfg.FundingURL = tc.fundingURL
-			cfg.PayerAddr = "PAYERADDR"
 			opts := setupHayai(t, cfg, node)
+			opts.Wallet = &fakeWallet{payer: "PAYERADDR", err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
+			opts.SpendGuard = &fakeSpendGuard{}
 			s := testServer(cfg, opts)
-			s.wallet = &fakeWallet{err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
-			s.spend = &fakeSpendGuard{}
 
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -166,11 +165,11 @@ func TestDispatchHayai_MbrPoolUnderfunded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
 	// The wallet wraps ErrDepositUnaffordable the way ensureDepositForServe does;
 	// errors.Is must still see the sentinel through the wrap.
-	s.wallet = &fakeWallet{err: fmt.Errorf("wallet: ensure MBR deposit: %w: need 577000 µALGO (575000 shortfall + 2000 fee), have 489000 µALGO spendable — fund the wallet with more ALGO", hayai.ErrDepositUnaffordable)}
-	s.spend = &fakeSpendGuard{}
+	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: ensure MBR deposit: %w: need 577000 µALGO (575000 shortfall + 2000 fee), have 489000 µALGO spendable — fund the wallet with more ALGO", hayai.ErrDepositUnaffordable)}
+	opts.SpendGuard = &fakeSpendGuard{}
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -205,14 +204,14 @@ func TestDispatchHayai_MbrPoolExhausted_429(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
-	s.wallet = &fakeWallet{err: fmt.Errorf("wallet: submit presigned open group: %w", &escrow.ApprovalError{
+	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: submit presigned open group: %w", &escrow.ApprovalError{
 		Method:  "open",
 		PC:      3255,
 		Message: escrow.AssertInsufficientMbrDeposit,
 		Err:     errors.New("logic eval error: assert failed pc=3255"),
 	})}
-	s.spend = &fakeSpendGuard{}
+	opts.SpendGuard = &fakeSpendGuard{}
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -239,12 +238,12 @@ func TestDispatchHayai_SpendCapExceeded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
 	fw := &fakeWallet{
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 	}
-	s.wallet = fw
-	s.spend = &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
+	opts.Wallet = fw
+	opts.SpendGuard = &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -271,12 +270,12 @@ func TestDispatchHayai_DuplicateTicketID_502(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
 	fw := &fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}
-	s.wallet = fw
-	s.spend = &fakeSpendGuard{
+	opts.Wallet = fw
+	opts.SpendGuard = &fakeSpendGuard{
 		reserveErr: fmt.Errorf("%w: %q (operator reused a ticket id)", hayai.ErrDuplicateTicket, "tid"),
 	}
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -301,11 +300,11 @@ func TestDispatchHayai_SpendReservedOnSuccess(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
 	cfg := testConfig()
 	opts := setupHayai(t, cfg, node)
-	s := testServer(cfg, opts)
 	fw := &fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}
-	s.wallet = fw
+	opts.Wallet = fw
 	guard := &fakeSpendGuard{}
-	s.spend = guard
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -339,9 +338,10 @@ func TestDispatchHayai_SpendSettledOnValidReceipt(t *testing.T) {
 		},
 	})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	opts := setupHayai(t, cfg, node)
 	guard := &fakeSpendGuard{}
-	s.spend = guard
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -383,9 +383,10 @@ func TestDispatchHayai_SpendReleasedOnBadReceipt(t *testing.T) {
 		},
 	})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	opts := setupHayai(t, cfg, node)
 	guard := &fakeSpendGuard{}
-	s.spend = guard
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
