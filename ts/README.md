@@ -2,7 +2,8 @@
 
 TypeScript primitives for the [ZeroSignal](https://docs.zerosignal.ai) protocol: envelope
 sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing,
-tokenize bounds, transient-error classification, and TEE attestation checks. Enough for a
+tokenize bounds, transient-error classification, escrow box decoding and settlement rules, and
+TEE attestation checks. Enough for a
 browser or Node process to speak the protocol directly to a node, with no proxy daemon in front.
 
 It is a port of the Go reference implementation and is kept byte-for-byte compatible with it on
@@ -34,11 +35,12 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/tokenize` | Input-token bound used to size a reserve |
 | `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
+| `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
 | `…/attest` | dstack / Intel TDX measurement checks and compose-file policy |
 | `…/inject` | Tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
 | `…/testdata/*` | The golden-vector fixtures this package is tested against |
 
-`pricing`, `transient`, and `relay` are subpath-only: their names (`classify`, `wait`,
+`escrow`, `pricing`, `transient`, and `relay` are subpath-only: their names (`classify`, `wait`,
 `buildRequest`, …) are package-qualified in Go and would be ambiguous at the root.
 
 ## Signing: raw Ed25519, not Algorand `signBytes`
@@ -59,6 +61,8 @@ Function names use camelCase. Constants use UPPER_SNAKE.
 
 Go's `uint64` / `int64` fields are typed as `number` here. Real values stay well within JS's safe-integer range (token counts, microUSDC totals up to ~10^12). Internally, the canonical-bytes encoder coerces via `BigInt` before writing the 8-byte big-endian form, so values up to 2^53−1 are encoded correctly.
 
+`escrow` is the exception: it decodes on-chain boxes, whose `uint64` fields can hold any value, so they are `bigint`. Fields the contract stores in one or two bytes (statuses, the pending side, usage types, fee bps, staging) are `number`. Its arithmetic is unbounded where Go's `uint64` wraps, so the two agree only on values the contract can actually produce; the fee functions accept fee bps as either type.
+
 ## Secret-key lifetime
 
 JS strings are immutable, so the AGE-SECRET-KEY-1… representation of an ephemeral identity cannot be reliably wiped from memory the way the Go side does (`ZeroEphemeralIdentity` reaches into age internals via reflect+unsafe). Callers should:
@@ -70,14 +74,15 @@ JS strings are immutable, so the AGE-SECRET-KEY-1… representation of an epheme
 For higher-assurance setups, terminate envelopes in a worker / iframe whose JS heap can be discarded entirely on completion.
 
 Not ported (intentionally): the Go file-IO identity loader, the Go `ZeroEphemeralIdentity` wipe,
-and the Go `algo`, `algod`, `escrow`, `tools`, and `keystore` packages.
+the Go `algo`, `algod`, `tools`, and `keystore` packages, and the chain-access half of `escrow`
+(transaction composition, box reads, group verification).
 
 ## Cross-implementation byte parity
 
 Every vectored module is checked against a fixture the Go implementation generates: AAD layout,
 admission tag, body hash, ticket / receipt canonical bytes, signature digests, address
-encoding, selection order, pricing, tokenize bounds, transient verdicts, and attestation
-checks. The Go suite fails when its output no longer matches the fixture, and this package's
+encoding, selection order, pricing, tokenize bounds, transient verdicts, escrow box keys,
+record decoding, `classify` and fee math, and attestation checks. The Go suite fails when its output no longer matches the fixture, and this package's
 suite fails when its output does, so drift on either side fails. In a checkout of the
 repository:
 

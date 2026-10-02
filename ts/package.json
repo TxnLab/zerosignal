@@ -68,6 +68,10 @@
             "types": "./dist/transient/index.d.ts",
             "import": "./dist/transient/index.js"
         },
+        "./escrow": {
+            "types": "./dist/escrow/index.d.ts",
+            "import": "./dist/escrow/index.js"
+        },
         "./testdata/*": "./dist/testdata/*",
         "./package.json": "./package.json"
     },

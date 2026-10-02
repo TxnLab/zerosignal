@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// pricing, relay, and transient are subpath-only (`@txnlab/zs-proto/transient`, …).
-// Their names are package-qualified in Go — transient.Classify, relay.BuildRequest —
-// so at the root they would read as a bare `classify`, `wait`, `buildRequest`, or
-// `Request`, and pricing's Violation collides with attest's.
+// escrow, pricing, relay, and transient are subpath-only (`@txnlab/zs-proto/transient`, …).
+// Their names are package-qualified in Go — escrow.Classify, transient.Classify,
+// relay.BuildRequest — so at the root they would read as a bare `classify`, `wait`,
+// `buildRequest`, or `Request`, and pricing's Violation collides with attest's.
 export * from './attest/index.js'
 export * from './wire/index.js'
 export * from './ticket/index.js'
