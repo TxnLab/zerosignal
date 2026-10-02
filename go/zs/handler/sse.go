@@ -162,7 +162,6 @@ type frameTransformFactory func(upstreamResp *http.Response) (frameTransform, er
 func (s *Server) forwardRawStream(
 	ctx context.Context,
 	em emitter,
-	r *http.Request,
 	baseURL, endpoint string,
 	body []byte,
 	outboundContentType string,
@@ -184,7 +183,7 @@ func (s *Server) forwardRawStream(
 	upstreamCtx, cancelUpstream := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelUpstream()
 
-	upstreamReq, err := s.buildOperatorRequest(upstreamCtx, baseURL, r.Method, endpoint, body, outboundContentType, extraHeaders)
+	upstreamReq, err := s.buildOperatorRequest(upstreamCtx, baseURL, http.MethodPost, endpoint, body, outboundContentType, extraHeaders)
 	if err != nil {
 		em.fail(newError("build_request", err.Error()))
 		return

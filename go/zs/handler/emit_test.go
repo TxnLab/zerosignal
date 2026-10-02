@@ -151,7 +151,9 @@ func (d deadSocketWriter) Write(p []byte) (int, error) {
 // built from the request has to swallow it.
 func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T) {
 	cut := make(chan struct{})
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var method atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method.Store(r.Method)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl := w.(http.Flusher)
 		_, _ = io.WriteString(w, "data: done\n\n")
@@ -181,11 +183,32 @@ func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T
 			return f, nil
 		}, nil
 	}
-	s.forwardRawStream(clientCtx, newHTTPEmitter(w, r), r, upstream.URL, "", []byte("{}"), "application/json", nil, nil,
+	s.forwardRawStream(clientCtx, newHTTPEmitter(w, r), upstream.URL, "", []byte("{}"), "application/json", nil, nil,
 		factory, func(emitter, *http.Response, []byte) error { return nil }, &genComplete)
 
 	if !sawTail.Load() {
 		t.Error("the stream ended before the tail frame after the client left")
+	}
+	if got := method.Load(); got != http.MethodPost {
+		t.Errorf("streaming forward used method %v, want POST", got)
+	}
+}
+
+// The non-streaming forward posts too: every inference route is a POST, and a
+// node answers anything else with 405.
+func TestForwardRawNonStream_Posts(t *testing.T) {
+	var method string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+	}))
+	defer upstream.Close()
+
+	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	s.forwardRawNonStream(context.Background(), newHTTPEmitter(httptest.NewRecorder(), r), upstream.URL, "", []byte("{}"),
+		"application/json", nil, nil, func(emitter, *http.Response, []byte) error { return nil })
+	if method != http.MethodPost {
+		t.Errorf("forward used method %q, want POST", method)
 	}
 }
 

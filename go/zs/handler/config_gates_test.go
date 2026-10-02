@@ -25,7 +25,7 @@ import (
 // target and a relay of distinct owners, with a reserve client that refuses
 // every call, and returns the hop each reserve rode. The refusal ends the
 // request before payment, so no wallet is needed.
-func dispatchRelayHops(t *testing.T, cfg *Config, relayHeader string) []*hayai.RelayHop {
+func dispatchRelayHops(t *testing.T, cfg *Config, relayHeader, bodyRelay string) []*hayai.RelayHop {
 	t.Helper()
 	refuse := &hayai.ReserveHTTPError{Status: http.StatusBadRequest, Code: "invalid_request"}
 	rc := &scriptedReserveClient{script: []error{refuse}}
@@ -34,7 +34,11 @@ func dispatchRelayHops(t *testing.T, cfg *Config, relayHeader string) []*hayai.R
 	s.tokenizer = testTokenizer()
 	s.wallet = &fakeWallet{}
 
-	body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`)
+	provider := ""
+	if bodyRelay != "" {
+		provider = `,"provider":{"relay":"` + bodyRelay + `"}`
+	}
+	body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]` + provider + `}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
 	if relayHeader != "" {
 		req.Header.Set("X-Zs-Relay", relayHeader)
@@ -56,18 +60,22 @@ func TestDispatch_RelayPosture(t *testing.T) {
 		name      string
 		cfg       *Config
 		header    string
+		bodyRelay string
 		wantRelay bool
 	}{
 		// An SDK caller who never set Privacy.
-		{"zero Privacy relays", &Config{Affinity: hayai.AffinityNone}, "", true},
-		{"direct sends direct", &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone}, "", false},
+		{"zero Privacy relays", &Config{Affinity: hayai.AffinityNone}, "", "", true},
+		{"direct sends direct", &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone}, "", "", false},
 		// A caller's relay=off must not override a payer who didn't allow it.
-		{"off refused without override", &Config{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone}, "off", true},
+		{"off refused without override", &Config{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone}, "off", "", true},
 		// The control for the row above: the header does reach the decision.
-		{"off honored with override", &Config{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "off", false},
+		{"off honored with override", &Config{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "off", "", false},
+		// The body's provider.relay outranks the header, in both directions.
+		{"body required beats header off", &Config{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "off", "required", true},
+		{"body off beats header required", &Config{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "required", "off", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for i, hop := range dispatchRelayHops(t, tc.cfg, tc.header) {
+			for i, hop := range dispatchRelayHops(t, tc.cfg, tc.header, tc.bodyRelay) {
 				if (hop != nil) != tc.wantRelay {
 					t.Errorf("reserve %d: relayed = %v, want %v", i, hop != nil, tc.wantRelay)
 				}

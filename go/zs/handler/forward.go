@@ -121,7 +121,6 @@ type nonStreamResponder func(em emitter, upstreamResp *http.Response, respBody [
 func (s *Server) forwardRawNonStream(
 	ctx context.Context,
 	em emitter,
-	r *http.Request,
 	baseURL, endpoint string,
 	body []byte,
 	outboundContentType string,
@@ -129,7 +128,7 @@ func (s *Server) forwardRawNonStream(
 	hop *hayai.RelayHop,
 	respond nonStreamResponder,
 ) {
-	upstreamReq, err := s.buildOperatorRequest(ctx, baseURL, r.Method, endpoint, body, outboundContentType, extraHeaders)
+	upstreamReq, err := s.buildOperatorRequest(ctx, baseURL, http.MethodPost, endpoint, body, outboundContentType, extraHeaders)
 	if err != nil {
 		em.fail(newError("build_request", err.Error()))
 		return
@@ -140,7 +139,7 @@ func (s *Server) forwardRawNonStream(
 		// In relayed mode the proxy connects to the relay, not the target, so a
 		// transport error here is a relay-hop failure rather than the target's —
 		// but only once the shared verdict has ruled out our OWN doing. ctx is
-		// the payer's r.Context() and Do blocks for the whole generation here, so
+		// the payer's request context and Do blocks for the whole generation here, so
 		// a payer hanging up mid-answer lands on this line; charging the relay
 		// for a socket the proxy tore down itself is what this seam did while it
 		// wrote to the reputation store directly.

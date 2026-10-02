@@ -58,7 +58,37 @@ const maxImageToolBudgetPerRequest uint64 = 64
 
 // dispatchHayai answers an HTTP client through dispatch.
 func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
-	s.dispatch(newHTTPEmitter(w, r), r, endpoint, body, format)
+	s.dispatch(r.Context(), newHTTPEmitter(w, r), turnFromHTTP(r, endpoint, body, format))
+}
+
+// turn is one request as dispatch sees it. The request headers it honors are
+// read into it by the HTTP surface, so dispatch never sees the request.
+type turn struct {
+	endpoint string
+	body     []byte
+	format   clientFormat
+	// contentType is the body's media type; an image edit is multipart.
+	contentType string
+	// requireTEE is the caller's per-request TEE opt-in (X-Zs-Require-TEE).
+	requireTEE bool
+	// relay is the caller's normalized relay preference (X-Zs-Relay); a
+	// `provider.relay` in the body outranks it.
+	relay string
+	// usageFrame asks for the non-OpenAI zs.usage stream frame
+	// (X-Zs-Usage-Frame).
+	usageFrame bool
+}
+
+func turnFromHTTP(r *http.Request, endpoint string, body []byte, format clientFormat) turn {
+	return turn{
+		endpoint:    endpoint,
+		body:        body,
+		format:      format,
+		contentType: r.Header.Get("Content-Type"),
+		requireTEE:  strings.TrimSpace(r.Header.Get("X-Zs-Require-TEE")) != "",
+		relay:       selection.NormalizeRelay(r.Header.Get("X-Zs-Relay")),
+		usageFrame:  strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
+	}
 }
 
 // dispatch runs the two-phase admission flow, sending its outcome to em:
@@ -78,8 +108,8 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 // If every candidate refuses, the client gets a 503 with Retry-After
 // propagated from the shortest operator hint — the admission layer is
 // doing its job and no payment has happened.
-func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []byte, format clientFormat) {
-	ctx := r.Context()
+func (s *Server) dispatch(ctx context.Context, em emitter, t turn) {
+	endpoint, body, format := t.endpoint, t.body, t.format
 
 	isImage := endpoint == endpointImages
 	isImageEdit := endpoint == endpointImageEdits
@@ -154,7 +184,7 @@ func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []b
 	var imageEditStream bool
 	switch {
 	case isImageEdit:
-		m, n, size, quality, stream, err := parseImageEditMultipart(r.Header.Get("Content-Type"), body)
+		m, n, size, quality, stream, err := parseImageEditMultipart(t.contentType, body)
 		if err != nil {
 			em.fail(newError("bad_image_edit_request", err.Error()))
 			return
@@ -211,8 +241,7 @@ func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []b
 	// Resolved here, ahead of the estimate, because the max_output clamp below
 	// has to know which operators this request could actually reach before it
 	// reads their declared ceilings.
-	requireTEE := strings.TrimSpace(r.Header.Get("X-Zs-Require-TEE")) != "" ||
-		s.cfg.teeRequired(model)
+	requireTEE := t.requireTEE || s.cfg.teeRequired(model)
 
 	var est tokenize.Estimate
 	if !isImage && !isImageEdit {
@@ -327,7 +356,7 @@ func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []b
 	// not per-request).
 	relayPref := routingPrefs.Relay
 	if relayPref == "" {
-		relayPref = selection.NormalizeRelay(r.Header.Get("X-Zs-Relay"))
+		relayPref = t.relay
 	}
 	usePrivacy := resolveUsePrivacy(s.cfg.relayByDefault(), s.cfg.AllowPrivacyOverride, relayPref)
 	if relayPref == selection.RelayOff && !s.cfg.AllowPrivacyOverride {
@@ -855,7 +884,7 @@ func (s *Server) dispatch(em emitter, r *http.Request, endpoint string, body []b
 					}
 					s.log.LogAttrs(ctx, slog.LevelDebug, "reserve response", attrs...)
 				}
-				s.runHayaiSealed(em, r, endpoint, model, body, op, rt, wantsStream, hop, format)
+				s.runHayaiSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, t.usageFrame, hop, format)
 				return
 			case hayai.IsBusy(err):
 				// A considered refusal, so it ends the sweeps — tracked separately
@@ -2417,17 +2446,16 @@ func bandByResponsiveness(ops []hayai.Operator, preferred *hayai.Operator, lat h
 // ticket_id bound into the envelope, and hands the response to the decrypt
 // pipeline.
 func (s *Server) runHayaiSealed(
+	ctx context.Context,
 	em emitter,
-	r *http.Request,
 	endpoint, model string,
 	body []byte,
 	op hayai.Operator,
 	rt *hayai.ReservedTicket,
-	wantsStream bool,
+	wantsStream, emitUsageFrame bool,
 	hop *hayai.RelayHop,
 	format clientFormat,
 ) {
-	ctx := r.Context()
 	ticket := rt.Ticket
 	algoUSDPrice := rt.AlgoUSDPrice
 
@@ -2634,15 +2662,15 @@ func (s *Server) runHayaiSealed(
 		// (node already done → pay the operator for delivered content) or
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
-		// Opt-in: only emit the non-OpenAI `event: zs.usage` frame when the
-		// client asked for it (hayai-aware: ui/, tui/). Default off keeps the
-		// stream a clean OpenAI stream for strict clients (JetBrains/Koog).
-		emitUsageFrame := strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != ""
+		// emitUsageFrame is opt-in: the non-OpenAI `event: zs.usage` frame goes
+		// out only when the client asked for it (hayai-aware: ui/, tui/). Default
+		// off keeps the stream a clean OpenAI stream for strict clients
+		// (JetBrains/Koog).
 		factory := s.buildHayaiFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, emitUsageFrame, format)
-		s.forwardRawStream(ctx, em, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
+		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
 		return
 	}
-	s.forwardRawNonStream(ctx, em, r, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
+	s.forwardRawNonStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
 }
 
 // resolveUsePrivacy applies a per-request relay preference on top of the proxy

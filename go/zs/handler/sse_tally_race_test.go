@@ -82,7 +82,7 @@ func TestForwardRawStream_TallyNoRaceOnMidStreamDisconnect(t *testing.T) {
 	go func() {
 		defer close(done)
 		s.forwardRawStream(
-			clientCtx, newHTTPEmitter(w, r), r,
+			clientCtx, newHTTPEmitter(w, r),
 			upstream.URL, "",
 			[]byte("{}"), "application/json", nil,
 			nil, // direct route: no relay hop
