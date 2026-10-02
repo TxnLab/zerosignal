@@ -58,6 +58,7 @@ update-vectors:
 	cd go && $(GO) test ./tokenize   -run TestVectors               -update
 	cd go && $(GO) test ./selection  -run TestSelectionVectors      -update
 	cd go && $(GO) test ./transient  -run TestTransientVectors      -update
+	cd go && $(GO) test ./steering   -run TestSteeringVectors       -update
 	cd go && $(GO) test ./inject     -run TestToolGrowthVectors     -update
 	cd go && $(GO) test ./inject     -run TestDialectVectors        -update
 	cd go && $(GO) test ./inject     -run TestDetailsVectors        -update

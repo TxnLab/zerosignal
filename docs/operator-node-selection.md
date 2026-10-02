@@ -12,7 +12,7 @@ Both decisions are split across **two layers**, and this split is the thing to u
 | Layer | Lives in | Decides | Golden-vectored (Go↔TS byte-identical)? |
 |---|---|---|---|
 | **Shared selection policy** | `proto/go/selection/` ↔ `proto/ts/src/selection/` | Eligibility + **price** + diversity | **Yes** — pinned by [`proto/testdata/selection_vectors.json`](../testdata/selection_vectors.json) |
-| **App-side signals** | `proxy/internal/hayai/` ↔ `client/src/operators/` | Reachability, relay reputation, **latency (RTT / TTFT / tok-s)** | **No** — stateful, per-process, vantage-specific |
+| **App-side signals** | `proxy/internal/hayai/` ↔ `client/src/operators/` | Reachability, relay reputation, target backoff, **latency (RTT / TTFT / tok-s)** | **No** for the stores, which are stateful, per-process and vantage-specific. **Yes** for the arithmetic under relay reputation, target backoff and the weights consensus, which lives in `proto/go/steering/` ↔ `proto/ts/src/steering/`, pinned by [`proto/testdata/steering_vectors.json`](../testdata/steering_vectors.json) |
 
 RTT, TTFT and tokens/sec are **never** in the shared policy. They're measured-and-stateful and depend on *where you're standing*, so they can't be a pure function of the static inputs the golden vectors pin — and they'd introduce float arithmetic that threatens Go↔TS parity. The shared policy is comparison-only on advertised price; everything quantitative-and-observed is bolted on top, app-side. See [Why the split](#why-the-split).
 
@@ -153,7 +153,8 @@ This is symmetric by design: the proxy is a **localhost single-user (payer) proc
 | Relay eligibility (diversity) | `proto/go/selection/select.go::EligibleRelays,SelectRelay,diverseSubnet` | (consumes the shared fn) | (consumes the shared fn) |
 | Relay weighted pick | — (app-side only) | `internal/hayai/relayrouter.go::SelectRelayHopWeighted,weightedRelayPick` (`latencyWeightBiasMS=50`, `latencyFloorFraction=0.15`) | `operators/relay-router.ts::selectRelayHopWeighted,weightedPick`; orchestrated by `operators/relay-decision.ts::resolveRelayDecision` |
 | Latency EWMA store | — | `internal/hayai/relay_latency.go` (α=0.3, stale 5m, min 2) | `operators/latency-store.ts` (same constants) |
-| Relay reputation | — | `internal/hayai/relay_reputation.go` (streak threshold 3) | `operators/relay-reputation.ts` |
+| Relay reputation | `proto/go/steering/reputation.go::Decay,Bump,RelayDownranked` (thresholds 3 / 5, cooldowns 10m / 60m) | `internal/hayai/relay_reputation.go` (the store) | `operators/relay-reputation.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
+| Target backoff | `proto/go/steering/backoff.go::BackoffWindow,RecordFailure,BackoffRemaining` (30s doubling to 5m) | `internal/hayai/target_backoff.go` (the store) | `operators/target-backoff.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
 | Reachability | — | `internal/hayai/fetcher.go::recallReachable,recordReachable` | `operators/relay-health.ts` (sticky verdict + TTL exclusions) |
 | On-chain metrics read | `NodeRecord.LatencyEwmaMs` / `.TokensPerSecEwma` | `internal/hayai/fetcher.go` (into `Operator.Metrics`) | `algorand/operators.ts::adaptNodeFields` (onto `RoutableNode`) |
 

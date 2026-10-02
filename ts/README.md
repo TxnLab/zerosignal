@@ -26,7 +26,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 
 | Import | Contents |
 |---|---|
-| `@txnlab/zs-proto` | Everything from `wire`, `ticket`, `selection`, `imageprice`, `tokenize`, `attest`, `inject` |
+| `@txnlab/zs-proto` | Everything from `wire`, `ticket`, `selection`, `imageprice`, `tokenize`, `attest`, `inject`, `tools` |
 | `…/wire` | Envelope types, `wrapRequest` / `unwrapResponseKey` / `decryptBody` / `decryptSSEDataValue`, `decryptRequest` / `ResponseSealer` (node side, for round-trip tests), AAD builders, admission-tag HMAC, body hash, sealed inner frame, ephemeral identity, protocol version |
 | `…/ticket` | `Ticket` / `UsageReceipt` / reserve types, `signTicket` / `verifyTicket` / `signReceipt` / `verifyReceipt`, signature digests, `commitResponseKey`, receipt header codec, Algorand address codec, `BytesSigner` |
 | `…/selection` | Operator and relay selection policy, `deriveMaxOutput` |
@@ -34,6 +34,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/imageprice` | Image-generation pricing |
 | `…/tokenize` | Input-token bound used to size a reserve |
 | `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule |
+| `…/steering` | The arithmetic behind a payer's own routing signals: relay-reputation `decay` / `bump` / `relayDownranked`, target backoff (`backoffWindowMs`, `recordFailure`, `backoffRemaining`), and the weights-digest `weightsConsensus`. The stores they feed stay with the payer |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
 | `…/tools` | What a payer reads off a tool-bearing stream: the sealed tool-status and image progress / partial / completed frames with `parseStatusEvent` and `partialImageDataUrl`, `ToolAction` and its source icons (`iconHostKey`, `iconDataUrl`, `sanitizeIcons`), `isLinkableUrl` for any URL that becomes an href, and the usage shapes with `generatedOutputTokens` |
 | `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
@@ -41,8 +42,9 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/inject` | The `/v1/zs/details` discovery types and `parseOperatorDetails`, retention tiers (`isKnownRetention`, `combineRetention`), TEE modes, the payer's pre-seal body mutators (`dropRoutingPreferences`, `dropPromptCacheKey`, `dropEmptyTools`, `clampMaxOutput`), tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
 | `…/testdata/*` | The golden-vector fixtures this package is tested against |
 
-`escrow`, `pricing`, `transient`, and `relay` are subpath-only: their names (`classify`, `wait`,
-`buildRequest`, …) are package-qualified in Go and would be ambiguous at the root.
+`escrow`, `pricing`, `transient`, `steering`, and `relay` are subpath-only: their names
+(`classify`, `wait`, `decay`, `buildRequest`, …) are package-qualified in Go and would be
+ambiguous at the root.
 
 ## Signing: raw Ed25519, not Algorand `signBytes`
 
@@ -87,7 +89,7 @@ encoding, selection order, pricing, tokenize bounds, transient verdicts, escrow 
 record decoding, `classify` and fee math, discovery field names and retention tiers, which
 bodies the pre-seal mutators change (compared by value: TS splices the original text where Go
 re-marshals), tool-status frames as a node emits them, icon host keys and the usage arithmetic,
-and attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
+reputation decay, target backoff and the weights consensus, and attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
 it drops a malformed field rather than rejecting the whole body — and that part is tested
 here only. The Go suite fails when its output no longer matches the fixture, and this package's
 suite fails when its output does, so drift on either side fails. In a checkout of the
