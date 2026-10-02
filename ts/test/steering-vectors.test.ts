@@ -93,6 +93,10 @@ describe('steering_vectors.json', () => {
                     forget: c.forget,
                 })
                 expect(recordFailure(b, c.now_ms)).toStrictEqual(backoff(c.failed))
+                // Dispatch calls with two arguments; the default floor is 0.
+                if (c.floor_ms === 0) {
+                    expect(backoffRemaining(b, c.now_ms)).toStrictEqual(backoffRemaining(b, c.now_ms, 0))
+                }
             })
         }
     })

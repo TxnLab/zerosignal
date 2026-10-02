@@ -362,6 +362,23 @@
         "count": 3,
         "at_ms": 1760005400000
       }
+    },
+    {
+      "name": "negative cooldown on a backwards clock",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1759998800000,
+      "cooldown_ms": -600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1759998800000
+      }
     }
   ],
   "backoff_windows": [
@@ -872,6 +889,85 @@
         false,
         false,
         true
+      ]
+    },
+    {
+      "name": "owners with no digest do not form a camp",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": ""
+        },
+        {
+          "owner": "D",
+          "digest": ""
+        },
+        {
+          "owner": "E",
+          "digest": ""
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "ASCII fold covers A and Z",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "AZ"
+        },
+        {
+          "owner": "B",
+          "digest": "az"
+        },
+        {
+          "owner": "C",
+          "digest": "az"
+        }
+      ],
+      "consensus": "az",
+      "contradicts": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "ASCII fold stops at @ and [",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "x@["
+        },
+        {
+          "owner": "B",
+          "digest": "x`{"
+        },
+        {
+          "owner": "C",
+          "digest": "x`{"
+        }
+      ],
+      "consensus": "x`{",
+      "contradicts": [
+        true,
+        false,
+        false
       ]
     },
     {

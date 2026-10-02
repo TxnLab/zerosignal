@@ -179,6 +179,10 @@ func buildDecay() []decayCase {
 		{"zero count with a timestamp", ev(0, 0), rep, rep},
 		{"zero cooldown ages nothing", ev(2, 0), 9 * rep, 0},
 		{"negative cooldown ages nothing", ev(2, 0), 9 * rep, -rep},
+		// A negative divisor on a backwards clock gives POSITIVE steps, so only
+		// the cooldown guard stands between this and a count that decays while
+		// At moves backwards.
+		{"negative cooldown on a backwards clock", ev(2, 0), -2 * rep, -rep},
 	}
 	out := make([]decayCase, 0, len(inputs))
 	for _, in := range inputs {
@@ -265,6 +269,12 @@ func buildConsensus() []consensusCase {
 		{"case-insensitive", []claimJSON{c("A", "SHA256:AAAA"), c("B", good), c("C", "sha256:BBBB")}},
 		// Unicode lowercasing differs between Go and JS (JS writes a final Σ as
 		// ς), so only ASCII folds: these two are different digests on both sides.
+		// Silence is not a camp: owners advertising no digest (every hosted
+		// passthrough) must neither outvote nor tie the publishers.
+		{"owners with no digest do not form a camp", []claimJSON{c("A", good), c("B", good), c("C", ""), c("D", ""), c("E", "")}},
+		// Both ends of A–Z fold, and the neighbours just outside it don't.
+		{"ASCII fold covers A and Z", []claimJSON{c("A", "AZ"), c("B", "az"), c("C", "az")}},
+		{"ASCII fold stops at @ and [", []claimJSON{c("A", "x@["), c("B", "x`{"), c("C", "x`{")}},
 		{"only ASCII folds: a non-ASCII capital is a different digest", []claimJSON{c("A", "xÉ"), c("B", "xé"), c("C", "xé")}},
 		{"only ASCII folds", []claimJSON{c("A", "xΣ"), c("B", "xσ"), c("C", "xσ")}},
 		{"claims with no owner are not evidence", []claimJSON{c("", fake), c("", fake), c("C", good)}},
