@@ -126,6 +126,7 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			cfg := testConfig()
 			cfg.Network = tc.network
 			cfg.FundingURL = tc.fundingURL
+			cfg.PayerAddr = "PAYERADDR"
 			opts := setupHayai(t, cfg, node)
 			s := testServer(cfg, opts)
 			s.wallet = &fakeWallet{err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
@@ -137,6 +138,11 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			body := w.Body.String()
 			if w.Result().StatusCode != http.StatusPaymentRequired || !strings.Contains(body, `"wallet_unfunded"`) {
 				t.Fatalf("status = %d body=%s; want 402 wallet_unfunded", w.Result().StatusCode, body)
+			}
+			// The deposit address is the actionable part; swapped with the
+			// network it would point the payer at a non-address.
+			if want := "wallet PAYERADDR can't pay for this request on " + tc.network + " "; !strings.Contains(body, want) {
+				t.Errorf("body missing %q:\n%s", want, body)
 			}
 			if got := strings.Contains(body, "web app"); got != tc.wantWebApp {
 				t.Errorf("body offers the web app = %v, want %v:\n%s", got, tc.wantWebApp, body)
