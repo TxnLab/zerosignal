@@ -59,7 +59,7 @@ func TestForwardRawStream_TallyNoRaceOnMidStreamDisconnect(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	s := &Server{
+	s := &client{
 		log:        slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		httpClient: &http.Client{},
 	}

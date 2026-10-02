@@ -2480,7 +2480,7 @@ var _ = context.Background
 // --- wallet payment path ----------------------------------------------------
 
 // fakeWallet implements WalletOpener on
-// *Server so dispatch tests can assert the payment path without
+// client so dispatch tests can assert the payment path without
 // wiring a real algod + escrow client. Records each Open invocation
 // and returns a deterministic handle so the test can assert which
 // value ends up in the envelope's AlgorandTxID: the app-call txid

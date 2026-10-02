@@ -164,7 +164,7 @@ func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T
 	}))
 	defer upstream.Close()
 
-	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
+	s := &client{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
 	clientCtx, leave := context.WithCancel(context.Background())
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}")).WithContext(clientCtx)
 	w := deadSocketWriter{httptest.NewRecorder(), clientCtx}
@@ -203,7 +203,7 @@ func TestForwardRawNonStream_Posts(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
+	s := &client{log: slog.New(slog.NewTextHandler(io.Discard, nil)), httpClient: &http.Client{}}
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	s.forwardRawNonStream(context.Background(), newHTTPEmitter(httptest.NewRecorder(), r), upstream.URL, "", []byte("{}"),
 		"application/json", nil, nil, func(emitter, *http.Response, []byte) error { return nil })
@@ -215,7 +215,7 @@ func TestForwardRawNonStream_Posts(t *testing.T) {
 // After the open, a node refusing admission is a paid turn interrupted, and
 // its code is what a caller branches on.
 func TestNonStreamResponder_PreEnvelopeErrorIsInterrupted(t *testing.T) {
-	s := &Server{cfg: &Config{}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &client{cfg: &Config{}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	responder := s.buildHayaiNonStreamResponder(context.Background(), nil, "", nil, zs.Operator{}, nil,
 		nil, endpointChatCompletions, "m", 0, 0, nil, formatChat)
 

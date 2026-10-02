@@ -18,14 +18,14 @@ import (
 // This DELIBERATELY violates the non-retention rule documented in AGENTS.md
 // ("never put request bodies ... into slog, traces, or any persistent sink").
 // It exists solely as a local-debugging escape hatch and is gated behind the
-// off-by-default -debug-bodies CLI flag (Server.debugLogBodies). main.go emits
+// off-by-default -debug-bodies CLI flag (client.debugLogBodies). main.go emits
 // a loud startup warning when the flag is on. Never enable it in production.
 //
 // Output goes straight to stderr via Fprintf rather than slog so the JSON is
 // readable natively — a slog string attribute would escape quotes/newlines.
 // The body is pretty-printed when it parses as JSON (chat/responses); for a
 // non-JSON body (e.g. multipart image-edits) the raw bytes are written as-is.
-func (s *Server) debugDumpRequestBody(endpoint string, operatorID uint64, ticketID string, body []byte) {
+func (s *client) debugDumpRequestBody(endpoint string, operatorID uint64, ticketID string, body []byte) {
 	if !s.debugLogBodies {
 		return
 	}
@@ -43,7 +43,7 @@ func (s *Server) debugDumpRequestBody(endpoint string, operatorID uint64, ticket
 // proxy is about to return to the client to stderr. Same escape-hatch contract
 // as debugDumpRequestBody — gated behind -debug-bodies, stderr only (not slog),
 // off by default, never in production. Pretty-printed when it parses as JSON.
-func (s *Server) debugDumpResponseBody(endpoint string, operatorID uint64, ticketID string, body []byte) {
+func (s *client) debugDumpResponseBody(endpoint string, operatorID uint64, ticketID string, body []byte) {
 	if !s.debugLogBodies {
 		return
 	}
@@ -63,7 +63,7 @@ func (s *Server) debugDumpResponseBody(endpoint string, operatorID uint64, ticke
 // each, tagged with ticket + frame index so interleaved parallel streams stay
 // readable) so a stream cancelled before it completes still shows whatever the
 // node managed to send. Same escape-hatch contract as the others.
-func (s *Server) debugDumpResponseFrame(endpoint string, operatorID uint64, ticketID string, frameIndex uint64, plaintext []byte) {
+func (s *client) debugDumpResponseFrame(endpoint string, operatorID uint64, ticketID string, frameIndex uint64, plaintext []byte) {
 	if !s.debugLogBodies {
 		return
 	}

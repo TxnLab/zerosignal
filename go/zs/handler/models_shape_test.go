@@ -52,7 +52,7 @@ func pathModelID(path string) string {
 }
 
 // feeWallet is a fakeWallet that also advertises a protocol fee — the optional
-// capability Server.feeRateNow gates on.
+// capability client.feeRateNow gates on.
 type feeWallet struct{ *fakeWallet }
 
 func (feeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) { return 1000, nil }

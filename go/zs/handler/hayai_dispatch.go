@@ -108,7 +108,7 @@ func turnFromHTTP(r *http.Request, endpoint string, body []byte, format clientFo
 // If every candidate refuses, the client gets a 503 with Retry-After
 // propagated from the shortest operator hint — the admission layer is
 // doing its job and no payment has happened.
-func (s *Server) dispatch(ctx context.Context, em emitter, t turn) {
+func (s *client) dispatch(ctx context.Context, em emitter, t turn) {
 	endpoint, body, format := t.endpoint, t.body, t.format
 
 	isImage := endpoint == endpointImages
@@ -1236,7 +1236,7 @@ const (
 // the transient one. s.fastSweeps zeroes it so a test can drive the busy
 // re-sweep path without real waits — it has to zero the HINT too, since
 // transient.Wait lets a server-supplied Retry-After beat the scheduled value.
-func (s *Server) busyRetryWait(hint, remaining time.Duration) (time.Duration, bool) {
+func (s *client) busyRetryWait(hint, remaining time.Duration) (time.Duration, bool) {
 	if s.fastSweeps {
 		if remaining <= 0 {
 			return 0, false
@@ -1519,7 +1519,7 @@ func describeMiss(m sizingMiss, req hayai.SizingRequest) string {
 // Failure modes are all surfaced to the client as 400 invalid_request,
 // not 503 — the client supplied a continuation reference we can't honor,
 // and the only sensible recovery is for them to retry without it.
-func (s *Server) resolveResponseIDPin(ctx context.Context, previousResponseID, model string, sizing hayai.SizingRequest) (string, hayai.Operator, bool) {
+func (s *client) resolveResponseIDPin(ctx context.Context, previousResponseID, model string, sizing hayai.SizingRequest) (string, hayai.Operator, bool) {
 	opID, nodeID, ok := s.responseAffinity.Lookup(previousResponseID)
 	if !ok {
 		return fmt.Sprintf("previous_response_id %q not found in routing cache; "+
@@ -1577,7 +1577,7 @@ func (s *Server) resolveResponseIDPin(ctx context.Context, previousResponseID, m
 //
 // A registry error yields 0 — the clamp stays out of the way and pickCandidates
 // surfaces the real failure with its own diagnostics.
-func (s *Server) poolMaxOutput(ctx context.Context, model string, requireTEE bool, prefs selection.RoutingPreferences) uint64 {
+func (s *client) poolMaxOutput(ctx context.Context, model string, requireTEE bool, prefs selection.RoutingPreferences) uint64 {
 	registry, err := s.registryProvider.Operators(ctx, model)
 	if err != nil {
 		return 0
@@ -1606,7 +1606,7 @@ func (s *Server) poolMaxOutput(ctx context.Context, model string, requireTEE boo
 // serve — so every predicate here must be one selection applies
 // unconditionally. Each mirrors a check the response-id pin path above already
 // makes against a single operator.
-func (s *Server) routableIgnoringSize(op hayai.Operator, requireTEE bool, prefs selection.RoutingPreferences) bool {
+func (s *client) routableIgnoringSize(op hayai.Operator, requireTEE bool, prefs selection.RoutingPreferences) bool {
 	// Permanent, process-lifetime ban for a proven-fraudulent settle group —
 	// pickCandidates drops these before it counts the registry at all.
 	if s.nodeExcluder != nil && s.nodeExcluder.NodeExcluded(hayai.RefOf(op)) {
@@ -1654,7 +1654,7 @@ func (s *Server) routableIgnoringSize(op hayai.Operator, requireTEE bool, prefs 
 // request must not get affinity-pinned to a non-attested operator. If
 // no operator survives the TEE filter, pickResult.TEEBlocked is set
 // and Operators is empty; dispatchHayai then returns 503 no_tee_capacity.
-func (s *Server) pickCandidates(ctx context.Context, endpoint, model string, body []byte, sizing hayai.SizingRequest, requireTEE bool, toolBudgets selection.ImageToolBudgets, prefs selection.RoutingPreferences) (pickResult, error) {
+func (s *client) pickCandidates(ctx context.Context, endpoint, model string, body []byte, sizing hayai.SizingRequest, requireTEE bool, toolBudgets selection.ImageToolBudgets, prefs selection.RoutingPreferences) (pickResult, error) {
 	registry, err := s.registryProvider.Operators(ctx, model)
 	if err != nil {
 		return pickResult{}, err
@@ -1938,7 +1938,7 @@ func (s *Server) pickCandidates(ctx context.Context, endpoint, model string, bod
 //
 // Rates, latency, ids and model names are all loggable; no request content is
 // involved.
-func (s *Server) logRanking(ctx context.Context, model, sort string, ops []hayai.Operator, ranking []rankDetail) {
+func (s *client) logRanking(ctx context.Context, model, sort string, ops []hayai.Operator, ranking []rankDetail) {
 	if !s.log.Enabled(ctx, slog.LevelDebug) || len(ops) == 0 {
 		return
 	}
@@ -2445,7 +2445,7 @@ func bandByResponsiveness(ops []hayai.Operator, preferred *hayai.Operator, lat h
 // forward secrecy, no anchor), dispatches it to op.BaseURL with the reserved
 // ticket_id bound into the envelope, and hands the response to the decrypt
 // pipeline.
-func (s *Server) runHayaiSealed(
+func (s *client) runHayaiSealed(
 	ctx context.Context,
 	em emitter,
 	endpoint, model string,
@@ -2704,7 +2704,7 @@ func resolveUsePrivacy(configPrivacy, allowOverride bool, relayPref string) bool
 // target, byte-identical to pre-relay behavior. When privacy is on it returns
 // the chosen relay hop, or (nil, selection.ErrNoRelay) when no operator
 // qualifies; the caller MUST NOT fall back to a direct route in that case.
-func (s *Server) relayHopFor(ctx context.Context, target hayai.Operator, usePrivacy bool) (*hayai.RelayHop, error) {
+func (s *client) relayHopFor(ctx context.Context, target hayai.Operator, usePrivacy bool) (*hayai.RelayHop, error) {
 	if !usePrivacy {
 		return nil, nil
 	}
@@ -2730,7 +2730,7 @@ func (s *Server) relayHopFor(ctx context.Context, target hayai.Operator, usePriv
 // between sweeps, so a relay proven dead early doesn't ride the full 60s window
 // at full weight. The latency weighting is NOT frozen even within a sweep —
 // relayHopForPool's latencyOf reads the live store per candidate.
-func (s *Server) relayPool(ctx context.Context) []selection.Operator {
+func (s *client) relayPool(ctx context.Context) []selection.Operator {
 	all := s.registryProvider.AllOperators(ctx)
 	sel := make([]selection.Operator, 0, len(all))
 	for _, op := range all {
@@ -2754,7 +2754,7 @@ func (s *Server) relayPool(ctx context.Context) []selection.Operator {
 // relayPool). Only the latency weighting and the target-exclusion inside
 // SelectRelayHopWeighted are target-dependent, so a caller iterating many
 // candidates reuses one pool across all of them.
-func (s *Server) relayHopForPool(sel []selection.Operator, target hayai.Operator, usePrivacy bool) (*hayai.RelayHop, error) {
+func (s *client) relayHopForPool(sel []selection.Operator, target hayai.Operator, usePrivacy bool) (*hayai.RelayHop, error) {
 	if !usePrivacy {
 		return nil, nil
 	}
@@ -2778,7 +2778,7 @@ func (s *Server) relayHopForPool(sel []selection.Operator, target hayai.Operator
 // no-op. ok=false on a relay-hop failure (transport error reaching the relay,
 // or a relay-generated hop error) deprioritizes the relay; ok=true clears its
 // failure streak.
-func (s *Server) recordRelayOutcome(hop *hayai.RelayHop, ok bool) {
+func (s *client) recordRelayOutcome(hop *hayai.RelayHop, ok bool) {
 	if hop == nil || s.relayRep == nil {
 		return
 	}
@@ -2873,7 +2873,7 @@ func relayEvidence(ctx context.Context, hop *hayai.RelayHop, header http.Header)
 //     response) means the relay did its job — credit it.
 //
 // No-op for a direct route (nil hop) or when reputation is disabled.
-func (s *Server) attributeRelayHop(ctx context.Context, hop *hayai.RelayHop, statusCode int, header http.Header, body []byte) {
+func (s *client) attributeRelayHop(ctx context.Context, hop *hayai.RelayHop, statusCode int, header http.Header, body []byte) {
 	if hop == nil || s.relayRep == nil {
 		return
 	}
@@ -2982,7 +2982,7 @@ func relayAttr(hop *hayai.RelayHop) slog.Attr {
 // verifies commit_k, and — on success — records any tool_call ids in the
 // affinity cache so the next turn of a tool-calling conversation routes
 // back to the same operator.
-func (s *Server) buildHayaiNonStreamResponder(
+func (s *client) buildHayaiNonStreamResponder(
 	ctx context.Context,
 	ephemeral *age.X25519Identity,
 	txID string,
@@ -3501,7 +3501,7 @@ func (c *feeRateCache) refresh(fetch func(context.Context) (uint64, error)) {
 // feeRateNow returns the proxy payer's cached effective fee rate for the
 // payer-facing breakdown, kicking an async refresh when stale. ok == false (no
 // breakdown) when the wallet can't read the rate or the cache hasn't warmed yet.
-func (s *Server) feeRateNow() (feeBps uint64, ok bool) {
+func (s *client) feeRateNow() (feeBps uint64, ok bool) {
 	w, capable := s.wallet.(feeRateCapable)
 	if !capable {
 		return 0, false
@@ -3545,7 +3545,7 @@ func (s *Server) feeRateNow() (feeBps uint64, ok bool) {
 //     The symptom an operator sees is a permanently price-less /v1/models
 //     rather than a log line, so treat "no pricing in the catalog" as a chain
 //     reachability symptom, not a pricing bug.
-func (s *Server) WarmFeeRate() {
+func (s *client) WarmFeeRate() {
 	_, _ = s.feeRateNow()
 }
 
@@ -3576,7 +3576,7 @@ func (s *Server) WarmFeeRate() {
 //
 // Dedicated image / character / seconds tickets are skipped inside
 // VerifyTicketPrice itself (priced by imageprice/videoprice, not per token).
-func (s *Server) verifyReservePrice(op hayai.Operator, req ticket.ReserveRequest, t *ticket.Ticket) *pricing.Violation {
+func (s *client) verifyReservePrice(op hayai.Operator, req ticket.ReserveRequest, t *ticket.Ticket) *pricing.Violation {
 	if req.ImageToolBudget > 0 || req.ImageEditToolBudget > 0 {
 		return nil
 	}
@@ -3694,7 +3694,7 @@ func hayaiUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op hayai.Ope
 // malformed — receipt-shape problems are recorded evidence, not a reason
 // to withhold the already-decrypted response. submit is nil when there is
 // nothing to put on chain.
-func (s *Server) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op hayai.Operator, handle settlementHandle, plaintext []byte, algoUSDPrice float64, hop *hayai.RelayHop) (*ticket.UsageReceipt, settleSubmit) {
+func (s *client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op hayai.Operator, handle settlementHandle, plaintext []byte, algoUSDPrice float64, hop *hayai.RelayHop) (*ticket.UsageReceipt, settleSubmit) {
 	if headerVal == "" {
 		s.log.Debug("no receipt header on zs response; tolerating",
 			opAttr(op),
@@ -3723,7 +3723,7 @@ func (s *Server) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGr
 // The goroutine recovers its own panics: it is outside the HTTP
 // middleware's recover, and a crash here would take down the payer's
 // whole proxy, including the in-memory refund watchdog.
-func (s *Server) submitAfterResponse(ticketID string, submit settleSubmit) {
+func (s *client) submitAfterResponse(ticketID string, submit settleSubmit) {
 	if submit == nil {
 		return
 	}
@@ -3746,7 +3746,7 @@ func (s *Server) submitAfterResponse(ticketID string, submit settleSubmit) {
 // requests. On timeout the error names the tickets still being submitted,
 // since a submit that dies with the process is not recovered in-process:
 // the refund watchdog is in-memory too.
-func (s *Server) WaitSettles(ctx context.Context) error {
+func (s *client) WaitSettles(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		s.settles.Wait()
@@ -3779,7 +3779,7 @@ func (s *Server) WaitSettles(ctx context.Context) error {
 // reads content frames with, so the `zs-settle-group` frame consuming no frame
 // index is a property of the method rather than a rule the read loop has to
 // remember.
-func openSealedResponseMeta(s *Server, sealedVal string, opener *wire.ResponseOpener, tkt *ticket.Ticket, name string, op hayai.Operator, hop *hayai.RelayHop) string {
+func openSealedResponseMeta(s *client, sealedVal string, opener *wire.ResponseOpener, tkt *ticket.Ticket, name string, op hayai.Operator, hop *hayai.RelayHop) string {
 	if sealedVal == "" {
 		return ""
 	}
@@ -3801,7 +3801,7 @@ func openSealedResponseMeta(s *Server, sealedVal string, opener *wire.ResponseOp
 // side); presence-but-malformed is logged at warn so an operator
 // emitting bad bytes is observable, but the proxy still falls back
 // to the standalone-ack path.
-func decodeSettleGroupHeader(s *Server, headerVal string, op hayai.Operator, tkt *ticket.Ticket, hop *hayai.RelayHop) []types.SignedTxn {
+func decodeSettleGroupHeader(s *client, headerVal string, op hayai.Operator, tkt *ticket.Ticket, hop *hayai.RelayHop) []types.SignedTxn {
 	if headerVal == "" {
 		return nil
 	}
@@ -3837,7 +3837,7 @@ func decodeSettleGroupHeader(s *Server, headerVal string, op hayai.Operator, tkt
 // by *hayai.OpenHandle in production and by test fakes); this keeps
 // runReceiptChecks testable without spinning up real algod or
 // escrow clients.
-func (s *Server) runReceiptChecks(
+func (s *client) runReceiptChecks(
 	ctx context.Context,
 	endpoint, model string,
 	ticket *ticket.Ticket,
@@ -3867,7 +3867,7 @@ type settleSubmit func() uint64
 // exists for the non-streaming responder, which must not hold the
 // client's response for an algod round-trip (up to settleSubmitTimeout),
 // so it writes the response first and runs the submit after.
-func (s *Server) checkReceipt(
+func (s *client) checkReceipt(
 	ctx context.Context,
 	endpoint, model string,
 	ticket *ticket.Ticket,
@@ -4139,7 +4139,7 @@ func flattenFrames(frames [][]byte) []byte {
 // responder. The signed receipt itself is not forwarded — but a
 // small, unsigned `zs.usage` SSE frame is emitted in its place so
 // streaming clients can render per-request usage + microUSDC cost.
-func (s *Server) buildHayaiFrameFactory(
+func (s *client) buildHayaiFrameFactory(
 	ctx context.Context,
 	ephemeral *age.X25519Identity,
 	txID string,
@@ -4517,7 +4517,7 @@ func reserveInputCount(op hayai.Operator, model string, body []byte, maxOutputTo
 		maxOutputTokens, contextWindow, reserveMinInputCount), boundVersion
 }
 
-func (s *Server) estimateTokens(model, endpoint string, body []byte) (tokenize.Estimate, error) {
+func (s *client) estimateTokens(model, endpoint string, body []byte) (tokenize.Estimate, error) {
 	if s.tokenizer == nil {
 		return tokenize.Estimate{}, errors.New("tokenizer not configured")
 	}
@@ -4531,7 +4531,7 @@ func (s *Server) estimateTokens(model, endpoint string, body []byte) (tokenize.E
 // writeTokenizeError maps tokenize errors to the OpenAI-shaped response
 // surfaces the reserve endpoint itself would produce, so the client sees
 // the same error code whether the proxy refused up front or the node did.
-func (s *Server) writeTokenizeError(em emitter, endpoint, model string, err error) {
+func (s *client) writeTokenizeError(em emitter, endpoint, model string, err error) {
 	switch {
 	case errors.Is(err, tokenize.ErrMaxOutputRequired):
 		em.fail(newError("max_output_required",

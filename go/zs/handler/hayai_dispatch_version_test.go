@@ -42,12 +42,11 @@ func minimalVersionServer(t *testing.T, ops []hayai.Operator) *Server {
 		t.Fatalf("NewStaticRegistryProvider: %v", err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return &Server{
+	return &Server{client: &client{
 		cfg:              &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone},
 		log:              log,
-		mux:              http.NewServeMux(),
 		registryProvider: registry,
-	}
+	}, mux: http.NewServeMux()}
 }
 
 func TestPickCandidates_VersionFilter_KeepsCompatible(t *testing.T) {

@@ -83,13 +83,12 @@ func retryServer(t *testing.T, privacy bool, rc hayai.ReserveClient, ops []hayai
 	if err != nil {
 		t.Fatalf("NewStaticRegistryProvider: %v", err)
 	}
-	return &Server{
+	return &Server{client: &client{
 		cfg:              &Config{Privacy: privacyMode(privacy), Affinity: hayai.AffinityNone},
 		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mux:              http.NewServeMux(),
 		registryProvider: registry,
 		reserveClient:    rc,
-	}
+	}, mux: http.NewServeMux()}
 }
 
 // retryOp builds a reachable, version-compatible operator. Distinct owners

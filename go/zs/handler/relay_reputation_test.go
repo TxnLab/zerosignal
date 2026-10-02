@@ -105,13 +105,12 @@ func relayRepServer(t *testing.T, privacy bool, ops []hayai.Operator, rep hayai.
 	if err != nil {
 		t.Fatalf("NewStaticRegistryProvider: %v", err)
 	}
-	return &Server{
+	return &Server{client: &client{
 		cfg:              &Config{Privacy: privacyMode(privacy), Affinity: hayai.AffinityNone},
 		log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mux:              http.NewServeMux(),
 		registryProvider: registry,
 		relayRep:         rep,
-	}
+	}, mux: http.NewServeMux()}
 }
 
 func relayOp(id uint64, owner, baseURL string) hayai.Operator {

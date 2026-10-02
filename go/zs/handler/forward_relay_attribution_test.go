@@ -26,11 +26,11 @@ import (
 // classifier would test the classifier, which relay_reputation_test.go already
 // does) and an observable reputation store.
 func forwardAttributionServer(rep hayai.RelayReputation) *Server {
-	return &Server{
+	return &Server{client: &client{
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		httpClient: &http.Client{},
 		relayRep:   rep,
-	}
+	}}
 }
 
 // The payer hangs up while the non-streaming forward is in flight. That leg

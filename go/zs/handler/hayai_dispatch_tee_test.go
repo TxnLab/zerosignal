@@ -30,12 +30,11 @@ func minimalTEEServer(t *testing.T, ops []hayai.Operator) *Server {
 		t.Fatalf("NewStaticRegistryProvider: %v", err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return &Server{
+	return &Server{client: &client{
 		cfg:              &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone},
 		log:              log,
-		mux:              http.NewServeMux(),
 		registryProvider: registry,
-	}
+	}, mux: http.NewServeMux()}
 }
 
 func teeOp(id uint64, model string, tee *hayai.TEEStatus) hayai.Operator {

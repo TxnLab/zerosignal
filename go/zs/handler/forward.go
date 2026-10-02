@@ -62,7 +62,7 @@ var hopByHopHeaders = map[string]struct{}{
 //
 // baseURL is the per-operator URL from the registry; it must be non-empty
 // and is already scheme-validated at registry-load time.
-func (s *Server) buildOperatorRequest(
+func (s *client) buildOperatorRequest(
 	ctx context.Context,
 	baseURL, method, endpoint string,
 	body []byte,
@@ -118,7 +118,7 @@ type nonStreamResponder func(em emitter, upstreamResp *http.Response, respBody [
 // supplies the final body, outbound Content-Type, and extra headers.
 //
 // baseURL is the per-operator URL from the registry; it must be non-empty.
-func (s *Server) forwardRawNonStream(
+func (s *client) forwardRawNonStream(
 	ctx context.Context,
 	em emitter,
 	baseURL, endpoint string,

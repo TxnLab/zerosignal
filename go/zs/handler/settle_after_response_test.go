@@ -111,7 +111,7 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 	upstream.Header.Set(wire.ReceiptHeader, sealedReceipt)
 
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := &Server{cfg: &Config{Privacy: hayai.PrivacyDirect}, log: discard, refunds: hayai.NewRefundWatchdog(discard)}
+	s := &client{cfg: &Config{Privacy: hayai.PrivacyDirect}, log: discard, refunds: hayai.NewRefundWatchdog(discard)}
 	handle := &blockingSettlementHandle{started: make(chan struct{}), release: make(chan struct{})}
 	responder := s.buildHayaiNonStreamResponder(context.Background(), ephemeral, txID, tkt, op, handle,
 		nil, endpointChatCompletions, "test-model", 0.20, 0, nil, formatChat)

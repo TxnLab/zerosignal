@@ -81,7 +81,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 	source := &hayai.ChainOperatorSource{}
-	srv := &Server{
+	srv := &client{
 		cfg:          &Config{Privacy: hayai.PrivacyDirect},
 		log:          discard,
 		refunds:      hayai.NewRefundWatchdog(discard),
@@ -105,7 +105,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 	}
 	// Sanity: an HONEST settle (groupRejected=false) must NOT exclude the node.
 	honestSource := &hayai.ChainOperatorSource{}
-	honestSrv := &Server{cfg: &Config{Privacy: hayai.PrivacyDirect}, log: discard, refunds: hayai.NewRefundWatchdog(discard), nodeExcluder: honestSource}
+	honestSrv := &client{cfg: &Config{Privacy: hayai.PrivacyDirect}, log: discard, refunds: hayai.NewRefundWatchdog(discard), nodeExcluder: honestSource}
 	honestHandle := &fakeSettlementHandle{groupRejected: false}
 	honestSrv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",

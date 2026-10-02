@@ -31,7 +31,7 @@ func f64ptr(f float64) *float64 { return &f }
 // newPriceTestServer returns a Server wired just enough for verifyReservePrice:
 // a fee-capable wallet and (when feeKnown) a warm fee cache at feeBps.
 func newPriceTestServer(feeBps uint64, feeKnown bool) *Server {
-	s := &Server{wallet: fakeFeeWallet{fee: feeBps}}
+	s := &Server{client: &client{wallet: fakeFeeWallet{fee: feeBps}}}
 	if feeKnown {
 		s.feeRate.feeBps = feeBps
 		s.feeRate.ok = true

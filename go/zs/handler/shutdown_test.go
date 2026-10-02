@@ -16,7 +16,7 @@ import (
 
 func newShutdownTestServer(token string, onShutdown func()) *Server {
 	return &Server{
-		log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		client:        &client{log: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		shutdownToken: token,
 		shutdown:      onShutdown,
 	}

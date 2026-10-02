@@ -159,7 +159,7 @@ type frameTransformFactory func(upstreamResp *http.Response) (frameTransform, er
 // the buffered body to nonStreamFallback.
 //
 // baseURL is the per-operator URL from the registry; it must be non-empty.
-func (s *Server) forwardRawStream(
+func (s *client) forwardRawStream(
 	ctx context.Context,
 	em emitter,
 	baseURL, endpoint string,

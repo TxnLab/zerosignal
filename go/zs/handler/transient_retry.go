@@ -60,7 +60,7 @@ import (
 // retrying. Production always uses the shared proto value so the proxy and the
 // client/ app ride out an outage for the same duration; s.retryBudget exists
 // only so tests can shrink it, since the real schedule sleeps up to a minute.
-func (s *Server) transientRetryBudget() time.Duration {
+func (s *client) transientRetryBudget() time.Duration {
 	if s.retryBudget > 0 {
 		return s.retryBudget
 	}
@@ -70,7 +70,7 @@ func (s *Server) transientRetryBudget() time.Duration {
 // sweepDelay is the wait before outer sweep i. Production uses the shared
 // schedule; s.fastSweeps zeros it so a test can drive the multi-sweep
 // terminal-selection path without the real 4s/12s/30s waits.
-func (s *Server) sweepDelay(sweep int) time.Duration {
+func (s *client) sweepDelay(sweep int) time.Duration {
 	if s.fastSweeps {
 		return 0
 	}
@@ -203,7 +203,7 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // The returned reserveAttempt always describes the final attempt — on success
 // Ticket is non-nil, otherwise Err carries the last failure so the dispatch
 // loop's existing per-error-type handling still sees the real cause.
-func (s *Server) reserveWithTransientRetry(
+func (s *client) reserveWithTransientRetry(
 	ctx context.Context,
 	op hayai.Operator,
 	req ticket.ReserveRequest,

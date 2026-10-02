@@ -159,7 +159,7 @@ func demoteContradictedWeights(
 // one operator legitimately serves a requant. That is how a level stops being
 // read. The per-request answer is already on logRanking; this is the "something
 // about your pool changed" line, which is only news once.
-func (s *Server) warnWeightsContradiction(model string, refs []hayai.NodeRef) {
+func (s *client) warnWeightsContradiction(model string, refs []hayai.NodeRef) {
 	for _, ref := range refs {
 		key := model + "\x00" + strconv.FormatUint(ref.Op, 10) + "\x00" + strconv.FormatUint(ref.Node, 10)
 		if _, seen := s.weightsWarned.LoadOrStore(key, struct{}{}); seen {
