@@ -38,6 +38,7 @@ import {
     windowedRingRevenue,
     type RecordMetrics,
 } from '../src/escrow/index.js'
+import * as escrow from '../src/escrow/index.js'
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -86,6 +87,7 @@ describe('escrow_vectors.json', () => {
     // A renamed key in the fixture would otherwise turn a section's loop into
     // zero tests and pass.
     it('has cases in every section', () => {
+        expect(Object.keys(v.constants ?? {}).length).toBeGreaterThan(0)
         for (const section of [
             v.box_keys.ticket,
             v.box_keys.operator,
@@ -104,6 +106,17 @@ describe('escrow_vectors.json', () => {
             v.fees.gap_op_ups_for_iters,
         ]) {
             expect(Array.isArray(section) && section.length > 0).toBe(true)
+        }
+    })
+
+    describe('constants', () => {
+        // Every TS export named in the fixture must exist and match Go's value.
+        for (const [name, want] of Object.entries(v.constants as Record<string, string>)) {
+            it(name, () => {
+                const got = (escrow as Record<string, unknown>)[name]
+                expect(typeof got === 'number' || typeof got === 'bigint').toBe(true)
+                expect(String(got)).toBe(want)
+            })
         }
     })
 
@@ -154,7 +167,7 @@ describe('escrow_vectors.json', () => {
             it(`ticket: ${c.name}`, () => {
                 const data = hex.decode(c.data_hex)
                 if (c.error) {
-                    expect(() => decodeTicketRecord(data)).toThrow()
+                    expect(() => decodeTicketRecord(data)).toThrow(new Error(c.error_message))
                     return
                 }
                 const r = decodeTicketRecord(data)
@@ -190,7 +203,9 @@ describe('escrow_vectors.json', () => {
             it(`operator: ${c.name}`, () => {
                 const data = hex.decode(c.data_hex)
                 if (c.error) {
-                    expect(() => decodeOperatorRecord(BigInt(c.operator_id), data)).toThrow()
+                    expect(() => decodeOperatorRecord(BigInt(c.operator_id), data)).toThrow(
+                        new Error(c.error_message),
+                    )
                     return
                 }
                 const r = decodeOperatorRecord(BigInt(c.operator_id), data)
@@ -214,7 +229,7 @@ describe('escrow_vectors.json', () => {
                 const data = hex.decode(c.data_hex)
                 const [op, node] = [BigInt(c.operator_id), BigInt(c.node_id)]
                 if (c.error) {
-                    expect(() => decodeNodeRecord(op, node, data)).toThrow()
+                    expect(() => decodeNodeRecord(op, node, data)).toThrow(new Error(c.error_message))
                     return
                 }
                 const r = decodeNodeRecord(op, node, data)
@@ -306,5 +321,35 @@ describe('escrow_vectors.json', () => {
                 expect(String(gapOpUpsForIters(BigInt(c.iters)))).toBe(c.want)
             })
         }
+    })
+})
+
+// Guards Go gets from its types and so the fixture cannot express: Go's ids are
+// uint64 and its ring is a [30]uint64, while TS takes a bigint and an array.
+describe('escrow input guards (TS only)', () => {
+    // DataView.setBigUint64 wraps silently, so without the guard -1n names
+    // operator 2^64-1's box and 2^64+5 names node 5's.
+    it('refuses ids outside uint64', () => {
+        expect(() => operatorBoxKey(-1n)).toThrow(new RangeError('uint64 out of range: -1'))
+        expect(() => nodeBoxKey(1n, 1n << 64n)).toThrow(/uint64 out of range/)
+        expect(() => nodeBoxPrefixForOperator(1n << 64n)).toThrow(/uint64 out of range/)
+        expect(hex.encode(operatorBoxKey(0xffff_ffff_ffff_ffffn))).toMatch(/ffffffffffffffff$/)
+    })
+
+    // A wrong-length id names a box the contract never creates, so a read of
+    // it would report "absent" instead of failing.
+    it('refuses a ticket id that is not 16 bytes', () => {
+        expect(() => ticketBoxKey(new Uint8Array(15))).toThrow(/must be 16 bytes \(got 15\)/)
+        expect(() => ticketBoxKey(new Uint8Array(17))).toThrow(/must be 16 bytes \(got 17\)/)
+    })
+
+    // A short ring would otherwise read its missing slots as zero revenue.
+    it('refuses a revenue ring that is not 30 buckets', () => {
+        expect(() => windowedRingRevenue(1n, Array<bigint>(29).fill(1n), 1n, 1n)).toThrow(
+            /has 29 buckets, want 30/,
+        )
+        expect(() => windowedRingRevenue(1n, Array<bigint>(31).fill(1n), 1n, 1n)).toThrow(
+            /has 31 buckets, want 30/,
+        )
     })
 })
