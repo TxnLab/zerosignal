@@ -168,6 +168,67 @@ func TestDispatch_TEERequirement(t *testing.T) {
 	}
 }
 
+// Strict affinity keeps a continuation on its pinned operator; a turn with no
+// pin has nothing to keep, so a candidate with no eligible relay is skipped
+// like any other rather than ending the turn.
+func TestDispatch_StrictUnpinnedSkipsRelaylessCandidate(t *testing.T) {
+	at := func(op hayai.Operator, url string) hayai.Operator { op.BaseURL = url; return op }
+	// Op 1 has no relay: op 2 shares its /16, op 3 its owner. Ops 2 and 3
+	// relay for each other.
+	relayless := at(gatesOp(1, "OWNER_A"), "http://203.0.113.1")
+	rc := &refusingReserveClient{}
+	s := gatesServer(t, &Config{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityStrict, AllowPrivateOperators: true}, rc,
+		relayless,
+		at(gatesOp(2, "OWNER_B"), "http://203.0.113.2"),
+		at(gatesOp(3, "OWNER_A"), "http://198.51.100.1"))
+	s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/chat/completions",
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
+
+	var ids []uint64
+	for _, op := range rc.ops {
+		ids = append(ids, op.ID)
+	}
+	if len(ids) != 2 || ids[0] == 1 || ids[1] == 1 {
+		t.Errorf("reserved %v, want ops 2 and 3 after op 1 was skipped", ids)
+	}
+}
+
+// The same holds for a candidate that cannot price an image tool the turn
+// budgets for. The turn budgets both tools, so op 1, pricing one of them,
+// still ranks first; it is skipped for the other.
+func TestDispatch_StrictUnpinnedSkipsUnpricedToolCandidate(t *testing.T) {
+	priced := func(op hayai.Operator, gen, edit uint64) hayai.Operator {
+		op.ModelCapacities = map[string]hayai.ModelCapacity{"gpt-test": {
+			ImageToolRateMicroUSDC: gen, ImageEditToolRateMicroUSDC: edit, OutputUSDPer1M: 10,
+		}}
+		return op
+	}
+	for _, tc := range []struct {
+		name      string
+		gen, edit uint64
+	}{
+		{"generation unpriced", 0, 80_000},
+		{"edit unpriced", 80_000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &refusingReserveClient{}
+			s := gatesServer(t, &Config{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityStrict}, rc,
+				priced(gatesOp(1, "OWNER_A"), tc.gen, tc.edit), priced(gatesOp(2, "OWNER_B"), 80_000, 80_000))
+			s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/responses",
+				`{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,`+
+					`"tool_budgets":{"zs_image_generation":{"max_n":1},"zs_image_edit":{"max_n":1}}}`))
+
+			if len(rc.ops) != 1 || rc.ops[0].ID != 2 {
+				var ids []uint64
+				for _, op := range rc.ops {
+					ids = append(ids, op.ID)
+				}
+				t.Errorf("reserved %v, want op 2 after op 1 was skipped", ids)
+			}
+		})
+	}
+}
+
 // Each routing store in Options reaches the Client. The fraud ban is the one
 // that matters most — a dropped NodeExcluder silently routes to a node proven
 // to have tried to take the payer's money — but a dropped store of any kind

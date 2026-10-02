@@ -634,6 +634,10 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		// waiting cannot fix", which is what disqualifies a busy re-sweep.
 		sweepTransient, sweepRefused := false, false
 		sweepBusy, sweepHardRefusal := false, false
+		// No skip below checks the affinity policy. Under strict, pickCandidates
+		// has already cut a pinned turn down to its one operator, so moving on
+		// ends the loop; an unpinned turn has no pin to keep and routes like any
+		// other.
 		for _, op := range candidates {
 			// Transport-privacy: pick the relay hop for this target. nil hop =
 			// privacy off (direct send); ErrNoRelay = privacy on but no eligible
@@ -644,9 +648,6 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				s.log.Info("privacy mode: no eligible relay; skipping operator",
 					opAttr(op),
 					slog.String("endpoint", endpoint))
-				if s.cfg.Affinity.Policy == AffinityStrict {
-					break
-				}
 				continue
 			}
 			// Per-operator max_output: the flat estimate when the caller specified one
@@ -725,18 +726,12 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					toolFactorMissing = true
 					s.log.Debug("operator missing image-tool pricing for chat-model image tool; skipping",
 						opAttr(op), relayAttr(hop), slog.String("model", model))
-					if s.cfg.Affinity.Policy == AffinityStrict {
-						break
-					}
 					continue
 				}
 				if toolBudgets.EditMaxN > 0 && mc.ImageEditToolRateMicroUSDC == 0 {
 					toolFactorMissing = true
 					s.log.Debug("operator missing image-edit-tool pricing for chat-model image tool; skipping",
 						opAttr(op), relayAttr(hop), slog.String("model", model))
-					if s.cfg.Affinity.Policy == AffinityStrict {
-						break
-					}
 					continue
 				}
 				reserveReq.ImageToolBudget = toolBudgets.GenerationMaxN
@@ -804,8 +799,8 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				// Payer-side price gate: refuse a mis-priced or internally-inconsistent
 				// ticket before opening escrow against it. A violation isn't retryable
 				// against this operator, but another may be honest — skip it like a size
-				// rejection (strict affinity stops instead of relocating). Fails open when
-				// a reference is unavailable (see verifyReservePrice).
+				// rejection. Fails open when a reference is unavailable (see
+				// verifyReservePrice).
 				if v := s.verifyReservePrice(op, reserveReq, rt.Ticket); v != nil {
 					priceRejected = true
 					s.log.Warn("reserve refused: ticket price failed verification; trying next operator",
@@ -815,9 +810,6 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 						slog.String("field", v.Field),
 						slog.Uint64("allowed", v.Want),
 						slog.Uint64("signed", v.Got))
-					if s.cfg.Affinity.Policy == AffinityStrict {
-						break
-					}
 					continue
 				}
 				if s.log.Enabled(ctx, slog.LevelDebug) {
@@ -878,10 +870,6 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					slog.String("code", be.Code),
 					slog.Bool("resweepable", be.Retryable()),
 					slog.Duration("retry_after", be.RetryAfter))
-				if s.cfg.Affinity.Policy == AffinityStrict {
-					// Strict affinity: don't fall through to other operators.
-					break
-				}
 			case IsSize(err):
 				// Node refused on a node-side capacity limit the advertised
 				// metadata didn't expose. Not retryable against the same
@@ -900,10 +888,6 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					relayAttr(hop),
 					slog.String("endpoint", endpoint),
 					slog.String("code", se.Code))
-				if s.cfg.Affinity.Policy == AffinityStrict {
-					// Strict affinity: same logic as busy — don't relocate.
-					break
-				}
 			case isPayerRefusal:
 				// Payer-scoped refusal: the escrow contract said no about THIS
 				// PAYER, not this operator. Every remaining candidate would refuse
@@ -937,10 +921,6 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					opAttr(op),
 					relayAttr(hop),
 					slog.String("endpoint", endpoint))
-				if s.cfg.Affinity.Policy == AffinityStrict {
-					// Strict affinity: don't relocate, same as the other skip cases.
-					break
-				}
 			default:
 				// Split the old catch-all in two. An infrastructure failure (a
 				// gateway 5xx with no protocol error code, or a transport error) has
