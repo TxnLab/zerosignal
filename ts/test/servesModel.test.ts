@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { servesModel, type Operator } from '../src/selection/index.js'
 
 // Mirrors proto/go/selection TestServesModel_EmptyServesNothing and
-// proxy/internal/hayai TestRegistry_EmptyModelsServesNothing: an empty models
+// proto/go/zs TestRegistry_EmptyModelsServesNothing: an empty models
 // list serves NOTHING regardless of reachable (no wildcard); a non-empty list
 // serves only its members.
 function op(models: string[], reachable: boolean): Operator {

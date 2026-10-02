@@ -163,8 +163,8 @@ type ModelCapacity struct {
 	// answer. That raise is now the ONLY ceiling (DefaultMaxOutputCeiling), so
 	// nothing reads this field and no selection outcome depends on it. Kept
 	// rather than removed because it is a serialized field of the descriptor the
-	// golden vectors pin and the proxy still populates it
-	// (proxy/internal/hayai/operator.go) — deprecate, don't remove.
+	// golden vectors pin and the Go payer SDK still populates it
+	// (proto/go/zs/operator.go) — deprecate, don't remove.
 	// omitempty (like Staging on Operator): absent reads as false.
 	ReasoningSupported bool `json:"reasoning_supported,omitempty"`
 	// ImageRateMicroUSDC / ImageEditRateMicroUSDC are the microUSDC price of one
@@ -201,7 +201,7 @@ type ModelCapacity struct {
 // it a tried-then-rejected candidate for every model — wasted reserve
 // round-trips plus a misleading operators_busy masking the real no_operator.
 //
-// This mirrors proxy/internal/hayai/operator.go::ServesModel byte-for-byte;
+// This mirrors proto/go/zs/operator.go::ServesModel byte-for-byte;
 // the two must agree or the proxy and client would disagree on eligibility.
 func (o Operator) ServesModel(model string) bool {
 	for _, m := range o.Models {
@@ -263,7 +263,7 @@ func (o Operator) SupportsAllBuiltinTools(needed []string) bool {
 // unbounded. The context-window check delegates to inject.FitsContextWindow so
 // proxy, node, and client agree byte-for-byte on what "fits" means.
 //
-// Mirrors proxy/internal/hayai/sizing.go::Fits.
+// Mirrors proto/go/zs/sizing.go::Fits.
 func Fits(op Operator, model string, inputTokens, maxOutputTokens uint64) bool {
 	mc, ok := op.ModelCapacities[model]
 	if !ok {

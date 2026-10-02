@@ -4,7 +4,7 @@ This is the wire specification for the encrypted-envelope layer between a ZeroSi
 
 **Status.** The protocol is in active development and the wire shape is not frozen. This document describes the current state. § 13 covers design rationale and peer designs.
 
-**Naming.** The protocol and product are **ZeroSignal**. Its short form `zs` is the only spelling on the wire: MIME types (`application/vnd.zs+json`), endpoint paths (`/v1/zs/*`), headers (`X-Zs-*`), SSE event names (`event: zs`), signing domains (`zs-ticket-v2\x00`) and built-in tool types (`zs_web_search`). The old project name, *hayai*, survives in implementation identifiers such as `proxy/internal/hayai/…`, `dispatchHayai` and `fetchHayaiDetails`, and in the text of one error message (`unknown hayai builtin tool type`, returned with code `unknown_builtin_tool`). None of these is an alternate protocol name; match on the code, never the message.
+**Naming.** The protocol and product are **ZeroSignal**. Its short form `zs` is the only spelling on the wire: MIME types (`application/vnd.zs+json`), endpoint paths (`/v1/zs/*`), headers (`X-Zs-*`), SSE event names (`event: zs`), signing domains (`zs-ticket-v2\x00`) and built-in tool types (`zs_web_search`). The old project name, *hayai*, survives in implementation identifiers such as `dispatchHayai` and `fetchHayaiDetails`, and in the text of one error message (`unknown hayai builtin tool type`, returned with code `unknown_builtin_tool`). None of these is an alternate protocol name; match on the code, never the message.
 
 **Conventions.** The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** mark interoperability requirements. Wire names appear in `snake_case`; Go and TypeScript identifiers appear only in reference-implementation notes. Unless a paragraph says otherwise, “caller” means either a direct ZeroSignal client or the proxy acting for a plaintext OpenAI client. “Proxy” means only that local bridge, and “node” means a serving or relaying ZeroSignal node. Sections marked as design notes, rationale, operational guidance or deferred work are non-normative.
 
@@ -149,7 +149,7 @@ The image fields (and future video fields) are excluded from the canonical bytes
 
 **Validity window and clock skew.** The verifier recovers the Ed25519 public key from `payer_addr` and checks the signature. It then requires that `payer_issued_at` is not in the future and that `now ≤ payer_issued_at + 60s`, each with a **30s** skew tolerance. Consumer devices stamp `payer_issued_at`, so skewed clocks are expected. On a window failure, the `401 invalid_payer_sig` body carries `node_time=<unix>`, the node's own clock. The caller re-stamps `payer_issued_at` to it, re-signs and retries the reserve **once**, as in AWS SigV4.
 
-**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proxy/internal/hayai/reserve.go`) and client (`client/src/stream/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
+**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proto/go/zs/reserve.go`) and client (`client/src/stream/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
 
 **Replay set.** `proxy_recipient` is a fresh X25519 recipient per request, so it doubles as the anti-replay nonce. A node that enforces signatures keeps a bounded, TTL'd set of seen `proxy_recipient` values covering the `60s + 30s` window. It checks membership right after a successful verify, but **records a value only when a slot is successfully reserved**. A `401`, `415`, `429` or other refused request never consumes the nonce. A repeat within the window is refused `409 reserve_replayed`. Without this, a relay could replay a captured sealed body to fill a victim's slot cap and manufacture abandon strikes against an honest payer.
 
@@ -560,7 +560,7 @@ Reference: step 1 is `ticketStore.Peek`; step 5 runs `proto/go/escrow.VerifyOpen
 
 If the `open()` group did confirm on chain, the escrowed `max_price` sits in the ticket box with no operator claim coming, because the node keeps no settlement-ledger row for a request it refused. The payer recovers it with `refundInactive` after `D = expires_at + grace` ("Settlement windows" below).
 
-Reference: the proxy automates this with a **refund watchdog** (`proxy/internal/hayai/refund_watchdog.go`). It arms on every submitted `open()`, resolves when an atomic settle finalizes or a protest freezes the ticket, and otherwise fires `refundInactive` at `D + margin`. Before firing, it reads the ticket box. A box already gone (settled standalone) or frozen (arbitration owns it) is a no-op. A box whose own `expires_at + settlement_grace_seconds` is later than the locally computed fire time re-arms to the on-chain deadline instead of burning retries.
+Reference: the proxy automates this with a **refund watchdog** (`proto/go/zs/refund_watchdog.go`). It arms on every submitted `open()`, resolves when an atomic settle finalizes or a protest freezes the ticket, and otherwise fires `refundInactive` at `D + margin`. Before firing, it reads the ticket box. A box already gone (settled standalone) or frozen (arbitration owns it) is a no-op. A box whose own `expires_at + settlement_grace_seconds` is later than the locally computed fire time re-arms to the on-chain deadline instead of burning retries.
 
 #### Admission tag
 
@@ -1485,7 +1485,7 @@ The asymmetry lets a coordinated `proto_version` bump announce "this generation 
 
 - `inject.OperatorDetails` / `inject.OperatorDetailsModel` (`inject/details.go`) — canonical response shape; both proxy and node import it.
 - `node/internal/server/handlers.go::handleDetails` — node-side handler that builds the response from the operator's advertised catalog (`Server.advertisedModels`: ids in `model_pricing`, plus upstream-discovered ids when `default_pricing` is set), with metadata hydrated from upstream discovery and overridden by `model_context_windows`, plus oracle and tool-registry state.
-- `proxy/internal/hayai/details.go::DetailsClient.Fetch` — proxy-side probe used by the operator-registry refresh loop.
+- `proto/go/zs/details.go::DetailsClient.Fetch` — Go payer SDK probe used by the operator-registry refresh loop.
 - `wire/version.go` and `ts/src/wire/version.ts` — version constants, parsing, compatibility, and minor capability gates. The proxy's major-version filter is `pickCandidates` in `proxy/internal/server/hayai_dispatch.go`.
 
 ### On-chain reliability metrics
@@ -1871,7 +1871,7 @@ The reference proxy and client do not send challenges yet.
 - `refresh_seconds` is **not the re-mint cadence**. A node re-mints on every ephemeral rotation (~20 min), far more often, so this is an upper bound on how long evidence may go unrefreshed.
 - A rule stated purely as "2 × `refresh_seconds`" is one the attested party sets for itself, with two one-field escapes: omitting the field (no cadence, so no check) and advertising a day (a two-day window). A verifier therefore applies its own absolute ceiling as a **minimum against** the advertised window. That ceiling can reject nothing honest: an accepted bundle must attest a live ephemeral, whose signed window is capped at `MaxEphemeralLifetime` + skew, so honest evidence is always far inside it.
 
-Reference: `EvidenceMaxAgeCeiling` (`proxy/internal/hayai/attestation.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
+Reference: `EvidenceMaxAgeCeiling` (`proto/go/zs/attestation.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
 
 **`collateral`: carried so a verifier can judge the quote while a PCCS is unreachable, and MUST NOT be preferred over one it can reach.** The field names and encodings mirror Intel's QVL collateral structure verbatim (`pck_crl_issuer_chain`, `root_ca_crl`, `pck_crl`, `tcb_info_issuer_chain`, `tcb_info`, `tcb_info_signature`, `qe_identity_issuer_chain`, `qe_identity`, `qe_identity_signature`). Binary members are hex, and `tcb_info` / `qe_identity` are the signed inner documents **byte-for-byte**: a re-marshal that only reorders keys invalidates Intel's signature, as for `app_compose`. Five rules:
 
@@ -1915,7 +1915,7 @@ This does **not** extend to routes the node picks. An image backend is one the o
 
 ### Verifier responsibilities
 
-A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proxy/internal/hayai/attestation.go::BundleVerifier.Verify`.
+A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proto/go/zs/attestation.go::BundleVerifier.Verify`.
 
 **Decoding the bundle.** Two verifiers given the same body MUST read the same values from it:
 
@@ -2121,8 +2121,8 @@ The cost is that a request issued *before* the verifier's next refresh runs agai
 - `node/internal/tee/dstack.go::DstackProvider` — the `dstack-tdx` provider: guest-agent `POST /GetQuote` over the unix socket, plus the runtime event log the verifier replays.
 - `node/internal/server/attestation.go::handleAttestation` — node-side `GET /v1/zs/attestation` handler.
 - `proto/go/attest` + `proto/ts/src/attest` — the shared measurement arithmetic: TDX quote field access, the RTMR3 replay above, and `ReportData`. Golden-vectored against each other; see the note under "Measurement replay".
-- `proxy/internal/hayai/attestation.go` — proxy-side `AttestationClient`, `TEEVerifier` interface, and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
-- `proxy/internal/hayai/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
+- `proto/go/zs/attestation.go` — Go payer SDK `AttestationClient`, `TEEVerifier` interface, and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
+- `proto/go/zs/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
 - `proxy/internal/server/hayai_dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `dispatchHayai`'s `503 no_tee_capacity`.
 - See [`TEE.md`](./TEE.md) for the threat model, encryption layers, and trust shift.
 
@@ -2578,7 +2578,7 @@ staging flag is carried into the shared policy as `selection.Operator.staging`.
     and slashes a percentage of its escrowed USDC stake to the treasury. It is a
     moderation action, not an automatic consequence of a reputation streak.
 
-  Reference: `proxy/internal/hayai/relay_reputation.go`, `RecordRelayOutcome`
+  Reference: `proto/go/zs/relay_reputation.go`, `RecordRelayOutcome`
   (forward outcomes) and `RecordRelayStaleEphemeral` (staleness faults).
 
 ### Privacy is the default
@@ -2674,7 +2674,7 @@ and `proto/ts` has no `inject` twin to mirror into.
 - `proto/go/relay` — `BuildRequest` (relay indirection builder), `IsAllowedInnerPath` (the allow-list / SSRF boundary), mirrored in `proto/ts/src/relay`.
 - `proto/go/selection` — `SelectTargets`, `SelectRelay`, the affinity-key derivation helpers, mirrored in `proto/ts/src/selection`; pinned across implementations by `proto/testdata/selection_vectors.json`.
 - `node/internal/server` — the `/v1/zs/relay` handler + the node-local cached operator directory.
-- `proxy/internal/server` / `proxy/internal/hayai` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
+- `proxy/internal/server` / `proto/go/zs` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
 
 ## 4. Request format
 

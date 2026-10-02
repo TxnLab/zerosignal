@@ -12,7 +12,7 @@ import (
 )
 
 // TestServesModel_EmptyServesNothing pins the eligibility rule shared byte-for-
-// byte with proxy/internal/hayai/operator.go and proto/ts servesModel: an empty
+// byte with proto/go/zs/operator.go and proto/ts servesModel: an empty
 // Models list serves NOTHING regardless of Reachable (no wildcard), and a
 // non-empty list serves only its members.
 func TestServesModel_EmptyServesNothing(t *testing.T) {

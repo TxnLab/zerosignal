@@ -18,7 +18,7 @@ package zs
 // approval program, a non-zero payer fee, or a co-signed value that contradicts
 // the node's OWN signed receipt). The node authored both halves of that group and
 // the receipt, so a mismatch is the node contradicting itself, never honest
-// desync — see proxy/internal/hayai/wallet.go AckSettle and the slashing plan.
+// desync — see wallet.go AckSettle and the slashing plan.
 // Such a node is not "temporarily broken"; it tried to take the payer's account
 // or overcharge. So we stop routing to it — as a target AND as a relay — for the
 // rest of the process's life.

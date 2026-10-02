@@ -15,9 +15,9 @@ import (
 
 // TestVerifyTDXQuoteChain_RealQuote is the one test that exercises the
 // step every other dstack test stubs out. Build-tagged because it
-// reaches Intel's PCS over the network:
+// reaches Intel's PCS over the network (run from proto/go):
 //
-//	go test -tags tdxlive -run TestVerifyTDXQuoteChain ./internal/hayai/
+//	go test -tags tdxlive -run TestVerifyTDXQuoteChain ./zs/
 //
 // It matters that this exists as more than a formality. The unit tests
 // inject a chain verifier that returns nil, so they prove the replay,

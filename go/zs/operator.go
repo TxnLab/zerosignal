@@ -319,7 +319,7 @@ func (m OperatorMetrics) LatencyMeanMs() uint64 {
 // else exists for observability (dashboards, debug logs, alerting).
 // FailureTag is empty when Verified is true and one of the canonical
 // verifier failure tags otherwise (see proto/TEE.md §4.3 and
-// proxy/internal/hayai/attestation.go for the full list).
+// attestation.go for the full list).
 type TEEStatus struct {
 	Mode       string    // "stub" | "dstack-tdx" | "nvidia-cc-tdx" | "nvidia-cc-snp"
 	AttestedAt time.Time // bundle.GeneratedAt of the verified evidence

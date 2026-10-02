@@ -12,7 +12,7 @@ Both decisions are split across **two layers**, and this split is the thing to u
 | Layer | Lives in | Decides | Golden-vectored (Go↔TS byte-identical)? |
 |---|---|---|---|
 | **Shared selection policy** | `proto/go/selection/` ↔ `proto/ts/src/selection/` | Eligibility + **price** + diversity | **Yes** — pinned by [`proto/testdata/selection_vectors.json`](../testdata/selection_vectors.json) |
-| **App-side signals** | `proxy/internal/hayai/` ↔ `client/src/operators/` | Reachability, relay reputation, target backoff, **latency (RTT / TTFT / tok-s)** | **No** for the stores, which are stateful, per-process and vantage-specific. **Yes** for the arithmetic under relay reputation, target backoff and the weights consensus, which lives in `proto/go/steering/` ↔ `proto/ts/src/steering/`, pinned by [`proto/testdata/steering_vectors.json`](../testdata/steering_vectors.json) |
+| **App-side signals** | `proto/go/zs/` ↔ `client/src/operators/` | Reachability, relay reputation, target backoff, **latency (RTT / TTFT / tok-s)** | **No** for the stores, which are stateful, per-process and vantage-specific. **Yes** for the arithmetic under relay reputation, target backoff and the weights consensus, which lives in `proto/go/steering/` ↔ `proto/ts/src/steering/`, pinned by [`proto/testdata/steering_vectors.json`](../testdata/steering_vectors.json) |
 
 RTT, TTFT and tokens/sec are **never** in the shared policy. They're measured-and-stateful and depend on *where you're standing*, so they can't be a pure function of the static inputs the golden vectors pin — and they'd introduce float arithmetic that threatens Go↔TS parity. The shared policy is comparison-only on advertised price; everything quantitative-and-observed is bolted on top, app-side. See [Why the split](#why-the-split).
 
@@ -85,7 +85,7 @@ A wholly separate decision. Relays only forward bytes — they don't run inferen
 
 ### Phase 2 — app-side: latency-weighted seeded draw
 
-On top of that diverse pool, `SelectRelayHopWeighted` (`proxy/internal/hayai/relayrouter.go`, mirrored by `selectRelayHopWeighted` in `client/src/operators/relay-router.ts`) does a weighted random pick:
+On top of that diverse pool, `SelectRelayHopWeighted` (`proto/go/zs/relayrouter.go`, mirrored by `selectRelayHopWeighted` in `client/src/operators/relay-router.ts`) does a weighted random pick:
 
 ```
 weight = 1 / (RTT + 50ms)                 # faster relay -> higher weight; bias prevents runaway
@@ -148,15 +148,15 @@ This is symmetric by design: the proxy is a **localhost single-user (payer) proc
 
 | Concern | Shared (proto) | Proxy (Go) | Client (TS) |
 |---|---|---|---|
-| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `internal/hayai/operator.go`, `internal/hayai/sizing.go`, `internal/server/hayai_dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, used by `operators/dispatch-candidates.ts` |
+| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `proto/go/zs/operator.go`, `proto/go/zs/sizing.go`, `internal/server/hayai_dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, used by `operators/dispatch-candidates.ts` |
 | Responsiveness banding | — (app-side only) | `internal/server/hayai_dispatch.go::responsivenessScore,bandByResponsiveness` (`decodeNormTokens=128`, `targetResponsivenessBandMS=500`) | `operators/dispatch-candidates.ts::responsivenessScore,bandByResponsiveness` (`DECODE_NORM_TOKENS=128`, `TARGET_RESPONSIVENESS_BAND_MS=500`) |
 | Relay eligibility (diversity) | `proto/go/selection/select.go::EligibleRelays,SelectRelay,diverseSubnet` | (consumes the shared fn) | (consumes the shared fn) |
-| Relay weighted pick | — (app-side only) | `internal/hayai/relayrouter.go::SelectRelayHopWeighted,weightedRelayPick` (`latencyWeightBiasMS=50`, `latencyFloorFraction=0.15`) | `operators/relay-router.ts::selectRelayHopWeighted,weightedPick`; orchestrated by `operators/relay-decision.ts::resolveRelayDecision` |
-| Latency EWMA store | — | `internal/hayai/relay_latency.go` (α=0.3, stale 5m, min 2) | `operators/latency-store.ts` (same constants) |
-| Relay reputation | `proto/go/steering/reputation.go::Decay,Bump,RelayDownranked` (thresholds 3 / 5, cooldowns 10m / 60m) | `internal/hayai/relay_reputation.go` (the store) | `operators/relay-reputation.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
-| Target backoff | `proto/go/steering/backoff.go::BackoffWindow,RecordFailure,BackoffRemaining` (30s doubling to 5m) | `internal/hayai/target_backoff.go` (the store) | `operators/target-backoff.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
-| Reachability | — | `internal/hayai/fetcher.go::recallReachable,recordReachable` | `operators/relay-health.ts` (sticky verdict + TTL exclusions) |
-| On-chain metrics read | `NodeRecord.LatencyEwmaMs` / `.TokensPerSecEwma` | `internal/hayai/fetcher.go` (into `Operator.Metrics`) | `algorand/operators.ts::adaptNodeFields` (onto `RoutableNode`) |
+| Relay weighted pick | — (app-side only) | `proto/go/zs/relayrouter.go::SelectRelayHopWeighted,weightedRelayPick` (`latencyWeightBiasMS=50`, `latencyFloorFraction=0.15`) | `operators/relay-router.ts::selectRelayHopWeighted,weightedPick`; orchestrated by `operators/relay-decision.ts::resolveRelayDecision` |
+| Latency EWMA store | — | `proto/go/zs/relay_latency.go` (α=0.3, stale 5m, min 2) | `operators/latency-store.ts` (same constants) |
+| Relay reputation | `proto/go/steering/reputation.go::Decay,Bump,RelayDownranked` (thresholds 3 / 5, cooldowns 10m / 60m) | `proto/go/zs/relay_reputation.go` (the store) | `operators/relay-reputation.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
+| Target backoff | `proto/go/steering/backoff.go::BackoffWindow,RecordFailure,BackoffRemaining` (30s doubling to 5m) | `proto/go/zs/target_backoff.go` (the store) | `operators/target-backoff.ts` (a hand copy until it adopts `@txnlab/zs-proto/steering`) |
+| Reachability | — | `proto/go/zs/fetcher.go::recallReachable,recordReachable` | `operators/relay-health.ts` (sticky verdict + TTL exclusions) |
+| On-chain metrics read | `NodeRecord.LatencyEwmaMs` / `.TokensPerSecEwma` | `proto/go/zs/fetcher.go` (into `Operator.Metrics`) | `algorand/operators.ts::adaptNodeFields` (onto `RoutableNode`) |
 
 > `selectTargets` / `selectRelay` are **not** in `client/src/algorand/operators.ts` — that file only defines the `RoutableNode` type and the on-chain box reads. The shared functions come from `@txnlab/zs-proto/selection`; the app-side wrappers live in `client/src/operators/{dispatch-candidates,relay-router,relay-decision}.ts`.
 

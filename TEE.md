@@ -258,7 +258,7 @@ The full per-component breakdown lives in the implementation plan and the operat
 
 ### 9.3 Off-chain advertising
 
-Capability is advertised off-chain via `/v1/zs/details` (the `tee.mode` field, plus matching evidence on `/v1/zs/attestation`) and verified directly by the proxy via `proxy/internal/hayai/attestation.go::NRASVerifier`.
+Capability is advertised off-chain via `/v1/zs/details` (the `tee.mode` field, plus matching evidence on `/v1/zs/attestation`) and verified directly by the payer via `proto/go/zs/attestation.go::BundleVerifier`.
 
 **This section is the source of truth for the deferred on-chain migration. Do not duplicate it.**
 

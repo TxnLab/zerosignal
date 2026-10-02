@@ -107,7 +107,7 @@ export interface Operator {
  * list means "serves nothing" — a node advertising zero models is not a routing
  * candidate for any model (matching the node's authoritative /v1/zs/details
  * contract). Deliberately does NOT wildcard on reachability. Mirrors
- * proxy/internal/hayai/operator.go::ServesModel.
+ * proto/go/zs/operator.go::ServesModel.
  */
 export function servesModel(op: Operator, model: string): boolean {
     return (op.models ?? []).includes(model)
@@ -154,7 +154,7 @@ export function fitsContextWindow(input: number, maxOutput: number, window: numb
 /**
  * Reports whether op can serve a request for model under its declared
  * capacity. No declared capacity for model ⇒ unbounded ⇒ true. Mirror of
- * proxy/internal/hayai/sizing.go::Fits.
+ * proto/go/zs/sizing.go::Fits.
  */
 export function fits(op: Operator, model: string, inputTokens: number, maxOutputTokens: number): boolean {
     const mc = op.model_capacities?.[model]

@@ -1660,7 +1660,7 @@ func (c *Client) SubmitPresignedSettleGroup(
 }
 
 // SettleArgs / ProtestArgs / RefundInactiveArgs mirror the contract
-// ABI. proxy/internal/hayai/wallet.go's OpenHandle API binds against
+// ABI. proto/go/zs/wallet.go's OpenHandle API binds against
 // these via real signatures.
 
 // SettleArgs matches the contract's settle(bytes, uint64, bytes, bool).

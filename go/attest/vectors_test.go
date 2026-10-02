@@ -43,7 +43,7 @@ const vectorsPath = "../../testdata/attest_vectors.json"
 
 // The (pubkey, operator_id) the captured quote's report_data was minted
 // over — the dstackprobe deployment's placeholder recipient and its
-// operator id. Mirrored by proxy/internal/hayai's capturedKey /
+// operator id. Mirrored by proto/go/zs's capturedKey /
 // capturedOperatorID, which is exactly why they are published into the
 // vectors: a constant that lives only in two Go test files is not
 // available to a third implementation reading this capture.

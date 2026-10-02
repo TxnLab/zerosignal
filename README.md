@@ -97,6 +97,7 @@ The canonical implementation; it generates every golden vector.
 | `keystore` | Signing-mnemonic loader: `<NAME>_MNEMONIC` env vars + `ZS_MNEMONIC_URLS` cloud-secret URLs (AWS/GCP/Azure). See [`go/keystore/README.md`](./go/keystore/README.md). |
 | `httpx` | A tuned, shared `http.Transport` for node↔node and payer↔node calls, with a private-address dial guard. |
 | `gcplog` | `slog` attribute names for Google Cloud Logging. |
+| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts. Used by `zs-proxy`. |
 | `cmd/releasenotes` | Release-notes generator used by the `zs-proxy` and `zs-node` release builds. |
 
 ### TypeScript — [`ts/`](./ts/), npm package `@txnlab/zs-proto`

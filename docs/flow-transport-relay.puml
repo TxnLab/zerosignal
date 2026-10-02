@@ -9,7 +9,7 @@
 ' node -> target node, with the relay as a byte-transparent forwarder that never
 ' decrypts, never verifies admission, and never touches its keystore. Function
 ' names reference the Go reference impl (proto/go/relay + proto/go/selection,
-' proxy/internal/hayai/relayrouter.go, node/internal/server/relay.go).
+' proto/go/zs/relayrouter.go, node/internal/server/relay.go).
 
 @startuml flow-transport-relay
 title Hayai transport privacy — single-hop relay (proxy -> relay -> target)
@@ -23,7 +23,7 @@ skinparam sequence {
     NoteBorderColor #C0A000
 }
 
-participant "Proxy\nhayai_dispatch.go +\ninternal/hayai/relayrouter.go\n(hayai.privacy = ON)" as Proxy
+participant "Proxy\nhayai_dispatch.go +\nproto/go/zs/relayrouter.go\n(hayai.privacy = ON)" as Proxy
 participant "Algod / ZeroSignalEscrow\nOperator + Node boxes" as Chain
 participant "Relay Node\nhandleRelay (server/relay.go)\n+ CachedRelayDirectory" as Relay
 participant "Target Node\nhandlers.go + receipt.go +\nsettlement worker" as Target
