@@ -144,8 +144,9 @@ describe('payer mutators keep untouched values byte for byte (TS only)', () => {
     expect(new TextDecoder().decode(out)).toBe('{"a":1}')
   })
 
-  it('refuses a ceiling outside uint64', () => {
+  it('refuses a ceiling outside uint64, and accepts its bounds', () => {
     expect(() => clampMaxOutput('{}', -1)).toThrow(RangeError)
     expect(() => clampMaxOutput('{}', 1n << 64n)).toThrow(RangeError)
+    expect(clampMaxOutput('{"max_tokens":5}', 0xffff_ffff_ffff_ffffn).body).toBe('{"max_tokens":5}')
   })
 })

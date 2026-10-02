@@ -125,7 +125,31 @@ describe('parseOperatorDetails leniency (TS only)', () => {
       { vendor_tool_call_cap: '5' },
       { vendor_tool_catchall_micro_usdc: -1 },
       { vendor_tool_tokens_per_call: 0.5 },
+      { output_rate_usd_per_1m: null },
     ]
+    // Every field the full Go body sets, other than the display-only ones, is
+    // read by routing, sizing or pricing: a string in any of them skips the
+    // model, and so does a fraction in any that Go sends as an integer. Derived
+    // from the fixture so a newly ported priced field is covered without a list.
+    const displayOnly = new Set([
+      'id',
+      'reasoning',
+      'tool_use',
+      'tags',
+      'coordinates',
+      'source',
+      'canonical_id',
+      'retention',
+      'serves_image_gen',
+      'serves_image_edit',
+    ])
+    const fullModel = v.full.models[0] as Json
+    const priced = Object.keys(fullModel).filter((k) => !displayOnly.has(k) && !k.startsWith('weights_'))
+    expect(priced.length).toBeGreaterThan(20)
+    for (const k of priced) {
+      bad.push({ [k]: '1' })
+      if (Number.isInteger(fullModel[k])) bad.push({ [k]: 1.5 })
+    }
     const got = parseOperatorDetails({
       models: [...bad.map((extra, i) => model({ id: `bad${i}`, ...extra })), model({ id: 'ok' })],
     })
@@ -142,7 +166,7 @@ describe('parseOperatorDetails leniency (TS only)', () => {
 
   it('reads an empty modality list or tool-rate map as absent', () => {
     const got = parseOperatorDetails({
-      models: [model({ input_modalities: [], tool_call_rates_micro_usdc: {} })],
+      models: [model({ input_modalities: [], output_modalities: [], tool_call_rates_micro_usdc: {} })],
     })
     expect(got?.models[0]).toStrictEqual(model())
   })
@@ -155,7 +179,12 @@ describe('parseOperatorDetails leniency (TS only)', () => {
   it('drops top-level integers that are negative, fractional, or past 2^53', () => {
     const got = parseOperatorDetails({
       operator_id: -1,
+      node_id: 1.5,
+      ephemeral_expiry: 1.5,
+      ephemeral_issued_at: -1,
       min_charge_output_tokens: 1.5,
+      min_charge_algo_txns: '7',
+      min_charge_microusdc: 1.5,
       max_tool_iterations: 2 ** 53,
       tool_headroom_per_iteration: 4000,
       models: [],

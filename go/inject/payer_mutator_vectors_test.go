@@ -48,6 +48,11 @@ var dropBodies = []struct{ name, body string }{
 	{"provider_escaped_key", `{"prov` + "\x5c" + `u0069der":{"sort":"price"},"model":"m"}`},
 	{"provider_nested_not_top_level", `{"metadata":{"provider":"x"},"model":"m"}`},
 	{"provider_whitespace", "{\n  \"model\" : \"m\" ,\n  \"provider\" : { \"only\" : [ \"x\" ] }\n}\n"},
+	// Whitespace straight after a bare literal ends it, the same as a comma.
+	{"tools_null_whitespace", "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}"},
+	// A leading byte-order mark is not JSON whitespace: Go refuses the body,
+	// so every mutator leaves it alone.
+	{"leading_bom", "\xef\xbb\xbf{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}"},
 	{"prompt_cache_key", `{"model":"m","prompt_cache_key":"sess-1234","input":"hi"}`},
 	{"prompt_cache_key_and_provider", `{"prompt_cache_key":"k","provider":{},"model":"m"}`},
 	{"tools_empty", `{"model":"m","tools":[],"tool_choice":"auto"}`},
@@ -93,6 +98,9 @@ var clampBodies = []struct {
 	{"nested_not_top_level", `{"metadata":{"max_tokens":500}}`, 100},
 	{"large_integer_elsewhere", `{"seed":12345678901234567890,"max_tokens":500}`, 100},
 	{"ceiling_above_2_53", `{"max_tokens":18446744073709551615}`, 9007199254740993},
+	{"ceiling_uint64_max", `{"max_tokens":18446744073709551615}`, 18446744073709551615},
+	{"value_followed_by_whitespace", "{\"max_tokens\" : 500 , \"model\":\"m\" ,\"max_output_tokens\":700\n}", 100},
+	{"leading_bom", "\xef\xbb\xbf{\"max_tokens\":500}", 100},
 	{"repeated_key_last_below", `{"max_tokens":500,"max_tokens":50}`, 100},
 	{"repeated_key_last_above", `{"max_tokens":50,"max_tokens":500}`, 100},
 	{"repeated_key_both_above", `{"max_tokens":500,"max_tokens":200}`, 100},

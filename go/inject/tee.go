@@ -55,8 +55,8 @@ const (
 )
 
 // KnownTEEModes returns every TEE mode this package defines, TEEModeNone first.
-// The cross-impl vectors enumerate from here, so a new mode reaches the TS port's
-// fixture without anyone remembering to list it. The slice is the caller's own.
+// The cross-impl vectors enumerate from here, and a test fails when a TEEMode*
+// constant is missing from it. The slice is the caller's own.
 func KnownTEEModes() []string {
 	return []string{TEEModeNone, TEEModeStub, TEEModeNvidiaCCTDX, TEEModeNvidiaCCSEVSNP, TEEModeDstackTDX}
 }

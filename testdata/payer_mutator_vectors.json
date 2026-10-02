@@ -80,6 +80,18 @@
       "want": "{\"model\":\"m\"}"
     },
     {
+      "name": "tools_null_whitespace",
+      "body": "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}",
+      "changed": false,
+      "want": "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}"
+    },
+    {
+      "name": "leading_bom",
+      "body": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}",
+      "changed": false,
+      "want": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}"
+    },
+    {
       "name": "prompt_cache_key",
       "body": "{\"model\":\"m\",\"prompt_cache_key\":\"sess-1234\",\"input\":\"hi\"}",
       "changed": false,
@@ -238,6 +250,18 @@
       "want": "{\n  \"model\" : \"m\" ,\n  \"provider\" : { \"only\" : [ \"x\" ] }\n}\n"
     },
     {
+      "name": "tools_null_whitespace",
+      "body": "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}",
+      "changed": false,
+      "want": "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}"
+    },
+    {
+      "name": "leading_bom",
+      "body": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}",
+      "changed": false,
+      "want": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}"
+    },
+    {
       "name": "prompt_cache_key",
       "body": "{\"model\":\"m\",\"prompt_cache_key\":\"sess-1234\",\"input\":\"hi\"}",
       "changed": true,
@@ -394,6 +418,18 @@
       "body": "{\n  \"model\" : \"m\" ,\n  \"provider\" : { \"only\" : [ \"x\" ] }\n}\n",
       "changed": false,
       "want": "{\n  \"model\" : \"m\" ,\n  \"provider\" : { \"only\" : [ \"x\" ] }\n}\n"
+    },
+    {
+      "name": "tools_null_whitespace",
+      "body": "{\"tools\" : null ,\"tool_choice\":\"auto\" , \"n\" : 1\t}",
+      "changed": true,
+      "want": "{\"n\":1}"
+    },
+    {
+      "name": "leading_bom",
+      "body": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}",
+      "changed": false,
+      "want": "﻿{\"provider\":{},\"tools\":[],\"prompt_cache_key\":\"k\"}"
     },
     {
       "name": "prompt_cache_key",
@@ -648,6 +684,30 @@
       "changed": true,
       "want": "{\"max_tokens\":9007199254740993}",
       "requested": "18446744073709551615"
+    },
+    {
+      "name": "ceiling_uint64_max",
+      "body": "{\"max_tokens\":18446744073709551615}",
+      "ceiling": "18446744073709551615",
+      "changed": false,
+      "want": "{\"max_tokens\":18446744073709551615}",
+      "requested": "0"
+    },
+    {
+      "name": "value_followed_by_whitespace",
+      "body": "{\"max_tokens\" : 500 , \"model\":\"m\" ,\"max_output_tokens\":700\n}",
+      "ceiling": "100",
+      "changed": true,
+      "want": "{\"max_output_tokens\":100,\"max_tokens\":100,\"model\":\"m\"}",
+      "requested": "700"
+    },
+    {
+      "name": "leading_bom",
+      "body": "﻿{\"max_tokens\":500}",
+      "ceiling": "100",
+      "changed": false,
+      "want": "﻿{\"max_tokens\":500}",
+      "requested": "0"
     },
     {
       "name": "repeated_key_last_below",

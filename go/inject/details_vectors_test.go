@@ -21,8 +21,14 @@ package inject_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -121,37 +127,86 @@ func minimalDetails() inject.OperatorDetails {
 	return inject.OperatorDetails{Models: []inject.OperatorDetailsModel{{ID: "m"}}}
 }
 
-// assertEveryFieldSet fails when a JSON-tagged field of v's type is missing
-// from the marshaled object, recursing into the named nested structs.
-func assertEveryFieldSet(t *testing.T, where string, typ reflect.Type, obj map[string]any) {
-	t.Helper()
+// unsetFields lists every JSON-tagged field of typ missing from the marshaled
+// object, recursing through pointers, slices, maps and embedded structs into
+// every nested struct, so a field added at any depth is reported.
+func unsetFields(where string, typ reflect.Type, obj map[string]any) []string {
+	var missing []string
 	for f := range typ.Fields() {
 		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "" || name == "-" {
+		if name == "-" || !f.IsExported() {
 			continue
+		}
+		if name == "" && f.Anonymous {
+			// encoding/json flattens an untagged embedded struct into its parent.
+			missing = append(missing, unsetFields(where, f.Type, obj)...)
+			continue
+		}
+		if name == "" {
+			name = f.Name
 		}
 		val, ok := obj[name]
 		if !ok {
-			t.Errorf("fullDetails leaves %s.%s (json %q) unset; set it so the TS round trip covers it", where, f.Name, name)
+			missing = append(missing, fmt.Sprintf("%s.%s (json %q)", where, f.Name, name))
 			continue
 		}
 		ft := f.Type
-		for ft.Kind() == reflect.Pointer || ft.Kind() == reflect.Slice {
+		for ft.Kind() == reflect.Pointer || ft.Kind() == reflect.Slice || ft.Kind() == reflect.Map {
 			ft = ft.Elem()
 		}
 		if ft.Kind() != reflect.Struct || ft == reflect.TypeFor[time.Time]() {
 			continue
 		}
+		var elems []any
 		switch sub := val.(type) {
-		case map[string]any:
-			assertEveryFieldSet(t, where+"."+f.Name, ft, sub)
 		case []any:
-			for _, e := range sub {
-				if m, ok := e.(map[string]any); ok {
-					assertEveryFieldSet(t, where+"."+f.Name+"[]", ft, m)
+			elems = sub
+		case map[string]any:
+			if f.Type.Kind() == reflect.Map {
+				for _, e := range sub {
+					elems = append(elems, e)
 				}
+			} else {
+				elems = []any{sub}
 			}
 		}
+		for _, e := range elems {
+			if m, ok := e.(map[string]any); ok {
+				missing = append(missing, unsetFields(where+"."+f.Name, ft, m)...)
+			}
+		}
+	}
+	return missing
+}
+
+func marshalToMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(b, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return obj
+}
+
+// The guard above is what forces a new Go field into the TS round trip, and it
+// is only worth that if it reaches nested fields; this pins that it does.
+func TestUnsetFieldsReachesNestedFields(t *testing.T) {
+	d := fullDetails()
+	d.Models[0].Reasoning.DefaultEffort = ""
+	d.Models[0].Coordinates.Variant = ""
+	d.TEE.EvidenceURL = ""
+	got := unsetFields("OperatorDetails", reflect.TypeFor[inject.OperatorDetails](), marshalToMap(t, d))
+	want := []string{
+		`OperatorDetails.Models.Reasoning.DefaultEffort (json "default_effort")`,
+		`OperatorDetails.Models.Coordinates.Variant (json "variant")`,
+	}
+	// EvidenceURL has no omitempty, so it is present even when empty.
+	if !slices.Equal(got, want) {
+		t.Fatalf("unsetFields = %q, want %q", got, want)
 	}
 }
 
@@ -177,11 +232,9 @@ func buildDetailsVectors(t *testing.T) detailsVectorsFile {
 	if err != nil {
 		t.Fatalf("marshal full: %v", err)
 	}
-	var obj map[string]any
-	if err := json.Unmarshal(full, &obj); err != nil {
-		t.Fatalf("unmarshal full: %v", err)
+	for _, f := range unsetFields("OperatorDetails", reflect.TypeFor[inject.OperatorDetails](), marshalToMap(t, fullDetails())) {
+		t.Errorf("fullDetails leaves %s unset; set it so the TS round trip covers it", f)
 	}
-	assertEveryFieldSet(t, "OperatorDetails", reflect.TypeFor[inject.OperatorDetails](), obj)
 
 	minimal, err := json.Marshal(minimalDetails())
 	if err != nil {
@@ -209,6 +262,42 @@ func buildDetailsVectors(t *testing.T) detailsVectorsFile {
 		KnownRetention: inject.KnownRetentionTiers(),
 		Combine:        combine,
 		TEEModes:       inject.KnownTEEModes(),
+	}
+}
+
+// KnownTEEModes is a hand-written list; this is what keeps it from missing a
+// TEEMode* constant, which would otherwise never reach the TS fixture.
+func TestKnownTEEModesListsEveryConstant(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), "tee.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse tee.go: %v", err)
+	}
+	var declared []string
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs := spec.(*ast.ValueSpec)
+			for i, name := range vs.Names {
+				if !strings.HasPrefix(name.Name, "TEEMode") || i >= len(vs.Values) {
+					continue
+				}
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					t.Fatalf("%s is not a string literal; extend this test", name.Name)
+				}
+				s, _ := strconv.Unquote(lit.Value)
+				declared = append(declared, s)
+			}
+		}
+	}
+	got := inject.KnownTEEModes()
+	slices.Sort(declared)
+	slices.Sort(got)
+	if len(declared) == 0 || !slices.Equal(declared, got) {
+		t.Fatalf("TEEMode* constants %q != KnownTEEModes() %q", declared, got)
 	}
 }
 
