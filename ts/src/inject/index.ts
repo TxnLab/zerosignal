@@ -5,3 +5,4 @@
 
 export * from './tools.js'
 export * from './dialect.js'
+export * from './details.js'

@@ -37,7 +37,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/relay` | Relay request metadata and the inner-path allow-list |
 | `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
 | `…/attest` | dstack / Intel TDX measurement checks and compose-file policy |
-| `…/inject` | Tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
+| `…/inject` | The `/v1/zs/details` discovery types and `parseOperatorDetails`, retention tiers (`isKnownRetention`, `combineRetention`), TEE modes, tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
 | `…/testdata/*` | The golden-vector fixtures this package is tested against |
 
 `escrow`, `pricing`, `transient`, and `relay` are subpath-only: their names (`classify`, `wait`,
@@ -82,7 +82,10 @@ the Go `algo`, `algod`, `tools`, and `keystore` packages, and the chain-access h
 Every vectored module is checked against a fixture the Go implementation generates: AAD layout,
 admission tag, body hash, ticket / receipt canonical bytes, signature digests, address
 encoding, selection order, pricing, tokenize bounds, transient verdicts, escrow box keys,
-record decoding, `classify` and fee math, and attestation checks. The Go suite fails when its output no longer matches the fixture, and this package's
+record decoding, `classify` and fee math, discovery field names and retention tiers, and
+attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
+it drops a malformed field rather than rejecting the whole body — and that part is tested
+here only. The Go suite fails when its output no longer matches the fixture, and this package's
 suite fails when its output does, so drift on either side fails. In a checkout of the
 repository:
 
