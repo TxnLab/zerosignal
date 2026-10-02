@@ -72,6 +72,10 @@
             "types": "./dist/escrow/index.d.ts",
             "import": "./dist/escrow/index.js"
         },
+        "./tools": {
+            "types": "./dist/tools/index.d.ts",
+            "import": "./dist/tools/index.js"
+        },
         "./testdata/*": "./dist/testdata/*",
         "./package.json": "./package.json"
     },

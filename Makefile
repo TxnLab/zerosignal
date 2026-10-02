@@ -62,6 +62,7 @@ update-vectors:
 	cd go && $(GO) test ./inject     -run TestDialectVectors        -update
 	cd go && $(GO) test ./inject     -run TestDetailsVectors        -update
 	cd go && $(GO) test ./inject     -run TestPayerMutatorVectors   -update
+	cd go && $(GO) test ./tools      -run TestPayerToolsVectors     -update
 	cd go && $(GO) test ./wire       -run TestStreamTerminalVectors -update
 	cd go && $(GO) test ./attest     -run TestVectors               -update
 	cd go && $(GO) test ./attest     -run TestComposeVectors        -update-compose

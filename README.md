@@ -102,12 +102,12 @@ The canonical implementation; it generates every golden vector.
 
 A port of the vectored Go packages so a browser can speak the protocol directly to a node.
 Subpaths: `wire`, `ticket`, `selection`, `pricing`, `imageprice`, `tokenize`, `transient`,
-`relay`, `attest`, `inject`, `escrow`, plus the fixtures under `testdata/*`. See
+`relay`, `attest`, `inject`, `escrow`, `tools`, plus the fixtures under `testdata/*`. See
 [`ts/README.md`](./ts/README.md).
 
 Wire-shaped types use snake_case property names matching the JSON wire format, so `JSON.stringify(envelope)` produces the bytes the Go side emits — no field-rename layer. Function names are camelCase.
 
-Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `tools/`, `keystore/` subpackages, and the chain-access half of `escrow/` (transaction composition, box reads, group verification).
+Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (transaction composition, box reads, group verification).
 
 ### Golden vectors — [`testdata/`](./testdata/)
 

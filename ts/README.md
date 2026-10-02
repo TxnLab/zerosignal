@@ -35,6 +35,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/tokenize` | Input-token bound used to size a reserve |
 | `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
+| `…/tools` | What a payer reads off a tool-bearing stream: the sealed tool-status and image progress / partial / completed frames with `parseStatusEvent` and `partialImageDataUrl`, `ToolAction` and its source icons (`iconHostKey`, `iconDataUrl`, `sanitizeIcons`), `isLinkableUrl` for any URL that becomes an href, and the usage shapes with `generatedOutputTokens` |
 | `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
 | `…/attest` | dstack / Intel TDX measurement checks and compose-file policy |
 | `…/inject` | The `/v1/zs/details` discovery types and `parseOperatorDetails`, retention tiers (`isKnownRetention`, `combineRetention`), TEE modes, the payer's pre-seal body mutators (`dropRoutingPreferences`, `dropPromptCacheKey`, `dropEmptyTools`, `clampMaxOutput`), tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
@@ -74,8 +75,9 @@ JS strings are immutable, so the AGE-SECRET-KEY-1… representation of an epheme
 For higher-assurance setups, terminate envelopes in a worker / iframe whose JS heap can be discarded entirely on completion.
 
 Not ported (intentionally): the Go file-IO identity loader, the Go `ZeroEphemeralIdentity` wipe,
-the Go `algo`, `algod`, `tools`, and `keystore` packages, and the chain-access half of `escrow`
-(transaction composition, box reads, group verification).
+the Go `algo`, `algod`, and `keystore` packages, the node-side half of `tools` (request rewriters,
+the tool loop, markup recovery), and the chain-access half of `escrow` (transaction composition,
+box reads, group verification).
 
 ## Cross-implementation byte parity
 
@@ -84,7 +86,8 @@ admission tag, body hash, ticket / receipt canonical bytes, signature digests, a
 encoding, selection order, pricing, tokenize bounds, transient verdicts, escrow box keys,
 record decoding, `classify` and fee math, discovery field names and retention tiers, which
 bodies the pre-seal mutators change (compared by value: TS splices the original text where Go
-re-marshals), and attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
+re-marshals), tool-status frames as a node emits them, icon host keys and the usage arithmetic,
+and attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
 it drops a malformed field rather than rejecting the whole body — and that part is tested
 here only. The Go suite fails when its output no longer matches the fixture, and this package's
 suite fails when its output does, so drift on either side fails. In a checkout of the
