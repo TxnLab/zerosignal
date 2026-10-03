@@ -494,7 +494,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 	if settleErr != nil {
 		return "", 0, groupRejected, fmt.Errorf("wallet: ack-settle: %w", settleErr)
 	}
-	return res.TxID, res.FeeMicroalgos, groupRejected, nil
+	return res.TxID, res.PayerFeeMicroalgos, groupRejected, nil
 }
 
 // settleArgsOf is what the payer co-signs on settle() for a verified receipt.
@@ -637,17 +637,17 @@ func (h *OpenHandle) settleGroupSpec(receipt *ticket.UsageReceipt) (escrow.Settl
 // reason rides as an indexable transaction arg (see escrow.ProtestReason*)
 // so off-chain consumers can categorize the freeze without re-running
 // receipt-vs-plaintext comparisons; the contract rejects 0.
-func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, error) {
+func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, uint64, error) {
 	if h.wallet == nil {
-		return "", errors.New("wallet: protest on detached OpenHandle (test-only or misconstructed)")
+		return "", 0, errors.New("wallet: protest on detached OpenHandle (test-only or misconstructed)")
 	}
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
-		return "", fmt.Errorf("wallet: protest decode ticket id: %w", err)
+		return "", 0, fmt.Errorf("wallet: protest decode ticket id: %w", err)
 	}
 	receiptSig, err := decodeReceiptSig(receipt.Sig)
 	if err != nil {
-		return "", fmt.Errorf("wallet: protest decode receipt sig: %w", err)
+		return "", 0, fmt.Errorf("wallet: protest decode receipt sig: %w", err)
 	}
 	receiptDigest := ticket.ReceiptSigDigest(receipt)
 
@@ -663,9 +663,9 @@ func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, 
 		NodeID:         h.Operator.NodeID,
 	}, signer, h.wallet.payerAddr)
 	if err != nil {
-		return "", fmt.Errorf("wallet: protest: %w", err)
+		return "", 0, fmt.Errorf("wallet: protest: %w", err)
 	}
-	return res.TxID, nil
+	return res.TxID, res.PayerFeeMicroalgos, nil
 }
 
 // RefundInactive is the payer's escape hatch when no operator claim

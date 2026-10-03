@@ -86,13 +86,14 @@ type Stream struct {
 	req     Request
 	started atomic.Bool
 	err     error
+	settle  *settleSlot
 }
 
 // Stream returns req as a Stream bound to ctx. Cancelling ctx before the node
 // finishes generating cancels the turn; after it, the receipt is still
 // collected and the ticket settled.
 func (c *Client) Stream(ctx context.Context, req Request) *Stream {
-	return &Stream{c: c, ctx: ctx, req: req}
+	return &Stream{c: c, ctx: ctx, req: req, settle: newSettleSlot()}
 }
 
 var errStreamReused = errors.New("zs: a Stream's events can be ranged over only once")
@@ -108,8 +109,16 @@ func (s *Stream) Events() iter.Seq2[Event, error] {
 			yield(nil, errStreamReused)
 			return
 		}
-		ctx, cancel := context.WithCancel(s.ctx)
+		ctx, cancel := context.WithCancel(withSettleSlot(s.ctx, s.settle))
 		defer cancel()
+		// Every submit is built before dispatch returns, so a turn without one
+		// has nothing for Wait to wait on. Deferred, so a caller that recovers
+		// a panic from dispatch or its loop body can still Wait.
+		defer func() {
+			if !s.settle.expected {
+				s.settle.finish(Settlement{}, nil)
+			}
+		}()
 		em := &streamEmitter{yield: yield, cancel: cancel, callerCtx: s.ctx}
 		if !s.req.FramesOnly {
 			em.dec = newDecoder(string(s.req.Endpoint))

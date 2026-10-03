@@ -37,9 +37,9 @@ func (f *fakeSettlementHandle) AckSettle(_ context.Context, _ *ticket.UsageRecei
 	return "STANDALONE_ACK_TXID", 5000, f.groupRejected, nil
 }
 
-func (f *fakeSettlementHandle) Protest(_ context.Context, _ *ticket.UsageReceipt, _ []byte, _ escrow.ProtestReasonCode) (string, error) {
+func (f *fakeSettlementHandle) Protest(_ context.Context, _ *ticket.UsageReceipt, _ []byte, _ escrow.ProtestReasonCode) (string, uint64, error) {
 	f.protestCalls++
-	return "", nil
+	return "", 0, nil
 }
 
 // TestRunReceiptChecks_ExcludesNodeOnGroupRejection covers the trigger half of

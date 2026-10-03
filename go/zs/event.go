@@ -217,6 +217,10 @@ type Usage struct {
 // the payer's own: what it paid in ALGO network fees for the open and, on a
 // stream, the settle, which a non-streaming reply reports as 0 because the
 // settle is submitted after the reply.
+//
+// Until ReceiptViolated is emitted, a stream whose receipt failed its checks
+// ends with this event too, and SettleFeesMicroAlgos is then the protest's
+// fee.
 type ReceiptVerified struct {
 	Receipt ticket.UsageReceipt
 	// Ticket is the signed ticket the receipt settles; its MaxPrice and
@@ -244,9 +248,10 @@ type ReceiptViolated struct {
 	ProtestTxID string
 }
 
-// SettleSubmitted and SettleConfirmed run on a context the caller's cancel
-// cannot reach, so they can arrive after Done. Atomic is false when the SDK
-// fell back to a standalone payer ack.
+// SettleSubmitted and SettleConfirmed are not emitted yet. Until they are,
+// Stream.Wait reports the submit, including one that ends after the Events
+// loop, where no event could carry it. Atomic is false when the SDK fell back
+// to a standalone payer ack.
 type SettleSubmitted struct {
 	TicketID       string
 	TxID           string

@@ -3524,12 +3524,13 @@ func (s *Client) runReceiptChecks(
 	if submit == nil {
 		return 0
 	}
-	return submit()
+	r, _ := submit()
+	return r.FeesMicroAlgos
 }
 
 // settleSubmit is the on-chain half of receipt handling (AckSettle or
-// Protest). It returns the payer-paid settle fee, 0 when none was paid.
-type settleSubmit func() uint64
+// Protest). Its Settlement's fee is what the payer paid, 0 when none was.
+type settleSubmit func() (Settlement, error)
 
 // checkReceipt is runReceiptChecks without the submit: it verifies the
 // receipt, records the spend outcome, and returns the escrow submit the
@@ -3564,11 +3565,28 @@ func (s *Client) checkReceipt(
 	// not when the receipt was checked, so a deferred submit gets its full
 	// budget.
 	detached := context.WithoutCancel(ctx)
-	withSettleCtx := func(fn func(settleCtx context.Context) uint64) settleSubmit {
-		return func() uint64 {
+	// The turn's Stream.Wait learns the outcome from slot, including a submit
+	// that panics, which would otherwise leave it waiting on its ctx.
+	slot := settleSlotFrom(ctx)
+	withSettleCtx := func(fn func(settleCtx context.Context) (Settlement, error)) settleSubmit {
+		if slot != nil {
+			slot.expected = true
+		}
+		return func() (r Settlement, err error) {
+			if slot != nil {
+				defer func() {
+					if p := recover(); p != nil {
+						slot.finish(Settlement{TicketID: ticket.TicketID}, fmt.Errorf("zs: settle submit panicked: %v", p))
+						panic(p)
+					}
+					slot.finish(r, err)
+				}()
+			}
 			settleCtx, cancelSettle := context.WithTimeout(detached, settleSubmitTimeout)
 			defer cancelSettle()
-			return fn(settleCtx)
+			r, err = fn(settleCtx)
+			r.TicketID = ticket.TicketID
+			return r, err
 		}
 	}
 
@@ -3610,11 +3628,10 @@ func (s *Client) checkReceipt(
 			return nil
 		}
 		s.journalReceipt(handle, receipt)
-		return withSettleCtx(func(settleCtx context.Context) uint64 {
-			// A failing ack is operational noise, not a client-visible error:
-			// the refund watchdog keeps tracking the ticket, so the escrow is
-			// still recovered on chain.
-			var settleFees uint64
+		return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
+			// A failing ack does not fail the turn: the refund watchdog keeps
+			// tracking the ticket, so the escrow is still recovered on chain.
+			// Only Wait reports it.
 			atomic := len(presignedSettleGroup) > 0
 			txid, fee, groupRejected, err := handle.AckSettle(settleCtx, receipt, presignedSettleGroup)
 			if groupRejected && s.nodeExcluder != nil {
@@ -3640,6 +3657,10 @@ func (s *Client) checkReceipt(
 			// case. So the ticket header being present is not enough; gate the
 			// watchdog Resolve on the group having truly finalized.
 			settledAtomically := atomic && !groupRejected
+			kind := SettlePayerAck
+			if settledAtomically {
+				kind = SettleAtomic
+			}
 			switch {
 			case err != nil:
 				s.log.Warn("ack-settle failed",
@@ -3647,8 +3668,8 @@ func (s *Client) checkReceipt(
 					slog.Bool("atomic", atomic),
 					slog.Bool("group_rejected", groupRejected),
 					slog.Any("err", err))
+				return Settlement{Kind: kind}, err
 			default:
-				settleFees = fee
 				// Info when the payer paid a fee: the non-streaming usage
 				// headers were written before this submit and cannot report it.
 				level := slog.LevelDebug
@@ -3669,8 +3690,8 @@ func (s *Client) checkReceipt(
 					// the deadline path when the operator never acks it.
 					s.refunds.Resolve(ticket.TicketID)
 				}
+				return Settlement{Kind: kind, TxID: txid, FeesMicroAlgos: fee}, nil
 			}
-			return settleFees
 		})
 	}
 	re, ok := AsReceiptError(err)
@@ -3699,24 +3720,25 @@ func (s *Client) checkReceipt(
 		return nil
 	}
 	excerpt := truncateDisputeExcerpt(plaintext, disputeExcerptCap)
-	return withSettleCtx(func(settleCtx context.Context) uint64 {
-		if txid, perr := handle.Protest(settleCtx, receipt, excerpt, protestReasonForViolation(re.Violation)); perr != nil {
+	return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
+		txid, fee, perr := handle.Protest(settleCtx, receipt, excerpt, protestReasonForViolation(re.Violation))
+		if perr != nil {
 			s.log.Warn("protest failed",
 				slog.String("ticket_id", ticket.TicketID),
 				slog.String("reason", re.Violation.String()),
 				slog.Any("verification_err", err),
 				slog.Any("submit_err", perr))
-		} else {
-			s.log.Warn("protest submitted",
-				slog.String("ticket_id", ticket.TicketID),
-				slog.String("txid", txid),
-				slog.String("reason", re.Violation.String()),
-				slog.Any("verification_err", err))
-			// Frozen ticket: refundInactive reverts on FROZEN, so the refund
-			// watchdog has nothing to do — resolution is off-chain arbitration.
-			s.refunds.Resolve(ticket.TicketID)
+			return Settlement{Kind: SettleProtest}, perr
 		}
-		return 0
+		s.log.Warn("protest submitted",
+			slog.String("ticket_id", ticket.TicketID),
+			slog.String("txid", txid),
+			slog.String("reason", re.Violation.String()),
+			slog.Any("verification_err", err))
+		// Frozen ticket: refundInactive reverts on FROZEN, so the refund
+		// watchdog has nothing to do — resolution is off-chain arbitration.
+		s.refunds.Resolve(ticket.TicketID)
+		return Settlement{Kind: SettleProtest, TxID: txid, FeesMicroAlgos: fee}, nil
 	})
 }
 

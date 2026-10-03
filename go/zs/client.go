@@ -290,7 +290,9 @@ type settlementHandle interface {
 	// settle). When empty, falls back to the standalone path
 	// (payer pays ~5,000 µALGO outer fee).
 	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, presignedSettleGroup []types.SignedTxn) (txid string, feeMicroalgos uint64, groupRejected bool, err error)
-	Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, error)
+	// Protest freezes the ticket. The payer signs and pays for it, so the fee
+	// is the payer's.
+	Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (txid string, feeMicroalgos uint64, err error)
 }
 
 // WalletOpener is the escrow side of the payer: *Wallet, or a fake that

@@ -27,7 +27,7 @@ func TestOpenHandle_NilWalletGuard(t *testing.T) {
 	if _, _, _, err := h.AckSettle(context.Background(), r, nil); err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Errorf("AckSettle on detached handle: err=%v, want 'detached'", err)
 	}
-	if _, err := h.Protest(context.Background(), r, []byte{}, escrow.ProtestReasonBodyHash); err == nil || !strings.Contains(err.Error(), "detached") {
+	if _, _, err := h.Protest(context.Background(), r, []byte{}, escrow.ProtestReasonBodyHash); err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Errorf("Protest on detached handle: err=%v, want 'detached'", err)
 	}
 	if _, err := h.RefundInactive(context.Background()); err == nil || !strings.Contains(err.Error(), "detached") {

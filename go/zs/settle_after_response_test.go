@@ -38,8 +38,8 @@ func (b *blockingSettlementHandle) AckSettle(context.Context, *ticket.UsageRecei
 	return "ACK_TXID", 0, false, nil
 }
 
-func (b *blockingSettlementHandle) Protest(context.Context, *ticket.UsageReceipt, []byte, escrow.ProtestReasonCode) (string, error) {
-	return "", nil
+func (b *blockingSettlementHandle) Protest(context.Context, *ticket.UsageReceipt, []byte, escrow.ProtestReasonCode) (string, uint64, error) {
+	return "", 0, nil
 }
 
 // TestNonStreamResponder_WritesBeforeSettleSubmit pins the ordering: the
