@@ -21,7 +21,7 @@ import (
 )
 
 func TestHandleHealth(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func TestHandleHealth(t *testing.T) {
 }
 
 func TestHandleGetModel_MissingID(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	// Synthesize a request that has no path value set for {id}.
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/", nil)
@@ -65,7 +65,7 @@ func (erroringReader) Read([]byte) (int, error) { return 0, errors.New("read fai
 func (erroringReader) Close() error             { return nil }
 
 func TestDispatchStreamable_ReadBodyError(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", erroringReader{})
 	w := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func TestHandleHayaiDetails_AggregatesAcrossOperators(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestHandleHayaiDetails_AggregatesNodeVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
@@ -225,7 +225,7 @@ func TestHandleHayaiDetails_AggregatesPricingMin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
@@ -279,7 +279,7 @@ func TestHandleHayaiDetails_EmitsFeeBps(t *testing.T) {
 	}
 	// Warm the fee cache: the fee rate needs a fee-capable wallet AND a fresh
 	// cache entry (a cold cache would kick a background refresh and report 0).
-	s := testServer(testConfig(), Options{RegistryProvider: reg, Wallet: feeWallet{&fakeWallet{}, 200}})
+	s := testServer(testConfig(), deps{RegistryProvider: reg, Wallet: feeWallet{&fakeWallet{}, 200}})
 	warmFee(t, s)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
@@ -351,7 +351,7 @@ func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
@@ -535,7 +535,7 @@ func TestHandleHayaiOperators_CoordinatesVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
@@ -586,7 +586,7 @@ func TestHandleHayaiOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 	w := httptest.NewRecorder()
 	s.handleHayaiOperators(w, httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil))
 
@@ -599,7 +599,7 @@ func TestHandleHayaiOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
 }
 
 func TestHandleHayaiOperators_EmptyRegistryReturnsEmptyList(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
@@ -623,7 +623,7 @@ func TestHandleHayaiOperators_EmptyRegistryReturnsEmptyList(t *testing.T) {
 }
 
 func TestHandleHayaiDetails_EmptyRegistryReturnsEmptyList(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
@@ -668,7 +668,7 @@ func TestHandleListModels_ExcludesUnreachableOperators(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
@@ -707,7 +707,7 @@ func TestHandleListModels_AllOperatorsUnreachable_ReturnsEmptyList(t *testing.T)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
@@ -731,10 +731,10 @@ func TestHandleListModels_AllOperatorsUnreachable_ReturnsEmptyList(t *testing.T)
 	}
 }
 
-func TestHandleListModels_NoRegistry_ReturnsEmptyList(t *testing.T) {
-	// With no registry wired, the list must still emit the canonical
+func TestHandleListModels_EmptyRegistry_ReturnsEmptyList(t *testing.T) {
+	// With no models, the list must still emit the canonical
 	// {"object":"list","data":[]} shape. There is no upstream fallback.
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()
@@ -773,7 +773,7 @@ func TestHandleGetModel_Found_OnChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/gpt-test", nil)
 	req.SetPathValue("id", "gpt-test")
@@ -818,7 +818,7 @@ func TestHandleGetModel_NotFound_404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/does-not-exist", nil)
 	req.SetPathValue("id", "does-not-exist")
@@ -837,8 +837,8 @@ func TestHandleGetModel_NotFound_404(t *testing.T) {
 	}
 }
 
-func TestHandleGetModel_NoRegistry_404(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+func TestHandleGetModel_EmptyRegistry_404(t *testing.T) {
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/anything", nil)
 	req.SetPathValue("id", "anything")
@@ -871,7 +871,7 @@ func TestHandleGetModel_AllOperatorsUnreachable_404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models/stale", nil)
 	req.SetPathValue("id", "stale")
@@ -925,7 +925,7 @@ func TestHandleHayai_WeightsSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	// Aggregate: agree → consensus digest, no mismatch; differ → mismatch, no consensus.
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
@@ -1023,7 +1023,7 @@ func TestHandleHayaiOperators_CarriesRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()

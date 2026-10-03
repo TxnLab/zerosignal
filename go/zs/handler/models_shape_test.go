@@ -71,7 +71,7 @@ func (w feeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) { return w.
 // goroutine would see either branch.
 func feeServer(t *testing.T, ops []hayai.Operator, feeBps uint64) *Server {
 	t.Helper()
-	s := testServer(testConfig(), Options{
+	s := testServer(testConfig(), deps{
 		RegistryProvider: modelsRegistry(t, ops),
 		Wallet:           feeWallet{&fakeWallet{}, feeBps},
 	})
@@ -79,10 +79,9 @@ func feeServer(t *testing.T, ops []hayai.Operator, feeBps uint64) *Server {
 	return s
 }
 
-// warmFee fills s's fee cache and waits until the rate reads as known.
+// warmFee waits until the fee read New started has landed.
 func warmFee(t *testing.T, s *Server) {
 	t.Helper()
-	s.WarmFeeRate()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if _, ok := s.FeeRate(); ok {
@@ -272,7 +271,7 @@ func TestHandleListModels_PricingIsGrossedUpByTheProtocolFee(t *testing.T) {
 	// every request. memoizingRegistry is that provider; the second read must
 	// return the same number.
 	memo := &memoizingRegistry{inner: modelsRegistry(t, []hayai.Operator{op})}
-	s2 := testServer(testConfig(), Options{RegistryProvider: memo, Wallet: feeWallet{&fakeWallet{}, 1000}})
+	s2 := testServer(testConfig(), deps{RegistryProvider: memo, Wallet: feeWallet{&fakeWallet{}, 1000}})
 	warmFee(t, s2)
 
 	var first, second inject.OpenAIModelList
@@ -340,7 +339,7 @@ func TestHandleListModels_ColdFeePublishesNoPrice(t *testing.T) {
 		},
 	}
 	// testServer's wallet is not feeRateCapable, so the fee is never known.
-	s := testServer(testConfig(), Options{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
+	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
 
 	var list inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &list); err != nil {
@@ -429,7 +428,7 @@ func (splitRegistry) AllModels(_ context.Context) []string { return []string{"li
 // 404ed: AllModels is what the discovery surface publishes, so answering 404
 // for one of its ids contradicts the list the same client just read.
 func TestModelEndpoints_ModelWithoutDetailsIsStillServed(t *testing.T) {
-	s := testServer(testConfig(), Options{RegistryProvider: splitRegistry{}})
+	s := testServer(testConfig(), deps{RegistryProvider: splitRegistry{}})
 
 	var list inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &list); err != nil {
@@ -456,7 +455,7 @@ func TestHandleListModels_EmptyRegistryMarshalsAsArray(t *testing.T) {
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: false,
 		Models: []string{"stale"},
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
+	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
 
 	body := getJSON(t, "/v1/models", s.handleListModels)
 	if got := strings.TrimSpace(string(body)); got != `{"object":"list","data":[]}` {

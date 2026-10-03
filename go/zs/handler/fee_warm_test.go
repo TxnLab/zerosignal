@@ -18,16 +18,21 @@ import (
 
 // countingFeeWallet reports a fee and records how many times it was asked, so a
 // test can tell a warm that actually reached the wallet from one that returned
-// the zero value and did nothing.
+// the zero value and did nothing. A non-nil release holds every read until it
+// is closed.
 type countingFeeWallet struct {
 	*fakeWallet
-	calls atomic.Int32
-	done  chan struct{}
+	calls   atomic.Int32
+	done    chan struct{}
+	release chan struct{}
 }
 
 func (w *countingFeeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) {
 	if w.calls.Add(1) == 1 {
 		close(w.done)
+	}
+	if w.release != nil {
+		<-w.release
 	}
 	return 1000, nil
 }
@@ -50,59 +55,50 @@ func pricedIDs(t *testing.T, body []byte) []string {
 	return ids
 }
 
-// A cold fee cache publishes NO price, and the read that finds it cold is the
-// one that pays for it — feeRateCache.get returns (0,false) and kicks the
-// refresh asynchronously. This pins the behaviour WarmFeeRate exists to move
-// off the client's first request; without it the first GET /v1/models after a
-// restart is unpriced.
+// A fee not yet read publishes NO price: a pre-fee rate in the OpenAI shape
+// understates the payer's cost with no field to say so. Held mid-read, the
+// warm New started leaves the cache cold for the first request, and that
+// request does not start a second read.
 func TestListModels_ColdFeeCachePublishesNoPricing(t *testing.T) {
-	w := &countingFeeWallet{fakeWallet: &fakeWallet{}, done: make(chan struct{})}
-	s := testServer(testConfig(), Options{
+	w := &countingFeeWallet{fakeWallet: &fakeWallet{}, done: make(chan struct{}), release: make(chan struct{})}
+	defer close(w.release)
+	s := testServer(testConfig(), deps{
 		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
 		Wallet:           w,
 	})
-
-	if got := pricedIDs(t, getJSON(t, "/v1/models", s.handleListModels)); len(got) != 0 {
-		t.Fatalf("cold fee cache published pricing for %v; a pre-fee rate in this shape "+
-			"understates the payer's cost with no field to say so", got)
-	}
 	// Without this the test passes against a wallet that isn't feeRateCapable at
 	// all, where the absent pricing proves nothing about coldness — and it
 	// collapses into a duplicate of TestHandleListModels_ColdFeePublishesNoPrice,
-	// which covers that branch already. The property here is specifically that a
-	// CAPABLE wallet's first read is cold and kicks the refresh.
-	//
-	// Wait for the kick rather than sampling the counter: get() returns BEFORE
-	// its refresh goroutine runs, so an immediate read races the scheduler and
-	// fails only under load — which is exactly how it fails in a full-package
-	// run and passes when the test is run alone.
+	// which covers that branch already.
 	select {
 	case <-w.done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("the cold read never kicked a refresh; the absent pricing above proves " +
-			"nothing about a cold cache unless the wallet was actually asked")
+		t.Fatal("the wallet was never asked for the fee; the absent pricing below would " +
+			"prove nothing about a cold cache")
+	}
+
+	if got := pricedIDs(t, getJSON(t, "/v1/models", s.handleListModels)); len(got) != 0 {
+		t.Fatalf("cold fee cache published pricing for %v", got)
 	}
 	if n := w.calls.Load(); n != 1 {
-		t.Errorf("cold read asked the wallet %d times, want exactly 1", n)
+		t.Errorf("wallet asked %d times while one read was in flight, want 1", n)
 	}
 }
 
-// WarmFeeRate must reach the wallet and land the value WITHOUT any request
-// having been served. Asserting only that a later request is priced would pass
-// on the cold path too, since that request kicks its own refresh.
-func TestWarmFeeRate_PricesTheCatalogBeforeTheFirstRequest(t *testing.T) {
+// New must reach the wallet and land the value WITHOUT any request having
+// been served. Asserting only that a later request is priced would pass on
+// the cold path too, since that request kicks its own refresh.
+func TestNew_WarmsTheFeeRateBeforeTheFirstRequest(t *testing.T) {
 	w := &countingFeeWallet{fakeWallet: &fakeWallet{}, done: make(chan struct{})}
-	s := testServer(testConfig(), Options{
+	s := testServer(testConfig(), deps{
 		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
 		Wallet:           w,
 	})
 
-	s.WarmFeeRate()
-
 	select {
 	case <-w.done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("WarmFeeRate never asked the wallet for the protocol fee")
+		t.Fatal("New never asked the wallet for the protocol fee")
 	}
 	// get() stores the value after fetch returns, so wait for the visible state
 	// rather than the call — the call alone doesn't mean the cache is warm.
@@ -112,7 +108,7 @@ func TestWarmFeeRate_PricesTheCatalogBeforeTheFirstRequest(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("fee never became known after WarmFeeRate")
+			t.Fatal("fee never became known after New")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -130,15 +126,13 @@ func TestWarmFeeRate_PricesTheCatalogBeforeTheFirstRequest(t *testing.T) {
 
 // A wallet that cannot report a fee must not be warmed into a false "known" —
 // feeRateNow type-asserts for feeRateCapable first, so this is the branch where
-// WarmFeeRate has to be a no-op rather than seeding a zero fee, which would
+// the warm has to be a no-op rather than seeding a zero fee, which would
 // publish raw operator rates as if they were payer-net.
-func TestWarmFeeRate_IsANoOpForAFeeBlindWallet(t *testing.T) {
-	s := testServer(testConfig(), Options{
+func TestNew_DoesNotWarmAFeeBlindWallet(t *testing.T) {
+	s := testServer(testConfig(), deps{
 		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
 		Wallet:           &fakeWallet{},
 	})
-
-	s.WarmFeeRate()
 
 	if _, ok := s.FeeRate(); ok {
 		t.Fatal("fee reported known for a wallet that cannot read it")

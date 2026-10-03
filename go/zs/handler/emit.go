@@ -38,7 +38,7 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 // app is offered only on mainnet: the hosted client is built for one network,
 // so a testnet payer sent there would fund the wrong chain.
 func (s *Server) fundingHint() string {
-	if s.cfg.Network == "mainnet" && s.cfg.FundingURL != "" {
+	if s.network == "mainnet" && s.cfg.FundingURL != "" {
 		return "add funds in the web app (" + s.cfg.FundingURL + ") if this is your web account, " +
 			"or run `zs-proxy fund` for a deposit address."
 	}

@@ -225,6 +225,22 @@ func (k *KeyStore) Addresses() []string {
 	return out
 }
 
+// AccountSigner is a KeyStore with one of its addresses chosen as the signer,
+// which is the shape zs.Signer takes.
+type AccountSigner struct {
+	*KeyStore
+	addr string
+}
+
+// Address is the chosen address. The KeyStore may not hold it: a caller
+// checks with HasAccount.
+func (s AccountSigner) Address() string { return s.addr }
+
+// Signer chooses addr as the signing address.
+func (k *KeyStore) Signer(addr string) AccountSigner {
+	return AccountSigner{KeyStore: k, addr: addr}
+}
+
 // SignWithAccount signs tx with the key for publicAddress and returns
 // (txID, signedTxnBytes, error). Satisfies the transaction half of
 // proto/algo.MultipleWalletSigner.

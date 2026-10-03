@@ -60,7 +60,7 @@ func streamReceiptServer(t *testing.T, mode nodeMode) (*Server, *bytes.Buffer) {
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 		groupID:     "WALLETGROUPID0000000000000000000000000000000000000000",
 	}
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
 	return s, &logBuf
 }
 

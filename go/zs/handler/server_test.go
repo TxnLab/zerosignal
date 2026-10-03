@@ -20,11 +20,20 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
+// The catalog routes and the funding hint read the Client's own settings, so
+// the two can never disagree about which nodes exist or which chain is paid on.
 func TestNew_WiresFields(t *testing.T) {
 	cfg := testConfig()
-	s := testServer(cfg, Options{})
-	if s.cfg != &cfg.Config {
-		t.Error("cfg not wired")
+	cfg.Network = "mainnet"
+	cfg.AllowStaging = true
+	cfg.FundingURL = "https://app.example"
+	reg := errRegistry{}
+	s := testServer(cfg, deps{RegistryProvider: reg})
+	if s.registryProvider != hayai.RegistryProvider(reg) {
+		t.Error("registry is not the Client's")
+	}
+	if !s.allowStaging || s.network != "mainnet" || s.cfg.FundingURL != "https://app.example" {
+		t.Errorf("allowStaging %v, network %q, FundingURL %q", s.allowStaging, s.network, s.cfg.FundingURL)
 	}
 	if s.log == nil {
 		t.Error("logger nil")
@@ -48,7 +57,7 @@ func TestHTTPServer_TimeoutsFromConfig(t *testing.T) {
 		IdleTimeout:  33 * time.Second,
 	}
 
-	hs := testServer(testConfig(), Options{}).HTTPServer(lc)
+	hs := testServer(testConfig(), deps{}).HTTPServer(lc)
 	if hs.ReadTimeout != 11*time.Second {
 		t.Errorf("ReadTimeout = %v", hs.ReadTimeout)
 	}
@@ -71,7 +80,7 @@ func TestMiddleware_LogsRequest(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	cfg := testConfig()
-	s := New(&cfg.Config, logger, transform.Passthrough{}, transform.Passthrough{}, Options{})
+	s := newServer(&cfg.policy, logger, transform.Passthrough{}, transform.Passthrough{}, deps{})
 
 	// Hit the health endpoint through the middleware.
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -101,7 +110,7 @@ func TestMiddleware_LogsErrorReason(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	s := New(&testConfig().Config, logger, transform.Passthrough{}, transform.Passthrough{}, Options{})
+	s := newServer(&testConfig().policy, logger, transform.Passthrough{}, transform.Passthrough{}, deps{})
 
 	// A handler that fails the way dispatchHayai does: an OpenAI-shaped 503.
 	failing := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -175,7 +184,7 @@ func TestStatusRecorder_CapturesErrorBodyCapped(t *testing.T) {
 
 func TestMiddleware_PanicRecovery(t *testing.T) {
 	cfg := testConfig()
-	s := testServer(cfg, Options{})
+	s := testServer(cfg, deps{})
 
 	panicking := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("boom")
@@ -235,7 +244,7 @@ func TestStatusRecorder_FlushNoFlusher(t *testing.T) {
 }
 
 func TestRoutes_HealthRegistered(t *testing.T) {
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -252,7 +261,7 @@ func TestRoutes_HealthRegistered(t *testing.T) {
 func TestRoutes_EmbeddingsDisabledReturns404(t *testing.T) {
 	// /v1/embeddings stays intentionally disabled (no chat equivalent to
 	// emulate it with). The mux should return 404 for it.
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader([]byte(`{}`)))
 	w := httptest.NewRecorder()
@@ -267,7 +276,7 @@ func TestRoutes_CompletionsRegistered(t *testing.T) {
 	// The route is wired, so a body with no prompt must surface the translation
 	// error (400 missing_prompt) rather than a 404 — proving the shim handles it
 	// before any operator is contacted.
-	s := testServer(testConfig(), Options{})
+	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/completions", bytes.NewReader([]byte(`{"model":"gpt-4"}`)))
 	w := httptest.NewRecorder()
@@ -295,7 +304,7 @@ func TestRoutes_ModelsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	s := testServer(testConfig(), Options{RegistryProvider: reg})
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	w := httptest.NewRecorder()

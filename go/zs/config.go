@@ -63,6 +63,7 @@ type Affinity struct {
 }
 
 // Discovery tunes operator discovery and the details probes behind routing.
+// Only the registry New builds reads it.
 type Discovery struct {
 	RefreshInterval    time.Duration
 	RefreshTimeout     time.Duration // one refresh cycle
@@ -73,6 +74,13 @@ type Discovery struct {
 	LatencyStateMax    int
 	DetailsTimeout     time.Duration
 	DetailsConcurrency int
+
+	// OperatorIDs, when set, limits discovery to these operators.
+	OperatorIDs []uint64
+	// CatalogPath, when set, is the file discovery saves each fleet snapshot
+	// to and New reads back, so a restart routes at once instead of
+	// rediscovering the fleet over several refresh cycles.
+	CatalogPath string
 }
 
 // Stores are the stateful pieces a process may want to persist or share.
@@ -109,6 +117,10 @@ type Config struct {
 	AllowPrivacyOverride bool
 	// RequireTEEModels route only to attested nodes.
 	RequireTEEModels []string
+	// TEEVerifier checks the attestation evidence nodes publish, in the
+	// discovery New builds. Nil checks none: every node counts as
+	// unattested, so RequireTEEModels have no route.
+	TEEVerifier TEEVerifier
 
 	Affinity Affinity // AffinityPrefer, 10m, 1024 entries
 
@@ -148,10 +160,21 @@ type Config struct {
 	Stores     Stores
 	SpendGuard SpendGuard // none: no cap
 
+	// UseEnvProxy sends node traffic (discovery, reserve, inference) through
+	// the proxy named by HTTPS_PROXY / HTTP_PROXY / NO_PROXY. The
+	// private-address guard then checks only the proxy's own address: the
+	// proxy dials the node, so a node on a private address is no longer
+	// refused, and a proxy on a private address is, unless AllowPrivateHosts.
+	// An HTTPClient the caller supplies keeps its own proxy setting.
+	UseEnvProxy bool
+
 	// Registry, ReserveClient and Wallet are the network-facing parts:
-	// operator discovery, the reserve call, and escrow. For now a Client
-	// needs all three; New will build them from Signer and Network when they
-	// are nil.
+	// operator discovery, the reserve call, and escrow. New builds each nil
+	// one from Signer and Network; a supplied one is used as is, so the
+	// settings only a built part reads (Discovery, TEEVerifier, and
+	// ReserveTimeout, UseEnvProxy and AllowPrivateHosts for the discovery
+	// probes and the reserve) do not reach it. A supplied Registry must apply
+	// the same staging gate as AllowStaging.
 	Registry      RegistryProvider
 	ReserveClient ReserveClient
 	Wallet        WalletOpener
@@ -165,23 +188,33 @@ type Config struct {
 	// response content is never logged, so it is for local debugging only.
 	DebugLogBodies bool
 
-	Logger     *slog.Logger     // discards
-	Clock      func() time.Time // time.Now
-	HTTPClient *http.Client     // see defaultHTTPClient
+	Logger *slog.Logger     // discards
+	Clock  func() time.Time // time.Now
+	// HTTPClient carries inference (see defaultHTTPClient). The reserve and
+	// discovery clients New builds are its own.
+	HTTPClient *http.Client
 }
 
 // defaultHTTPClient has no overall timeout, because streams end by context;
 // a response-header backstop, so a connected but silent node is given up on;
-// the private-address dial guard unless AllowPrivateHosts; and no environment
-// proxy: http.DefaultTransport honours HTTP_PROXY, which would route around
-// the dial guard and contradict "the SDK reads no environment".
-func defaultHTTPClient(allowPrivateHosts bool) *http.Client {
-	c := httpx.Client(0, httpx.Options{
-		ResponseHeaderTimeout: httpx.ForwardHeaderBackstop,
-		BlockPrivateTargets:   !allowPrivateHosts,
+// and the dial rules of nodeHTTPClient.
+func (c Config) defaultHTTPClient() *http.Client {
+	return c.nodeHTTPClient(0, httpx.ForwardHeaderBackstop)
+}
+
+// nodeHTTPClient is a client for dialing node-registered addresses: the
+// private-address guard unless AllowPrivateHosts, and no environment proxy
+// unless UseEnvProxy. http.DefaultTransport honours HTTP_PROXY, which would
+// route around the guard and contradict "the SDK reads no environment".
+func (c Config) nodeHTTPClient(timeout, headerTimeout time.Duration) *http.Client {
+	hc := httpx.Client(timeout, httpx.Options{
+		ResponseHeaderTimeout: headerTimeout,
+		BlockPrivateTargets:   !c.AllowPrivateHosts,
 	})
-	c.Transport.(*http.Transport).Proxy = nil
-	return c
+	if !c.UseEnvProxy {
+		hc.Transport.(*http.Transport).Proxy = nil
+	}
+	return hc
 }
 
 const (
@@ -221,7 +254,7 @@ func (c Config) withDefaults() Config {
 		c.Clock = time.Now
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = defaultHTTPClient(c.AllowPrivateHosts)
+		c.HTTPClient = c.defaultHTTPClient()
 	}
 	return c
 }

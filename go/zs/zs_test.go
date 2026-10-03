@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -182,7 +183,7 @@ func TestConfigDefaults(t *testing.T) {
 		DetailsTimeout:     2 * time.Second,
 		DetailsConcurrency: 24,
 	}
-	if c.Discovery != wantD {
+	if !reflect.DeepEqual(c.Discovery, wantD) {
 		t.Errorf("Discovery = %+v\nwant %+v", c.Discovery, wantD)
 	}
 	if c.Logger == nil || c.Clock == nil || c.HTTPClient == nil {
@@ -216,14 +217,15 @@ func TestConfigDefaultsKeepExplicitAndReplaceNegative(t *testing.T) {
 	}
 }
 
-func TestDefaultHTTPClientIgnoresEnvironmentProxy(t *testing.T) {
-	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
-	tr, ok := Config{}.withDefaults().HTTPClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("Transport = %T, want *http.Transport", Config{}.withDefaults().HTTPClient.Transport)
-	}
-	if tr.Proxy != nil {
-		t.Error("default transport consults the environment proxy")
+// The environment proxy is consulted only on request. Checked on the Proxy
+// func rather than by sending through one: net/http reads the environment
+// once per process, so a test cannot set it.
+func TestNodeHTTPClientEnvironmentProxy(t *testing.T) {
+	for _, use := range []bool{false, true} {
+		tr := Config{UseEnvProxy: use}.withDefaults().HTTPClient.Transport.(*http.Transport)
+		if (tr.Proxy != nil) != use {
+			t.Errorf("UseEnvProxy=%v: transport consults the environment proxy = %v", use, tr.Proxy != nil)
+		}
 	}
 }
 
@@ -234,11 +236,11 @@ func TestDefaultHTTPClientBlocksPrivateTargets(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer srv.Close()
 
-	if resp, err := defaultHTTPClient(false).Get(srv.URL); err == nil {
+	if resp, err := (Config{}).defaultHTTPClient().Get(srv.URL); err == nil {
 		resp.Body.Close()
 		t.Error("default client reached a loopback server")
 	}
-	resp, err := defaultHTTPClient(true).Get(srv.URL)
+	resp, err := Config{AllowPrivateHosts: true}.defaultHTTPClient().Get(srv.URL)
 	if err != nil {
 		t.Fatalf("AllowPrivateHosts client: %v", err)
 	}

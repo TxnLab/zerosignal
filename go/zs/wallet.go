@@ -177,7 +177,7 @@ func (a poolEscrowAdapter) SubmitPresignedOpenGroup(ctx context.Context, group [
 	return a.c.SubmitPresignedOpenGroup(ctx, group, payerSigner, spec)
 }
 
-// WalletConfig groups the dependencies main.go assembles. Keeping
+// WalletConfig groups the dependencies buildWallet assembles. Keeping
 // this a struct lets the constructor evolve (e.g. add a retry policy
 // or a metrics sink) without breaking call sites.
 type WalletConfig struct {

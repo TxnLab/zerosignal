@@ -826,10 +826,10 @@ func writeMixedStream(
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
 }
 
-// setupHayai wires a cfg + Options pair for a test against one or more
+// setupHayai wires a cfg + deps pair for a test against one or more
 // fake nodes. The first node's age identity is also used by proxy-side
 // decrypt. All nodes are placed into the static registry.
-func setupHayai(t *testing.T, cfg *testCfg, nodes ...*fakeNode) Options {
+func setupHayai(t *testing.T, cfg *testCfg, nodes ...*fakeNode) deps {
 	t.Helper()
 	ops := make([]hayai.Operator, len(nodes))
 	for i, n := range nodes {
@@ -843,7 +843,7 @@ func setupHayai(t *testing.T, cfg *testCfg, nodes ...*fakeNode) Options {
 	cfg.Affinity = hayai.AffinityPrefer
 	sr := &swapRegistry{}
 	sr.set(registry)
-	return Options{
+	return deps{
 		RegistryProvider: sr,
 		ReserveClient:    &hayai.HTTPReserveClient{HTTPClient: http.DefaultClient},
 		ToolAffinity:     hayai.NewIDAffinity(64, time.Minute, nil),
@@ -889,7 +889,7 @@ func (r *swapRegistry) ReprobeEphemeral(ctx context.Context, op hayai.Operator) 
 func (r *swapRegistry) RecordModelDemand(model string) { r.get().RecordModelDemand(model) }
 
 // setFleet replaces the operators the Server built from opts routes over.
-func setFleet(t *testing.T, opts Options, ops ...hayai.Operator) {
+func setFleet(t *testing.T, opts deps, ops ...hayai.Operator) {
 	t.Helper()
 	registry, err := hayai.NewStaticRegistryProvider(ops)
 	if err != nil {
@@ -2642,7 +2642,7 @@ func TestDispatchHayai_Receipt_BodyHashMismatch_DrivesProtest(t *testing.T) {
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 		groupID:     "WALLETGROUPID0000000000000000000000000000000000000000",
 	}
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2692,7 +2692,7 @@ func TestDispatchHayai_Receipt_BodyHashMismatch_LoggedAsViolation(t *testing.T) 
 	opts := setupHayai(t, cfg, node)
 
 	var logBuf bytes.Buffer
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2739,7 +2739,7 @@ func TestDispatchHayai_Receipt_AmountExceedsMaxPrice(t *testing.T) {
 	opts := setupHayai(t, cfg, node)
 
 	var logBuf bytes.Buffer
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -2771,7 +2771,7 @@ func TestDispatchHayai_Receipt_MissingHeader_Tolerated(t *testing.T) {
 	opts := setupHayai(t, cfg, node)
 
 	var logBuf bytes.Buffer
-	s := New(&cfg.Config, capturingLogger(&logBuf), nil, nil, opts)
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))

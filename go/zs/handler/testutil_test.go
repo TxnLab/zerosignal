@@ -14,10 +14,13 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/algorand/go-algorand-sdk/v2/types"
 
+	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/inject"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
+	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
 func silentLogger() *slog.Logger {
@@ -32,20 +35,127 @@ func capturingLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, nil))
 }
 
-// testCfg is the handler Config plus the operator list setupHayai built the
+// policy is the part of zs.Config, plus the handler Config, that handler tests
+// vary.
+type policy struct {
+	Network               string
+	FundingURL            string
+	Privacy               hayai.Privacy
+	AllowPrivacyOverride  bool
+	Affinity              hayai.AffinityPolicy
+	AllowStaging          bool
+	AllowPrivateOperators bool
+	TEERequiredModels     []string
+}
+
+// deps are the Client parts a handler test supplies. A nil network part gets
+// a stub, so the Client never builds one against a chain.
+type deps struct {
+	RegistryProvider hayai.RegistryProvider
+	ReserveClient    hayai.ReserveClient
+	Wallet           hayai.WalletOpener
+	ToolAffinity     *hayai.IDAffinity
+	ResponseAffinity *hayai.IDAffinity
+	Tokenizer        *tokenize.Registry
+	RelayReputation  hayai.RelayReputation
+	RelayLatency     hayai.RelayLatency
+	TargetBackoff    hayai.TargetBackoff
+	NodeExcluder     hayai.NodeExcluder
+	SpendGuard       spendGuard
+	TrackCryptoTimes bool
+	DebugLogBodies   bool
+	RetryBudget      time.Duration
+	SweepDelay       func(sweep int) time.Duration
+}
+
+// spendGuard is a zs.SpendGuard without Admit, which no handler test needs.
+type spendGuard interface {
+	Reserve(ticketID string, maxPriceMicroUSDC uint64) error
+	Settle(ticketID string, spentMicroUSDC uint64)
+	Release(ticketID string)
+}
+
+type admitAll struct{ spendGuard }
+
+func (admitAll) Admit(uint64) error { return nil }
+
+// testPayer is the Signer every test Client is built with. Nothing signs with
+// it: the Wallet and ReserveClient are fakes.
+type testPayer struct{}
+
+func (testPayer) Address() string                                           { return "PAYER" }
+func (testPayer) HasAccount(a string) bool                                  { return a == "PAYER" }
+func (testPayer) SignBytes(context.Context, string, []byte) ([]byte, error) { return nil, nil }
+func (testPayer) SignWithAccount(context.Context, types.Transaction, string) (string, []byte, error) {
+	return "", nil, nil
+}
+
+// newServer builds the Client p and d describe, and the Server over it.
+func newServer(p *policy, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, d deps) *Server {
+	network := p.Network
+	if network == "" {
+		network = "localnet"
+	}
+	if d.RegistryProvider == nil {
+		d.RegistryProvider = errRegistry{}
+	}
+	if d.ReserveClient == nil {
+		d.ReserveClient = &refusingReserveClient{}
+	}
+	if d.Wallet == nil {
+		d.Wallet = &fakeWallet{}
+	}
+	var spend hayai.SpendGuard
+	if d.SpendGuard != nil {
+		spend = admitAll{d.SpendGuard}
+	}
+	c, err := hayai.New(context.Background(), hayai.Config{
+		Signer:               testPayer{},
+		Network:              hayai.Network{Algod: algod.Config{Network: network}, EscrowAppID: 1},
+		Privacy:              p.Privacy,
+		AllowPrivacyOverride: p.AllowPrivacyOverride,
+		RequireTEEModels:     p.TEERequiredModels,
+		Affinity:             hayai.Affinity{Policy: p.Affinity},
+		AllowStaging:         p.AllowStaging,
+		AllowPrivateHosts:    p.AllowPrivateOperators,
+		RetryBudget:          d.RetryBudget,
+		SweepDelay:           d.SweepDelay,
+		Stores: hayai.Stores{
+			RelayReputation:  d.RelayReputation,
+			RelayLatency:     d.RelayLatency,
+			TargetBackoff:    d.TargetBackoff,
+			NodeExclusions:   d.NodeExcluder,
+			ToolAffinity:     d.ToolAffinity,
+			ResponseAffinity: d.ResponseAffinity,
+		},
+		SpendGuard:     spend,
+		Registry:       d.RegistryProvider,
+		ReserveClient:  d.ReserveClient,
+		Wallet:         d.Wallet,
+		Tokenizer:      d.Tokenizer,
+		DebugLogBodies: d.DebugLogBodies,
+		Logger:         log,
+	})
+	if err != nil {
+		panic("newServer: " + err.Error())
+	}
+	return New(c, &Config{FundingURL: p.FundingURL}, log, reqTx, respTx, Options{TrackCryptoTimes: d.TrackCryptoTimes})
+}
+
+// testCfg is the test policy plus the operator list setupHayai built the
 // static registry from, which tests edit and rebuild a registry from.
 type testCfg struct {
-	Config
+	policy
 	ResolvedOperators []hayai.Operator
 }
 
-// testConfig returns a minimal Config for handler-level tests. Direct, because
+// testConfig returns a minimal policy for handler-level tests. Direct, because
 // most fake-node tests stand up one node and relaying needs a second; tests of
 // the relay path set Privacy themselves. AllowPrivateOperators: tests forward to
 // httptest fake nodes on 127.0.0.1, which the default-on SSRF dial guard would
 // refuse.
 func testConfig() *testCfg {
-	return &testCfg{Config: Config{Privacy: hayai.PrivacyDirect, AllowPrivateOperators: true}}
+	return &testCfg{policy: policy{Privacy: hayai.PrivacyDirect, AllowPrivateOperators: true}}
 }
 
 // privacyMode maps the relay-on bool the routing tests are written in.
@@ -59,19 +169,19 @@ func privacyMode(relay bool) hayai.Privacy {
 // testServer constructs a Server with silent logging and passthrough
 // transforms wired to cfg. The SSRF dial guard is opted out (tests forward to
 // 127.0.0.1 fake nodes) regardless of how the caller built cfg.
-func testServer(cfg *testCfg, opts Options) *Server {
+func testServer(cfg *testCfg, opts deps) *Server {
 	cfg.AllowPrivateOperators = true
-	return New(&cfg.Config, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, opts)
+	return newServer(&cfg.policy, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, opts)
 }
 
 // testServerWithTransforms is like testServer but lets the caller inject
 // custom req/resp transforms.
-func testServerWithTransforms(cfg *testCfg, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
+func testServerWithTransforms(cfg *testCfg, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts deps) *Server {
 	cfg.AllowPrivateOperators = true
-	return New(&cfg.Config, silentLogger(), reqTx, respTx, opts)
+	return newServer(&cfg.policy, silentLogger(), reqTx, respTx, opts)
 }
 
-// noSweepDelay is an Options.SweepDelay that never waits, so a test can run
+// noSweepDelay is a deps.SweepDelay that never waits, so a test can run
 // several retry or busy sweeps without sleeping through the real schedule.
 func noSweepDelay(int) time.Duration { return 0 }
 

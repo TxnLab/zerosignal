@@ -32,6 +32,26 @@ func TestEscrowAppID(t *testing.T) {
 	}
 }
 
+// Pinned as literals: a wrong fee sink fails the payer's first escrow read on
+// a chain where the payer holds no ALGO yet.
+func TestFeeSink(t *testing.T) {
+	cases := []struct {
+		network string
+		want    string
+	}{
+		{"testnet", "A7NMWS3NT3IUDMLVO26ULGXGIIOUQ3ND2TXSER6EBGRZNOBOUIQXHIBGDE"},
+		{"MainNet", "Y76M3MSY6DKBRHBL7C3NNDXGS5IIMQVQVUAB6MP4XEMMGVF2QWNPL226CA"},
+		{"localnet", ""},
+		{"", ""},
+		{"betanet", ""},
+	}
+	for _, c := range cases {
+		if got := FeeSink(c.network); got != c.want {
+			t.Errorf("FeeSink(%q) = %q, want %q", c.network, got, c.want)
+		}
+	}
+}
+
 func TestConfigResolve(t *testing.T) {
 	localToken := strings.Repeat("a", 64)
 	cases := []struct {

@@ -163,7 +163,7 @@ func TestDispatch_PayerRefusalRendersNodeCodeAndRetryAfter(t *testing.T) {
 	for _, code := range []string{"free_quota_exhausted", "unlisted_payer_refusal"} {
 		t.Run(code, func(t *testing.T) {
 			rc := &refusingReserveClient{err: &zs.PayerRefusalError{Code: code, Message: "daily free tickets used", RetryAfter: time.Hour}}
-			s := gatesServer(t, &Config{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}, rc,
+			s := gatesServer(t, &policy{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}, rc,
 				gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"))
 
 			w := httptest.NewRecorder()

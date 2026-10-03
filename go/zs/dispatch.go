@@ -3204,8 +3204,8 @@ func (s *Client) feeRateNow() (feeBps uint64, ok bool) {
 	return s.feeRate.get(w.ProtocolFeeBps)
 }
 
-// WarmFeeRate kicks the first protocol-fee read at startup so the catalog is
-// priced before any client asks for it.
+// warmFeeRate starts the first protocol-fee read from New, so the catalog is
+// priced before anyone asks for it.
 //
 // A cold read returns ok == false AND starts the refresh, so whoever triggers
 // the warm is the one request that misses it — and under modelEntryFor a fee
@@ -3217,14 +3217,12 @@ func (s *Client) feeRateNow() (feeBps uint64, ok bool) {
 // Hermes Agent does exactly this.
 //
 // It does NOT block, and the window is narrowed rather than closed: a client
-// connecting inside the refresh RTT still reads a cold cache. What buys the
-// narrowing is NOT boot work overlapping the read — there is essentially none
-// left after this point (HTTPServer is a struct literal, the module serves no
-// TLS, and what follows is a handful of log lines). It is that the read is
-// issued when the proxy starts rather than when a tool first connects, and an
-// operator starts the proxy seconds to minutes before pointing anything at it.
-// It cannot be moved earlier to overlap the wallet's simulate: feeRateNow reads
-// s.wallet, which does not exist until buildEscrowWalletFromClient returns.
+// connecting inside the refresh RTT still reads a cold cache. The narrowing is
+// that the read is issued when the payer starts rather than when a tool first
+// connects, and an operator starts the proxy seconds to minutes before pointing
+// anything at it. It could start as soon as the wallet is built, before the
+// boot discovery, but the read lands in well under that discovery's time, so
+// starting it from the finished Client costs nothing.
 //
 // Blocking here instead would put a chain read on the startup path, which
 // feeRateCache exists to avoid. A failed warm degrades to exactly the old
@@ -3233,14 +3231,14 @@ func (s *Client) feeRateNow() (feeBps uint64, ok bool) {
 // Two consequences of reusing the request path's cache, both deliberate:
 //
 //   - The refresh goroutine runs on context.Background() with its own 5s cap,
-//     so it is NOT bound to app.Run's context — an early Ctrl-C will not cancel
-//     it and Shutdown does not join it. Bounded and detached by design; the
-//     alternative is a cancellation seam on a cache every request also uses.
+//     so it is NOT bound to New's context and Close does not join it. Bounded
+//     and detached by design; the alternative is a cancellation seam on a
+//     cache every request also uses.
 //   - A failed warm is SILENT (refresh drops the error and recovers panics).
 //     The symptom an operator sees is a permanently price-less /v1/models
 //     rather than a log line, so treat "no pricing in the catalog" as a chain
 //     reachability symptom, not a pricing bug.
-func (s *Client) WarmFeeRate() {
+func (s *Client) warmFeeRate() {
 	_, _ = s.feeRateNow()
 }
 

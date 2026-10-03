@@ -90,7 +90,7 @@ func (s *Server) modelDetailsByID(ctx context.Context) map[string]inject.Operato
 // and an absent object is not:
 //
 //   - feeKnown false. The fee cache is cold until the first read, which is why
-//     Server.WarmFeeRate kicks that read at startup — an OpenAI-compatible
+//     zs.New starts that read — an OpenAI-compatible
 //     client fetches the catalog once, at connect time, and caches what it
 //     gets, so without the warm the first client to connect is the one that
 //     misses. The warm narrows that window rather than closing it (it does not
@@ -178,23 +178,20 @@ func grossRate(usdPer1M, grossFactor float64) float64 {
 // the rates. The authoritative per-request price is the microUSDC the chosen
 // node signs into the reserve ticket.
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
-	out := inject.NewOpenAIModelList(0)
-	if s.registryProvider != nil {
-		models := s.registryProvider.AllModels(r.Context())
-		byID := s.modelDetailsByID(r.Context())
-		grossFactor, feeKnown := s.grossFactorNow()
-		out = inject.NewOpenAIModelList(len(models))
-		for _, id := range models {
-			d, ok := byID[id]
-			if !ok {
-				// Reachable through a third-party RegistryProvider, or in the
-				// microseconds-wide window where a background refresh swaps the
-				// snapshot between the two aggregate reads. Listing the id bare
-				// is the same answer the get endpoint gives for it.
-				d = inject.OperatorDetailsModel{ID: id}
-			}
-			out.Data = append(out.Data, modelEntryFor(d, grossFactor, feeKnown))
+	models := s.registryProvider.AllModels(r.Context())
+	byID := s.modelDetailsByID(r.Context())
+	grossFactor, feeKnown := s.grossFactorNow()
+	out := inject.NewOpenAIModelList(len(models))
+	for _, id := range models {
+		d, ok := byID[id]
+		if !ok {
+			// Reachable through a third-party RegistryProvider, or in the
+			// microseconds-wide window where a background refresh swaps the
+			// snapshot between the two aggregate reads. Listing the id bare
+			// is the same answer the get endpoint gives for it.
+			d = inject.OperatorDetailsModel{ID: id}
 		}
+		out.Data = append(out.Data, modelEntryFor(d, grossFactor, feeKnown))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -325,45 +322,43 @@ func (s *Server) handleHayaiDetails(w http.ResponseWriter, r *http.Request) {
 	if feeBps, ok := s.FeeRate(); ok {
 		out.FeeBps = feeBps
 	}
-	if s.registryProvider != nil {
-		for _, d := range s.registryProvider.AllModelDetails(r.Context()) {
-			out.Models = append(out.Models, modelEntry{
-				ID:                           d.ID,
-				ContextWindow:                d.ContextWindow,
-				MaxOutputTokens:              d.MaxOutputTokens,
-				InputModalities:              d.InputModalities,
-				OutputModalities:             d.OutputModalities,
-				Reasoning:                    d.Reasoning,
-				ToolUse:                      d.ToolUse,
-				InputUSDPer1M:                d.InputRateUSDPer1M,
-				OutputUSDPer1M:               d.OutputRateUSDPer1M,
-				CacheReadUSDPer1M:            d.CacheReadRateUSDPer1M,
-				LongContextThresholdTokens:   d.LongContextThresholdTokens,
-				LongContextInputUSDPer1M:     d.LongContextInputRateUSDPer1M,
-				LongContextOutputUSDPer1M:    d.LongContextOutputRateUSDPer1M,
-				LongContextCacheReadUSDPer1M: d.LongContextCacheReadRateUSDPer1M,
-				ImageRateMicroUSDC:           d.ImageRateMicroUSDC,
-				ImageEditRateMicroUSDC:       d.ImageEditRateMicroUSDC,
-				ImageDefaultMicroUSDC:        d.ImageDefaultMicroUSDC,
-				ImageEditDefaultMicroUSDC:    d.ImageEditDefaultMicroUSDC,
-				ImageCapMicroUSDC:            d.ImageCapMicroUSDC,
-				ImageEditCapMicroUSDC:        d.ImageEditCapMicroUSDC,
-				ServesImageGen:               d.ServesImageGen,
-				ServesImageEdit:              d.ServesImageEdit,
-				ImageToolRateMicroUSDC:       d.ImageToolRateMicroUSDC,
-				ImageEditToolRateMicroUSDC:   d.ImageEditToolRateMicroUSDC,
-				ImageToolBaseMicroUSDC:       d.ImageToolBaseMicroUSDC,
-				ImageEditToolBaseMicroUSDC:   d.ImageEditToolBaseMicroUSDC,
-				Coordinates:                  d.Coordinates,
-				WeightsDigest:                d.WeightsDigest,
-				WeightsMismatch:              d.WeightsMismatch,
-			})
-		}
-		for _, t := range s.registryProvider.AllBuiltinTools(r.Context()) {
-			out.BuiltinTools = append(out.BuiltinTools, builtinToolEntry{Type: t.Type})
-		}
-		out.NodeVersions = s.registryProvider.AllNodeVersions(r.Context())
+	for _, d := range s.registryProvider.AllModelDetails(r.Context()) {
+		out.Models = append(out.Models, modelEntry{
+			ID:                           d.ID,
+			ContextWindow:                d.ContextWindow,
+			MaxOutputTokens:              d.MaxOutputTokens,
+			InputModalities:              d.InputModalities,
+			OutputModalities:             d.OutputModalities,
+			Reasoning:                    d.Reasoning,
+			ToolUse:                      d.ToolUse,
+			InputUSDPer1M:                d.InputRateUSDPer1M,
+			OutputUSDPer1M:               d.OutputRateUSDPer1M,
+			CacheReadUSDPer1M:            d.CacheReadRateUSDPer1M,
+			LongContextThresholdTokens:   d.LongContextThresholdTokens,
+			LongContextInputUSDPer1M:     d.LongContextInputRateUSDPer1M,
+			LongContextOutputUSDPer1M:    d.LongContextOutputRateUSDPer1M,
+			LongContextCacheReadUSDPer1M: d.LongContextCacheReadRateUSDPer1M,
+			ImageRateMicroUSDC:           d.ImageRateMicroUSDC,
+			ImageEditRateMicroUSDC:       d.ImageEditRateMicroUSDC,
+			ImageDefaultMicroUSDC:        d.ImageDefaultMicroUSDC,
+			ImageEditDefaultMicroUSDC:    d.ImageEditDefaultMicroUSDC,
+			ImageCapMicroUSDC:            d.ImageCapMicroUSDC,
+			ImageEditCapMicroUSDC:        d.ImageEditCapMicroUSDC,
+			ServesImageGen:               d.ServesImageGen,
+			ServesImageEdit:              d.ServesImageEdit,
+			ImageToolRateMicroUSDC:       d.ImageToolRateMicroUSDC,
+			ImageEditToolRateMicroUSDC:   d.ImageEditToolRateMicroUSDC,
+			ImageToolBaseMicroUSDC:       d.ImageToolBaseMicroUSDC,
+			ImageEditToolBaseMicroUSDC:   d.ImageEditToolBaseMicroUSDC,
+			Coordinates:                  d.Coordinates,
+			WeightsDigest:                d.WeightsDigest,
+			WeightsMismatch:              d.WeightsMismatch,
+		})
 	}
+	for _, t := range s.registryProvider.AllBuiltinTools(r.Context()) {
+		out.BuiltinTools = append(out.BuiltinTools, builtinToolEntry{Type: t.Type})
+	}
+	out.NodeVersions = s.registryProvider.AllNodeVersions(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
@@ -562,102 +557,99 @@ func (s *Server) handleHayaiOperators(w http.ResponseWriter, r *http.Request) {
 		Operators []operatorEntry `json:"operators"`
 	}
 
-	out := listResponse{Operators: []operatorEntry{}}
-	if s.registryProvider != nil {
-		ops := s.registryProvider.AllOperators(r.Context())
-		out.Operators = make([]operatorEntry, 0, len(ops))
-		for _, op := range ops {
-			if hayai.HeldOutStaging(op, s.cfg.AllowStaging) {
-				continue
-			}
-			models := make([]modelEntry, 0, len(op.Models))
-			for _, m := range op.Models {
-				cap := op.ModelCapacities[m]
-				models = append(models, modelEntry{
-					ID:                         m,
-					ContextWindow:              cap.ContextWindow,
-					MaxOutputTokens:            cap.MaxOutputTokens,
-					InputModalities:            cap.InputModalities,
-					OutputModalities:           cap.OutputModalities,
-					InputUSDPer1M:              cap.InputUSDPer1M,
-					OutputUSDPer1M:             cap.OutputUSDPer1M,
-					CacheReadUSDPer1M:          cap.CacheReadUSDPer1M,
-					ImageRateMicroUSDC:         cap.ImageRateMicroUSDC,
-					ImageEditRateMicroUSDC:     cap.ImageEditRateMicroUSDC,
-					ImageDefaultMicroUSDC:      cap.ImageDefaultMicroUSDC,
-					ImageEditDefaultMicroUSDC:  cap.ImageEditDefaultMicroUSDC,
-					ImageCapMicroUSDC:          cap.ImageCapMicroUSDC,
-					ImageEditCapMicroUSDC:      cap.ImageEditCapMicroUSDC,
-					ServesImageGen:             cap.ServesImageGen(),
-					ServesImageEdit:            cap.ServesImageEdit(),
-					ImageToolRateMicroUSDC:     cap.ImageToolRateMicroUSDC,
-					ImageEditToolRateMicroUSDC: cap.ImageEditToolRateMicroUSDC,
-					ImageToolBaseMicroUSDC:     cap.ImageToolBaseMicroUSDC,
-					ImageEditToolBaseMicroUSDC: cap.ImageEditToolBaseMicroUSDC,
-					Coordinates:                cap.Coordinates,
-					WeightsDigest:              cap.WeightsDigest,
-					WeightsUnverifiable:        cap.WeightsUnverifiable,
-					Source:                     cap.Source,
-					CanonicalID:                cap.CanonicalID,
-					Retention:                  cap.Retention,
-				})
-			}
-			tools := make([]builtinToolEntry, 0, len(op.BuiltinTools))
-			for _, t := range op.BuiltinTools {
-				tools = append(tools, builtinToolEntry{Type: t.Type})
-			}
-			var tee *teeEntry
-			if op.TEE != nil {
-				tee = &teeEntry{Mode: op.TEE.Mode, Verified: op.TEE.Verified,
-					AttestedModelIDs: op.TEE.AttestedModelIDs}
-			}
-			m := op.Metrics
-			out.Operators = append(out.Operators, operatorEntry{
-				OperatorID:            op.ID,
-				NodeID:                op.NodeID,
-				OwnerAddr:             op.OwnerAddr,
-				SigningAddr:           op.SigningAddr,
-				BaseURL:               op.BaseURL,
-				NodeVersion:           op.NodeVersion,
-				ProtoVersion:          op.ProtoVersion,
-				Reachable:             op.Reachable,
-				Staging:               op.Staging,
-				TEE:                   tee,
-				MaxToolIterations:     op.MaxToolIters,
-				MinChargeOutputTokens: op.MinChargeOutputTokens,
-				MinChargeAlgoTxns:     op.MinChargeAlgoTxns,
-				MinChargeMicroUSDC:    op.MinChargeMicroUSDC,
-				Metrics: metricsEntry{
-					LastActivityAt:            m.LastActivityAt,
-					TicketsOpened:             m.TicketsOpened,
-					TicketsSettled:            m.TicketsSettled,
-					TicketsLapsedSettled:      m.TicketsLapsedSettled,
-					TicketsRefundedInactive:   m.TicketsRefundedInactive,
-					TicketsProtested:          m.TicketsProtested,
-					TicketsFrozenDispute:      m.TicketsFrozenDispute,
-					TotalRefundedInactiveUsdc: m.TotalRefundedInactiveUsdc,
-					TotalProtestedUsdc:        m.TotalProtestedUsdc,
-					TotalFrozenDisputeUsdc:    m.TotalFrozenDisputeUsdc,
-					LatencyTotalMs:            m.LatencyTotalMs,
-					LatencyEwmaMs:             m.LatencyEwmaMs,
-					LatencySamples:            m.LatencySamples,
-					LatencyMeanMs:             m.LatencyMeanMs(),
-					TotalRevenueGrossUsdc:     m.TotalRevenueGross,
-					// Net == gross under the additive fee model (operator keeps
-					// the full base; the payer pays the fee on top). The
-					// dedicated net field is gone from the on-chain record; keep
-					// the response field for API stability, mirroring gross.
-					TotalRevenueNetUsdc: m.TotalRevenueGross,
-					Revenue24hUsdc:      m.Revenue24hUsdc,
-					Revenue7dUsdc:       m.Revenue7dUsdc,
-					Revenue30dUsdc:      m.Revenue30dUsdc,
-				},
-				Models:                    models,
-				BuiltinTools:              tools,
-				SignerSpendableMicroAlgos: op.SignerSpendableMicroAlgos,
-				SignerUnderfunded:         op.SignerUnderfunded(),
+	ops := s.registryProvider.AllOperators(r.Context())
+	out := listResponse{Operators: make([]operatorEntry, 0, len(ops))}
+	for _, op := range ops {
+		if hayai.HeldOutStaging(op, s.allowStaging) {
+			continue
+		}
+		models := make([]modelEntry, 0, len(op.Models))
+		for _, m := range op.Models {
+			cap := op.ModelCapacities[m]
+			models = append(models, modelEntry{
+				ID:                         m,
+				ContextWindow:              cap.ContextWindow,
+				MaxOutputTokens:            cap.MaxOutputTokens,
+				InputModalities:            cap.InputModalities,
+				OutputModalities:           cap.OutputModalities,
+				InputUSDPer1M:              cap.InputUSDPer1M,
+				OutputUSDPer1M:             cap.OutputUSDPer1M,
+				CacheReadUSDPer1M:          cap.CacheReadUSDPer1M,
+				ImageRateMicroUSDC:         cap.ImageRateMicroUSDC,
+				ImageEditRateMicroUSDC:     cap.ImageEditRateMicroUSDC,
+				ImageDefaultMicroUSDC:      cap.ImageDefaultMicroUSDC,
+				ImageEditDefaultMicroUSDC:  cap.ImageEditDefaultMicroUSDC,
+				ImageCapMicroUSDC:          cap.ImageCapMicroUSDC,
+				ImageEditCapMicroUSDC:      cap.ImageEditCapMicroUSDC,
+				ServesImageGen:             cap.ServesImageGen(),
+				ServesImageEdit:            cap.ServesImageEdit(),
+				ImageToolRateMicroUSDC:     cap.ImageToolRateMicroUSDC,
+				ImageEditToolRateMicroUSDC: cap.ImageEditToolRateMicroUSDC,
+				ImageToolBaseMicroUSDC:     cap.ImageToolBaseMicroUSDC,
+				ImageEditToolBaseMicroUSDC: cap.ImageEditToolBaseMicroUSDC,
+				Coordinates:                cap.Coordinates,
+				WeightsDigest:              cap.WeightsDigest,
+				WeightsUnverifiable:        cap.WeightsUnverifiable,
+				Source:                     cap.Source,
+				CanonicalID:                cap.CanonicalID,
+				Retention:                  cap.Retention,
 			})
 		}
+		tools := make([]builtinToolEntry, 0, len(op.BuiltinTools))
+		for _, t := range op.BuiltinTools {
+			tools = append(tools, builtinToolEntry{Type: t.Type})
+		}
+		var tee *teeEntry
+		if op.TEE != nil {
+			tee = &teeEntry{Mode: op.TEE.Mode, Verified: op.TEE.Verified,
+				AttestedModelIDs: op.TEE.AttestedModelIDs}
+		}
+		m := op.Metrics
+		out.Operators = append(out.Operators, operatorEntry{
+			OperatorID:            op.ID,
+			NodeID:                op.NodeID,
+			OwnerAddr:             op.OwnerAddr,
+			SigningAddr:           op.SigningAddr,
+			BaseURL:               op.BaseURL,
+			NodeVersion:           op.NodeVersion,
+			ProtoVersion:          op.ProtoVersion,
+			Reachable:             op.Reachable,
+			Staging:               op.Staging,
+			TEE:                   tee,
+			MaxToolIterations:     op.MaxToolIters,
+			MinChargeOutputTokens: op.MinChargeOutputTokens,
+			MinChargeAlgoTxns:     op.MinChargeAlgoTxns,
+			MinChargeMicroUSDC:    op.MinChargeMicroUSDC,
+			Metrics: metricsEntry{
+				LastActivityAt:            m.LastActivityAt,
+				TicketsOpened:             m.TicketsOpened,
+				TicketsSettled:            m.TicketsSettled,
+				TicketsLapsedSettled:      m.TicketsLapsedSettled,
+				TicketsRefundedInactive:   m.TicketsRefundedInactive,
+				TicketsProtested:          m.TicketsProtested,
+				TicketsFrozenDispute:      m.TicketsFrozenDispute,
+				TotalRefundedInactiveUsdc: m.TotalRefundedInactiveUsdc,
+				TotalProtestedUsdc:        m.TotalProtestedUsdc,
+				TotalFrozenDisputeUsdc:    m.TotalFrozenDisputeUsdc,
+				LatencyTotalMs:            m.LatencyTotalMs,
+				LatencyEwmaMs:             m.LatencyEwmaMs,
+				LatencySamples:            m.LatencySamples,
+				LatencyMeanMs:             m.LatencyMeanMs(),
+				TotalRevenueGrossUsdc:     m.TotalRevenueGross,
+				// Net == gross under the additive fee model (operator keeps
+				// the full base; the payer pays the fee on top). The
+				// dedicated net field is gone from the on-chain record; keep
+				// the response field for API stability, mirroring gross.
+				TotalRevenueNetUsdc: m.TotalRevenueGross,
+				Revenue24hUsdc:      m.Revenue24hUsdc,
+				Revenue7dUsdc:       m.Revenue7dUsdc,
+				Revenue30dUsdc:      m.Revenue30dUsdc,
+			},
+			Models:                    models,
+			BuiltinTools:              tools,
+			SignerSpendableMicroAlgos: op.SignerSpendableMicroAlgos,
+			SignerUnderfunded:         op.SignerUnderfunded(),
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
@@ -679,10 +671,6 @@ func (s *Server) handleGetModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if id == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "missing_model_id", "model id is required")
-		return
-	}
-	if s.registryProvider == nil {
-		notFound()
 		return
 	}
 	if !slices.Contains(s.registryProvider.AllModels(r.Context()), id) {

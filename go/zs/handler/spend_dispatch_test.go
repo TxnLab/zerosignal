@@ -18,6 +18,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
 // fakeSpendGuard is a SpendGuard for dispatch tests: reserveErr forces a cap
@@ -114,14 +115,20 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 		network    string
 		fundingURL string
 		wantWebApp bool
+		// nilConfig builds the Server with a nil handler Config, which New
+		// allows.
+		nilConfig bool
 	}{
-		{"mainnet", fundingURL, true},
-		{"testnet", fundingURL, false},
-		{"", fundingURL, false},
+		{"mainnet", fundingURL, true, false},
+		// The network name is matched in any case, as algod.Resolve does.
+		{"Mainnet", fundingURL, true, false},
+		{"testnet", fundingURL, false, false},
+		{"localnet", fundingURL, false, false},
 		// No URL to name: an empty "web app ()" hint is worse than none.
-		{"mainnet", "", false},
+		{"mainnet", "", false, false},
+		{"mainnet", "", false, true},
 	} {
-		t.Run("network="+tc.network+"/url="+tc.fundingURL, func(t *testing.T) {
+		t.Run(fmt.Sprintf("network=%s/url=%s/nil=%v", tc.network, tc.fundingURL, tc.nilConfig), func(t *testing.T) {
 			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 			cfg := testConfig()
 			cfg.Network = tc.network
@@ -130,6 +137,9 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			opts.Wallet = &fakeWallet{payer: "PAYERADDR", err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
 			opts.SpendGuard = &fakeSpendGuard{}
 			s := testServer(cfg, opts)
+			if tc.nilConfig {
+				s = New(s.Client, nil, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{})
+			}
 
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -140,7 +150,7 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			}
 			// The deposit address is the actionable part; swapped with the
 			// network it would point the payer at a non-address.
-			if want := "wallet PAYERADDR can't pay for this request on " + tc.network + " "; !strings.Contains(body, want) {
+			if want := "wallet PAYERADDR can't pay for this request on " + strings.ToLower(tc.network) + " "; !strings.Contains(body, want) {
 				t.Errorf("body missing %q:\n%s", want, body)
 			}
 			if got := strings.Contains(body, "web app"); got != tc.wantWebApp {

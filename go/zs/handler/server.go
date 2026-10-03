@@ -7,55 +7,20 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/TxnLab/zerosignal/go/algod"
-	"github.com/TxnLab/zerosignal/go/httpx"
-	"github.com/TxnLab/zerosignal/go/keystore"
 	hayai "github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 	"github.com/TxnLab/zerosignal/go/zs/internal/cryptotimer"
-	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
-// Config is the payer policy. New copies the routing fields into the Client
-// and keeps the pointer for the rest, so a change after New reaches some
-// reads and not others: finish configuring before New.
+// Config is what the HTTP surface adds to the Client's own configuration.
 type Config struct {
-	// Network names the chain ("mainnet", "testnet", …) in funding errors.
-	// "mainnet" also switches the payer-facing hint to the web app.
-	Network string
-	// PayerAddr is the payer account.
-	//
-	// Deprecated: unread. Funding errors name the Wallet's own address.
-	PayerAddr string
 	// FundingURL is the web app a mainnet funding error points the payer at.
 	FundingURL string
-
-	// Privacy is the default transport posture (SPEC §3f). The zero value
-	// relays every reserve and inference; only zs.PrivacyDirect sends direct,
-	// so an unrecognized value relays too. AllowPrivacyOverride lets a
-	// request's provider.relay / X-Zs-Relay preference turn relaying off;
-	// without it an opt-out is refused.
-	Privacy              hayai.Privacy
-	AllowPrivacyOverride bool
-
-	// Affinity is the tool-call continuation policy. The zero value behaves
-	// as prefer.
-	Affinity hayai.AffinityPolicy
-
-	// AllowStaging admits staging operators to routing and discovery.
-	AllowStaging bool
-	// AllowPrivateOperators turns off the SSRF dial guard so operators may
-	// register loopback or RFC1918 BaseURLs. Localnet development only.
-	AllowPrivateOperators bool
-
-	// TEERequiredModels route only to attested operators.
-	TEERequiredModels []string
 }
 
 // ListenConfig is what HTTPServer needs beyond the handler itself.
@@ -72,171 +37,48 @@ type Server struct {
 
 	cfg *Config
 	log *slog.Logger
-	// registryProvider backs the catalog routes (/v1/models, /v1/zs/details,
-	// /v1/zs/operators); the Client holds the same one for routing.
+	// registryProvider is the Client's, read by the catalog routes
+	// (/v1/models, /v1/zs/details, /v1/zs/operators).
 	registryProvider hayai.RegistryProvider
+	// allowStaging and network are the Client's: whether staging nodes are
+	// admitted, and the chain a funding error names.
+	allowStaging bool
+	network      string
 
 	reqTx  transform.RequestTransformer
 	respTx transform.ResponseTransformer
 	mux    *http.ServeMux
 
-	// keystore holds Algorand mnemonics loaded at startup used to
-	// sign payment transactions against operator pay-to addresses.
-	keystore *keystore.KeyStore
-
 	// trackCryptoTimes enables per-request encrypt/decrypt duration
 	// accounting in the middleware and the hayai dispatch path. Opt-in via
 	// the proxy's -times flag.
 	trackCryptoTimes bool
-
-	// shutdownToken / shutdown back the loopback POST /shutdown control channel
-	// (the Windows graceful-stop path). shutdownToken is the required
-	// X-Shutdown-Token value; shutdown triggers the graceful drain. Both unset
-	// (foreground / service runs) ⇒ the route isn't registered. See shutdown.go.
-	shutdownToken string
-	shutdown      func()
 }
 
-// Options collects dependencies for New.
+// Options are the handler's own switches.
 type Options struct {
-	RegistryProvider hayai.RegistryProvider
-	ReserveClient    hayai.ReserveClient
-	// ToolAffinity is the IDAffinity instance keyed on tool_call_id for
-	// chat-completions continuation routing.
-	ToolAffinity *hayai.IDAffinity
-	// ResponseAffinity is the IDAffinity instance keyed on response_id
-	// for /v1/responses session routing. Optional; if nil, /v1/responses
-	// behaves as a stateless pass-through (no response-id routing).
-	// Wired in main.go.
-	ResponseAffinity *hayai.IDAffinity
-	// Tokenizer is the tokenize.Registry used by dispatch to produce
-	// input_tokens / max_output_tokens for the ReserveRequest.
-	Tokenizer *tokenize.Registry
-	// RelayReputation is the per-relay forward-reputation store, wired to the
-	// ChainOperatorSource backing the registry in main.go. Optional; nil
-	// disables relay downranking + outcome reporting (tests / non-privacy).
-	RelayReputation hayai.RelayReputation
-	// RelayLatency is the per-process client-observed latency store, wired to the
-	// same ChainOperatorSource as RelayReputation in main.go. Optional; nil
-	// disables latency-weighted relay selection + the slow-target demote.
-	RelayLatency hayai.RelayLatency
-	// TargetBackoff is the per-target-node dispatch-failure store, wired to the
-	// same ChainOperatorSource as RelayReputation in main.go. Optional; nil
-	// disables the demote + recording (tests).
-	TargetBackoff hayai.TargetBackoff
-	// NodeExcluder is the proven-malicious-node exclusion store, wired to the
-	// same ChainOperatorSource as RelayReputation in main.go. Optional; nil
-	// disables the hard-exclusion record + consult (tests).
-	NodeExcluder hayai.NodeExcluder
-	// Wallet composes + signs + submits the Payment + escrow.open
-	// atomic group per request and threads the app-call txid through
-	// the envelope. Assembled from hayai.NewWallet in main.go once the
-	// algod + escrow clients are constructed. Tests pass a *fakeWallet.
-	Wallet WalletOpener
-	// SpendGuard bounds the aggregate USDC the auto-spending wallet can drain
-	// (a runaway-agent backstop). Checked before each escrow open, credited
-	// after. Optional; nil disables enforcement.
-	SpendGuard SpendGuard
-	// Keystore holds Algorand mnemonics loaded at startup used to sign
-	// payment transactions against operator pay-to addresses.
-	Keystore *keystore.KeyStore
 	// TrackCryptoTimes turns on per-request encrypt/decrypt timing in the
 	// "request" log line. Off by default.
 	TrackCryptoTimes bool
-	// DebugLogBodies dumps full plaintext request bodies sent to the node AND
-	// decrypted responses (non-stream body / streaming frames) to stderr (the
-	// proxy's -debug-bodies flag). Off by default. Deliberately breaks
-	// non-retention — local debugging only. See debug.go.
-	DebugLogBodies bool
-	// ShutdownToken, when non-empty, registers the loopback-only POST /shutdown
-	// control channel and is the token it requires (sent as X-Shutdown-Token).
-	// The self-managed daemon parent generates it, forwards it to the serving
-	// child via the environment, and records it in daemon.json so `proxy stop`
-	// can reach it — the graceful-stop path on Windows (no SIGTERM). Empty
-	// (foreground / service-managed runs) ⇒ the route is not registered.
-	ShutdownToken string
-	// Shutdown is invoked by the POST /shutdown handler to trigger the same
-	// graceful drain a SIGTERM does (app.Run wires it to cancel the run ctx).
-	Shutdown func()
-	// RetryBudget and SweepDelay are zs.Config's: zero takes the shared
-	// transient-retry schedule.
-	RetryBudget time.Duration
-	SweepDelay  func(sweep int) time.Duration
 }
 
-// New builds a Server wired with the given config, logger, and
-// request/response transformers. Pass Options to supply optional
-// dependencies like the hayai recipient/tx-id providers.
-func New(cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
-	var spend hayai.SpendGuard
-	if opts.SpendGuard != nil {
-		spend = admitAll{opts.SpendGuard}
+// New serves c over HTTP. cfg, reqTx and respTx may be nil.
+func New(c *hayai.Client, cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
+	if cfg == nil {
+		cfg = &Config{}
 	}
-	c, err := hayai.New(context.Background(), hayai.Config{
-		Network:              hayai.Network{Algod: algod.Config{Network: cfg.Network}},
-		Privacy:              cfg.Privacy,
-		AllowPrivacyOverride: cfg.AllowPrivacyOverride,
-		RequireTEEModels:     cfg.TEERequiredModels,
-		Affinity:             hayai.Affinity{Policy: cfg.Affinity},
-		AllowStaging:         cfg.AllowStaging,
-		AllowPrivateHosts:    cfg.AllowPrivateOperators,
-		RetryBudget:          opts.RetryBudget,
-		SweepDelay:           opts.SweepDelay,
-		Stores: hayai.Stores{
-			RelayReputation:  opts.RelayReputation,
-			RelayLatency:     opts.RelayLatency,
-			TargetBackoff:    opts.TargetBackoff,
-			NodeExclusions:   opts.NodeExcluder,
-			ToolAffinity:     opts.ToolAffinity,
-			ResponseAffinity: opts.ResponseAffinity,
-		},
-		SpendGuard:     spend,
-		Registry:       opts.RegistryProvider,
-		ReserveClient:  opts.ReserveClient,
-		Wallet:         opts.Wallet,
-		Tokenizer:      opts.Tokenizer,
-		DebugLogBodies: opts.DebugLogBodies,
-		Logger:         log,
-		// 0 = no timeout; required for long SSE streams. Per-request
-		// cancellation comes from the request context. The tuned transport
-		// adds a short dial timeout (an unreachable operator fails over fast
-		// instead of stalling for Go's 30s default) and a large per-host idle
-		// pool (the proxy fans many concurrent requests at the same popular
-		// operator; Go's default of 2 idle conns/host forces a re-dial +
-		// re-TLS past the second). The header backstop bounds a
-		// connected-but-silent node; it is sized to outlast the slowest
-		// non-streaming forward (image generations/edits, whose headers wait
-		// on the full upstream call), not just admission — see
-		// httpx.ForwardHeaderBackstop.
-		//
-		// BlockPrivateTargets is the SSRF guard: the proxy is co-located with
-		// the user, so its localhost is the user's machine, and it dials
-		// operator-registered BaseURLs (the relay hop in privacy mode, or the
-		// target directly). Without the guard a malicious operator could
-		// register a loopback/RFC1918 BaseURL and make the proxy probe the
-		// user's own LAN. Default on; allow_private_operators is the localnet
-		// dev opt-out.
-		//
-		// It keeps http.DefaultTransport's environment proxy, which the SDK's
-		// own default drops.
-		HTTPClient: httpx.Client(0, httpx.Options{ResponseHeaderTimeout: httpx.ForwardHeaderBackstop, BlockPrivateTargets: !cfg.AllowPrivateOperators}),
-	})
-	if err != nil {
-		// hayai.New refuses nothing this Config can hold.
-		panic("handler.New: " + err.Error())
-	}
+	zc := c.Config()
 	s := &Server{
 		Client:           c,
 		cfg:              cfg,
 		log:              log,
-		registryProvider: opts.RegistryProvider,
+		registryProvider: c.Registry(),
+		allowStaging:     zc.AllowStaging,
+		network:          string(zc.Network.Algod.ResolvedNetwork),
 		reqTx:            reqTx,
 		respTx:           respTx,
 		mux:              http.NewServeMux(),
-		keystore:         opts.Keystore,
 		trackCryptoTimes: opts.TrackCryptoTimes,
-		shutdownToken:    opts.ShutdownToken,
-		shutdown:         opts.Shutdown,
 	}
 	s.routes()
 	return s
@@ -244,13 +86,6 @@ func New(cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, resp
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
-
-	// Loopback-only graceful-stop control channel — registered only when the
-	// daemon supplied a shutdown token (the Windows `proxy stop` path; unix uses
-	// SIGTERM). Foreground / service-managed runs leave it unregistered.
-	if s.shutdownToken != "" && s.shutdown != nil {
-		s.mux.HandleFunc("POST /shutdown", s.handleShutdown)
-	}
 
 	// /v1/completions is the legacy OpenAI text-completion endpoint. The proxy
 	// emulates it entirely by translating to/from /v1/chat/completions (see
@@ -355,41 +190,6 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		s.log.LogAttrs(ctx, level, "request", attrs...)
 	})
 }
-
-// WalletOpener is the escrow side of the payer the Client opens tickets
-// through.
-type WalletOpener = hayai.WalletOpener
-
-// SpendGuard is the subset of zs.SpendGuard the dispatch path uses: an atomic
-// Reserve of the ticket's MaxPrice ceiling against the caller's USDC caps
-// before the escrow open, then Settle (the signed receipt verified — record
-// the actual charge, drop the ceiling) or Release (anything else — drop the
-// ceiling, record nothing). Reserve folds check-and-add into one operation so
-// the cap holds under concurrent requests. A Reserve refusal wrapping
-// zs.ErrDuplicateTicket is an operator reusing a ticket id, not a cap breach,
-// so a fake must return that same sentinel to exercise the mapping.
-//
-// Everything is keyed by ticket id, and Settle/Release are idempotent, so a
-// ticket can be resolved from more than one place without double counting. Note
-// what that does NOT do: a request whose escrow committed but which never
-// produced a verified receipt (a stream its client cancelled, an upstream
-// gateway timeout) reaches neither call, and its ceiling stays outstanding until
-// the UTC day rolls. That is intentional — the operator can still claim up to
-// MaxPrice via settleLapsed, so the exposure is real — but it is held at the
-// full ceiling rather than the eventual charge. Reconciling it against the
-// on-chain outcome is the refund watchdog's job, not the dispatch path's.
-type SpendGuard interface {
-	Reserve(ticketID string, maxPriceMicroUSDC uint64) error
-	Settle(ticketID string, spentMicroUSDC uint64)
-	Release(ticketID string)
-}
-
-// admitAll is a SpendGuard as a zs.SpendGuard: its caps are checked at
-// Reserve, against the signed max_price, and it admits every request before
-// that.
-type admitAll struct{ SpendGuard }
-
-func (admitAll) Admit(uint64) error { return nil }
 
 // maxCapturedErrBody caps how many bytes of an error (status >= 400) response
 // body statusRecorder buffers for the request log line. The proxy's own error

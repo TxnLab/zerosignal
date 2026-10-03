@@ -70,7 +70,7 @@ func catalogServerWith(t *testing.T, allowStaging bool, rc hayai.ReserveClient, 
 	}
 	cfg := testConfig()
 	cfg.AllowStaging = allowStaging
-	return testServer(cfg, Options{RegistryProvider: reg, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
+	return testServer(cfg, deps{RegistryProvider: reg, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
 }
 
 func listedModelIDs(t *testing.T, s *Server) map[string]bool {
@@ -285,16 +285,16 @@ func dynamicCatalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator
 	}
 	cfg := testConfig()
 	cfg.AllowStaging = allowStaging
-	return testServer(cfg, Options{RegistryProvider: reg, ReserveClient: &refusingReserveClient{}, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
+	return testServer(cfg, deps{RegistryProvider: reg, ReserveClient: &refusingReserveClient{}, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}})
 }
 
 // TestDiscoveryHandlersOverDynamicRegistry is the shipped-path pin, and the one
 // that makes the two halves of the gate agree on a single Server.
 //
 // The aggregates read the value captured in DynamicRegistryConfig at
-// construction; handleHayaiOperators reads Config.AllowStaging live. In the
-// proxy both come from its hayai.allow_staging setting (registryConfigFor,
-// pinned in its internal/app). If they ever diverge, the proxy routes to a staging node while
+// construction; handleHayaiOperators reads the Client's AllowStaging. A Client
+// that builds its own registry feeds both from Config.AllowStaging (bootRegistry,
+// pinned in zs). If they ever diverge, the proxy routes to a staging node while
 // hiding it from its own catalog — which is the split this whole gate exists to
 // close, so it is asserted here across one Server rather than left to a comment.
 func TestDiscoveryHandlersOverDynamicRegistry(t *testing.T) {

@@ -147,14 +147,46 @@ type Client struct {
 	// rule (see AGENTS.md) — local debugging only, never enable in
 	// production. See debug.go.
 	debugLogBodies bool
+
+	// stop ends the background work New started; nil when it started none.
+	stop func()
 }
 
-// New builds a Client. For now it does not build Registry, ReserveClient or
-// Wallet from Signer and Network, so a Client is usable only with all three
-// supplied.
+// New builds a Client, and each nil Registry, ReserveClient and Wallet from
+// Signer and Network. Building them reads the chain: the escrow's config,
+// which must succeed, and a first discovery, which may fail and is retried in
+// the background. ctx bounds those reads only. Close stops the background
+// work.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	cfg = cfg.withDefaults()
+	ac, appID, warnings, err := cfg.validate()
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range warnings {
+		cfg.Logger.Warn(w)
+	}
+	cfg.Network = Network{Algod: ac, EscrowAppID: appID}
+	parts, err := buildNetworkParts(ctx, cfg, ac, appID)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Registry, cfg.ReserveClient, cfg.Wallet = parts.registry, parts.reserve, parts.wallet
 	st := cfg.Stores
+	if src := parts.source; src != nil {
+		if st.RelayReputation == nil {
+			st.RelayReputation = src
+		}
+		if st.RelayLatency == nil {
+			st.RelayLatency = src
+		}
+		if st.TargetBackoff == nil {
+			st.TargetBackoff = src
+		}
+		if st.NodeExclusions == nil {
+			st.NodeExclusions = src
+		}
+	}
 	if st.ToolAffinity == nil {
 		st.ToolAffinity = NewIDAffinity(cfg.Affinity.Max, cfg.Affinity.TTL, cfg.Clock)
 	}
@@ -169,7 +201,8 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		}
 		tok = tokenize.BuildRegistry(cfg.MaxOutputByModel, fallback)
 	}
-	return &Client{
+	cfg.Stores, cfg.Tokenizer = st, tok
+	c := &Client{
 		cfg:              cfg,
 		log:              cfg.Logger,
 		httpClient:       cfg.HTTPClient,
@@ -188,8 +221,26 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		retryBudget:      cfg.RetryBudget,
 		sweepDelayFn:     cfg.SweepDelay,
 		debugLogBodies:   cfg.DebugLogBodies,
-	}, nil
+		stop:             parts.stop,
+	}
+	c.warmFeeRate()
+	return c, nil
 }
+
+// Close stops the discovery refresh New started. It does not wait for
+// settlements; see WaitSettles. Safe to call more than once.
+func (s *Client) Close() {
+	if s.stop != nil {
+		s.stop()
+	}
+}
+
+// Config is the Client's configuration with every default applied and the
+// parts New built filled in.
+func (s *Client) Config() Config { return s.cfg }
+
+// Registry is the operator catalog the Client routes from.
+func (s *Client) Registry() RegistryProvider { return s.registryProvider }
 
 // Refunds is the watchdog that recovers escrow for tickets whose settlement
 // never arrived.
@@ -204,8 +255,9 @@ func (c *Config) relayByDefault() bool { return c.Privacy != PrivacyDirect }
 
 func (c *Config) teeRequired(model string) bool { return slices.Contains(c.RequireTEEModels, model) }
 
-// networkName names the chain in a funding error.
-func (s *Client) networkName() string { return s.cfg.Network.Algod.Network }
+// networkName names the chain in a funding error, spelled as the handler's
+// funding hint compares it.
+func (s *Client) networkName() string { return string(s.cfg.Network.Algod.ResolvedNetwork) }
 
 // settlementHandle is the subset of *OpenHandle the response builders use to
 // settle or dispute a ticket.
