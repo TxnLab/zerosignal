@@ -30,7 +30,7 @@ func getPath(t *testing.T, s *Server, path string) (int, string) {
 func TestRoutes_HostRelativeModelsAlias(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	wantStatus, wantBody := getPath(t, s, "/v1/models")
 	if wantStatus != http.StatusOK {
@@ -49,7 +49,7 @@ func TestRoutes_HostRelativeModelsAlias(t *testing.T) {
 func TestRoutes_HostRelativeModelGetAlias(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	for _, id := range []string{"gpt-test", "google/gemma-5.2"} {
 		wantStatus, wantBody := getPath(t, s, "/v1/models/"+id)
@@ -88,7 +88,7 @@ func isJSONBody(b string) bool {
 func TestRoutes_NoHostRelativePostAlias(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/chat/completions", `{"model":"gpt-test"}`))

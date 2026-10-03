@@ -131,18 +131,18 @@ type outFrame struct {
 
 func (o outFrame) isEmpty() bool { return o.frame.isEmpty() && o.usage == nil }
 
-// frameTransform is the per-frame hook used by pumpSSE. For hayai it
+// frameTransform is the per-frame hook used by pumpSSE. It
 // decrypts frames tagged with `event: zs` under a per-request symmetric
 // key.
 type frameTransform func(Frame) (outFrame, error)
 
 // frameTransformFactory builds the per-frame hook from the upstream response
-// headers. Hayai needs this because the symmetric key used to AEAD-open each
+// headers. It exists because the symmetric key used to AEAD-open each
 // SSE frame is carried in an upstream header and must be unwrapped before
 // the first frame is processed.
 type frameTransformFactory func(upstreamResp *http.Response) (frameTransform, error)
 
-// forwardRawStream is the low-level streaming forwarder used by the hayai
+// forwardRawStream is the low-level streaming forwarder used by the
 // dispatcher. It sends the pre-built body, branches on the operator
 // Content-Type, and either pumps SSE frames through frameFn or delegates
 // the buffered body to nonStreamFallback.

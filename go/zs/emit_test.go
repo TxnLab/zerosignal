@@ -484,7 +484,7 @@ func TestForwardRawNonStream_Posts(t *testing.T) {
 // its code is what a caller branches on.
 func TestNonStreamResponder_PreEnvelopeErrorIsInterrupted(t *testing.T) {
 	s := &Client{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	responder := s.buildHayaiNonStreamResponder(context.Background(), nil, "", nil, Operator{}, nil,
+	responder := s.buildNonStreamResponder(context.Background(), nil, "", nil, Operator{}, nil,
 		nil, endpointChatCompletions, "m", 0, 0, nil)
 
 	for _, tc := range []struct {

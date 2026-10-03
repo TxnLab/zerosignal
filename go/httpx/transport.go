@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Package httpx provides a shared, tuned http.Transport for hayai's
+// Package httpx provides a shared, tuned http.Transport for ZeroSignal's
 // node↔node and proxy↔node calls. Go's http.DefaultTransport is wrong in
 // two ways for a service that fans many concurrent requests at a small,
 // changing set of operator hosts:

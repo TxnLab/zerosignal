@@ -204,7 +204,7 @@ func TestPickCandidates_VersionFilter_ResponseIDPin_BlocksIncompatible(t *testin
 	}
 }
 
-func TestDispatchHayai_VersionBlocked_NoCompatibleOperator(t *testing.T) {
+func TestDispatch_VersionBlocked_NoCompatibleOperator(t *testing.T) {
 	// End-to-end: every operator advertises an incompatible major, and the
 	// turn must translate VersionBlocked → no_compatible_operator.
 	srv := minimalVersionServer(t, []Operator{

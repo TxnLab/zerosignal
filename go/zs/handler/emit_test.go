@@ -162,7 +162,7 @@ func TestHTTPEmitter_OpenWithoutFlusherFails(t *testing.T) {
 func TestHTTPEmitter_LegacyCompletionsReshapesContentOnly(t *testing.T) {
 	chunk := []byte(`{"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}`)
 	r := httptest.NewRequest(http.MethodPost, "/v1/completions", nil)
-	r.Header.Set(hayaiUsageFrameHeader, "1")
+	r.Header.Set(usageFrameHeader, "1")
 	w := httptest.NewRecorder()
 	newHTTPEmitter(w, r, formatLegacyCompletions, "").serve((&script{events: []zs.Event{
 		zs.ResponseStarted{Status: http.StatusOK, Streaming: true},
@@ -180,7 +180,7 @@ func TestHTTPEmitter_LegacyCompletionsReshapesContentOnly(t *testing.T) {
 	if got[1] != "data: "+string(chunk) {
 		t.Errorf("pass-through frame changed: %s", got[1])
 	}
-	if !strings.HasPrefix(got[2], "event: "+hayaiUsageFrameEvent) {
+	if !strings.HasPrefix(got[2], "event: "+usageFrameEvent) {
 		t.Errorf("usage frame: %s", got[2])
 	}
 

@@ -173,7 +173,7 @@ func TestDynamicRegistry_AllNodeVersionsExcludesStaging(t *testing.T) {
 // remain usable as relays, since a relay forwards bytes and runs no inference."
 // Server.relayPool builds the relay pool from AllOperators, so filtering staging
 // there would silently shrink the pool SPEC §3f diffusion depends on. The
-// payer-facing production view is applied by handleHayaiOperators instead.
+// payer-facing production view is applied by handleOperators instead.
 func TestDynamicRegistry_AllOperatorsKeepsStagingForRelayUse(t *testing.T) {
 	op := stagingOp(1, "m")
 
@@ -182,7 +182,7 @@ func TestDynamicRegistry_AllOperatorsKeepsStagingForRelayUse(t *testing.T) {
 		t.Fatalf("AllOperators = %+v, want the staging node kept (it is still a valid relay hop)", got)
 	}
 	if !got[0].Staging {
-		t.Error("AllOperators dropped the Staging flag; handleHayaiOperators needs it to filter and mark")
+		t.Error("AllOperators dropped the Staging flag; handleOperators needs it to filter and mark")
 	}
 }
 

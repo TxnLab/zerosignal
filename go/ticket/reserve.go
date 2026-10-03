@@ -206,7 +206,7 @@ func ReserveSigDigest(r *ReserveRequest, operatorID, nodeID uint64) [sha256.Size
 // set r.Model / r.InputCount / r.MaxOutputCount / r.Stream / r.ProxyRecipient
 // and r.PayerIssuedAt — the signature commits to all of them plus the target
 // (operatorID, nodeID). operatorID / nodeID are the node this reserve is being
-// sent to (proxy: hayai.Operator.ID/NodeID; client: the RoutableNode it
+// sent to (proxy: zs.Operator.ID/NodeID; client: the RoutableNode it
 // reserves against). Mirrors Ticket.Sign / EphemeralAdvertisement.Sign.
 func (r *ReserveRequest) Sign(ctx context.Context, signer BytesSigner, payerAddr string, operatorID, nodeID uint64) error {
 	if signer == nil {

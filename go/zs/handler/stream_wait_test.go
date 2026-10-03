@@ -12,7 +12,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // Wait reports the submit of a turn run through Client.Stream, on both
@@ -29,31 +29,31 @@ func TestStreamWait_ReportsTheTurnsSubmit(t *testing.T) {
 		name     string
 		node     nodeConfig
 		body     string
-		wantKind hayai.SettleKind
+		wantKind zs.SettleKind
 		wantErr  bool
 	}{
 		{"whole reply, payer ack",
 			nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"choices":[{"message":{"content":"hi"}}]}`), buildReceipt: verifying},
-			`{"model":"gpt-test"}`, hayai.SettlePayerAck, true},
+			`{"model":"gpt-test"}`, zs.SettlePayerAck, true},
 		{"stream, protest",
 			nodeConfig{mode: modeStreamReceiptIntact, streamFrames: frames, buildReceipt: mismatchingReceipt},
-			`{"model":"gpt-test","stream":true}`, hayai.SettleProtest, true},
+			`{"model":"gpt-test","stream":true}`, zs.SettleProtest, true},
 		{"stream cut before the receipt",
 			nodeConfig{mode: modeStreamReceiptTruncated, streamFrames: frames, buildReceipt: mismatchingReceipt},
-			`{"model":"gpt-test","stream":true}`, hayai.SettleNone, false},
+			`{"model":"gpt-test","stream":true}`, zs.SettleNone, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := newFakeNode(t, &tc.node)
 			cfg := testConfig()
-			opts := setupHayai(t, cfg, node)
+			opts := setup(t, cfg, node)
 			wallet := &fakeWallet{appCallTxID: "APPCALLTX"}
 			opts.Wallet = wallet
 			s := testServer(cfg, opts)
 
 			// FramesOnly, as the handler runs it: the fake node's frames are not
 			// OpenAI chunks a decoder would accept as finished.
-			st := s.Client.Stream(context.Background(), hayai.Request{Endpoint: hayai.EndpointChatCompletions, Body: []byte(tc.body), FramesOnly: true})
+			st := s.Client.Stream(context.Background(), zs.Request{Endpoint: zs.EndpointChatCompletions, Body: []byte(tc.body), FramesOnly: true})
 			for _, err := range st.Events() {
 				if err != nil {
 					t.Fatalf("turn failed: %v", err)
@@ -65,7 +65,7 @@ func TestStreamWait_ReportsTheTurnsSubmit(t *testing.T) {
 			if r.Kind != tc.wantKind || (err != nil) != tc.wantErr {
 				t.Fatalf("Wait = %+v, %v; want kind %q, error %v", r, err, tc.wantKind, tc.wantErr)
 			}
-			if tc.wantKind != hayai.SettleNone && (r.TicketID == "" || r.TicketID != wallet.lastTID) {
+			if tc.wantKind != zs.SettleNone && (r.TicketID == "" || r.TicketID != wallet.lastTID) {
 				t.Errorf("Wait ticket %q, opened %q", r.TicketID, wallet.lastTID)
 			}
 		})

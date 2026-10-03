@@ -4,7 +4,7 @@
  */
 
 // Package selection holds the shared, transport-agnostic operator- and
-// path-selection policy used by every hayai "user" endpoint (the proxy and
+// path-selection policy used by every zs "user" endpoint (the proxy and
 // the client/ chat app). Lifting the policy here — rather than letting each
 // app reimplement it — is what guarantees they pick the same target and the
 // same relay hop, so the network's privacy and routing behavior is uniform.
@@ -109,7 +109,7 @@ type Operator struct {
 	// A missing entry is treated as unbounded by Fits.
 	ModelCapacities map[string]ModelCapacity `json:"model_capacities"`
 
-	// BuiltinTools is the set of hayai built-in tool type names the
+	// BuiltinTools is the set of zs built-in tool type names the
 	// operator advertises. nil means unknown capability — the tool
 	// partition treats such operators as "don't prefer, don't exclude".
 	BuiltinTools []string `json:"builtin_tools"`

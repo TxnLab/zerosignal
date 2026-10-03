@@ -18,7 +18,7 @@ import (
 // references a `zs_*` tool type that the node's registry does not
 // enable. Handlers surface this as a 400 so the client can see the
 // offending type name in the reason string.
-var ErrUnknownBuiltinTool = errors.New("unknown hayai builtin tool type")
+var ErrUnknownBuiltinTool = errors.New("unknown zs builtin tool type")
 
 // RewriteBuiltinToolsChat walks body.tools[] and replaces every
 // {"type":"zs_*", "zs_*":{...}} entry with a Chat-Completions-flavor
@@ -32,13 +32,13 @@ var ErrUnknownBuiltinTool = errors.New("unknown hayai builtin tool type")
 // registry (defs). Each matching entry is replaced wholesale, so any
 // extra fields the client may have set are implicitly dropped.
 //
-// Non-hayai entries (`{"type":"function"}`, etc.) pass through byte-
+// Non-zs entries (`{"type":"function"}`, etc.) pass through byte-
 // identical via json.RawMessage. When body does not contain a tools[]
 // array (or contains no zs_* entries), the original body is returned
 // unchanged and builtinNames is an empty map — this is the zero-regression
 // guarantee for non-tool requests.
 //
-// builtinNames maps the rewritten function name to the originating hayai
+// builtinNames maps the rewritten function name to the originating zs
 // type, so the response interceptor can filter tool_calls efficiently.
 func RewriteBuiltinToolsChat(body []byte, defs map[BuiltinToolType]BuiltinToolDef) (rewritten []byte, builtinNames map[string]BuiltinToolType, err error) {
 	return rewriteBuiltinTools(body, defs, marshalChatFunctionTool)
@@ -535,11 +535,11 @@ type ChatToolCallStitcher struct {
 	usage         ChatUsage
 	sawUsage      bool
 	sawUsageChunk bool
-	// builtinNames is the map from function name to hayai built-in type,
+	// builtinNames is the map from function name to zs built-in type,
 	// as populated by RewriteBuiltinToolsChat. The stitcher uses it to
 	// classify each tool-call frame as FrameToolCallBuiltin or
 	// FrameToolCallClient so the streaming tool loop can suppress or
-	// forward the frame accordingly. nil / empty map means "no hayai
+	// forward the frame accordingly. nil / empty map means "no zs
 	// tools registered" — every tool call is classified as client.
 	builtinNames map[string]BuiltinToolType
 }
@@ -563,7 +563,7 @@ type chatStitchEntry struct {
 // intentionally unusable — callers must use this constructor so the
 // internal maps are ready.
 // builtinNames is the name→type map from RewriteBuiltinToolsChat; pass
-// nil or an empty map when no hayai built-ins are registered.
+// nil or an empty map when no zs built-ins are registered.
 func NewChatToolCallStitcher(builtinNames map[string]BuiltinToolType) *ChatToolCallStitcher {
 	return &ChatToolCallStitcher{
 		byIndex:      map[int]*chatStitchEntry{},
@@ -571,7 +571,7 @@ func NewChatToolCallStitcher(builtinNames map[string]BuiltinToolType) *ChatToolC
 	}
 }
 
-// classifyToolCall returns FrameToolCallBuiltin when name is a known hayai
+// classifyToolCall returns FrameToolCallBuiltin when name is a known zs
 // built-in and FrameToolCallClient otherwise.
 func (s *ChatToolCallStitcher) classifyToolCall(name string) FrameClassification {
 	if name == "" {
@@ -580,8 +580,8 @@ func (s *ChatToolCallStitcher) classifyToolCall(name string) FrameClassification
 		// tool_calls[i] delta — but llama.cpp / some tool-call modes
 		// defer the name to a later fragment. Return FrameUnknown so
 		// the tool-loop buffers the fragment until the name arrives.
-		// Suppressing-then-replaying is safer than forwarding a hayai
-		// fragment to the client before we know it's hayai.
+		// Suppressing-then-replaying is safer than forwarding a zs
+		// fragment to the client before we know it's zs.
 		return FrameUnknown
 	}
 	if _, ok := s.builtinNames[name]; ok {
@@ -695,7 +695,7 @@ func (s *ChatToolCallStitcher) Observe(frame []byte) FrameClassification {
 			// Classify this fragment by its stored name. If we haven't
 			// seen the name yet (this delta only carried an id or an
 			// arguments chunk), treat as client — conservative choice
-			// since hayai names appear in the first fragment by spec.
+			// since zs names appear in the first fragment by spec.
 			if s.classifyToolCall(entry.Name) == FrameToolCallBuiltin {
 				sawBuiltinCall = true
 			} else {
@@ -715,11 +715,11 @@ func (s *ChatToolCallStitcher) Observe(frame []byte) FrameClassification {
 	case sawContent:
 		return FrameContent
 	case sawToolCall:
-		// If ANY tool call in this frame is hayai, treat the whole frame
-		// as hayai (suppress). In practice providers stream one call's
+		// If ANY tool call in this frame is zs, treat the whole frame
+		// as zs (suppress). In practice providers stream one call's
 		// fragments per frame so this is unambiguous; if a rare mixed
 		// frame appears, suppressing is the safer default than
-		// forwarding an unredacted hayai payload to the client.
+		// forwarding an unredacted zs payload to the client.
 		if sawBuiltinCall {
 			return FrameToolCallBuiltin
 		}

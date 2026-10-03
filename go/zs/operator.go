@@ -110,7 +110,7 @@ type Operator struct {
 	// filter tightens automatically.
 	ModelCapacities map[string]ModelCapacity
 
-	// BuiltinTools is the hayai built-in tool advertisement the operator
+	// BuiltinTools is the zs built-in tool advertisement the operator
 	// publishes on /v1/zs/details. Populated opportunistically at
 	// startup by FetchDetails; nil means the proxy couldn't reach the
 	// endpoint (older node, network blip) and the operator is assumed
@@ -364,7 +364,7 @@ func (o Operator) SealRecipient(now time.Time) (age.Recipient, error) {
 }
 
 // SupportsBuiltinTool reports whether this operator advertises the
-// given hayai tool type. An operator with no declared BuiltinTools
+// given zs tool type. An operator with no declared BuiltinTools
 // (nil slice) returns false — the capability data is missing and the
 // proxy only "prefers" operators that positively advertise.
 func (o Operator) SupportsBuiltinTool(toolType string) bool {
@@ -659,7 +659,7 @@ func (o Operator) Selection() selection.Operator {
 		// flags and ORDERS them by the projected image rates (an image model's
 		// token rates are 0, so the token sort can't rank them). The
 		// authoritative per-image sizing still reads the rate off this
-		// ModelCapacity in hayai_dispatch, not off the routing descriptor.
+		// ModelCapacity in dispatch, not off the routing descriptor.
 		caps[m] = selection.ModelCapacity{
 			ContextWindow:       c.ContextWindow,
 			MaxOutputTokens:     c.MaxOutputTokens,

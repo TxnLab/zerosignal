@@ -291,7 +291,7 @@ func buildVectors() *vectorsFile {
 
 	return &vectorsFile{
 		Version: 6,
-		Comment: "Cross-impl byte-parity vectors for the hayai protocol. " +
+		Comment: "Cross-impl byte-parity vectors for the ZeroSignal protocol. " +
 			"Regenerate via: cd proto/go && go test ./ticket -run TestVectors -update. " +
 			"Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
 		AADBodyWithTicket: aadVector{

@@ -276,7 +276,7 @@ func TestResolveUsePrivacy(t *testing.T) {
 // End-to-end: a turn must report each routing-preference diagnostic as its
 // own code. Exercises the `provider`-object parse path (the field rides in the
 // request body).
-func TestDispatchHayai_RoutingPreferences_Statuses(t *testing.T) {
+func TestDispatch_RoutingPreferences_Statuses(t *testing.T) {
 	cases := []struct {
 		name     string
 		ops      []Operator

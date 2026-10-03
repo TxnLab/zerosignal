@@ -11,8 +11,8 @@ import (
 	"encoding/json"
 )
 
-// Hayai tool-round status event type strings. Emitted by the node
-// during server-side execution of a hayai built-in tool so the client
+// ZeroSignal tool-round status event type strings. Emitted by the node
+// during server-side execution of a zs built-in tool so the client
 // can render an "in progress" indicator during an otherwise silent
 // tool round. Both events are sealed like any other streaming frame —
 // they ride the `event: zs` SSE channel and increment the sealer's
@@ -21,7 +21,7 @@ import (
 // Shape mirrors OpenAI's Responses-API built-in tool events (e.g.
 // response.web_search_call.in_progress). Unknown Responses event types
 // pass cleanly through openai-go's union-deserializer, so a client
-// that doesn't know about hayai types still sees them as events it
+// that doesn't know about zs types still sees them as events it
 // can ignore.
 const (
 	StatusEventToolCallInProgress = "response.zs_tool_call.in_progress"
@@ -52,7 +52,7 @@ const StatusEventImageProgress = "response.zs_image.progress"
 // zero-or-more times (operator-throttled); an unaware client ignores it.
 const StatusEventImagePartial = "response.zs_image.partial"
 
-// ToolCallStatusFrame is the plaintext payload inside a sealed hayai
+// ToolCallStatusFrame is the plaintext payload inside a sealed zs
 // status SSE frame. The outer wire frame is `event: zs\ndata:
 // <sealed JSON>\n\n` per SPEC.md §5.3; this struct is the JSON
 // unmarshal target for the sealed plaintext.

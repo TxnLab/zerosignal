@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Package wire implements the hayai encrypted-envelope layer shared by the
-// hayai proxy and a hayai node. SPEC.md in this module is the authoritative
+// Package wire implements the ZeroSignal encrypted-envelope layer shared by
+// a zs payer (proxy or client) and a zs node. SPEC.md in this module is the authoritative
 // wire specification; the symbols exported here cite section numbers where
 // behavior is non-obvious.
 //

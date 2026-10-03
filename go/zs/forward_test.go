@@ -31,7 +31,7 @@ func TestBuildOperatorRequest_NoBearerInjected(t *testing.T) {
 	}
 }
 
-func TestBuildOperatorRequest_AcceptHayai(t *testing.T) {
+func TestBuildOperatorRequest_AcceptEnvelope(t *testing.T) {
 	s := &Client{}
 
 	req, err := s.buildOperatorRequest(context.Background(), testOperatorBaseURL, http.MethodPost, "/v1/chat/completions", []byte(`{}`), wire.EncryptedContentType, nil)
@@ -40,7 +40,7 @@ func TestBuildOperatorRequest_AcceptHayai(t *testing.T) {
 	}
 	accept := req.Header.Get("Accept")
 	if !strings.Contains(accept, wire.EncryptedContentType) {
-		t.Errorf("Accept missing hayai MIME: %q", accept)
+		t.Errorf("Accept missing envelope MIME: %q", accept)
 	}
 	if !strings.Contains(accept, "application/json") {
 		t.Errorf("Accept missing application/json: %q", accept)

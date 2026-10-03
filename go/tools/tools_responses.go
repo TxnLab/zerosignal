@@ -25,7 +25,7 @@ import (
 // The function-tool shape differs from Chat Completions — Responses hoists
 // name/description/parameters to the top level rather than nesting them
 // under a `function` key. Otherwise the rewriter mirrors the chat variant:
-// unknown zs_* types error, non-hayai entries pass through, and the
+// unknown zs_* types error, non-zs entries pass through, and the
 // return value is byte-identical to the input when no rewrite is needed.
 func RewriteBuiltinToolsResponses(body []byte, defs map[BuiltinToolType]BuiltinToolDef) (rewritten []byte, builtinNames map[string]BuiltinToolType, err error) {
 	return rewriteBuiltinTools(body, defs, marshalResponsesFunctionTool)
@@ -558,11 +558,11 @@ type ResponsesToolCallStitcher struct {
 	messageItemID      string
 	messageOutputIndex int
 	hasMessageItem     bool
-	// builtinNames is the map from function name to hayai built-in type,
+	// builtinNames is the map from function name to zs built-in type,
 	// as populated by RewriteBuiltinToolsResponses. The stitcher uses
 	// it to classify each tool-call frame as FrameToolCallBuiltin or
 	// FrameToolCallClient so the streaming tool loop can suppress or
-	// forward the frame accordingly. nil / empty map means "no hayai
+	// forward the frame accordingly. nil / empty map means "no zs
 	// tools registered" — every tool call is classified as client.
 	builtinNames map[string]BuiltinToolType
 }
@@ -592,7 +592,7 @@ type responsesStitchEntry struct {
 
 // NewResponsesToolCallStitcher returns a ready-to-use stitcher.
 // builtinNames is the name→type map from RewriteBuiltinToolsResponses;
-// pass nil or an empty map when no hayai built-ins are registered and
+// pass nil or an empty map when no zs built-ins are registered and
 // every tool call should be treated as client-defined.
 func NewResponsesToolCallStitcher(builtinNames map[string]BuiltinToolType) *ResponsesToolCallStitcher {
 	return &ResponsesToolCallStitcher{
@@ -619,9 +619,9 @@ func (s *ResponsesToolCallStitcher) entryFor(key, itemType string) *responsesSti
 	return entry
 }
 
-// classifyToolCall returns FrameToolCallBuiltin when name is a known hayai
+// classifyToolCall returns FrameToolCallBuiltin when name is a known zs
 // built-in and FrameToolCallClient otherwise. The decision is made per
-// tool call (by function name), so a response that mixes a hayai and a
+// tool call (by function name), so a response that mixes a zs and a
 // client-defined call into one iteration gets each fragment classified
 // on its own merits.
 func (s *ResponsesToolCallStitcher) classifyToolCall(name string) FrameClassification {
@@ -630,11 +630,11 @@ func (s *ResponsesToolCallStitcher) classifyToolCall(name string) FrameClassific
 		// output_item.added carries the function name, but llama.cpp /
 		// some Qwen tool-call modes delay the name until a later event
 		// (output_item.done or the completed overlay). Classifying as
-		// FrameToolCallClient in that window would forward hayai tool
-		// fragments to the wire before we know they're hayai. Return
+		// FrameToolCallClient in that window would forward zs tool
+		// fragments to the wire before we know they're zs. Return
 		// FrameUnknown so the tool-loop buffers the fragment — once the
 		// name resolves, subsequent frames classify authoritatively and
-		// the buffered head is either discarded (hayai) or flushed at
+		// the buffered head is either discarded (zs) or flushed at
 		// iteration end (legitimate client tool).
 		return FrameUnknown
 	}
@@ -669,7 +669,7 @@ func (s *ResponsesToolCallStitcher) classifyToolCall(name string) FrameClassific
 //   - response.zs_tool_call.in_progress / .completed            → FrameStatus
 //   - everything else                                              → FrameUnknown
 //
-// Tool-call frames are split by whether the function name is a hayai
+// Tool-call frames are split by whether the function name is a zs
 // built-in (suppress from wire, execute server-side) or a client-
 // defined function (forward to wire, client executes). See
 // classifyToolCall for how the split is decided.
@@ -851,7 +851,7 @@ func (s *ResponsesToolCallStitcher) Observe(frame []byte) FrameClassification {
 		// item payload (name, call_id, arguments). Classifying it as
 		// FrameUnknown leaks the tool-call metadata to the client after
 		// the arguments.delta/done frames were already suppressed. Route
-		// it through the same hayai-vs-client decision as the other
+		// it through the same zs-vs-client decision as the other
 		// function_call frames.
 		if isFunctionCall {
 			return s.classifyToolCall(entryName)

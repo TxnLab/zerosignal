@@ -1,5 +1,5 @@
-' Hayai transport privacy — single-hop operator-as-relay (Option A).
-' Companion to proto/SPEC.md § 3f. hayai.privacy defaults ON: honest clients
+' ZeroSignal transport privacy — single-hop operator-as-relay (Option A).
+' Companion to proto/SPEC.md § 3f. zs.privacy defaults ON: honest clients
 ' route THROUGH a relay by default; only an explicit privacy: false (YAML) /
 ' PROXY_ZS_PRIVACY=false opts back to a direct route.
 '
@@ -12,7 +12,7 @@
 ' proto/go/zs/relayrouter.go, node/internal/server/relay.go).
 
 @startuml flow-transport-relay
-title Hayai transport privacy — single-hop relay (proxy -> relay -> target)
+title ZeroSignal transport privacy — single-hop relay (proxy -> relay -> target)
 
 autonumber "<b>[00]</b>"
 skinparam sequence {
@@ -23,7 +23,7 @@ skinparam sequence {
     NoteBorderColor #C0A000
 }
 
-participant "Proxy\nhayai_dispatch.go +\nproto/go/zs/relayrouter.go\n(hayai.privacy = ON)" as Proxy
+participant "Proxy\nproto/go/zs/dispatch.go +\nproto/go/zs/relayrouter.go\n(zs.privacy = ON)" as Proxy
 participant "Algod / ZeroSignalEscrow\nOperator + Node boxes" as Chain
 participant "Relay Node\nhandleRelay (server/relay.go)\n+ CachedRelayDirectory" as Relay
 participant "Target Node\nhandlers.go + receipt.go +\nsettlement worker" as Target
@@ -38,7 +38,7 @@ end note
 
 == Path selection (proxy side; on-chain enumeration is NOT relayed) ==
 
-Proxy -> Chain: enumerate Operator + Node boxes (algod box reads, fetcher.go)\n  -> []hayai.Operator  (each entry is ONE node within an operator,\n     keyed by (operatorId, nodeId))\n  *This is NOT an operator HTTP call -> never relayed* (SPEC §3f);\n  hiding the proxy here is out of scope (any algod endpoint works).
+Proxy -> Chain: enumerate Operator + Node boxes (algod box reads, fetcher.go)\n  -> []zs.Operator  (each entry is ONE node within an operator,\n     keyed by (operatorId, nodeId))\n  *This is NOT an operator HTTP call -> never relayed* (SPEC §3f);\n  hiding the proxy here is out of scope (any algod endpoint works).
 Chain --> Proxy: per-node set\n  {operatorId, nodeId, owner_addr (operator-level),\n   base_url (per-node), proto_version, reachable,\n   tee_attested, models[], builtin_tools[]}
 
 Proxy -> Proxy: selection.SelectTargets(ops, constraints, preferred)\n  ServesModel filter -> sizing -> image-factor -> version -> TEE\n  -> built-in-tool partition -> affinity reorder\n  => TARGET operator (same policy as the direct pickCandidates)

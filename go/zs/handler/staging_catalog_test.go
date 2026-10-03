@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // The proxy's discovery surface must agree with its routing: SelectTargets
@@ -25,7 +25,7 @@ import (
 // half lives in proto/go/zs/registry_staging_test.go.
 
 // catalogOp is a REACHABLE model-serving node, optionally flagged staging.
-// Distinct from stagingOp in hayai_dispatch_staging_test.go, which leaves
+// Distinct from stagingOp in dispatch_staging_test.go, which leaves
 // Reachable false — fine for pickCandidates, but the catalog aggregates gate on
 // reachability first and would drop every fixture before staging was consulted.
 //
@@ -34,12 +34,12 @@ import (
 // production ships) needs either a fresh probe this cycle or a ReachableAsOf
 // inside the carry window. A fixture with only Reachable set passes every static
 // assertion and is dropped entirely by the dynamic provider.
-func catalogOp(id uint64, model string, staging bool) hayai.Operator {
-	return hayai.Operator{
+func catalogOp(id uint64, model string, staging bool) zs.Operator {
+	return zs.Operator{
 		ID: id, OwnerAddr: "A", BaseURL: "http://op.example",
 		Reachable: true, Probed: true, ReachableAsOf: time.Now(),
 		Models: []string{model},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			model: {
 				ContextWindow:   128_000,
 				MaxOutputTokens: 16_384,
@@ -55,16 +55,16 @@ func catalogOp(id uint64, model string, staging bool) hayai.Operator {
 // catalogServer wires a Server whose registry and config agree on allow_staging
 // — the two must be threaded from the same value in production (app.go), so a
 // fixture that sets only one would test a state that cannot occur.
-func catalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator) *Server {
+func catalogServer(t *testing.T, allowStaging bool, ops ...zs.Operator) *Server {
 	t.Helper()
 	return catalogServerWith(t, allowStaging, &refusingReserveClient{}, ops...)
 }
 
 // catalogServerWith is catalogServer over rc. A request that routes ends at
 // rc's refusal, before any payment.
-func catalogServerWith(t *testing.T, allowStaging bool, rc hayai.ReserveClient, ops ...hayai.Operator) *Server {
+func catalogServerWith(t *testing.T, allowStaging bool, rc zs.ReserveClient, ops ...zs.Operator) *Server {
 	t.Helper()
-	reg, err := hayai.NewStaticRegistryProviderWithConfig(ops, hayai.StaticRegistryConfig{AllowStaging: allowStaging})
+	reg, err := zs.NewStaticRegistryProviderWithConfig(ops, zs.StaticRegistryConfig{AllowStaging: allowStaging})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -157,7 +157,7 @@ func operatorsPayload(t *testing.T, s *Server) []map[string]any {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /v1/zs/operators status = %d, body %s", w.Code, w.Body.String())
 	}
@@ -173,7 +173,7 @@ func operatorsPayload(t *testing.T, s *Server) []map[string]any {
 	return out.Operators
 }
 
-func TestHandleHayaiOperators_DropsStagingNodesByDefault(t *testing.T) {
+func TestHandleOperators_DropsStagingNodesByDefault(t *testing.T) {
 	ops := operatorsPayload(t, catalogServer(t, false,
 		catalogOp(1, "prod-model", false),
 		catalogOp(2, "staging-only", true),
@@ -190,7 +190,7 @@ func TestHandleHayaiOperators_DropsStagingNodesByDefault(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiOperators_MarksStagingWhenAllowed(t *testing.T) {
+func TestHandleOperators_MarksStagingWhenAllowed(t *testing.T) {
 	ops := operatorsPayload(t, catalogServer(t, true,
 		catalogOp(1, "prod-model", false),
 		catalogOp(2, "staging-only", true),
@@ -219,7 +219,7 @@ func TestHandleHayaiOperators_MarksStagingWhenAllowed(t *testing.T) {
 // to. Both surfaces are driven from one Server and one fixture, so they cannot
 // drift apart without failing here.
 func TestStagingCatalogAndDispatchAgree(t *testing.T) {
-	ops := []hayai.Operator{
+	ops := []zs.Operator{
 		catalogOp(1, "prod-model", false),
 		catalogOp(2, "staging-only", true),
 	}
@@ -260,21 +260,21 @@ func postChat(t *testing.T, s *Server, model string) (int, string) {
 	return w.Code, w.Body.String()
 }
 
-// frozenSource is an hayai.OperatorSource that always returns the same fleet, so
+// frozenSource is a zs.OperatorSource that always returns the same fleet, so
 // a DynamicRegistryProvider can be driven without a chain.
-type frozenSource struct{ ops []hayai.Operator }
+type frozenSource struct{ ops []zs.Operator }
 
-func (f *frozenSource) Fetch(context.Context) ([]hayai.Operator, error) {
-	return append([]hayai.Operator(nil), f.ops...), nil
+func (f *frozenSource) Fetch(context.Context) ([]zs.Operator, error) {
+	return append([]zs.Operator(nil), f.ops...), nil
 }
 
 // dynamicCatalogServer is catalogServer over the provider production actually
 // ships. The two providers implement the aggregates SEPARATELY
 // (registry_dynamic.go vs registry.go), so a handler test on the static one
 // exercises code no payer ever runs.
-func dynamicCatalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator) *Server {
+func dynamicCatalogServer(t *testing.T, allowStaging bool, ops ...zs.Operator) *Server {
 	t.Helper()
-	reg, err := hayai.NewDynamicRegistryProvider(&frozenSource{ops: ops}, ops, hayai.DynamicRegistryConfig{
+	reg, err := zs.NewDynamicRegistryProvider(&frozenSource{ops: ops}, ops, zs.DynamicRegistryConfig{
 		RefreshInterval: time.Hour,
 		RefreshTimeout:  time.Second,
 		MaxCacheAge:     time.Hour,
@@ -292,13 +292,13 @@ func dynamicCatalogServer(t *testing.T, allowStaging bool, ops ...hayai.Operator
 // that makes the two halves of the gate agree on a single Server.
 //
 // The aggregates read the value captured in DynamicRegistryConfig at
-// construction; handleHayaiOperators reads the Client's AllowStaging. A Client
+// construction; handleOperators reads the Client's AllowStaging. A Client
 // that builds its own registry feeds both from Config.AllowStaging (bootRegistry,
 // pinned in zs). If they ever diverge, the proxy routes to a staging node while
 // hiding it from its own catalog — which is the split this whole gate exists to
 // close, so it is asserted here across one Server rather than left to a comment.
 func TestDiscoveryHandlersOverDynamicRegistry(t *testing.T) {
-	ops := []hayai.Operator{
+	ops := []zs.Operator{
 		catalogOp(1, "prod-model", false),
 		catalogOp(2, "staging-only", true),
 	}
@@ -354,7 +354,7 @@ func detailsModelIDs(t *testing.T, s *Server) map[string]bool {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /v1/zs/details status = %d, body %s", w.Code, w.Body.String())
 	}

@@ -60,7 +60,7 @@ func FeeSink(network string) string {
 // EscrowAppID returns the canonical ZeroSignalEscrow application id embedded for a
 // public network ("testnet" | "mainnet", case-insensitive). It returns 0 when
 // none is shipped — localnet (deploy-specific) and any unknown/empty network —
-// in which case the value must come from config (hayai.escrow_app_id). The
+// in which case the value must come from config (zs.escrow_app_id). The
 // lowercase normalization mirrors Resolve so the two agree on what "MainNet"
 // means.
 //

@@ -1105,7 +1105,7 @@ func (p *DynamicRegistryProvider) AllModelDetails(ctx context.Context) []inject.
 // covers target selection only — a relay forwards bytes and runs no inference, so
 // a staging node is a perfectly good hop and excluding it would shrink the pool
 // SPEC §3f diffusion depends on. Callers that want the payer-facing production
-// view apply zs.allow_staging themselves; handleHayaiOperators does.
+// view apply zs.allow_staging themselves; handleOperators does.
 func (p *DynamicRegistryProvider) AllOperators(ctx context.Context) []Operator {
 	p.ensureFresh(ctx)
 	snap := p.snap.Load()

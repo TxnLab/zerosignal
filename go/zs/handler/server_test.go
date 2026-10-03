@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
@@ -29,7 +29,7 @@ func TestNew_WiresFields(t *testing.T) {
 	cfg.FundingURL = "https://app.example"
 	reg := errRegistry{}
 	s := testServer(cfg, deps{RegistryProvider: reg})
-	if s.registryProvider != hayai.RegistryProvider(reg) {
+	if s.registryProvider != zs.RegistryProvider(reg) {
 		t.Error("registry is not the Client's")
 	}
 	if !s.allowStaging || s.network != "mainnet" || s.cfg.FundingURL != "https://app.example" {
@@ -114,7 +114,7 @@ func TestMiddleware_LogsErrorReason(t *testing.T) {
 	s := newServer(&testConfig().policy, logger, transform.Passthrough{}, transform.Passthrough{}, deps{})
 	buf.Reset() // drop the Client's startup lines
 
-	// A handler that fails the way dispatchHayai does: an OpenAI-shaped 503.
+	// A handler that fails the way dispatch does: an OpenAI-shaped 503.
 	failing := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeOpenAIError(w, http.StatusServiceUnavailable, "service_unavailable", "no_operator",
 			"no operator is currently advertising this model")
@@ -297,12 +297,12 @@ func TestRoutes_CompletionsRegistered(t *testing.T) {
 
 func TestRoutes_ModelsRegistered(t *testing.T) {
 	// Verify the GET /v1/models and GET /v1/models/{id} patterns are wired.
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"gpt-4", "google/gemma-5.2"},
 		Reachable:    true,
 		ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}

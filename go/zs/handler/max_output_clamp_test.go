@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // clampModel deliberately isn't "gpt-test": that id is bound to a fake
@@ -43,7 +43,7 @@ func clampNodeBody(t *testing.T, sealed []byte, field string) (uint64, bool) {
 	return n, true
 }
 
-// TestDispatchHayai_ClampsCallerMaxOutputToPoolCeiling reproduces the reported
+// TestDispatch_ClampsCallerMaxOutputToPoolCeiling reproduces the reported
 // failure: a third-party chat app whose own model card says 65536 against a pool
 // whose only operator advertises 32768. Before the clamp this was a hard 400
 // context_length_exceeded ("your conversation is too long") on a request with
@@ -54,7 +54,7 @@ func clampNodeBody(t *testing.T, sealed []byte, field string) (uint64, bool) {
 // the clamped number, and the body the node decrypts carries the clamped number
 // too. Getting the last one wrong is the quiet failure — the ticket would be
 // sized for 32768 while the upstream is still asked for 65536.
-func TestDispatchHayai_ClampsCallerMaxOutputToPoolCeiling(t *testing.T) {
+func TestDispatch_ClampsCallerMaxOutputToPoolCeiling(t *testing.T) {
 	var reserves []ticket.ReserveRequest
 	var sealed []byte
 	node := newFakeNode(t, &nodeConfig{
@@ -64,12 +64,12 @@ func TestDispatchHayai_ClampsCallerMaxOutputToPoolCeiling(t *testing.T) {
 		onRequest:      func(_ *http.Request, b []byte) { sealed = b },
 	})
 	node.operator.Models = []string{clampModel}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -104,7 +104,7 @@ func TestDispatchHayai_ClampsCallerMaxOutputToPoolCeiling(t *testing.T) {
 // capped operator would supply a 32768 ceiling if it were allowed to, and the
 // unbounded one — the only one that survives Fits at 65536 — must still be
 // served the caller's own number.
-func TestDispatchHayai_UndeclaredCapLeavesCallerMaxOutputAlone(t *testing.T) {
+func TestDispatch_UndeclaredCapLeavesCallerMaxOutputAlone(t *testing.T) {
 	var reserves []ticket.ReserveRequest
 	var sealed []byte
 	unbounded := newFakeNode(t, &nodeConfig{
@@ -121,15 +121,15 @@ func TestDispatchHayai_UndeclaredCapLeavesCallerMaxOutputAlone(t *testing.T) {
 		n.operator.Models = []string{clampModel}
 	}
 	// ContextWindow only — no declared output cap.
-	unbounded.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	unbounded.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144},
 	}
-	capped.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	capped.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, unbounded, capped))
+	s := testServer(cfg, setup(t, cfg, unbounded, capped))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -157,19 +157,19 @@ func TestDispatchHayai_UndeclaredCapLeavesCallerMaxOutputAlone(t *testing.T) {
 // rescue a request whose input genuinely doesn't fit, and the caller must still
 // get context_length_exceeded — now accurate, since a max-output-only miss can
 // no longer produce that code.
-func TestDispatchHayai_ClampDoesNotRescueAWindowMiss(t *testing.T) {
+func TestDispatch_ClampDoesNotRescueAWindowMiss(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{
 		mode:           modeNonStreamEncrypted,
 		replyPlaintext: []byte(`{}`),
 	})
 	node.operator.Models = []string{clampModel}
 	// Declares a cap worth clamping to, but a window far too small to hold it.
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 1000, MaxOutputTokens: 32_768},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -202,7 +202,7 @@ func TestDispatchHayai_ClampDoesNotRescueAWindowMiss(t *testing.T) {
 // caller asked for a big budget, so it should route to whoever can give the most
 // of it; the smaller operator drops out through the pre-existing Fits check
 // exactly as it did before.
-func TestDispatchHayai_ClampsToTheMostGenerousOperator(t *testing.T) {
+func TestDispatch_ClampsToTheMostGenerousOperator(t *testing.T) {
 	var generousReserves []ticket.ReserveRequest
 	generous := newFakeNode(t, &nodeConfig{
 		mode:           modeNonStreamEncrypted,
@@ -216,15 +216,15 @@ func TestDispatchHayai_ClampsToTheMostGenerousOperator(t *testing.T) {
 	for _, n := range []*fakeNode{generous, stingy} {
 		n.operator.Models = []string{clampModel}
 	}
-	generous.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	generous.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
-	stingy.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	stingy.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 8192},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, generous, stingy))
+	s := testServer(cfg, setup(t, cfg, generous, stingy))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -246,7 +246,7 @@ func TestDispatchHayai_ClampsToTheMostGenerousOperator(t *testing.T) {
 
 // A caller already inside the ceiling is untouched — no rewrite, no inflation to
 // the pool ceiling. The clamp only ever lowers.
-func TestDispatchHayai_CallerUnderCeilingIsUnchanged(t *testing.T) {
+func TestDispatch_CallerUnderCeilingIsUnchanged(t *testing.T) {
 	var reserves []ticket.ReserveRequest
 	var sealed []byte
 	node := newFakeNode(t, &nodeConfig{
@@ -256,12 +256,12 @@ func TestDispatchHayai_CallerUnderCeilingIsUnchanged(t *testing.T) {
 		onRequest:      func(_ *http.Request, b []byte) { sealed = b },
 	})
 	node.operator.Models = []string{clampModel}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -286,7 +286,7 @@ func TestDispatchHayai_CallerUnderCeilingIsUnchanged(t *testing.T) {
 // declaring 32768, with allow_staging off. Reading the raw registry would see
 // the staging node's undeclared cap, disable the clamp pool-wide, and hand the
 // caller back the 400 this whole path exists to prevent.
-func TestDispatchHayai_StagingNodeDoesNotDisableTheClamp(t *testing.T) {
+func TestDispatch_StagingNodeDoesNotDisableTheClamp(t *testing.T) {
 	var reserves []ticket.ReserveRequest
 	production := newFakeNode(t, &nodeConfig{
 		mode:           modeNonStreamEncrypted,
@@ -300,18 +300,18 @@ func TestDispatchHayai_StagingNodeDoesNotDisableTheClamp(t *testing.T) {
 	for _, n := range []*fakeNode{production, staging} {
 		n.operator.Models = []string{clampModel}
 	}
-	production.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	production.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
 	// Staging, and no declared output cap — the combination that used to switch
 	// the clamp off for everyone.
 	staging.operator.Staging = true
-	staging.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	staging.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144},
 	}
 
 	cfg := testConfig() // AllowStaging defaults false
-	s := testServer(cfg, setupHayai(t, cfg, production, staging))
+	s := testServer(cfg, setup(t, cfg, production, staging))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -334,7 +334,7 @@ func TestDispatchHayai_StagingNodeDoesNotDisableTheClamp(t *testing.T) {
 
 // Same shape for the caller's own routing preferences: an operator the request
 // excluded by name can't decide the ceiling for the operators it kept.
-func TestDispatchHayai_IgnoredOperatorDoesNotDisableTheClamp(t *testing.T) {
+func TestDispatch_IgnoredOperatorDoesNotDisableTheClamp(t *testing.T) {
 	var reserves []ticket.ReserveRequest
 	kept := newFakeNode(t, &nodeConfig{
 		mode:           modeNonStreamEncrypted,
@@ -348,15 +348,15 @@ func TestDispatchHayai_IgnoredOperatorDoesNotDisableTheClamp(t *testing.T) {
 	for _, n := range []*fakeNode{kept, ignored} {
 		n.operator.Models = []string{clampModel}
 	}
-	kept.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	kept.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 	}
-	ignored.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	ignored.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		clampModel: {ContextWindow: 262_144},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, kept, ignored))
+	s := testServer(cfg, setup(t, cfg, kept, ignored))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -377,14 +377,14 @@ func TestDispatchHayai_IgnoredOperatorDoesNotDisableTheClamp(t *testing.T) {
 // The clamp is otherwise invisible to the caller: the reply just stops early at
 // finish_reason:"length", which looks identical to the model deciding to stop.
 // The header is the only thing that tells a tool the proxy moved its ceiling.
-func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
+func TestDispatch_ClampSetsResponseHeader(t *testing.T) {
 	newNode := func() *fakeNode {
 		n := newFakeNode(t, &nodeConfig{
 			mode:           modeNonStreamEncrypted,
 			replyPlaintext: []byte(`{"choices":[{"message":{"content":"hi"}}]}`),
 		})
 		n.operator.Models = []string{clampModel}
-		n.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+		n.operator.ModelCapacities = map[string]zs.ModelCapacity{
 			clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 		}
 		return n
@@ -392,7 +392,7 @@ func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
 
 	t.Run("set when the ceiling moved", func(t *testing.T) {
 		cfg := testConfig()
-		s := testServer(cfg, setupHayai(t, cfg, newNode()))
+		s := testServer(cfg, setup(t, cfg, newNode()))
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
 			fmt.Sprintf(`{"model":%q,"max_tokens":65536,"messages":[{"role":"user","content":"hi"}]}`, clampModel)))
@@ -411,11 +411,11 @@ func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
 			streamFrames: [][]byte{[]byte(`{"choices":[{"delta":{"content":"hi"}}]}`)},
 		})
 		n.operator.Models = []string{clampModel}
-		n.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+		n.operator.ModelCapacities = map[string]zs.ModelCapacity{
 			clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 		}
 		cfg := testConfig()
-		s := testServer(cfg, setupHayai(t, cfg, n))
+		s := testServer(cfg, setup(t, cfg, n))
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
 			fmt.Sprintf(`{"model":%q,"max_tokens":65536,"stream":true,`+
@@ -430,7 +430,7 @@ func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
 
 	t.Run("absent when the caller was already under the ceiling", func(t *testing.T) {
 		cfg := testConfig()
-		s := testServer(cfg, setupHayai(t, cfg, newNode()))
+		s := testServer(cfg, setup(t, cfg, newNode()))
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
 			fmt.Sprintf(`{"model":%q,"max_tokens":512,"messages":[{"role":"user","content":"hi"}]}`, clampModel)))
@@ -439,7 +439,7 @@ func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
 		}
 	})
 
-	// The restore this header needs (snapshotHayaiHeaders + stripNodeHayaiHeaders)
+	// The restore this header needs (snapshotZsHeaders + stripNodeZsHeaders)
 	// must not become a hole in the §5.2-step-4 strip. A node answering with its
 	// own X-Zs-Max-Output-Clamped is overwriting the proxy's value in w.Header()
 	// via copyResponseHeaders, so an allow-list-shaped fix would have forwarded
@@ -453,11 +453,11 @@ func TestDispatchHayai_ClampSetsResponseHeader(t *testing.T) {
 				extraRespHeaders: map[string]string{"X-Zs-Max-Output-Clamped": "999999"},
 			})
 			n.operator.Models = []string{clampModel}
-			n.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+			n.operator.ModelCapacities = map[string]zs.ModelCapacity{
 				clampModel: {ContextWindow: 262_144, MaxOutputTokens: 32_768},
 			}
 			cfg := testConfig()
-			s := testServer(cfg, setupHayai(t, cfg, n))
+			s := testServer(cfg, setup(t, cfg, n))
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
 				fmt.Sprintf(`{"model":%q,"max_tokens":%d,"messages":[{"role":"user","content":"hi"}]}`,

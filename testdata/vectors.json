@@ -1,6 +1,6 @@
 {
     "version": 6,
-    "comment": "Cross-impl byte-parity vectors for the hayai protocol. Regenerate via: cd proto/go \u0026\u0026 go test ./ticket -run TestVectors -update. Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
+    "comment": "Cross-impl byte-parity vectors for the ZeroSignal protocol. Regenerate via: cd proto/go \u0026\u0026 go test ./ticket -run TestVectors -update. Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
     "aad_body_with_ticket": {
         "tx_id": "TX-VECTOR-001",
         "ticket_id": "TKT-VECTOR-001",

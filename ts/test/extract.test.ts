@@ -27,7 +27,7 @@ describe('extractRequestedBuiltinTools', () => {
         { name: 'none', body: '{"model":"m1"}', want: [] },
         { name: 'empty tools', body: '{"tools":[]}', want: [] },
         {
-            name: 'hayai and non-hayai, order preserved',
+            name: 'zs and non-zs, order preserved',
             body: '{"tools":[{"type":"function"},{"type":"zs_web_search"},{"type":"zs_image_search"}]}',
             want: ['zs_web_search', 'zs_image_search'],
         },

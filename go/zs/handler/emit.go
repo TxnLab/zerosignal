@@ -18,10 +18,10 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// dispatchHayai answers an HTTP client with one turn of the Client. The
+// dispatch answers an HTTP client with one turn of the Client. The
 // request headers the turn honors are read here, so the Client never sees the
 // request.
-func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
+func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, endpoint string, body []byte, format clientFormat) {
 	req := zs.Request{
 		Endpoint:    zs.Endpoint(endpoint),
 		Body:        body,
@@ -68,7 +68,7 @@ func newHTTPEmitter(w http.ResponseWriter, r *http.Request, format clientFormat,
 		w:           w,
 		clientCtx:   r.Context(),
 		format:      format,
-		usageFrame:  strings.TrimSpace(r.Header.Get(hayaiUsageFrameHeader)) != "",
+		usageFrame:  strings.TrimSpace(r.Header.Get(usageFrameHeader)) != "",
 		fundingHint: fundingHint,
 	}
 }
@@ -150,9 +150,9 @@ func (e *httpEmitter) fail(err error) {
 // advice is the proxy's, set over any the node sent.
 func (e *httpEmitter) passThrough(up *zs.NodeReply, retry bool) {
 	h := e.w.Header()
-	proxyHdrs := snapshotHayaiHeaders(h)
+	proxyHdrs := snapshotZsHeaders(h)
 	copyResponseHeaders(h, up.Header)
-	stripNodeHayaiHeaders(h, proxyHdrs)
+	stripNodeZsHeaders(h, proxyHdrs)
 	setShouldRetry(h, retry)
 	h.Del("Content-Length")
 	if up.ContentType != "" {
@@ -167,9 +167,9 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 	// Captured before the copy: the X-Zs-* the proxy itself set earlier in
 	// dispatch (the max_output clamp marker) would otherwise be deleted along
 	// with the node's.
-	proxyHdrs := snapshotHayaiHeaders(h)
+	proxyHdrs := snapshotZsHeaders(h)
 	copyResponseHeaders(h, header)
-	stripNodeHayaiHeaders(h, proxyHdrs)
+	stripNodeZsHeaders(h, proxyHdrs)
 	h.Del("Content-Length")
 	h.Set("Content-Type", "application/json")
 	if status >= http.StatusBadRequest {

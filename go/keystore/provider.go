@@ -7,7 +7,7 @@
 // backends (the OS environment, AWS Secrets Manager, GCP Secret Manager,
 // Azure Key Vault) and exposes a single signer surface that handles raw
 // transactions, AtomicTransactionComposer-shaped signing, and raw
-// sign-bytes payloads (the form hayai tickets / receipts use — see
+// sign-bytes payloads (the form zs tickets / receipts use — see
 // proto/ticket/ticket.go and proto/ticket/receipt.go, where the caller
 // hands the signer a precomputed sha256 digest of a domain-tagged
 // canonical body).

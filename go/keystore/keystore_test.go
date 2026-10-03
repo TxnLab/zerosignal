@@ -153,7 +153,7 @@ func TestKeyStore_SignBytes_VerifiesAgainstAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg := []byte("hello hayai")
+	msg := []byte("hello zs")
 	sig, err := ks.SignBytes(context.Background(), addr, msg)
 	if err != nil {
 		t.Fatalf("SignBytes: %v", err)

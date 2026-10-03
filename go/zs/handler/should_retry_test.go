@@ -70,7 +70,7 @@ func TestDispatch_ShouldRetry(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			node := newFakeNode(t, tc.node)
 			cfg := testConfig()
-			opts := setupHayai(t, cfg, node)
+			opts := setup(t, cfg, node)
 			opts.SweepDelay = noSweepDelay
 			s := testServer(cfg, opts)
 

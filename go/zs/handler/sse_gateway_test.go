@@ -21,7 +21,7 @@ import (
 func TestForwardStream_NonOpenAIErrorBody_ReplacedWithStructuredError(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeInferenceGatewayHTMLError})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -73,7 +73,7 @@ func TestForwardStream_NonOpenAIErrorBody_ReplacedWithStructuredError(t *testing
 func TestForwardStream_NonOpenAIErrorBody_PreservesRetryAfter(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeInferenceGatewayHTMLError, gatewayRetryAfter: "7"})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
@@ -95,7 +95,7 @@ func TestForwardStream_NonOpenAIErrorBody_TruncatesContentType(t *testing.T) {
 		gatewayCTSuffix: strings.Repeat("A", 4096),
 	})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",

@@ -23,7 +23,7 @@ import (
 // absent "tools", or a "tools" that is not an array all return the body
 // unchanged with an empty name map. That matches InjectSafetyIdentifier — a
 // malformed body is the upstream's to reject, not this helper's. An entry
-// naming a hayai built-in with no matching def IS an error, because the node
+// naming a zs built-in with no matching def IS an error, because the node
 // registered a tool it cannot describe.
 func rewriteBuiltinTools(
 	body []byte,
@@ -71,7 +71,7 @@ func rewriteBuiltinTools(
 		changed = true
 	}
 
-	// No hayai built-in in the list: return the ORIGINAL bytes rather than a
+	// No zs built-in in the list: return the ORIGINAL bytes rather than a
 	// remarshalled copy, so a body that was never going to change is never
 	// reordered or reformatted on its way through.
 	if !changed {

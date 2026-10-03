@@ -25,7 +25,7 @@ const (
 	EndpointImageEdits      = "/v1/images/edits"
 )
 
-// Affinity policy values, equal to the proxy's hayai.AffinityPolicy strings.
+// Affinity policy values, equal to the proxy's zs.AffinityPolicy strings.
 const (
 	AffinityPrefer = "prefer"
 	AffinityStrict = "strict"
@@ -84,7 +84,7 @@ type Constraints struct {
 	// AllowStaging includes nodes whose on-chain `staging` flag is set (see
 	// Operator.Staging) in target selection. Default false: staging nodes are
 	// dropped, so the standard routing path never targets a node its operator is
-	// still testing. The proxy sets it from `hayai.allow_staging` (config /
+	// still testing. The proxy sets it from `zs.allow_staging` (config /
 	// --allow-staging); the client from the Model Routing "allow staging" toggle.
 	// omitempty is correct — the false default matches the Go zero value, and the
 	// TS mirror reads an absent field as false.
@@ -92,7 +92,7 @@ type Constraints struct {
 	// RequestedTools is the set of zs_* tool types the request asks for.
 	// Operators advertising all of them are partitioned ahead of the rest.
 	RequestedTools []string `json:"requested_tools"`
-	// ImageToolGenBudget / ImageToolEditBudget are the per-request hayai
+	// ImageToolGenBudget / ImageToolEditBudget are the per-request zs
 	// image-tool budgets (max_n) the caller declared (proxy: from the body's
 	// tool_budgets; client: from its image-tool setting). When > 0, operators
 	// whose chosen model publishes the matching in-loop image-tool factor are
@@ -246,7 +246,7 @@ type TargetResult struct {
 }
 
 // SelectTargets reproduces the proxy's candidate-selection policy as a pure
-// function. Order of operations matches proto/go/zs/handler/hayai_dispatch.go
+// function. Order of operations matches proto/go/zs/dispatch.go
 // ::pickCandidates exactly: model eligibility → caller only/ignore filter →
 // sizing → image-factor → wire-version → TEE → staging exclusion → signer
 // funding → caller max_price filter → price sort → built-in-tool partition (or hard filter when RequireTools) →
@@ -481,7 +481,7 @@ func SelectTargets(ops []Operator, c Constraints, preferred *Operator) TargetRes
 		}
 	}
 
-	// 9b. In-loop image-tool partition. When the request budgets a hayai image
+	// 9b. In-loop image-tool partition. When the request budgets a zs image
 	//     tool, partition operators whose chosen model publishes the matching
 	//     in-loop factor AHEAD of those that don't. PREFER, not filter — a model
 	//     served only by toolless operators stays selectable for a text turn.

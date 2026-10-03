@@ -11,21 +11,21 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/selection"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // The discovery surface must agree with routing for the signer-funding gate
 // too — and, unlike staging, /v1/zs/operators keeps listing the node with its
 // balance, because that is the only place a payer can see why a model left.
 
-func fundedCatalogOp(id uint64, model string, spendable *uint64) hayai.Operator {
+func fundedCatalogOp(id uint64, model string, spendable *uint64) zs.Operator {
 	op := catalogOp(id, model, false)
 	op.SignerSpendableMicroAlgos = spendable
 	return op
 }
 
 func TestSignerCatalogAndDispatchAgree(t *testing.T) {
-	ops := []hayai.Operator{
+	ops := []zs.Operator{
 		fundedCatalogOp(1, "funded-model", nil),
 		fundedCatalogOp(2, "broke-only", new(selection.MinSignerSpendableMicroAlgos-1)),
 	}

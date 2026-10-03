@@ -54,7 +54,7 @@ var ErrOperatorUnknown = errors.New("operator unknown")
 // AllModels means every operator is offline and should surface as such
 // rather than as a passthrough.
 //
-// AllBuiltinTools returns the deduplicated union of every hayai built-in
+// AllBuiltinTools returns the deduplicated union of every zs built-in
 // tool advertised by any *reachable* operator. Keyed by Type; when two
 // operators advertise the same type the first-seen definition wins
 // (registry order). Used to serve GET /v1/zs/details on the proxy so

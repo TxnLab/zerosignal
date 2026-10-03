@@ -53,7 +53,7 @@ func TestKeyStore_HD_SignBytes_VerifiesVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg := []byte("hello hayai from an xHD key")
+	msg := []byte("hello zs from an xHD key")
 	sig, err := ks.SignBytes(context.Background(), hdAddrZero, msg)
 	if err != nil {
 		t.Fatalf("SignBytes: %v", err)

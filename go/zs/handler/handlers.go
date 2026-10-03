@@ -16,7 +16,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/inject"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // MaxClientBodyBytes caps the size of an inbound request body the proxy
@@ -26,7 +26,7 @@ import (
 const MaxClientBodyBytes = 16 << 20
 
 // Endpoint paths used both as ServeMux patterns and as the `endpoint`
-// argument threaded through dispatchHayai for routing decisions
+// argument threaded through dispatch for routing decisions
 // (notably the response_id pin gate, which is /v1/responses-only).
 const (
 	endpointChatCompletions = "/v1/chat/completions"
@@ -197,7 +197,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleHayaiDetails surfaces the aggregate hayai capability view across
+// handleDetails surfaces the aggregate zs capability view across
 // every operator in the registry. The response shape mirrors the node's
 // own /v1/zs/details so clients (TUI, SDKs) can decode either endpoint
 // with the same struct.
@@ -207,7 +207,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 // Per-operator-only fields (operator_id, age pubkey, oracle health,
 // max_tool_iterations) are intentionally omitted: they're per-node
 // settlement state and have no clean aggregate meaning at the proxy.
-func (s *Server) handleHayaiDetails(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDetails(w http.ResponseWriter, r *http.Request) {
 	type builtinToolEntry struct {
 		Type string `json:"type"`
 	}
@@ -363,7 +363,7 @@ func (s *Server) handleHayaiDetails(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleHayaiOperators surfaces the per-operator view of the registry:
+// handleOperators surfaces the per-operator view of the registry:
 // every operator the proxy currently knows about, with its own model
 // list, capabilities, reachability, and TEE verdict. Complements the
 // aggregated /v1/zs/details by *not* unioning across operators —
@@ -396,7 +396,7 @@ func (s *Server) handleHayaiDetails(w http.ResponseWriter, r *http.Request) {
 // from that method and a staging node is still a valid relay hop; the accepted
 // consequence is that a staging node the proxy is actively relaying through does
 // not appear on this endpoint while the knob is off.
-func (s *Server) handleHayaiOperators(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 	type modelEntry struct {
 		ID               string   `json:"id"`
 		ContextWindow    uint64   `json:"context_window,omitempty"`
@@ -472,7 +472,7 @@ func (s *Server) handleHayaiOperators(w http.ResponseWriter, r *http.Request) {
 		// both into an absent key.
 		AttestedModelIDs []string `json:"attested_model_ids"`
 	}
-	// metricsEntry mirrors hayai.OperatorMetrics (itself a mirror of the
+	// metricsEntry mirrors zs.OperatorMetrics (itself a mirror of the
 	// on-chain OperatorRecord reliability tail — proto/SPEC.md §3c).
 	// All *_usdc values are microUSDC; *_ms values are milliseconds.
 	type metricsEntry struct {
@@ -560,7 +560,7 @@ func (s *Server) handleHayaiOperators(w http.ResponseWriter, r *http.Request) {
 	ops := s.registryProvider.AllOperators(r.Context())
 	out := listResponse{Operators: make([]operatorEntry, 0, len(ops))}
 	for _, op := range ops {
-		if hayai.HeldOutStaging(op, s.allowStaging) {
+		if zs.HeldOutStaging(op, s.allowStaging) {
 			continue
 		}
 		models := make([]modelEntry, 0, len(op.Models))
@@ -715,12 +715,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 // dispatchStreamable is the entry point for endpoints whose request body
 // may ask for a streaming response. It reads the client body once, then
-// hands off to dispatchHayai, which decides stream vs non-stream itself.
+// hands off to dispatch, whose zs.Client.dispatch decides stream vs
+// non-stream itself.
 func (s *Server) dispatchStreamable(w http.ResponseWriter, r *http.Request, endpoint string) {
 	body, ok := readClientBody(w, r)
 	if !ok {
 		return
 	}
 	_ = r.Body.Close()
-	s.dispatchHayai(w, r, endpoint, body, formatChat)
+	s.dispatch(w, r, endpoint, body, formatChat)
 }

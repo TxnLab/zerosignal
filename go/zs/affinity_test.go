@@ -133,7 +133,7 @@ func TestExtractInputToolCallIDs(t *testing.T) {
 	}
 }
 
-func TestExtractRequestedHayaiTools(t *testing.T) {
+func TestExtractRequestedBuiltinTools(t *testing.T) {
 	cases := map[string]struct {
 		body string
 		want []string
@@ -146,7 +146,7 @@ func TestExtractRequestedHayaiTools(t *testing.T) {
 			body: `{"tools":[{"type":"function","function":{"name":"f"}}]}`,
 			want: nil,
 		},
-		"single hayai": {
+		"single zs tool": {
 			body: `{"tools":[{"type":"zs_web_search"}]}`,
 			want: []string{"zs_web_search"},
 		},
@@ -161,7 +161,7 @@ func TestExtractRequestedHayaiTools(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := ExtractRequestedHayaiTools([]byte(c.body))
+			got := ExtractRequestedBuiltinTools([]byte(c.body))
 			if len(got) != len(c.want) {
 				t.Fatalf("len = %d, want %d (%v)", len(got), len(c.want), got)
 			}

@@ -71,7 +71,7 @@ func TestPickCandidates_SignerFilter_AllBelowFloorSetsBlocked(t *testing.T) {
 	}
 }
 
-func TestDispatchHayai_AllUnderfunded_NoFundedOperator(t *testing.T) {
+func TestDispatch_AllUnderfunded_NoFundedOperator(t *testing.T) {
 	srv := minimalTEEServer(t, []Operator{
 		signerOp(1, "gpt-4o-mini", micro(0)),
 	})

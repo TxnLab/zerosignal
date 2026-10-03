@@ -81,7 +81,7 @@ func TestRewriteBuiltinTools_NoBuiltinToolIsByteIdentical(t *testing.T) {
 			t.Fatalf("%s: %v", ep.name, err)
 		}
 		if len(names) != 0 {
-			t.Errorf("%s: names = %v, want empty (no hayai built-in present)", ep.name, names)
+			t.Errorf("%s: names = %v, want empty (no zs built-in present)", ep.name, names)
 		}
 		if !bytes.Equal(out, body) {
 			t.Errorf("%s: body re-marshalled when nothing needed rewriting\n got=%s\nwant=%s", ep.name, out, body)

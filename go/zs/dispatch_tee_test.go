@@ -146,7 +146,7 @@ func TestPickCandidates_TEEFilter_RegistryMissTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestDispatchHayai_RequireTEE_TriggersFilter(t *testing.T) {
+func TestDispatch_RequireTEE_TriggersFilter(t *testing.T) {
 	// End-to-end: two non-TEE operators and a request that requires TEE →
 	// no_tee_capacity from the turn's translation of pickResult.TEEBlocked.
 	srv := minimalTEEServer(t, []Operator{
@@ -168,7 +168,7 @@ func TestDispatchHayai_RequireTEE_TriggersFilter(t *testing.T) {
 	}
 }
 
-func TestDispatchHayai_RequireForModels_TriggersFilter(t *testing.T) {
+func TestDispatch_RequireForModels_TriggersFilter(t *testing.T) {
 	// Same shape as above, but the requirement comes from
 	// Config.RequireTEEModels rather than the request. Should produce the
 	// same no_tee_capacity.

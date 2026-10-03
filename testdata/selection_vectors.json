@@ -1,6 +1,6 @@
 {
     "version": 4,
-    "comment": "Cross-impl parity vectors for the hayai operator/relay selection policy. Regenerate via: cd proto/go \u0026\u0026 go test ./selection -run TestSelectionVectors -update. Loaded by proto/go/selection/vectors_test.go and proto/ts/test/selection-vectors.test.ts.",
+    "comment": "Cross-impl parity vectors for the zs operator/relay selection policy. Regenerate via: cd proto/go \u0026\u0026 go test ./selection -run TestSelectionVectors -update. Loaded by proto/go/selection/vectors_test.go and proto/ts/test/selection-vectors.test.ts.",
     "target_cases": [
         {
             "name": "basic_three",

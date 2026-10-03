@@ -29,7 +29,7 @@ import {
 import { newTestNode, randomBytes } from './helpers.js'
 
 describe('AAD layout', () => {
-    it('body AAD has the expected hayai\\0body\\0txID\\0ticketID shape', () => {
+    it('body AAD has the expected zs\\0body\\0txID\\0ticketID shape', () => {
         const aad = buildBodyAAD('TX1', 'TKT1')
         const expected = new Uint8Array([
             ...new TextEncoder().encode('zs'),

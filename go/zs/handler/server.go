@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 	"github.com/TxnLab/zerosignal/go/zs/internal/cryptotimer"
 )
@@ -33,13 +33,13 @@ type ListenConfig struct {
 
 // Server is the OpenAI-compatible HTTP surface over a zs.Client.
 type Server struct {
-	*hayai.Client
+	*zs.Client
 
 	cfg *Config
 	log *slog.Logger
 	// registryProvider is the Client's, read by the catalog routes
 	// (/v1/models, /v1/zs/details, /v1/zs/operators).
-	registryProvider hayai.RegistryProvider
+	registryProvider zs.RegistryProvider
 	// allowStaging and network are the Client's: whether staging nodes are
 	// admitted, and the chain a funding error names.
 	allowStaging bool
@@ -50,7 +50,7 @@ type Server struct {
 	mux    *http.ServeMux
 
 	// trackCryptoTimes enables per-request encrypt/decrypt duration
-	// accounting in the middleware and the hayai dispatch path. Opt-in via
+	// accounting in the middleware and the dispatch path. Opt-in via
 	// the proxy's -times flag.
 	trackCryptoTimes bool
 }
@@ -63,7 +63,7 @@ type Options struct {
 }
 
 // New serves c over HTTP. cfg, reqTx and respTx may be nil.
-func New(c *hayai.Client, cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
+func New(c *zs.Client, cfg *Config, log *slog.Logger, reqTx transform.RequestTransformer, respTx transform.ResponseTransformer, opts Options) *Server {
 	if cfg == nil {
 		cfg = &Config{}
 	}
@@ -114,15 +114,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /models", s.handleListModels)
 	s.mux.HandleFunc("GET /models/{id...}", s.handleGetModel)
 
-	// Aggregate hayai capability surface — union of built-in tools across
+	// Aggregate zs capability surface — union of built-in tools across
 	// every operator the proxy knows about. Shape mirrors the node's
 	// endpoint of the same name so downstream clients share a decoder.
-	s.mux.HandleFunc("GET /v1/zs/details", s.handleHayaiDetails)
+	s.mux.HandleFunc("GET /v1/zs/details", s.handleDetails)
 	// Per-operator view of the registry — complements /v1/zs/details
 	// by surfacing each operator's own model list and capabilities
 	// without unioning across operators. Lets clients render which
 	// operator backs which model.
-	s.mux.HandleFunc("GET /v1/zs/operators", s.handleHayaiOperators)
+	s.mux.HandleFunc("GET /v1/zs/operators", s.handleOperators)
 }
 
 // HTTPServer returns a net/http Server configured with the middleware
@@ -288,7 +288,7 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 	// Explicit list rather than `*` so the X-Zs-* response headers stay
 	// readable off cross-origin responses by name. The X-Zs-* entries
-	// mirror setHayaiUsageHeaders in usage.go — keep them in sync
+	// mirror setReceiptUsageHeaders in usage.go — keep them in sync
 	// when adding a new non-streaming response header.
 	h.Set("Access-Control-Expose-Headers",
 		"Content-Type, Retry-After, X-Should-Retry, "+

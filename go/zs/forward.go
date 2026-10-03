@@ -35,7 +35,7 @@ var hopByHopHeaders = map[string]struct{}{
 // baseURL. The proxy never injects bearer auth — admission is via the on-chain
 // sealed envelope. The client's Authorization header is deliberately discarded.
 // `contentType` sets the outbound Content-Type — use "application/json" for
-// plaintext OpenAI and the hayai vendor type for encrypted envelopes.
+// plaintext OpenAI and the zs vendor type for encrypted envelopes.
 //
 // baseURL is the per-operator URL from the registry; it must be non-empty
 // and is already scheme-validated at registry-load time.
@@ -59,7 +59,7 @@ func (s *Client) buildOperatorRequest(
 	}
 
 	req.Header.Set("Content-Type", contentType)
-	// Hayai envelopes may come back as application/vnd.zs+json; advertise
+	// Sealed envelopes may come back as application/vnd.zs+json; advertise
 	// both so a strict node doing content negotiation won't 406.
 	if contentType == wire.EncryptedContentType {
 		req.Header.Set("Accept", wire.EncryptedContentType+", application/json")
@@ -90,7 +90,7 @@ func (s *Client) buildOperatorRequest(
 type nonStreamResponder func(em emitter, upstreamResp *http.Response, respBody []byte) error
 
 // forwardRawNonStream is the low-level non-streaming forwarder used by the
-// hayai dispatcher. It does not invoke the RequestTransformer — the caller
+// dispatcher. It does not invoke the RequestTransformer — the caller
 // is responsible for whatever request-side processing is appropriate, and
 // supplies the final body, outbound Content-Type, and extra headers.
 //

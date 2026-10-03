@@ -98,7 +98,7 @@ export interface Operator {
     models: string[]
     // per-model sizing envelope keyed by model id.
     model_capacities: Record<string, ModelCapacity>
-    // advertised hayai built-in tool type names.
+    // advertised zs built-in tool type names.
     builtin_tools: string[]
 }
 

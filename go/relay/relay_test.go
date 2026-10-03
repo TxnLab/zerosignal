@@ -83,12 +83,12 @@ func TestIsAllowedInnerPath(t *testing.T) {
 	}
 
 	denied := []string{
-		wire.RelayPath,                // no relay-to-relay chaining
-		"/v1/zs/relay",                // same, explicit
-		"/v1/zs/relay?x=y",            // ...even with a query
-		"/v1/models/",                 // empty model id
-		"/v1/models/a/b",              // multi-segment id
-		"/v1/models/../hayai/reserve", // traversal
+		wire.RelayPath,             // no relay-to-relay chaining
+		"/v1/zs/relay",             // same, explicit
+		"/v1/zs/relay?x=y",         // ...even with a query
+		"/v1/models/",              // empty model id
+		"/v1/models/a/b",           // multi-segment id
+		"/v1/models/../zs/reserve", // traversal
 		"/v1/chat/completions/../admin",
 		"/v1/chat/completions/../admin?q=1", // traversal survives a query suffix
 		"/admin",

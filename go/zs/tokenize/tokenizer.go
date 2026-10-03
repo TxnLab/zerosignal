@@ -49,7 +49,7 @@ type Estimate struct {
 	// number, so a small-window operator isn't blocked by a guessed ceiling. In
 	// that mode MaxOutputTokens holds the global fallback ceiling as a display /
 	// diagnostic value (== MaxOutputCeiling); the actual per-operator value is
-	// computed at reserve time via hayai.EffectiveMaxOutput. Zero value (a
+	// computed at reserve time via zs.EffectiveMaxOutput. Zero value (a
 	// caller-specified max, or a per-model default) keeps the flat behavior.
 	DeriveMaxOutput  bool
 	MaxOutputCeiling uint64
@@ -175,7 +175,7 @@ func BuildRegistry(defaults map[string]uint64, fallback uint64) *Registry {
 //  3. else, with a global fallback > 0 → DERIVE mode: the reserve is sized
 //     per-operator from each operator's declared capacity against the fallback
 //     as the base ceiling (selection.DeriveMaxOutput, applied at reserve time via
-//     hayai.EffectiveMaxOutput). MaxOutputTokens carries the ceiling as the
+//     zs.EffectiveMaxOutput). MaxOutputTokens carries the ceiling as the
 //     display/diagnostic value.
 //  4. else (fallback == 0, the fail-closed opt-in) → ErrMaxOutputRequired.
 //

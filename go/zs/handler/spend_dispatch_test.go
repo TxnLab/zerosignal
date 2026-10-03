@@ -17,7 +17,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
@@ -29,7 +29,7 @@ import (
 // It mirrors the real guard's exactly-once semantics — reservations keyed by
 // ticket id, Settle/Release resolving the amount from the reservation and
 // dropping it, later calls for the same ticket no-ops, and a duplicate ticket id
-// REFUSED with hayai.ErrDuplicateTicket — so the "must NOT Release" / "must NOT
+// REFUSED with zs.ErrDuplicateTicket — so the "must NOT Release" / "must NOT
 // Settle" assertions below measure what the dispatch path actually decided rather
 // than how many times it happened to call through.
 type fakeSpendGuard struct {
@@ -60,11 +60,11 @@ func (f *fakeSpendGuard) Reserve(ticketID string, amt uint64) error {
 		f.open = make(map[string]uint64)
 	}
 	if _, dup := f.open[ticketID]; dup {
-		// The real guard REFUSES a duplicate (wrapping hayai.ErrDuplicateTicket)
+		// The real guard REFUSES a duplicate (wrapping zs.ErrDuplicateTicket)
 		// rather than accepting it, and the dispatch path maps that sentinel to a
 		// distinct 502. Returning nil here would let a regression that reused a
 		// ticket id pass unnoticed at this level.
-		return fmt.Errorf("%w: %q (fake)", hayai.ErrDuplicateTicket, ticketID)
+		return fmt.Errorf("%w: %q (fake)", zs.ErrDuplicateTicket, ticketID)
 	}
 	f.open[ticketID] = amt
 	f.reserved = append(f.reserved, amt)
@@ -89,12 +89,12 @@ func (f *fakeSpendGuard) Release(ticketID string) {
 	f.released = append(f.released, amt)
 }
 
-// TestDispatchHayai_WalletUnfunded_402 asserts an underfunded open surfaces an
+// TestDispatch_WalletUnfunded_402 asserts an underfunded open surfaces an
 // actionable 402 wallet_unfunded rather than a generic 502.
-func TestDispatchHayai_WalletUnfunded_402(t *testing.T) {
+func TestDispatch_WalletUnfunded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	opts.Wallet = &fakeWallet{err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
 	guard := &fakeSpendGuard{}
 	opts.SpendGuard = guard
@@ -118,7 +118,7 @@ func TestDispatchHayai_WalletUnfunded_402(t *testing.T) {
 
 // The web app is built for one network, so the 402 may point a payer at it only
 // on mainnet; anywhere else it would fund the same address on the wrong chain.
-func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
+func TestDispatch_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 	const fundingURL = "https://app.example.test"
 	for _, tc := range []struct {
 		network    string
@@ -142,7 +142,7 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			cfg := testConfig()
 			cfg.Network = tc.network
 			cfg.FundingURL = tc.fundingURL
-			opts := setupHayai(t, cfg, node)
+			opts := setup(t, cfg, node)
 			opts.Wallet = &fakeWallet{payer: "PAYERADDR", err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
 			opts.SpendGuard = &fakeSpendGuard{}
 			s := testServer(cfg, opts)
@@ -175,18 +175,18 @@ func TestDispatchHayai_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_MbrPoolUnderfunded_402 asserts that an open failing because
+// TestDispatch_MbrPoolUnderfunded_402 asserts that an open failing because
 // the payer can't fund the prepaid ticket-MBR pool (ALGO shortfall, holds USDC)
 // surfaces the distinct, actionable mbr_pool_underfunded code with the µALGO
 // detail — NOT the generic wallet_unfunded (which reads as a USDC/onboarding
 // problem and hides the real "add ALGO" cause).
-func TestDispatchHayai_MbrPoolUnderfunded_402(t *testing.T) {
+func TestDispatch_MbrPoolUnderfunded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	// The wallet wraps ErrDepositUnaffordable the way ensureDepositForServe does;
 	// errors.Is must still see the sentinel through the wrap.
-	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: ensure MBR deposit: %w: need 577000 µALGO (575000 shortfall + 2000 fee), have 489000 µALGO spendable — fund the wallet with more ALGO", hayai.ErrDepositUnaffordable)}
+	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: ensure MBR deposit: %w: need 577000 µALGO (575000 shortfall + 2000 fee), have 489000 µALGO spendable — fund the wallet with more ALGO", zs.ErrDepositUnaffordable)}
 	opts.SpendGuard = &fakeSpendGuard{}
 	s := testServer(cfg, opts)
 
@@ -209,7 +209,7 @@ func TestDispatchHayai_MbrPoolUnderfunded_402(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_MbrPoolExhausted_429 is the other half: the wallet HOLDS
+// TestDispatch_MbrPoolExhausted_429 is the other half: the wallet HOLDS
 // the ALGO, every prepaid slot is just reserved by an in-flight ticket, so
 // open() reverts on a pool guard. That is a transient concurrency cap with a
 // knob attached, not an unfunded wallet — 429 + Retry-After, never a 402 "fund
@@ -219,10 +219,10 @@ func TestDispatchHayai_MbrPoolUnderfunded_402(t *testing.T) {
 // Wallet.Open wraps it, because the whole classification now rests on the type
 // surviving that wrap. algod puts only "assert failed pc=NNN" on the wire, so
 // there is no text to fall back on if the type is lost.
-func TestDispatchHayai_MbrPoolExhausted_429(t *testing.T) {
+func TestDispatch_MbrPoolExhausted_429(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: submit presigned open group: %w", &escrow.ApprovalError{
 		Method:  "open",
 		PC:      3255,
@@ -250,13 +250,13 @@ func TestDispatchHayai_MbrPoolExhausted_429(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_SpendCapExceeded_402 asserts the spend guard refuses past
+// TestDispatch_SpendCapExceeded_402 asserts the spend guard refuses past
 // the cap with a 402 spend_cap_exceeded and never opens the escrow (no money
 // committed).
-func TestDispatchHayai_SpendCapExceeded_402(t *testing.T) {
+func TestDispatch_SpendCapExceeded_402(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	fw := &fakeWallet{
 		appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000",
 	}
@@ -280,11 +280,11 @@ func TestDispatchHayai_SpendCapExceeded_402(t *testing.T) {
 
 // Candidates come in routing order, not price order, so a cap trip on one
 // operator's ticket moves on to the next, which may be cheaper.
-func TestDispatchHayai_SpendCapTriesTheNextOperator(t *testing.T) {
+func TestDispatch_SpendCapTriesTheNextOperator(t *testing.T) {
 	a := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	b := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, a, b)
+	opts := setup(t, cfg, a, b)
 	fw := opts.Wallet.(*fakeWallet)
 	guard := &fakeSpendGuard{refuseFirst: 1}
 	opts.SpendGuard = guard
@@ -305,11 +305,11 @@ func TestDispatchHayai_SpendCapTriesTheNextOperator(t *testing.T) {
 // A cap trip on one operator and a busy answer from another is operators_busy:
 // the busy one may fit once a slot frees. The cap trip also ends the sweeps,
 // so the capped operator is not asked for another reservation.
-func TestDispatchHayai_SpendCapYieldsToBusy(t *testing.T) {
+func TestDispatch_SpendCapYieldsToBusy(t *testing.T) {
 	busy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 7})
 	capped := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, busy, capped)
+	opts := setup(t, cfg, busy, capped)
 	guard := &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
 	opts.SpendGuard = guard
 	s := testServer(cfg, opts)
@@ -330,17 +330,17 @@ func TestDispatchHayai_SpendCapYieldsToBusy(t *testing.T) {
 // prices no tool allowance, so the allowance is what tips the signed ticket
 // over the cap; the payer must hear about the cap, not that no operator serves
 // the tool.
-func TestDispatchHayai_ToolBudgets_SpendCapBeatsUnsupportedTool(t *testing.T) {
+func TestDispatch_ToolBudgets_SpendCapBeatsUnsupportedTool(t *testing.T) {
 	capped := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	factorless := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
-	capped.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	capped.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {ImageToolRateMicroUSDC: 100_000, OutputUSDPer1M: 10},
 	}
-	factorless.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	factorless.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {OutputUSDPer1M: 10},
 	}
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, capped, factorless)
+	opts := setup(t, cfg, capped, factorless)
 	guard := &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
 	opts.SpendGuard = guard
 	s := testServer(cfg, opts)
@@ -357,21 +357,21 @@ func TestDispatchHayai_ToolBudgets_SpendCapBeatsUnsupportedTool(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_DuplicateTicketID_502 asserts the OTHER Reserve failure gets
+// TestDispatch_DuplicateTicketID_502 asserts the OTHER Reserve failure gets
 // its own diagnosis. A reused ticket id is the operator's node handing out an id
 // already in flight for this payer — nothing the payer configured and nothing a
 // config change can fix — so it must not surface as the 402 spend_cap_exceeded
 // that tells them to raise spend.daily_cap_usdc or wait for the UTC day to roll.
-// Distinguished by the hayai.ErrDuplicateTicket sentinel, so the two Reserve
+// Distinguished by the zs.ErrDuplicateTicket sentinel, so the two Reserve
 // errors can't be conflated by message text.
-func TestDispatchHayai_DuplicateTicketID_502(t *testing.T) {
+func TestDispatch_DuplicateTicketID_502(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	fw := &fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}
 	opts.Wallet = fw
 	opts.SpendGuard = &fakeSpendGuard{
-		reserveErr: fmt.Errorf("%w: %q (operator reused a ticket id)", hayai.ErrDuplicateTicket, "tid"),
+		reserveErr: fmt.Errorf("%w: %q (operator reused a ticket id)", zs.ErrDuplicateTicket, "tid"),
 	}
 	s := testServer(cfg, opts)
 
@@ -392,12 +392,12 @@ func TestDispatchHayai_DuplicateTicketID_502(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_SpendReservedOnSuccess asserts a committed open reserves the
+// TestDispatch_SpendReservedOnSuccess asserts a committed open reserves the
 // ticket's MaxPrice exactly once and never releases it.
-func TestDispatchHayai_SpendReservedOnSuccess(t *testing.T) {
+func TestDispatch_SpendReservedOnSuccess(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	fw := &fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}
 	opts.Wallet = fw
 	guard := &fakeSpendGuard{}
@@ -418,12 +418,12 @@ func TestDispatchHayai_SpendReservedOnSuccess(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_SpendSettledOnValidReceipt asserts that when the operator's
+// TestDispatch_SpendSettledOnValidReceipt asserts that when the operator's
 // signed receipt verifies, the guard records the *actual* charge (Settle with
 // the receipt's AmountCharged) against the reserved MaxPrice ceiling — and does
 // not Release. This is the fix for `zs status` showing reserved ceilings
 // instead of real spend.
-func TestDispatchHayai_SpendSettledOnValidReceipt(t *testing.T) {
+func TestDispatch_SpendSettledOnValidReceipt(t *testing.T) {
 	const charged = 8*2 + 3*5 // matches the receipt built below
 	reply := []byte(`{"choices":[{"message":{"content":"hi"}}]}`)
 	node := newFakeNode(t, &nodeConfig{
@@ -436,7 +436,7 @@ func TestDispatchHayai_SpendSettledOnValidReceipt(t *testing.T) {
 		},
 	})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	guard := &fakeSpendGuard{}
 	opts.SpendGuard = guard
 	s := testServer(cfg, opts)
@@ -465,11 +465,11 @@ func TestDispatchHayai_SpendSettledOnValidReceipt(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_SpendReleasedOnBadReceipt asserts that a receipt which fails
+// TestDispatch_SpendReleasedOnBadReceipt asserts that a receipt which fails
 // verification (here a body_hash mismatch) backs the reservation out via
 // Release and records no spend — the disputed/failed request must not count
 // toward the daily total.
-func TestDispatchHayai_SpendReleasedOnBadReceipt(t *testing.T) {
+func TestDispatch_SpendReleasedOnBadReceipt(t *testing.T) {
 	reply := []byte(`{"choices":[{"message":{"content":"actual"}}]}`)
 	node := newFakeNode(t, &nodeConfig{
 		mode:           modeNonStreamEncrypted,
@@ -481,7 +481,7 @@ func TestDispatchHayai_SpendReleasedOnBadReceipt(t *testing.T) {
 		},
 	})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	guard := &fakeSpendGuard{}
 	opts.SpendGuard = guard
 	s := testServer(cfg, opts)

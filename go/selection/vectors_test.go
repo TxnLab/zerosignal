@@ -1361,7 +1361,7 @@ func buildDeriveCases() []deriveCase {
 func buildVectors() *selectionVectorsFile {
 	return &selectionVectorsFile{
 		Version: 4,
-		Comment: "Cross-impl parity vectors for the hayai operator/relay selection policy. " +
+		Comment: "Cross-impl parity vectors for the zs operator/relay selection policy. " +
 			"Regenerate via: cd proto/go && go test ./selection -run TestSelectionVectors -update. " +
 			"Loaded by proto/go/selection/vectors_test.go and proto/ts/test/selection-vectors.test.ts.",
 		TargetCases: buildTargetCases(),

@@ -16,7 +16,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 )
 
@@ -30,11 +30,11 @@ import (
 type refusingReserveClient struct {
 	err  error
 	mu   sync.Mutex
-	ops  []hayai.Operator
-	hops []*hayai.RelayHop
+	ops  []zs.Operator
+	hops []*zs.RelayHop
 }
 
-func (c *refusingReserveClient) Reserve(_ context.Context, op hayai.Operator, _ ticket.ReserveRequest, hop *hayai.RelayHop) (*hayai.ReservedTicket, error) {
+func (c *refusingReserveClient) Reserve(_ context.Context, op zs.Operator, _ ticket.ReserveRequest, hop *zs.RelayHop) (*zs.ReservedTicket, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.ops = append(c.ops, op)
@@ -42,13 +42,13 @@ func (c *refusingReserveClient) Reserve(_ context.Context, op hayai.Operator, _ 
 	if c.err != nil {
 		return nil, c.err
 	}
-	return nil, &hayai.ReserveHTTPError{Status: http.StatusBadRequest, Code: "invalid_request"}
+	return nil, &zs.ReserveHTTPError{Status: http.StatusBadRequest, Code: "invalid_request"}
 }
 
 // gatesOp is a reachable, version-compatible operator. Distinct owners matter:
 // a relay must not share its target's owner.
-func gatesOp(id uint64, owner string) hayai.Operator {
-	return hayai.Operator{
+func gatesOp(id uint64, owner string) zs.Operator {
+	return zs.Operator{
 		ID:           id,
 		NodeID:       1,
 		OwnerAddr:    owner,
@@ -60,9 +60,9 @@ func gatesOp(id uint64, owner string) hayai.Operator {
 }
 
 // gatesServer builds a Server over ops whose reserves are all refused.
-func gatesServer(t *testing.T, cfg *policy, rc hayai.ReserveClient, ops ...hayai.Operator) *Server {
+func gatesServer(t *testing.T, cfg *policy, rc zs.ReserveClient, ops ...zs.Operator) *Server {
 	t.Helper()
-	registry, err := hayai.NewStaticRegistryProvider(ops)
+	registry, err := zs.NewStaticRegistryProvider(ops)
 	if err != nil {
 		t.Fatalf("NewStaticRegistryProvider: %v", err)
 	}
@@ -76,7 +76,7 @@ func gatesServer(t *testing.T, cfg *policy, rc hayai.ReserveClient, ops ...hayai
 
 // dispatchRelayHops sends one chat request against a target and a relay of
 // distinct owners and returns the hop each reserve rode.
-func dispatchRelayHops(t *testing.T, cfg *policy, relayHeader, bodyRelay string) []*hayai.RelayHop {
+func dispatchRelayHops(t *testing.T, cfg *policy, relayHeader, bodyRelay string) []*zs.RelayHop {
 	t.Helper()
 	rc := &refusingReserveClient{}
 	s := gatesServer(t, cfg, rc, gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"))
@@ -107,15 +107,15 @@ func TestDispatch_RelayPosture(t *testing.T) {
 		wantRelay bool
 	}{
 		// A caller who never set Privacy.
-		{"zero Privacy relays", &policy{Affinity: hayai.AffinityNone}, "", "", true},
-		{"direct sends direct", &policy{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone}, "", "", false},
+		{"zero Privacy relays", &policy{Affinity: zs.AffinityNone}, "", "", true},
+		{"direct sends direct", &policy{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}, "", "", false},
 		// A caller's relay=off must not override a payer who didn't allow it.
-		{"off refused without override", &policy{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone}, "off", "", true},
+		{"off refused without override", &policy{Privacy: zs.PrivacyRelayRequired, Affinity: zs.AffinityNone}, "off", "", true},
 		// The control for the row above: the header does reach the decision.
-		{"off honored with override", &policy{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "off", "", false},
+		{"off honored with override", &policy{Privacy: zs.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: zs.AffinityNone}, "off", "", false},
 		// The body's provider.relay outranks the header, in both directions.
-		{"body required beats header off", &policy{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "off", "required", true},
-		{"body off beats header required", &policy{Privacy: hayai.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: hayai.AffinityNone}, "required", "off", false},
+		{"body required beats header off", &policy{Privacy: zs.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: zs.AffinityNone}, "off", "required", true},
+		{"body off beats header required", &policy{Privacy: zs.PrivacyRelayRequired, AllowPrivacyOverride: true, Affinity: zs.AffinityNone}, "required", "off", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.cfg.AllowPrivateOperators = true
@@ -146,7 +146,7 @@ func TestDispatch_TEERequirement(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rc := &refusingReserveClient{}
-			cfg := &policy{Privacy: hayai.PrivacyDirect, TEERequiredModels: tc.models}
+			cfg := &policy{Privacy: zs.PrivacyDirect, TEERequiredModels: tc.models}
 			s := gatesServer(t, cfg, rc, gatesOp(1, "OWNER_A"))
 			req := clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","max_completion_tokens":100}`)
 			if tc.header != "" {
@@ -170,12 +170,12 @@ func TestDispatch_TEERequirement(t *testing.T) {
 // pin has nothing to keep, so a candidate with no eligible relay is skipped
 // like any other rather than ending the turn.
 func TestDispatch_StrictUnpinnedSkipsRelaylessCandidate(t *testing.T) {
-	at := func(op hayai.Operator, url string) hayai.Operator { op.BaseURL = url; return op }
+	at := func(op zs.Operator, url string) zs.Operator { op.BaseURL = url; return op }
 	// Op 1 has no relay: op 2 shares its /16, op 3 its owner. Ops 2 and 3
 	// relay for each other.
 	relayless := at(gatesOp(1, "OWNER_A"), "http://203.0.113.1")
 	rc := &refusingReserveClient{}
-	s := gatesServer(t, &policy{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityStrict, AllowPrivateOperators: true}, rc,
+	s := gatesServer(t, &policy{Privacy: zs.PrivacyRelayRequired, Affinity: zs.AffinityStrict, AllowPrivateOperators: true}, rc,
 		relayless,
 		at(gatesOp(2, "OWNER_B"), "http://203.0.113.2"),
 		at(gatesOp(3, "OWNER_A"), "http://198.51.100.1"))
@@ -195,8 +195,8 @@ func TestDispatch_StrictUnpinnedSkipsRelaylessCandidate(t *testing.T) {
 // budgets for. The turn budgets both tools, so op 1, pricing one of them,
 // still ranks first; it is skipped for the other.
 func TestDispatch_StrictUnpinnedSkipsUnpricedToolCandidate(t *testing.T) {
-	priced := func(op hayai.Operator, gen, edit uint64) hayai.Operator {
-		op.ModelCapacities = map[string]hayai.ModelCapacity{"gpt-test": {
+	priced := func(op zs.Operator, gen, edit uint64) zs.Operator {
+		op.ModelCapacities = map[string]zs.ModelCapacity{"gpt-test": {
 			ImageToolRateMicroUSDC: gen, ImageEditToolRateMicroUSDC: edit, OutputUSDPer1M: 10,
 		}}
 		return op
@@ -210,7 +210,7 @@ func TestDispatch_StrictUnpinnedSkipsUnpricedToolCandidate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rc := &refusingReserveClient{}
-			s := gatesServer(t, &policy{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityStrict}, rc,
+			s := gatesServer(t, &policy{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityStrict}, rc,
 				priced(gatesOp(1, "OWNER_A"), tc.gen, tc.edit), priced(gatesOp(2, "OWNER_B"), 80_000, 80_000))
 			s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/responses",
 				`{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,`+
@@ -232,7 +232,7 @@ func TestDispatch_StrictUnpinnedSkipsUnpricedToolCandidate(t *testing.T) {
 // to have tried to take the payer's money — but a dropped store of any kind
 // leaves routing blind to evidence the proxy is still collecting.
 func TestNew_PassesRoutingStores(t *testing.T) {
-	ref := func(op hayai.Operator) hayai.NodeRef { return hayai.RefOf(op) }
+	ref := func(op zs.Operator) zs.NodeRef { return zs.RefOf(op) }
 	op1, op2, op3 := gatesOp(1, "OWNER_A"), gatesOp(2, "OWNER_B"), gatesOp(3, "OWNER_C")
 
 	// reserved dispatches one chat request in direct mode and returns the
@@ -240,14 +240,14 @@ func TestNew_PassesRoutingStores(t *testing.T) {
 	// code, so every candidate is asked once.
 	reserved := func(t *testing.T, opts func(*deps)) []uint64 {
 		t.Helper()
-		registry, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+		registry, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 		if err != nil {
 			t.Fatalf("NewStaticRegistryProvider: %v", err)
 		}
 		rc := &refusingReserveClient{}
 		o := deps{RegistryProvider: registry, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{}}
 		opts(&o)
-		s := newServer(&policy{Privacy: hayai.PrivacyDirect, Affinity: hayai.AffinityNone, AllowPrivateOperators: true},
+		s := newServer(&policy{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone, AllowPrivateOperators: true},
 			silentLogger(), transform.Passthrough{}, transform.Passthrough{}, o)
 		s.mux.ServeHTTP(httptest.NewRecorder(), clientReq(http.MethodPost, "/v1/chat/completions",
 			`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
@@ -264,22 +264,22 @@ func TestNew_PassesRoutingStores(t *testing.T) {
 	}
 
 	t.Run("NodeExcluder", func(t *testing.T) {
-		src := &hayai.ChainOperatorSource{}
+		src := &zs.ChainOperatorSource{}
 		src.ExcludeNode(ref(op1))
 		if got := reserved(t, func(o *deps) { o.NodeExcluder = src }); len(got) != 1 || got[0] != 2 {
 			t.Errorf("reserved %v, want only op 2", got)
 		}
 	})
 	t.Run("TargetBackoff", func(t *testing.T) {
-		src := &hayai.ChainOperatorSource{}
+		src := &zs.ChainOperatorSource{}
 		src.RecordTargetOutcome(ref(op1), false)
 		if got := reserved(t, func(o *deps) { o.TargetBackoff = src }); len(got) != 2 || got[0] != 2 {
 			t.Errorf("reserved %v, want op 2 first", got)
 		}
 	})
 	t.Run("RelayLatency", func(t *testing.T) {
-		src := &hayai.ChainOperatorSource{}
-		for range hayai.LatencyMinSamples {
+		src := &zs.ChainOperatorSource{}
+		for range zs.LatencyMinSamples {
 			src.RecordDirectRTT(ref(op1), 10*time.Second)
 			src.RecordDirectRTT(ref(op2), 10*time.Millisecond)
 		}
@@ -291,16 +291,16 @@ func TestNew_PassesRoutingStores(t *testing.T) {
 		// A downranked relay is a fallback, never a drop, so it is chosen only
 		// when no other relay can carry the target. With three owners every
 		// target has another, so op 2 must never relay.
-		src := &hayai.ChainOperatorSource{}
+		src := &zs.ChainOperatorSource{}
 		for !src.RelayDownranked(ref(op2)) {
 			src.RecordRelayOutcome(ref(op2), false)
 		}
-		registry, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2, op3})
+		registry, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2, op3})
 		if err != nil {
 			t.Fatalf("NewStaticRegistryProvider: %v", err)
 		}
 		rc := &refusingReserveClient{}
-		s := newServer(&policy{Privacy: hayai.PrivacyRelayRequired, Affinity: hayai.AffinityNone, AllowPrivateOperators: true},
+		s := newServer(&policy{Privacy: zs.PrivacyRelayRequired, Affinity: zs.AffinityNone, AllowPrivateOperators: true},
 			silentLogger(), transform.Passthrough{}, transform.Passthrough{}, deps{
 				RegistryProvider: registry, ReserveClient: rc, Tokenizer: testTokenizer(), Wallet: &fakeWallet{},
 				RelayReputation: src,
@@ -330,7 +330,7 @@ func TestNew_BlocksPrivateTargetsUnlessAllowed(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
 		cfg := testConfig()
-		opts := setupHayai(t, cfg, node)
+		opts := setup(t, cfg, node)
 		cfg.AllowPrivateOperators = allow
 		s := newServer(&cfg.policy, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, opts)
 

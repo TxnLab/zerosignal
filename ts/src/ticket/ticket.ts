@@ -55,8 +55,8 @@ export interface Ticket {
     // ceil(min_charge.output_tokens*output_rate/1e6), µALGO component =
     // ceil(min_charge.algo_txns*1000*algo_usd)). 0 only when both
     // components are 0 — i.e. a free model, OR (token component off:
-    // hayai.min_charge.output_tokens=0 or output_rate=0) AND (µALGO
-    // component off: hayai.min_charge.algo_txns=0 — the default — or
+    // zs.min_charge.output_tokens=0 or output_rate=0) AND (µALGO
+    // component off: zs.min_charge.algo_txns=0 — the default — or
     // oracle unavailable at reserve). With stock config a paid model's
     // ticket has a non-zero min_price. The (0,0) inference-failure path
     // still charges 0 regardless.

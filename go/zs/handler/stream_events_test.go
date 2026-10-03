@@ -27,7 +27,7 @@ func TestDispatch_NodeErrorInsideResponsePassesThrough(t *testing.T) {
 			[]byte(nodeErr),
 		}})
 		cfg := testConfig()
-		s := testServer(cfg, setupHayai(t, cfg, node))
+		s := testServer(cfg, setup(t, cfg, node))
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","stream":true}`))
 
@@ -40,7 +40,7 @@ func TestDispatch_NodeErrorInsideResponsePassesThrough(t *testing.T) {
 	t.Run("single body", func(t *testing.T) {
 		node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(nodeErr)})
 		cfg := testConfig()
-		s := testServer(cfg, setupHayai(t, cfg, node))
+		s := testServer(cfg, setup(t, cfg, node))
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
 
@@ -70,7 +70,7 @@ func TestClientStream_DecodesSealedFrames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			node := newFakeNode(t, tc.cfg)
 			cfg := testConfig()
-			s := testServer(cfg, setupHayai(t, cfg, node))
+			s := testServer(cfg, setup(t, cfg, node))
 			req := zs.Request{Endpoint: zs.EndpointChatCompletions, Body: []byte(tc.body)}
 
 			var text string
@@ -114,7 +114,7 @@ func TestClientStream_TextKeepsWhatArrivedBeforeAnError(t *testing.T) {
 		[]byte(`{"choices":[{"index":0,"delta":{"content":"Hel"}}]}`),
 	}})
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 	req := zs.Request{Endpoint: zs.EndpointChatCompletions, Body: []byte(`{"model":"gpt-test","stream":true}`)}
 
 	got, err := s.Client.Stream(context.Background(), req).Text()

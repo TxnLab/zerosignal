@@ -31,6 +31,13 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-03 — one error message no longer names the old project
+
+`tools.ErrUnknownBuiltinTool` now reads "unknown zs builtin tool type" (was "unknown hayai
+builtin tool type"). A node returns that text as the message of its `unknown_builtin_tool`
+error, so a client sees the new wording once the node takes this release. The code is
+unchanged; match on it, never on the message.
+
 ### 2026-10-01 — public module and package names
 
 The Go module is now `github.com/TxnLab/zerosignal/go` (was `github.com/TxnLab/hayai-proto/go`)

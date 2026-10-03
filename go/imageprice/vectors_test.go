@@ -136,7 +136,7 @@ func buildVectors() *imageVectorsFile {
 
 	return &imageVectorsFile{
 		Version: 1,
-		Comment: "Cross-impl byte-parity vectors for hayai image pricing (imageprice). " +
+		Comment: "Cross-impl byte-parity vectors for zs image pricing (imageprice). " +
 			"Regenerate via: cd proto/go && go test ./imageprice -run TestVectors -update. " +
 			"Loaded by proto/go/imageprice/vectors_test.go and proto/ts/test/imageprice-vectors.test.ts.",
 		SampleRates: sampleRates,

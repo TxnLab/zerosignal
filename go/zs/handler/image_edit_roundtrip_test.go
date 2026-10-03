@@ -13,7 +13,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // buildEditBody returns a multipart/form-data body + the Content-Type
@@ -49,7 +49,7 @@ func buildEditBody(t *testing.T, model, prompt string, n int, imageBytes, maskBy
 	return buf.Bytes(), mw.FormDataContentType()
 }
 
-// TestDispatchHayai_ImageEdit_RoundTrip is the proxy-side e2e for
+// TestDispatch_ImageEdit_RoundTrip is the proxy-side e2e for
 // /v1/images/edits. The proxy:
 //   - parses the inbound multipart body for model + n (without
 //     consuming the buffer destined for the seal),
@@ -57,7 +57,7 @@ func buildEditBody(t *testing.T, model, prompt string, n int, imageBytes, maskBy
 //   - reserves with image_n = n on the edit rate basis,
 //   - seals the original multipart bytes into the envelope and POSTs
 //     to the operator's /v1/images/edits.
-func TestDispatchHayai_ImageEdit_RoundTrip(t *testing.T) {
+func TestDispatch_ImageEdit_RoundTrip(t *testing.T) {
 	canned := []byte(`{"created":1700000000,"data":[{"b64_json":"aGVsbG8="}]}`)
 	const (
 		genFactor  uint64 = 100_000
@@ -78,7 +78,7 @@ func TestDispatchHayai_ImageEdit_RoundTrip(t *testing.T) {
 		},
 	})
 	node.operator.Models = []string{"flux2"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"flux2": {
 			InputModalities:        []string{"text", "image"},
 			OutputModalities:       []string{"image"},
@@ -90,7 +90,7 @@ func TestDispatchHayai_ImageEdit_RoundTrip(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	bodyBytes, contentType := buildEditBody(t, "flux2", "make it red", n, []byte("PNGINPUT"), nil)
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(bodyBytes))
@@ -137,14 +137,14 @@ func boundaryOf(t *testing.T, contentType string) string {
 	return contentType[len(prefix):]
 }
 
-// TestDispatchHayai_ImageEdit_SkipsOperatorMissingEditFactor — operator
+// TestDispatch_ImageEdit_SkipsOperatorMissingEditFactor — operator
 // declares the model and the gen factor but not the edit factor; the
 // edits route must skip that operator (analog of
-// TestDispatchHayai_Image_SkipsOperatorMissingFactor).
-func TestDispatchHayai_ImageEdit_SkipsOperatorMissingEditFactor(t *testing.T) {
+// TestDispatch_Image_SkipsOperatorMissingFactor).
+func TestDispatch_ImageEdit_SkipsOperatorMissingEditFactor(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	node.operator.Models = []string{"flux2"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"flux2": {
 			InputModalities:    []string{"text", "image"},
 			OutputModalities:   []string{"image"},
@@ -155,7 +155,7 @@ func TestDispatchHayai_ImageEdit_SkipsOperatorMissingEditFactor(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	bodyBytes, contentType := buildEditBody(t, "flux2", "x", 1, []byte("BYTES"), nil)
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(bodyBytes))

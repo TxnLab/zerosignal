@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // TestFeeBreakdownFor pins the additive-fee decomposition the proxy derives
@@ -43,15 +43,15 @@ func TestFeeBreakdownFor(t *testing.T) {
 	}
 }
 
-// TestHayaiUsageFrame_FeeBreakdown checks the breakdown rides the zs.usage
+// TestReceiptUsageFrame_FeeBreakdown checks the breakdown rides the zs.usage
 // SSE frame when readable and is wholly absent (no `fee` key) when not.
-func TestHayaiUsageFrame_FeeBreakdown(t *testing.T) {
+func TestReceiptUsageFrame_FeeBreakdown(t *testing.T) {
 	r := &ticket.UsageReceipt{TicketID: "tid", AmountCharged: 1_000_000}
 	tk := &ticket.Ticket{MaxPrice: 1_100_000}
-	op := hayai.Operator{ID: 7}
+	op := zs.Operator{ID: 7}
 
-	fr := hayaiUsageFrame(r, tk, op, 0, 0, 0, 1000, 0, true)
-	var u hayaiUsage
+	fr := receiptUsageFrame(r, tk, op, 0, 0, 0, 1000, 0, true)
+	var u usageBody
 	if err := json.Unmarshal(fr.Data, &u); err != nil {
 		t.Fatalf("unmarshal frame: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestHayaiUsageFrame_FeeBreakdown(t *testing.T) {
 		t.Errorf("frame fee = %+v", u.Fee)
 	}
 
-	fr2 := hayaiUsageFrame(r, tk, op, 0, 0, 0, 0, 0, false)
+	fr2 := receiptUsageFrame(r, tk, op, 0, 0, 0, 0, 0, false)
 	if strings.Contains(string(fr2.Data), `"fee"`) {
 		t.Errorf("fee key present when snapshot absent: %s", fr2.Data)
 	}
@@ -71,17 +71,17 @@ func TestHayaiUsageFrame_FeeBreakdown(t *testing.T) {
 // The usage event carries what the frame reports: the receipt's ticket, the
 // open-time ticket's ceiling, and the fee snapshot.
 func TestUsageFrame_FromReceiptVerified(t *testing.T) {
-	fr := usageFrame(hayai.ReceiptVerified{
+	fr := usageFrame(zs.ReceiptVerified{
 		Receipt:     ticket.UsageReceipt{TicketID: "tid", AmountCharged: 1_000_000},
 		Ticket:      ticket.Ticket{MaxPrice: 1_100_000},
-		Target:      hayai.NodeRef{Op: 7, Node: 2},
+		Target:      zs.NodeRef{Op: 7, Node: 2},
 		FeeBps:      1000,
 		FeeBpsKnown: true,
 	})
-	if fr.Event != hayaiUsageFrameEvent {
-		t.Errorf("event = %q, want %q", fr.Event, hayaiUsageFrameEvent)
+	if fr.Event != usageFrameEvent {
+		t.Errorf("event = %q, want %q", fr.Event, usageFrameEvent)
 	}
-	var u hayaiUsage
+	var u usageBody
 	if err := json.Unmarshal(fr.Data, &u); err != nil {
 		t.Fatalf("unmarshal frame: %v", err)
 	}
@@ -99,9 +99,9 @@ func TestUsageFrame_FromReceiptVerified(t *testing.T) {
 // The usage headers name the serving node, not just its operator.
 func TestSetUsageHeaders_NamesTheNode(t *testing.T) {
 	h := http.Header{}
-	setUsageHeaders(h, hayai.ReceiptVerified{
+	setUsageHeaders(h, zs.ReceiptVerified{
 		Receipt:   ticket.UsageReceipt{TicketID: "tid"},
-		Target:    hayai.NodeRef{Op: 7, Node: 2},
+		Target:    zs.NodeRef{Op: 7, Node: 2},
 		OwnerAddr: "OWNER",
 	})
 	if h.Get("X-Zs-Operator-Id") != "7" || h.Get("X-Zs-Node-Id") != "2" {

@@ -14,7 +14,7 @@ import (
 )
 
 // stagingNodeOp builds a model-serving operator with its on-chain NodeRecord.staging
-// flag set or clear. Mirrors teeOp (hayai_dispatch_tee_test.go); reuses
+// flag set or clear. Mirrors teeOp (dispatch_tee_test.go); reuses
 // minimalTEEServer from that file since staging filtering, like TEE, happens in
 // pickCandidates before any wallet / reserve wiring.
 func stagingNodeOp(id uint64, model string, staging bool) Operator {
@@ -115,7 +115,7 @@ func TestPickCandidates_StagingFilter_AllowStagingKeepsStaging(t *testing.T) {
 	}
 }
 
-func TestDispatchHayai_AllStaging_NoProductionOperator(t *testing.T) {
+func TestDispatch_AllStaging_NoProductionOperator(t *testing.T) {
 	// End-to-end: a model served only by staging nodes, default config (no
 	// allow_staging) → no_production_operator from the turn's translation of
 	// pickResult.StagingBlocked.

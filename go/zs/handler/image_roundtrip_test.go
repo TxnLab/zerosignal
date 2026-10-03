@@ -12,24 +12,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// TestDispatchHayai_Image_RoundTrip is the proxy-side e2e for the
+// TestDispatch_Image_RoundTrip is the proxy-side e2e for the
 // image-generation route: client POSTs OpenAI-shape JSON →
-// dispatchHayai picks the operator → reserves with the synthetic-token
+// zs.Client.dispatch picks the operator → reserves with the synthetic-token
 // sizing (image_n on the rate basis) → seals the request → forwards to the
 // node (here, a fakeNode that handleSealed-decrypts and returns a
 // canned image response) → unseals and returns to the client.
 //
 // Covers the path the unit tests can't:
 //
-//   - the dispatchHayai image branch (skips estimateTokens, parses n)
+//   - zs.Client.dispatch's image branch (skips estimateTokens, parses n)
 //   - the per-operator reserve override that swaps in
 //     image_n / image_size / image_quality for the rate reserve
 //   - the proxy correctly URL-routes the sealed body to
 //     <op>/v1/images/generations (not chat/responses)
-func TestDispatchHayai_Image_RoundTrip(t *testing.T) {
+func TestDispatch_Image_RoundTrip(t *testing.T) {
 	canned := []byte(`{"created":1700000000,"data":[{"b64_json":"aGVsbG8="}]}`)
 	const (
 		factor uint64 = 100_000
@@ -50,10 +50,10 @@ func TestDispatchHayai_Image_RoundTrip(t *testing.T) {
 	// Re-skin the fake operator as an image-only operator: declare
 	// the model, hydrate ModelCapacities with the synthetic-token
 	// factor, mark Reachable so any "skip unreachable" guards pass.
-	// Mutate BEFORE setupHayai — it copies n.operator into the
+	// Mutate BEFORE setup — it copies n.operator into the
 	// static registry, so post-setup edits wouldn't propagate.
 	node.operator.Models = []string{"sdxl-test"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"sdxl-test": {
 			InputModalities:    []string{"text"},
 			OutputModalities:   []string{"image"},
@@ -64,7 +64,7 @@ func TestDispatchHayai_Image_RoundTrip(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	clientBody := `{"model":"sdxl-test","prompt":"a cat","n":2,"size":"512x512"}`
 	w := httptest.NewRecorder()
@@ -105,15 +105,15 @@ func TestDispatchHayai_Image_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_Image_SkipsOperatorMissingFactor — operators
+// TestDispatch_Image_SkipsOperatorMissingFactor — operators
 // advertising the image model but lacking an image rate (ServesImageGen false) are skipped
 // so the proxy doesn't size-reserve with a zero factor. With only one
 // such operator the dispatch ends in operators_busy (no candidates
 // landed a ticket).
-func TestDispatchHayai_Image_SkipsOperatorMissingFactor(t *testing.T) {
+func TestDispatch_Image_SkipsOperatorMissingFactor(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	node.operator.Models = []string{"sdxl-test"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"sdxl-test": {
 			OutputModalities: []string{"image"},
 			// ImageRateMicroUSDC intentionally unset — defensive case.
@@ -122,7 +122,7 @@ func TestDispatchHayai_Image_SkipsOperatorMissingFactor(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/images/generations",

@@ -520,7 +520,7 @@ func normalizeHex(s string) string {
 //
 // Sized against the REFRESH CYCLE, not against PCS: the whole cycle —
 // chain read plus every operator's probes — runs under
-// hayai.DefaultRefreshTimeout (30s), so a ceiling anywhere near that
+// DefaultRefreshTimeout (30s), so a ceiling anywhere near that
 // lets one unreachable third party cost the proxy a complete refresh.
 // A warm cache makes this moot (the artifacts move on Intel's
 // publication cadence, days to weeks); it bounds the cold path and the

@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Hayai tool-call marker item types. Mirror OpenAI's `web_search_call`
+// ZeroSignal tool-call marker item types. Mirror OpenAI's `web_search_call`
 // shape — a top-level item that appears in the Responses output[] (and
 // streamed via response.output_item.added/.done) so the client can see
 // THAT a tool ran without seeing query/results. The marker rides through
@@ -56,7 +56,7 @@ type CitationEffect struct {
 	EndIndex   int    `json:"end_index"`
 }
 
-// ToolEffect is the side-channel a hayai built-in tool emits alongside
+// ToolEffect is the side-channel a zs built-in tool emits alongside
 // its LLM-facing content string. Citations populate the annotations
 // array on the final message; CallItem is the raw JSON of a marker item
 // inserted into output[] so the client trace records that a tool ran.
@@ -80,7 +80,7 @@ type ToolEffect struct {
 	Action    *ToolAction
 }
 
-// NewMarkerCallID returns a fresh opaque identifier for a hayai tool
+// NewMarkerCallID returns a fresh opaque identifier for a zs tool
 // marker item. Distinct prefix from NewStatusItemID so logs are easy to
 // disambiguate: marker items live in output[]; status items ride the
 // zs_tool_call.in_progress/completed event channel.
@@ -110,7 +110,7 @@ func MarshalMarkerItem(itemType, id, status string) (json.RawMessage, error) {
 // MarshalMarkerItem's type/id/status shape but adds the produced images:
 //
 //   - `result`  = the FIRST image's base64 — mirrors OpenAI's native
-//     `image_generation_call.result` so a client (or older hayai build)
+//     `image_generation_call.result` so a client (or older zs build)
 //     that reads only `result` still renders one image.
 //   - `results` = ALL images' base64 (one tool call can produce n>1);
 //     clients that know the field iterate it to render every image.

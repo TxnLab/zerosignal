@@ -59,7 +59,7 @@ func ExtractRequestedBuiltinTools(body []byte) []string {
 }
 
 // ImageToolBudgets carries the per-request image-tool budgets a client
-// declares on a /v1/responses body to opt the hayai image tools in:
+// declares on a /v1/responses body to opt the zs image tools in:
 //
 //	"tool_budgets": {
 //	  "zs_image_generation": { "max_n": 4 },

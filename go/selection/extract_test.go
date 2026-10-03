@@ -21,7 +21,7 @@ func TestExtractRequestedBuiltinTools(t *testing.T) {
 		{"none", `{"model":"m1"}`, nil},
 		{"empty tools", `{"tools":[]}`, nil},
 		{
-			"hayai and non-hayai, order preserved",
+			"zs and non-zs, order preserved",
 			`{"tools":[{"type":"function"},{"type":"zs_web_search"},{"type":"zs_image_search"}]}`,
 			[]string{"zs_web_search", "zs_image_search"},
 		},

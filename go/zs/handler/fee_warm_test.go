@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/inject"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // countingFeeWallet reports a fee and records how many times it was asked, so a
@@ -63,7 +63,7 @@ func TestListModels_ColdFeeCachePublishesNoPricing(t *testing.T) {
 	w := &countingFeeWallet{fakeWallet: &fakeWallet{}, done: make(chan struct{}), release: make(chan struct{})}
 	defer close(w.release)
 	s := testServer(testConfig(), deps{
-		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
+		RegistryProvider: modelsRegistry(t, []zs.Operator{richOperator()}),
 		Wallet:           w,
 	})
 	// Without this the test passes against a wallet that isn't feeRateCapable at
@@ -91,7 +91,7 @@ func TestListModels_ColdFeeCachePublishesNoPricing(t *testing.T) {
 func TestNew_WarmsTheFeeRateBeforeTheFirstRequest(t *testing.T) {
 	w := &countingFeeWallet{fakeWallet: &fakeWallet{}, done: make(chan struct{})}
 	s := testServer(testConfig(), deps{
-		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
+		RegistryProvider: modelsRegistry(t, []zs.Operator{richOperator()}),
 		Wallet:           w,
 	})
 
@@ -130,7 +130,7 @@ func TestNew_WarmsTheFeeRateBeforeTheFirstRequest(t *testing.T) {
 // publish raw operator rates as if they were payer-net.
 func TestNew_DoesNotWarmAFeeBlindWallet(t *testing.T) {
 	s := testServer(testConfig(), deps{
-		RegistryProvider: modelsRegistry(t, []hayai.Operator{richOperator()}),
+		RegistryProvider: modelsRegistry(t, []zs.Operator{richOperator()}),
 		Wallet:           &fakeWallet{},
 	})
 

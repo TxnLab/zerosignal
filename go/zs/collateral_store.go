@@ -205,7 +205,7 @@ func (s *collateralStore) load() map[string]collateralEntry {
 // save writes the snapshot atomically.
 //
 // Temp-then-rename rather than internal/connect's atomicWriteWithBackup:
-// that helper is unexported with nine call sites there, and hayai
+// that helper is unexported with nine call sites there, and zs
 // importing connect inverts the layering the same way config importing
 // it would. There is deliberately no .bak — the file is reconstructible
 // from Intel by definition.

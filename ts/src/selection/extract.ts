@@ -41,7 +41,7 @@ export function extractRequestedBuiltinTools(body: string): string[] {
 
 /**
  * Per-request image-tool budgets a client declares on a /v1/responses body to
- * opt the hayai image tools in:
+ * opt the zs image tools in:
  *
  *     "tool_budgets": {
  *       "zs_image_generation": { "max_n": 4 },

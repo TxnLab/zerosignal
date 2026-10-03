@@ -40,7 +40,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
-// maxImageToolBudgetPerRequest caps a single request's hayai image-tool
+// maxImageToolBudgetPerRequest caps a single request's zs image-tool
 // budget (total images per tool across the whole /v1/responses turn). It
 // bounds the untrusted client max_n before it sizes the reserve: the node
 // delegates this clamp to the proxy (it records the raw counts verbatim and
@@ -265,7 +265,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	}
 
 	// Image-tool budgets: a /v1/responses (or chat) client opts the
-	// hayai image tools in with a tool_budgets object. We size the reserve
+	// zs image tools in with a tool_budgets object. We size the reserve
 	// to include max_n × the OUTER chat model's synthetic-token factor and
 	// pass the raw counts to the node. Parsed and clamped once here, then
 	// threaded into pickCandidates (the in-loop image-tool partition) and
@@ -515,7 +515,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	// skipped and, if every candidate is skipped for this reason, surfaced as
 	// 503 no_relay_available after the loop.
 	var relayUnavailable bool
-	// toolFactorMissing is set when the client budgeted a hayai image tool
+	// toolFactorMissing is set when the client budgeted a zs image tool
 	// but a candidate's capacity entry for the requested chat model doesn't
 	// publish the matching synthetic-token factor — so the proxy can't size
 	// the budget against this operator and skips it like the image-route
@@ -861,7 +861,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				}
 				// Spend guard: bound the aggregate USDC drain before committing
 				// money, atomically against both caps. The reservation holds the
-				// cap under concurrency; runHayaiSealed releases it if the open
+				// cap under concurrency; runSealed releases it if the open
 				// fails. Admit has already refused a request no candidate could
 				// fit, so a trip here is this operator's signed ceiling; the next
 				// candidate may be cheaper, and this ticket just expires unopened.
@@ -893,7 +893,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 						continue
 					}
 				}
-				s.runHayaiSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
+				s.runSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
 				return
 			case IsBusy(err):
 				// A considered refusal, so it ends the sweeps — tracked separately
@@ -1105,7 +1105,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			formatReserveSizeFailureMessage(model, sizing, reserveSizeRejections, pick.SizingMisses)))
 		return
 	}
-	// The client budgeted a hayai image tool but no candidate could
+	// The client budgeted a zs image tool but no candidate could
 	// size it — every operator's capacity for the requested chat model lacks
 	// the synthetic-token factor — AND no operator was merely busy or relay-
 	// gapped. That makes it a hard client-side problem (a retry won't help):
@@ -1766,7 +1766,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	// is off, there's no cache hit, or the hit doesn't resolve in the
 	// registry (all of which mean "no affinity preference").
 	var preferred *selection.Operator
-	var preferredHayai *Operator
+	var preferredOp *Operator
 	if s.cfg.Affinity.Policy != AffinityNone && s.toolAffinity != nil {
 		for _, id := range ExtractInputToolCallIDs(body) {
 			if opID, nodeID, ok := s.toolAffinity.Lookup(id); ok {
@@ -1777,7 +1777,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 				if op, err := s.registryProvider.Resolve(ctx, opID, nodeID); err == nil {
 					sel := op.Selection()
 					preferred = &sel
-					preferredHayai = &op
+					preferredOp = &op
 				} else {
 					s.log.Debug("affinity-preferred node not in registry",
 						slog.Uint64("operator_id", opID),
@@ -1814,7 +1814,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		Endpoint:             endpoint,
 		RequireTEE:           requireTEE,
 		AllowStaging:         s.cfg.AllowStaging,
-		RequestedTools:       ExtractRequestedHayaiTools(body),
+		RequestedTools:       ExtractRequestedBuiltinTools(body),
 		ImageToolGenBudget:   toolBudgets.GenerationMaxN,
 		ImageToolEditBudget:  toolBudgets.EditMaxN,
 		AffinityPolicy:       string(s.cfg.Affinity.Policy),
@@ -1837,12 +1837,12 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	res.TEEBlocked = tr.Diagnostics.TEEBlocked
 	res.StagingBlocked = tr.Diagnostics.StagingBlocked
 	res.SignerUnderfundedBlocked = tr.Diagnostics.SignerUnderfundedBlocked
-	if res.SignerUnderfundedBlocked && preferredHayai != nil && preferredHayai.SignerUnderfunded() &&
+	if res.SignerUnderfundedBlocked && preferredOp != nil && preferredOp.SignerUnderfunded() &&
 		s.cfg.Affinity.Policy == AffinityStrict {
 		res.SignerUnderfundedReason = fmt.Sprintf(
 			"this tool-call continuation is pinned (affinity_policy: strict) to operator %d node %d, whose signing account "+
 				"has less than %d ALGO spendable to pay network fees; retry later, or set affinity_policy to prefer so another node can continue it",
-			preferredHayai.ID, preferredHayai.NodeID, selection.MinSignerSpendableMicroAlgos/1_000_000)
+			preferredOp.ID, preferredOp.NodeID, selection.MinSignerSpendableMicroAlgos/1_000_000)
 	}
 	res.ImageEndpointUnsupported = tr.Diagnostics.ImageEndpointUnsupported
 	res.AffinityBlocked = tr.Diagnostics.AffinityBlocked
@@ -1874,8 +1874,8 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		for _, op := range registry {
 			byNode[RefOf(op)] = op
 		}
-		if preferredHayai != nil {
-			byNode[RefOf(*preferredHayai)] = *preferredHayai
+		if preferredOp != nil {
+			byNode[RefOf(*preferredOp)] = *preferredOp
 		}
 		res.Operators = make([]Operator, 0, len(tr.Operators))
 		for _, so := range tr.Operators {
@@ -1888,7 +1888,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		// bands" policy mirrored from the client's dispatch-candidates. No-op when
 		// no node has a responsiveness signal.
 		var ranking []rankDetail
-		res.Operators, ranking = bandByResponsiveness(res.Operators, preferredHayai, s.relayLatency, prefs.Sort)
+		res.Operators, ranking = bandByResponsiveness(res.Operators, preferredOp, s.relayLatency, prefs.Sort)
 		// Weights post-pass: demote a candidate whose advertised weights digest
 		// contradicts what a majority of distinct owners advertise for this model.
 		// Applied after the responsiveness order because it is a trust signal
@@ -1902,7 +1902,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		// continuation, and NEITHER of the proxy's pins is one at this point.
 		// The real continuation pin (previous_response_id → responseAffinity) has
 		// already returned a single-operator list far above and never reaches this
-		// code. What survives to here is only `preferredHayai`, the TOOL-CALL
+		// code. What survives to here is only `preferredOp`, the TOOL-CALL
 		// affinity pin — and under `strict` SelectTargets has already collapsed
 		// the list to that one operator, so the exemption could only ever fire
 		// under `prefer`, where the pin is a KV-cache preference and nothing more.
@@ -1919,7 +1919,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		// against it). Demote, never drop, mirroring the client: a model only one
 		// node serves must stay reachable as a last resort, and the window only
 		// lapses because live traffic re-probes it.
-		res.Operators = demoteBackedOffTargets(res.Operators, preferredHayai, s.targetBackoff)
+		res.Operators = demoteBackedOffTargets(res.Operators, preferredOp, s.targetBackoff)
 		s.logRanking(ctx, model, prefs.Sort, res.Operators, ranking)
 	}
 	return res, nil
@@ -2444,12 +2444,12 @@ func bandByResponsiveness(ops []Operator, preferred *Operator, lat RelayLatency,
 	return out, ordered
 }
 
-// runHayaiSealed seals the request under the recipient pinned at reserve time
+// runSealed seals the request under the recipient pinned at reserve time
 // (rt.SealRecipient — the operator's signed ephemeral recipient; mandatory
 // forward secrecy, no anchor), dispatches it to op.BaseURL with the reserved
 // ticket_id bound into the envelope, and hands the response to the decrypt
 // pipeline.
-func (s *Client) runHayaiSealed(
+func (s *Client) runSealed(
 	ctx context.Context,
 	em emitter,
 	endpoint, model string,
@@ -2598,7 +2598,7 @@ func (s *Client) runHayaiSealed(
 	// it only exposes the dispute/settle surface).
 	var sh settlementHandle = openHandle
 	openFees := openHandle.OpenFeesMicroalgos
-	nonStreamRespond := s.buildHayaiNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
+	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
 
 	// Transport-privacy routing. With no hop, send directly to the target
 	// (fwdBaseURL = op.BaseURL, fwdEndpoint = endpoint, no extra headers) —
@@ -2627,7 +2627,7 @@ func (s *Client) runHayaiSealed(
 		// (node already done → pay the operator for delivered content) or
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
-		factory := s.buildHayaiFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete)
+		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete)
 		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
 		return
 	}
@@ -2939,11 +2939,11 @@ func relayAttr(hop *RelayHop) slog.Attr {
 		slog.Uint64("relay_node_id", hop.RelayNodeID))
 }
 
-// buildHayaiNonStreamResponder decrypts the node's non-streaming response,
+// buildNonStreamResponder decrypts the node's non-streaming response,
 // verifies commit_k, and — on success — records any tool_call ids in the
 // affinity cache so the next turn of a tool-calling conversation routes
 // back to the same operator.
-func (s *Client) buildHayaiNonStreamResponder(
+func (s *Client) buildNonStreamResponder(
 	ctx context.Context,
 	ephemeral *age.X25519Identity,
 	txID string,
@@ -3128,7 +3128,7 @@ func (s *Client) buildHayaiNonStreamResponder(
 		}
 
 		// -debug-bodies escape hatch: dump the decrypted response we're about
-		// to return (symmetric with the request dump in runHayaiSealed). No-op
+		// to return (symmetric with the request dump in runSealed). No-op
 		// unless the flag is on. See debug.go.
 		s.debugDumpResponseBody(endpoint, op.ID, ticket.TicketID, plaintext)
 
@@ -3824,7 +3824,7 @@ func flattenFrames(frames [][]byte) []byte {
 	return out
 }
 
-// buildHayaiFrameFactory handles the streaming path. It does the same
+// buildFrameFactory handles the streaming path. It does the same
 // commit_k verification as the non-stream responder (once, when the
 // wrapped key arrives), decrypts content frames in order, accumulates
 // their plaintext for body_hash, and on the terminal zs-receipt
@@ -3832,7 +3832,7 @@ func flattenFrames(frames [][]byte) []byte {
 // responder. The signed receipt itself is not forwarded; what the
 // payer is told it cost goes to the emitter as a usageReport in its
 // place.
-func (s *Client) buildHayaiFrameFactory(
+func (s *Client) buildFrameFactory(
 	ctx context.Context,
 	ephemeral *age.X25519Identity,
 	txID string,
@@ -3910,9 +3910,9 @@ func (s *Client) buildHayaiFrameFactory(
 		return func(f Frame) (outFrame, error) {
 			switch f.Event {
 			case wire.StreamEventMarker:
-				// Sealed hayai frame. Shape of the plaintext is opaque
+				// Sealed zs frame. Shape of the plaintext is opaque
 				// to the proxy — it could be an OpenAI content delta, a
-				// function-call fragment, or a hayai-specific event the
+				// function-call fragment, or a zs-specific event the
 				// node emits (e.g. response.zs_tool_call.in_progress
 				// status frames during server-side tool rounds). The
 				// proxy decrypts, includes the plaintext in the body-
@@ -4071,7 +4071,7 @@ func (s *Client) buildHayaiFrameFactory(
 				}}, nil
 
 			default:
-				return outFrame{frame: f}, nil // non-hayai event (e.g. [DONE]) passes through
+				return outFrame{frame: f}, nil // unsealed event (e.g. [DONE]) passes through
 			}
 		}, nil
 	}

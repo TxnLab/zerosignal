@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "comment": "Cross-impl byte-parity vectors for hayai image pricing (imageprice). Regenerate via: cd proto/go \u0026\u0026 go test ./imageprice -run TestVectors -update. Loaded by proto/go/imageprice/vectors_test.go and proto/ts/test/imageprice-vectors.test.ts.",
+    "comment": "Cross-impl byte-parity vectors for zs image pricing (imageprice). Regenerate via: cd proto/go \u0026\u0026 go test ./imageprice -run TestVectors -update. Loaded by proto/go/imageprice/vectors_test.go and proto/ts/test/imageprice-vectors.test.ts.",
     "sample_rates": [
         40000,
         7

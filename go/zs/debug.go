@@ -35,7 +35,7 @@ func (s *Client) debugDumpRequestBody(endpoint string, operatorID uint64, ticket
 		out = pretty.Bytes()
 	}
 	fmt.Fprintf(os.Stderr,
-		"\n=== hayai debug: POST %s -> operator %d (ticket %s) ===\n%s\n=== end request body ===\n",
+		"\n=== zs debug: POST %s -> operator %d (ticket %s) ===\n%s\n=== end request body ===\n",
 		endpoint, operatorID, ticketID, out)
 }
 
@@ -53,13 +53,13 @@ func (s *Client) debugDumpResponseBody(endpoint string, operatorID uint64, ticke
 		out = pretty.Bytes()
 	}
 	fmt.Fprintf(os.Stderr,
-		"\n=== hayai debug: RESPONSE %s <- operator %d (ticket %s) ===\n%s\n=== end response body ===\n",
+		"\n=== zs debug: RESPONSE %s <- operator %d (ticket %s) ===\n%s\n=== end response body ===\n",
 		endpoint, operatorID, ticketID, out)
 }
 
 // debugDumpResponseFrame writes one decrypted STREAMING response frame to
 // stderr as the proxy forwards it — a content delta, a tool-call fragment, a
-// sealed mid-stream error, or a hayai status event. Frame-by-frame (one line
+// sealed mid-stream error, or a zs status event. Frame-by-frame (one line
 // each, tagged with ticket + frame index so interleaved parallel streams stay
 // readable) so a stream cancelled before it completes still shows whatever the
 // node managed to send. Same escape-hatch contract as the others.

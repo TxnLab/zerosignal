@@ -10,7 +10,7 @@ import (
 	"math"
 )
 
-// BuiltinToolType is the `type` value that marks a tool entry as a hayai
+// BuiltinToolType is the `type` value that marks a tool entry as a zs
 // built-in tool in an OpenAI-compatible request body's tools[] array.
 // Values are always prefixed `zs_` so a node can cheaply distinguish
 // them from user-supplied function tools and provider-native tools.
@@ -23,7 +23,7 @@ import (
 // function-tool shape the LLM actually sees.
 type BuiltinToolType string
 
-// Built-in hayai tool type strings shared across packages. Search tools
+// Built-in zs tool type strings shared across packages. Search tools
 // keep their type strings local to their implementation packages; the
 // image tools declare theirs here because the node's tool loop
 // must distinguish zs_image_generation from zs_image_edit (to pick
@@ -47,7 +47,7 @@ func IsBuiltinToolType(t string) bool {
 	return t[:len(prefix)] == prefix
 }
 
-// BuiltinToolDef describes one hayai built-in tool the node offers. It is
+// BuiltinToolDef describes one zs built-in tool the node offers. It is
 // the node's node-internal, authoritative descriptor — the source of
 // `Name`, `Description`, and `Parameters` for the wire-level function tool
 // the upstream LLM sees. Clients MUST NOT echo those fields back on the
@@ -63,8 +63,8 @@ func IsBuiltinToolType(t string) bool {
 //
 // Name is the function name the LLM will call back with when it decides
 // to invoke the tool. In practice Name == string(Type) — the rewriter
-// sets the function name to the hayai type string so the response
-// interceptor can match tool_calls[i].function.name against the hayai
+// sets the function name to the zs type string so the response
+// interceptor can match tool_calls[i].function.name against the zs
 // type set without extra bookkeeping.
 type BuiltinToolDef struct {
 	Type        BuiltinToolType `json:"type"`
@@ -164,10 +164,10 @@ const (
 	FrameToolCallBuiltin
 
 	// FrameToolCallClient means the frame carried a tool-call fragment
-	// for a client-defined function tool (not a hayai built-in). The
+	// for a client-defined function tool (not a zs built-in). The
 	// streaming tool loop FORWARDS these frames to the client so the
 	// standard OpenAI client-executes-tool pattern still works for
-	// mixed requests (client tools alongside hayai built-ins).
+	// mixed requests (client tools alongside zs built-ins).
 	FrameToolCallClient
 
 	// FrameTerminal means the frame was the stream's end-of-iteration
@@ -177,7 +177,7 @@ const (
 	// frames based on whether any tool calls were stitched.
 	FrameTerminal
 
-	// FrameStatus means the frame is a node-originated hayai tool-round
+	// FrameStatus means the frame is a node-originated zs tool-round
 	// status event (response.zs_tool_call.in_progress / .completed).
 	// Status frames are emitted by the node's tool loop itself during
 	// server-side tool execution; if the upstream provider ever echoes

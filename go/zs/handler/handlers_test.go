@@ -17,7 +17,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -97,24 +97,24 @@ func TestReadClientBody_BodyTooLarge(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiDetails_AggregatesAcrossOperators(t *testing.T) {
-	op1 := hayai.Operator{
+func TestHandleDetails_AggregatesAcrossOperators(t *testing.T) {
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		BuiltinTools: []hayai.BuiltinToolDef{
+		BuiltinTools: []zs.BuiltinToolDef{
 			{Type: "zs_web_search"},
 			{Type: "zs_web_read"},
 		},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", BaseURL: "http://b", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		BuiltinTools: []hayai.BuiltinToolDef{
+		BuiltinTools: []zs.BuiltinToolDef{
 			{Type: "zs_web_search"}, // dup
 			{Type: "zs_image_search"},
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestHandleHayaiDetails_AggregatesAcrossOperators(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
@@ -152,25 +152,25 @@ func TestHandleHayaiDetails_AggregatesAcrossOperators(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiDetails_AggregatesNodeVersions(t *testing.T) {
+func TestHandleDetails_AggregatesNodeVersions(t *testing.T) {
 	// Two operators report distinct versions, a third dups op1's. We
 	// expect the proxy to surface a sorted, deduped list.
-	op1 := hayai.Operator{
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
 		NodeVersion: "0.21.0+abc1234 [2026-05-03T12:00:00Z]",
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", BaseURL: "http://b", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
 		NodeVersion: "0.21.0+def5678 [2026-05-04T08:00:00Z]",
 	}
-	op3 := hayai.Operator{
+	op3 := zs.Operator{
 		ID: 3, OwnerAddr: "C", BaseURL: "http://c", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
 		NodeVersion: "0.21.0+abc1234 [2026-05-03T12:00:00Z]", // dup of op1
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2, op3})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2, op3})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestHandleHayaiDetails_AggregatesNodeVersions(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
@@ -203,25 +203,25 @@ func TestHandleHayaiDetails_AggregatesNodeVersions(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiDetails_AggregatesPricingMin(t *testing.T) {
+func TestHandleDetails_AggregatesPricingMin(t *testing.T) {
 	// Two operators serve the same model at different rates; the aggregate
 	// /v1/zs/details should surface the lowest declared rate per axis
 	// ("from $X" semantic).
-	op1 := hayai.Operator{
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {InputUSDPer1M: 0.50, OutputUSDPer1M: 1.50},
 		},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", BaseURL: "http://b", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {InputUSDPer1M: 0.15, OutputUSDPer1M: 2.00},
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestHandleHayaiDetails_AggregatesPricingMin(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
@@ -262,18 +262,18 @@ func TestHandleHayaiDetails_AggregatesPricingMin(t *testing.T) {
 	}
 }
 
-// TestHandleHayaiDetails_EmitsFeeBps proves the aggregate details endpoint
+// TestHandleDetails_EmitsFeeBps proves the aggregate details endpoint
 // surfaces the warm protocol fee so discovery consumers (e.g. `zs-proxy
 // connect`) can gross the advertised operator rates up to payer-net.
-func TestHandleHayaiDetails_EmitsFeeBps(t *testing.T) {
-	op := hayai.Operator{
+func TestHandleDetails_EmitsFeeBps(t *testing.T) {
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"m"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60},
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestHandleHayaiDetails_EmitsFeeBps(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
@@ -300,15 +300,15 @@ func TestHandleHayaiDetails_EmitsFeeBps(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
-	op1 := hayai.Operator{
+func TestHandleOperators_PerOperatorView(t *testing.T) {
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "OWNER_A", SigningAddr: "SIGN_A",
 		BaseURL: "http://a", Models: []string{"m", "n"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {ContextWindow: 128000, MaxOutputTokens: 4096, InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"}, InputUSDPer1M: 0.15, OutputUSDPer1M: 0.60},
 			"n": {ContextWindow: 32000, InputModalities: []string{"text"}, OutputModalities: []string{"text"}, InputUSDPer1M: 5.00, OutputUSDPer1M: 15.00},
 		},
-		BuiltinTools:          []hayai.BuiltinToolDef{{Type: "zs_web_search"}},
+		BuiltinTools:          []zs.BuiltinToolDef{{Type: "zs_web_search"}},
 		NodeVersion:           "0.21.0+abc1234 [2026-05-03T12:00:00Z]",
 		Reachable:             true,
 		ProtoVersion:          wire.ProtoVersion,
@@ -316,9 +316,9 @@ func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
 		MinChargeOutputTokens: 1000,
 		MinChargeAlgoTxns:     9,
 		MinChargeMicroUSDC:    1620,
-		TEE: &hayai.TEEStatus{Mode: "dstack-tdx", Verified: true,
+		TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: true,
 			AttestedModelIDs: []string{"m"}},
-		Metrics: hayai.OperatorMetrics{
+		Metrics: zs.OperatorMetrics{
 			LastActivityAt:            1_700_000_000,
 			TicketsOpened:             100,
 			TicketsSettled:            70,
@@ -340,14 +340,14 @@ func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
 			Revenue30dUsdc:    120_000,
 		},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "OWNER_B", SigningAddr: "SIGN_B",
 		BaseURL: "http://b", Models: []string{"m"},
 		// Wire-compatible on purpose — see the note on the other unreachable
 		// fixtures: unreachability must be the only thing holding it out.
 		Reachable: false, ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
@@ -518,20 +518,20 @@ func TestHandleHayaiOperators_PerOperatorView(t *testing.T) {
 	}
 }
 
-// TestHandleHayaiOperators_CoordinatesVerbatim asserts the per-operator surface
+// TestHandleOperators_CoordinatesVerbatim asserts the per-operator surface
 // shows EACH operator's own coordinates verbatim — no cross-operator
 // aggregation — even when two operators disagree on a field (contrast the
 // aggregate /v1/zs/details, which would omit the disputed field).
-func TestHandleHayaiOperators_CoordinatesVerbatim(t *testing.T) {
-	op1 := hayai.Operator{
+func TestHandleOperators_CoordinatesVerbatim(t *testing.T) {
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", SigningAddr: "SA", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
-		ModelCapacities: map[string]hayai.ModelCapacity{"m": {Coordinates: &inject.ModelCoordinates{Family: "qwen/q", Quantization: "Q4"}}},
+		ModelCapacities: map[string]zs.ModelCapacity{"m": {Coordinates: &inject.ModelCoordinates{Family: "qwen/q", Quantization: "Q4"}}},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", SigningAddr: "SB", BaseURL: "http://b", Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
-		ModelCapacities: map[string]hayai.ModelCapacity{"m": {Coordinates: &inject.ModelCoordinates{Family: "qwen/q", Quantization: "Q5"}}},
+		ModelCapacities: map[string]zs.ModelCapacity{"m": {Coordinates: &inject.ModelCoordinates{Family: "qwen/q", Quantization: "Q5"}}},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestHandleHayaiOperators_CoordinatesVerbatim(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", w.Result().StatusCode)
 	}
@@ -574,21 +574,21 @@ func TestHandleHayaiOperators_CoordinatesVerbatim(t *testing.T) {
 // A node attesting an empty catalog and a node with no verified list must
 // stay distinguishable on the wire: [] versus null. Checked on the raw body,
 // because decoding into a []string reads both as a nil-or-empty slice.
-func TestHandleHayaiOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
-	op := func(id uint64, ids []string) hayai.Operator {
-		return hayai.Operator{
+func TestHandleOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
+	op := func(id uint64, ids []string) zs.Operator {
+		return zs.Operator{
 			ID: id, BaseURL: fmt.Sprintf("http://%d", id), Reachable: true,
 			ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
-			TEE: &hayai.TEEStatus{Mode: "dstack-tdx", Verified: ids != nil, AttestedModelIDs: ids},
+			TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: ids != nil, AttestedModelIDs: ids},
 		}
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op(1, []string{}), op(2, nil)})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op(1, []string{}), op(2, nil)})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
 	s := testServer(testConfig(), deps{RegistryProvider: reg})
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil))
+	s.handleOperators(w, httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil))
 
 	raw := w.Body.String()
 	for _, want := range []string{`"attested_model_ids":[]`, `"attested_model_ids":null`} {
@@ -598,12 +598,12 @@ func TestHandleHayaiOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiOperators_EmptyRegistryReturnsEmptyList(t *testing.T) {
+func TestHandleOperators_EmptyRegistryReturnsEmptyList(t *testing.T) {
 	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Errorf("status = %d", w.Result().StatusCode)
@@ -622,12 +622,12 @@ func TestHandleHayaiOperators_EmptyRegistryReturnsEmptyList(t *testing.T) {
 	}
 }
 
-func TestHandleHayaiDetails_EmptyRegistryReturnsEmptyList(t *testing.T) {
+func TestHandleDetails_EmptyRegistryReturnsEmptyList(t *testing.T) {
 	s := testServer(testConfig(), deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Errorf("status = %d", w.Result().StatusCode)
@@ -654,17 +654,17 @@ func TestHandleHayaiDetails_EmptyRegistryReturnsEmptyList(t *testing.T) {
 // dispatch's reserve path can keep trying the operator). Repros the
 // "stale models in /refresh output" bug from the TUI.
 func TestHandleListModels_ExcludesUnreachableOperators(t *testing.T) {
-	op1 := hayai.Operator{
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"alive"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", BaseURL: "http://b", Models: []string{"stale"},
 		// Wire-compatible on purpose: unreachability must be the ONLY reason this
 		// operator is held out, or the test passes whichever gate you delete.
 		Reachable: false, ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -694,16 +694,16 @@ func TestHandleListModels_ExcludesUnreachableOperators(t *testing.T) {
 // the "every operator is offline" state. AllModels returns empty because
 // of the reachability filter, but we should NOT fall through to the
 // upstream — that would advertise models the proxy can't actually
-// dispatch via hayai. An empty list is the correct surface for "we know
+// dispatch. An empty list is the correct surface for "we know
 // of operators, none are currently reachable".
 func TestHandleListModels_AllOperatorsUnreachable_ReturnsEmptyList(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"stale"},
 		// Wire-compatible on purpose: unreachability must be the ONLY reason this
 		// operator is held out, or the test passes whichever gate you delete.
 		Reachable: false, ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -762,14 +762,14 @@ func TestHandleListModels_EmptyRegistry_ReturnsEmptyList(t *testing.T) {
 }
 
 func TestHandleGetModel_Found_OnChain(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"gpt-test"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"gpt-test": {InputModalities: []string{"text", "image"}, OutputModalities: []string{"text"}},
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -810,11 +810,11 @@ func TestHandleGetModel_Found_OnChain(t *testing.T) {
 }
 
 func TestHandleGetModel_NotFound_404(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"alive"},
 		Reachable: true, ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -861,13 +861,13 @@ func TestHandleGetModel_AllOperatorsUnreachable_404(t *testing.T) {
 	// Operator advertises the model but is unreachable — the model is
 	// not currently servable, so the lookup must 404 instead of returning
 	// a stale entry.
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Models: []string{"stale"},
 		// Wire-compatible on purpose: unreachability must be the ONLY reason this
 		// operator is held out, or the test passes whichever gate you delete.
 		Reachable: false, ProtoVersion: wire.ProtoVersion,
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -898,30 +898,30 @@ func TestReadClientBody_AtCapSucceeds(t *testing.T) {
 	}
 }
 
-// TestHandleHayai_WeightsSurfaces asserts the weights-digest fields appear on both
+// TestHandleCatalog_WeightsSurfaces asserts the weights-digest fields appear on both
 // the aggregate /v1/zs/details (consensus + mismatch) and the per-operator
 // /v1/zs/operators (each operator's digest / unverifiable verbatim).
-func TestHandleHayai_WeightsSurfaces(t *testing.T) {
+func TestHandleCatalog_WeightsSurfaces(t *testing.T) {
 	da := "sha256:" + strings.Repeat("a", 64)
 	db := "sha256:" + strings.Repeat("b", 64)
-	op1 := hayai.Operator{
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", SigningAddr: "SA", BaseURL: "http://a",
 		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"agree", "differ", "remote"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"agree":  {WeightsDigest: da},
 			"differ": {WeightsDigest: da},
 			"remote": {WeightsUnverifiable: true},
 		},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", SigningAddr: "SB", BaseURL: "http://b",
 		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"agree", "differ"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"agree":  {WeightsDigest: da},
 			"differ": {WeightsDigest: db}, // disagrees with op1
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestHandleHayai_WeightsSurfaces(t *testing.T) {
 	// Aggregate: agree → consensus digest, no mismatch; differ → mismatch, no consensus.
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiDetails(w, req)
+	s.handleDetails(w, req)
 	var agg struct {
 		Models []struct {
 			ID              string `json:"id"`
@@ -964,7 +964,7 @@ func TestHandleHayai_WeightsSurfaces(t *testing.T) {
 	// suppressed consensus); op1's 'remote' is unverifiable with no digest.
 	req = httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w = httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 	var perOp struct {
 		Operators []struct {
 			OperatorID uint64 `json:"operator_id"`
@@ -1003,23 +1003,23 @@ func TestHandleHayai_WeightsSurfaces(t *testing.T) {
 // own deployment, so two operators serving one model SHOULD differ and the
 // endpoint must show both. Without this the field was written in fetcher.go and
 // read nowhere: filtered, documented "display only", and displayed by nothing.
-func TestHandleHayaiOperators_CarriesRetention(t *testing.T) {
-	op1 := hayai.Operator{
+func TestHandleOperators_CarriesRetention(t *testing.T) {
+	op1 := zs.Operator{
 		ID: 1, OwnerAddr: "A", SigningAddr: "SA", BaseURL: "http://a",
 		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m", "quiet"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m":     {Retention: inject.RetentionUpstreamEnforced},
 			"quiet": {}, // no signal — the honest state of most passthroughs
 		},
 	}
-	op2 := hayai.Operator{
+	op2 := zs.Operator{
 		ID: 2, OwnerAddr: "B", SigningAddr: "SB", BaseURL: "http://b",
 		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {Retention: inject.RetentionNoUpstream},
 		},
 	}
-	reg, err := hayai.NewStaticRegistryProvider([]hayai.Operator{op1, op2})
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -1027,7 +1027,7 @@ func TestHandleHayaiOperators_CarriesRetention(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil)
 	w := httptest.NewRecorder()
-	s.handleHayaiOperators(w, req)
+	s.handleOperators(w, req)
 
 	var perOp struct {
 		Operators []struct {

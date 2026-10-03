@@ -23,7 +23,7 @@ import (
 // runReceiptChecks against a desynced / absent receipt — the body_hash compare
 // that drives a protest simply never runs, so an honest target is never
 // protested for a relay's transport fault. These tests document that property
-// and lock it against a future buildHayaiFrameFactory refactor (no behavior
+// and lock it against a future buildFrameFactory refactor (no behavior
 // change). The positive control proves the streaming receipt path actually
 // verifies (and protests) when the stream is intact, so the negatives aren't
 // vacuous.
@@ -52,7 +52,7 @@ func streamReceiptServer(t *testing.T, mode nodeMode) (*Server, *bytes.Buffer) {
 		buildReceipt: mismatchingReceipt,
 	})
 	cfg := testConfig()
-	opts := setupHayai(t, cfg, node)
+	opts := setup(t, cfg, node)
 	var logBuf bytes.Buffer
 	// A wired wallet makes the protest path reachable, so a fired protest is
 	// observable in the logs (the negatives assert it does NOT fire).
@@ -76,7 +76,7 @@ func driveStream(t *testing.T, s *Server) *httptest.ResponseRecorder {
 
 // Positive control: with an intact stream the proxy decrypts the receipt,
 // runReceiptChecks runs, and the body_hash mismatch drives a protest.
-func TestDispatchHayai_Stream_ReceiptIntact_Protests(t *testing.T) {
+func TestDispatch_Stream_ReceiptIntact_Protests(t *testing.T) {
 	s, logBuf := streamReceiptServer(t, modeStreamReceiptIntact)
 	driveStream(t, s)
 	logs := logBuf.String()
@@ -91,7 +91,7 @@ func TestDispatchHayai_Stream_ReceiptIntact_Protests(t *testing.T) {
 // 6a (i): a relay drops the tail content frame → the proxy's frameIndex
 // desyncs → the receipt frame fails to decrypt and is swallowed →
 // runReceiptChecks never runs → NO protest (the honest target is spared).
-func TestDispatchHayai_Stream_RelayDropsTailContent_NoProtest(t *testing.T) {
+func TestDispatch_Stream_RelayDropsTailContent_NoProtest(t *testing.T) {
 	s, logBuf := streamReceiptServer(t, modeStreamReceiptDropTail)
 	driveStream(t, s)
 	logs := logBuf.String()
@@ -110,7 +110,7 @@ func TestDispatchHayai_Stream_RelayDropsTailContent_NoProtest(t *testing.T) {
 
 // 6a (ii): a relay truncates before the receipt frame → no receipt arrives →
 // runReceiptChecks never runs → NO protest.
-func TestDispatchHayai_Stream_RelayTruncatesBeforeReceipt_NoProtest(t *testing.T) {
+func TestDispatch_Stream_RelayTruncatesBeforeReceipt_NoProtest(t *testing.T) {
 	s, logBuf := streamReceiptServer(t, modeStreamReceiptTruncated)
 	w := driveStream(t, s)
 	logs := logBuf.String()
@@ -129,12 +129,12 @@ func TestDispatchHayai_Stream_RelayTruncatesBeforeReceipt_NoProtest(t *testing.T
 	}
 }
 
-// The zs.usage SSE frame is opt-in (hayaiUsageFrameHeader): its data payload
+// The zs.usage SSE frame is opt-in (usageFrameHeader): its data payload
 // is not a valid OpenAI chat chunk, so strict OpenAI clients (JetBrains/Koog)
 // that parse every data: line throw on it. Default off keeps the stream
 // OpenAI-compatible; settlement runs either way (driven by reading the receipt,
 // before the frame is built).
-func TestDispatchHayai_Stream_UsageFrameOptIn(t *testing.T) {
+func TestDispatch_Stream_UsageFrameOptIn(t *testing.T) {
 	t.Run("default suppressed but settlement runs", func(t *testing.T) {
 		s, logBuf := streamReceiptServer(t, modeStreamReceiptIntact)
 		w := httptest.NewRecorder()
@@ -160,7 +160,7 @@ func TestDispatchHayai_Stream_UsageFrameOptIn(t *testing.T) {
 		s, _ := streamReceiptServer(t, modeStreamReceiptIntact)
 		w := httptest.NewRecorder()
 		req := clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","stream":true}`)
-		req.Header.Set(hayaiUsageFrameHeader, "1")
+		req.Header.Set(usageFrameHeader, "1")
 		s.mux.ServeHTTP(w, req)
 		if w.Result().StatusCode != http.StatusOK {
 			t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())

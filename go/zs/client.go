@@ -28,7 +28,7 @@ type Client struct {
 	log        *slog.Logger
 	httpClient *http.Client
 
-	// Hayai providers. The registry feeds operator selection, the reserve
+	// Providers. The registry feeds operator selection, the reserve
 	// client handles the pre-payment admission call, and the affinity cache
 	// pins continuation requests to the same operator.
 	registryProvider RegistryProvider

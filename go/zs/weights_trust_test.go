@@ -222,7 +222,7 @@ func TestDemoteContradictedWeights(t *testing.T) {
 	})
 
 	t.Run("the tool-affinity pin does NOT exempt at the dispatch call site", func(t *testing.T) {
-		// The regression this guards: exempting `preferredHayai` would make the
+		// The regression this guards: exempting `preferredOp` would make the
 		// demerit inert for a payer mid-tool-loop with the contradicted operator
 		// — the one who is paying for the substituted model, across every turn of
 		// the loop. pickCandidates must keep passing nil.

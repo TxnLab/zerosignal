@@ -25,7 +25,7 @@ export const ENDPOINT_RESPONSES = '/v1/responses' as const
 export const ENDPOINT_IMAGES = '/v1/images/generations' as const
 export const ENDPOINT_IMAGE_EDITS = '/v1/images/edits' as const
 
-// Affinity policy values, equal to the proxy's hayai.AffinityPolicy strings.
+// Affinity policy values, equal to the proxy's zs.AffinityPolicy strings.
 export const AFFINITY_PREFER = 'prefer' as const
 export const AFFINITY_STRICT = 'strict' as const
 export const AFFINITY_NONE = 'none' as const
@@ -69,13 +69,13 @@ export interface Constraints {
     // include nodes whose on-chain `staging` flag is set (Operator.staging) in
     // target selection. Default/absent ⇒ false: staging nodes are dropped, so
     // the standard routing path never targets a node still being tested. Set
-    // from the Model Routing "allow staging" toggle (client) / hayai.allow_staging
+    // from the Model Routing "allow staging" toggle (client) / zs.allow_staging
     // (proxy). Optional + omitempty: absent reads as false (Go omits the zero).
     allow_staging?: boolean
     // zs_* tool types the request asks for; operators advertising all of
     // them are partitioned ahead of the rest. null/undefined ⇒ none.
     requested_tools: string[] | null
-    // per-request hayai image-tool budgets (max_n). When > 0, operators whose
+    // per-request zs image-tool budgets (max_n). When > 0, operators whose
     // chosen model publishes the matching in-loop image-tool factor are
     // partitioned ahead of those that don't — a ranking preference, not a hard
     // filter (a model served only by toolless operators stays selectable). See
@@ -335,7 +335,7 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
         }
     }
 
-    // 9b. In-loop image-tool partition. When the request budgets a hayai image
+    // 9b. In-loop image-tool partition. When the request budgets a zs image
     //     tool, partition operators whose chosen model publishes the matching
     //     in-loop factor ahead of those that don't. PREFER, not filter (a model
     //     served only by toolless operators stays selectable). OR-of-budgeted-

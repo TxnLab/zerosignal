@@ -16,12 +16,12 @@ GO   ?= go
 PNPM ?= pnpm
 
 .PHONY: test test-go test-ts verify-vectors update-vectors update-sealed-vectors \
-	update-ts-sealed-vectors check-vector-generators vet typecheck
+	update-ts-sealed-vectors check-vector-generators check-no-hayai vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
 # vector-staleness is caught here too.
-test: check-vector-generators test-go test-ts
+test: check-vector-generators check-no-hayai test-go test-ts
 
 test-go:
 	cd go && $(GO) test ./... -count 1
@@ -40,6 +40,13 @@ verify-vectors:
 # them came to be silently skipped by update-vectors.
 check-vector-generators:
 	./scripts/check-vector-generators.sh
+
+# Fails when the old project name reappears in the published code. The test
+# runs first: on the real tree the guard only ever passes, so the test is what
+# shows it can still fail.
+check-no-hayai:
+	./scripts/check-no-hayai.test.sh
+	./scripts/check-no-hayai.sh
 
 # Regenerate every testdata/*.json fixture from the Go side after an intentional
 # change (e.g. a new field in Ticket/UsageReceipt). Re-run `make test` afterwards

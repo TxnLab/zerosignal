@@ -171,14 +171,13 @@ func (c *IDAffinity) evictLocked() {
 //
 // These delegate to proto/go/selection so the proxy and the client/ chat app
 // derive identical affinity keys and tool sets from a request body — proto is
-// the single source of truth (see selection/extract.go). The thin wrappers
-// keep the proxy's existing hayai.Extract* call sites unchanged.
+// the single source of truth (see selection/extract.go).
 
 // ExtractModel pulls the top-level "model" string from a request body.
 func ExtractModel(body []byte) string { return selection.ExtractModel(body) }
 
-// ExtractRequestedHayaiTools returns every `zs_*` tool type in tools[], in order.
-func ExtractRequestedHayaiTools(body []byte) []string {
+// ExtractRequestedBuiltinTools returns every `zs_*` tool type in tools[], in order.
+func ExtractRequestedBuiltinTools(body []byte) []string {
 	return selection.ExtractRequestedBuiltinTools(body)
 }
 

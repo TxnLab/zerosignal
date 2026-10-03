@@ -13,14 +13,14 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// TestDispatchHayai_ToolBudgets_SizesReserve confirms the proxy
+// TestDispatch_ToolBudgets_SizesReserve confirms the proxy
 // sizing: a /v1/responses request carrying tool_budgets adds
 // the OUTER chat model's image-tool budget (max_n) to the reserve's
 // the image-tool budget on the reserve request (MaxPrice, not MaxOutputTokens).
-func TestDispatchHayai_ToolBudgets_SizesReserve(t *testing.T) {
+func TestDispatch_ToolBudgets_SizesReserve(t *testing.T) {
 	const factor uint64 = 100_000
 
 	var reserves []ticket.ReserveRequest
@@ -30,7 +30,7 @@ func TestDispatchHayai_ToolBudgets_SizesReserve(t *testing.T) {
 		onReserve:      func(req ticket.ReserveRequest) { reserves = append(reserves, req) },
 	})
 	node.operator.Models = []string{"gpt-test"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		// ImageToolRateMicroUSDC (the tool-path rate) — NOT ImageRateMicroUSDC,
 		// which would falsely mark gpt-test as a dedicated image-route model.
 		"gpt-test": {ImageToolRateMicroUSDC: factor, OutputUSDPer1M: 10},
@@ -38,7 +38,7 @@ func TestDispatchHayai_ToolBudgets_SizesReserve(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	// Control run: no tool_budgets.
 	base := `{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50}`
@@ -68,20 +68,20 @@ func TestDispatchHayai_ToolBudgets_SizesReserve(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_ToolBudgets_UnsupportedTool confirms the 400 path: a
+// TestDispatch_ToolBudgets_UnsupportedTool confirms the 400 path: a
 // budget for a chat model whose capacity entry lacks the synthetic-token
 // factor can't be sized, so the request is refused as unsupported_tool and
 // no reserve is attempted.
-func TestDispatchHayai_ToolBudgets_UnsupportedTool(t *testing.T) {
+func TestDispatch_ToolBudgets_UnsupportedTool(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	node.operator.Models = []string{"gpt-test"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {OutputUSDPer1M: 10}, // ImageToolRateMicroUSDC intentionally 0 (tool not priced)
 	}
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	body := `{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`
 	w := httptest.NewRecorder()
@@ -98,16 +98,16 @@ func TestDispatchHayai_ToolBudgets_UnsupportedTool(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_ImageGen_SkipsChatToolModel is the regression guard for
+// TestDispatch_ImageGen_SkipsChatToolModel is the regression guard for
 // the overload bug: a model that advertises only the tool-path factor
 // (ImageToolRateMicroUSDC) — i.e. a chat model offering zs_image_generation
 // — must NOT be routed to the dedicated /v1/images/generations route. The
 // proxy has no image-tool rate to size that reserve, so the request must
 // fail without ever POSTing a (zero-input_tokens) reserve the node rejects.
-func TestDispatchHayai_ImageGen_SkipsChatToolModel(t *testing.T) {
+func TestDispatch_ImageGen_SkipsChatToolModel(t *testing.T) {
 	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 	node.operator.Models = []string{"gpt-test"}
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		// Tool-path factor only — a chat model that OFFERS the image tool,
 		// not a dedicated image-route model.
 		"gpt-test": {ImageToolRateMicroUSDC: 80_000, OutputUSDPer1M: 10},
@@ -115,7 +115,7 @@ func TestDispatchHayai_ImageGen_SkipsChatToolModel(t *testing.T) {
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/images/generations",
@@ -129,7 +129,7 @@ func TestDispatchHayai_ImageGen_SkipsChatToolModel(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_ToolBudgets_BusyBeatsUnsupportedTool is the precedence
+// TestDispatch_ToolBudgets_BusyBeatsUnsupportedTool is the precedence
 // guard: when one candidate CAN serve the budgeted image tool (it publishes
 // the factor) but is busy, and another lacks the factor, the client must get
 // the retryable 503 operators_busy — NOT the terminal 400 unsupported_tool.
@@ -138,23 +138,23 @@ func TestDispatchHayai_ImageGen_SkipsChatToolModel(t *testing.T) {
 // would wrongly tell the client to stop retrying. Order-independent: both
 // candidates are visited, so busyHint and toolFactorMissing are both set and
 // the guard (busyHint == 0 && !relayUnavailable) is what picks the 503.
-func TestDispatchHayai_ToolBudgets_BusyBeatsUnsupportedTool(t *testing.T) {
+func TestDispatch_ToolBudgets_BusyBeatsUnsupportedTool(t *testing.T) {
 	opBusy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 7})
 	opFactorless := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
 
 	// opBusy publishes the tool-path factor, so it passes the factor gate
 	// and reaches the reserve (where it returns 429).
-	opBusy.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	opBusy.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {ImageToolRateMicroUSDC: 100_000, OutputUSDPer1M: 10},
 	}
 	// opFactorless serves the model but has no image-tool factor → skipped
 	// with toolFactorMissing.
-	opFactorless.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	opFactorless.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {OutputUSDPer1M: 10},
 	}
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, opBusy, opFactorless))
+	s := testServer(cfg, setup(t, cfg, opBusy, opFactorless))
 
 	body := `{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`
 	w := httptest.NewRecorder()
@@ -175,11 +175,11 @@ func TestDispatchHayai_ToolBudgets_BusyBeatsUnsupportedTool(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_ToolBudgets_EditSizesReserve mirrors the generation test
+// TestDispatch_ToolBudgets_EditSizesReserve mirrors the generation test
 // for the edit tool: a zs_image_edit budget sizes the reserve via the
 // model's ImageEditToolRateMicroUSDC and forwards ImageEditToolBudget, leaving
 // the generation budget at zero.
-func TestDispatchHayai_ToolBudgets_EditSizesReserve(t *testing.T) {
+func TestDispatch_ToolBudgets_EditSizesReserve(t *testing.T) {
 	const factor uint64 = 120_000
 
 	var reserves []ticket.ReserveRequest
@@ -188,13 +188,13 @@ func TestDispatchHayai_ToolBudgets_EditSizesReserve(t *testing.T) {
 		replyPlaintext: []byte(`{"status":"completed","output":[]}`),
 		onReserve:      func(req ticket.ReserveRequest) { reserves = append(reserves, req) },
 	})
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {ImageEditToolRateMicroUSDC: factor, OutputUSDPer1M: 10},
 	}
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	base := `{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50}`
 	w := httptest.NewRecorder()
@@ -222,13 +222,13 @@ func TestDispatchHayai_ToolBudgets_EditSizesReserve(t *testing.T) {
 	}
 }
 
-// TestDispatchHayai_ToolBudgets_ClampsMaxN confirms the proxy caps an
+// TestDispatch_ToolBudgets_ClampsMaxN confirms the proxy caps an
 // oversized client max_n at maxImageToolBudgetPerRequest before it sizes the
 // reserve. The node trusts the proxy for this clamp (it honors the raw budget
 // in its tool loop), so an unbounded max_n would otherwise overflow the
 // synthetic-token multiply and under-size the escrow. Because the reserve's
 // asserting the forwarded ImageToolBudget == ceiling proves the budget is bounded.
-func TestDispatchHayai_ToolBudgets_ClampsMaxN(t *testing.T) {
+func TestDispatch_ToolBudgets_ClampsMaxN(t *testing.T) {
 	const factor uint64 = 100_000
 	// The SDK's per-request image-tool ceiling, pinned as a literal so a
 	// change to it is a deliberate edit here too.
@@ -240,13 +240,13 @@ func TestDispatchHayai_ToolBudgets_ClampsMaxN(t *testing.T) {
 		replyPlaintext: []byte(`{"status":"completed","output":[]}`),
 		onReserve:      func(req ticket.ReserveRequest) { reserves = append(reserves, req) },
 	})
-	node.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+	node.operator.ModelCapacities = map[string]zs.ModelCapacity{
 		"gpt-test": {ImageToolRateMicroUSDC: factor, OutputUSDPer1M: 10},
 	}
 	node.operator.Reachable = true
 
 	cfg := testConfig()
-	s := testServer(cfg, setupHayai(t, cfg, node))
+	s := testServer(cfg, setup(t, cfg, node))
 
 	over := maxImageToolBudgetPerRequest + 50
 	body := fmt.Sprintf(`{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":%d}}}`, over)

@@ -17,12 +17,12 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/wire"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-func modelsRegistry(t *testing.T, ops []hayai.Operator) *hayai.StaticRegistryProvider {
+func modelsRegistry(t *testing.T, ops []zs.Operator) *zs.StaticRegistryProvider {
 	t.Helper()
-	reg, err := hayai.NewStaticRegistryProvider(ops)
+	reg, err := zs.NewStaticRegistryProvider(ops)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -69,7 +69,7 @@ func (w feeWallet) ProtocolFeeBps(_ context.Context) (uint64, error) { return w.
 // branch. And the cache must be warm before the first request: a cold read
 // returns (0, false) and kicks an ASYNC refresh, so a request racing that
 // goroutine would see either branch.
-func feeServer(t *testing.T, ops []hayai.Operator, feeBps uint64) *Server {
+func feeServer(t *testing.T, ops []zs.Operator, feeBps uint64) *Server {
 	t.Helper()
 	s := testServer(testConfig(), deps{
 		RegistryProvider: modelsRegistry(t, ops),
@@ -100,11 +100,11 @@ func warmFee(t *testing.T, s *Server) {
 // Source is deliberately NOT the model id: with the two equal, a builder
 // returning `HuggingFaceID: d.ID` would satisfy every assertion and neither the
 // scheme strip nor the revision drop would be pinned.
-func richOperator() hayai.Operator {
-	return hayai.Operator{
+func richOperator() zs.Operator {
+	return zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion,
 		Models: []string{"gemma-5.2-q8"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"gemma-5.2-q8": {
 				ContextWindow:     131072,
 				MaxOutputTokens:   32768,
@@ -129,7 +129,7 @@ func TestHandleListModels_CarriesCapabilityAndPricing(t *testing.T) {
 	// Zero bps: a real, known fee that leaves the rates at their declared
 	// values, so this test reads the projection and the gross-up tests below
 	// read the arithmetic.
-	s := feeServer(t, []hayai.Operator{richOperator()}, 0)
+	s := feeServer(t, []zs.Operator{richOperator()}, 0)
 
 	var body inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &body); err != nil {
@@ -197,10 +197,10 @@ func TestHandleListModels_CarriesCapabilityAndPricing(t *testing.T) {
 // Publishing the other side beside a "0" claims free tokens for a rate nobody
 // set, on the surface whose whole meaning is "this is what it costs".
 func TestHandleListModels_PricingIsOmittedUnlessBothRatesAreDeclared(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion,
 		Models: []string{"neither", "input-only", "output-only", "priced"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			// Declared window, no rate — an operator whose capability probe
 			// landed without pricing.
 			"neither":     {ContextWindow: 8192},
@@ -209,7 +209,7 @@ func TestHandleListModels_PricingIsOmittedUnlessBothRatesAreDeclared(t *testing.
 			"priced":      {ContextWindow: 8192, InputUSDPer1M: 3, OutputUSDPer1M: 15},
 		},
 	}
-	s := feeServer(t, []hayai.Operator{op}, 0)
+	s := feeServer(t, []zs.Operator{op}, 0)
 
 	var list inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &list); err != nil {
@@ -239,14 +239,14 @@ func TestHandleListModels_PricingIsOmittedUnlessBothRatesAreDeclared(t *testing.
 // number would understate every reader's cost by the protocol fee with nothing
 // on the response to correct it.
 func TestHandleListModels_PricingIsGrossedUpByTheProtocolFee(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion,
 		Models: []string{"m"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {InputUSDPer1M: 3, OutputUSDPer1M: 15, CacheReadUSDPer1M: new(0.3)},
 		},
 	}
-	s := feeServer(t, []hayai.Operator{op}, 1000) // 10%
+	s := feeServer(t, []zs.Operator{op}, 1000) // 10%
 
 	var list inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &list); err != nil {
@@ -270,7 +270,7 @@ func TestHandleListModels_PricingIsGrossedUpByTheProtocolFee(t *testing.T) {
 	// provider that memoized the aggregate would have the gross-up compound on
 	// every request. memoizingRegistry is that provider; the second read must
 	// return the same number.
-	memo := &memoizingRegistry{inner: modelsRegistry(t, []hayai.Operator{op})}
+	memo := &memoizingRegistry{inner: modelsRegistry(t, []zs.Operator{op})}
 	s2 := testServer(testConfig(), deps{RegistryProvider: memo, Wallet: feeWallet{&fakeWallet{}, 1000}})
 	warmFee(t, s2)
 
@@ -291,19 +291,19 @@ func TestHandleListModels_PricingIsGrossedUpByTheProtocolFee(t *testing.T) {
 // pointers included — the shape a caching provider would have, and the only one
 // under which a write-through in modelEntryFor is observable.
 type memoizingRegistry struct {
-	inner  *hayai.StaticRegistryProvider
+	inner  *zs.StaticRegistryProvider
 	cached []inject.OperatorDetailsModel
 }
 
-func (m *memoizingRegistry) Operators(ctx context.Context, model string) ([]hayai.Operator, error) {
+func (m *memoizingRegistry) Operators(ctx context.Context, model string) ([]zs.Operator, error) {
 	return m.inner.Operators(ctx, model)
 }
 
-func (m *memoizingRegistry) Resolve(ctx context.Context, opID, nodeID uint64) (hayai.Operator, error) {
+func (m *memoizingRegistry) Resolve(ctx context.Context, opID, nodeID uint64) (zs.Operator, error) {
 	return m.inner.Resolve(ctx, opID, nodeID)
 }
 func (m *memoizingRegistry) AllModels(ctx context.Context) []string { return m.inner.AllModels(ctx) }
-func (m *memoizingRegistry) AllBuiltinTools(ctx context.Context) []hayai.BuiltinToolDef {
+func (m *memoizingRegistry) AllBuiltinTools(ctx context.Context) []zs.BuiltinToolDef {
 	return m.inner.AllBuiltinTools(ctx)
 }
 
@@ -316,10 +316,10 @@ func (m *memoizingRegistry) AllModelDetails(ctx context.Context) []inject.Operat
 func (m *memoizingRegistry) AllNodeVersions(ctx context.Context) []string {
 	return m.inner.AllNodeVersions(ctx)
 }
-func (m *memoizingRegistry) AllOperators(ctx context.Context) []hayai.Operator {
+func (m *memoizingRegistry) AllOperators(ctx context.Context) []zs.Operator {
 	return m.inner.AllOperators(ctx)
 }
-func (m *memoizingRegistry) ReprobeEphemeral(ctx context.Context, op hayai.Operator) (hayai.Operator, bool) {
+func (m *memoizingRegistry) ReprobeEphemeral(ctx context.Context, op zs.Operator) (zs.Operator, bool) {
 	return m.inner.ReprobeEphemeral(ctx, op)
 }
 func (m *memoizingRegistry) RecordModelDemand(model string) { m.inner.RecordModelDemand(model) }
@@ -331,15 +331,15 @@ func (m *memoizingRegistry) RecordModelDemand(model string) { m.inner.RecordMode
 // gross-up exists to prevent, and this shape has no fee field in which to say
 // the number is provisional.
 func TestHandleListModels_ColdFeePublishesNoPrice(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion,
 		Models: []string{"m"},
-		ModelCapacities: map[string]hayai.ModelCapacity{
+		ModelCapacities: map[string]zs.ModelCapacity{
 			"m": {ContextWindow: 8192, InputUSDPer1M: 3, OutputUSDPer1M: 15},
 		},
 	}
 	// testServer's wallet is not feeRateCapable, so the fee is never known.
-	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
+	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []zs.Operator{op})})
 
 	var list inject.OpenAIModelList
 	if err := json.Unmarshal(getJSON(t, "/v1/models", s.handleListModels), &list); err != nil {
@@ -364,7 +364,7 @@ func TestHandleListModels_ColdFeePublishesNoPrice(t *testing.T) {
 // the get computes it per request, so a unit fee would make the one value that
 // can differ between the two paths invisible to the comparison.
 func TestHandleGetModel_ByteIdenticalToListEntry(t *testing.T) {
-	s := feeServer(t, []hayai.Operator{richOperator()}, 1000)
+	s := feeServer(t, []zs.Operator{richOperator()}, 1000)
 
 	var list struct {
 		Data []json.RawMessage `json:"data"`
@@ -395,11 +395,11 @@ func TestHandleGetModel_ByteIdenticalToListEntry(t *testing.T) {
 // case is TestModelEndpoints_ModelWithoutDetailsIsStillServed's job, not this
 // one.)
 func TestHandleGetModel_BareModelIsFoundNot404(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: true, ProtoVersion: wire.ProtoVersion,
 		Models: []string{"bare"},
 	}
-	s := feeServer(t, []hayai.Operator{op}, 1000)
+	s := feeServer(t, []zs.Operator{op}, 1000)
 
 	var got inject.OpenAIModel
 	if err := json.Unmarshal(getJSON(t, "/v1/models/bare", s.handleGetModel), &got); err != nil {
@@ -451,11 +451,11 @@ func TestModelEndpoints_ModelWithoutDetailsIsStillServed(t *testing.T) {
 // operator being unreachable is a documented steady state, and a client
 // iterating the list would see null.
 func TestHandleListModels_EmptyRegistryMarshalsAsArray(t *testing.T) {
-	op := hayai.Operator{
+	op := zs.Operator{
 		ID: 1, OwnerAddr: "A", BaseURL: "http://a", Reachable: false,
 		Models: []string{"stale"},
 	}
-	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []hayai.Operator{op})})
+	s := testServer(testConfig(), deps{RegistryProvider: modelsRegistry(t, []zs.Operator{op})})
 
 	body := getJSON(t, "/v1/models", s.handleListModels)
 	if got := strings.TrimSpace(string(body)); got != `{"object":"list","data":[]}` {

@@ -18,10 +18,9 @@ import (
 // back into text-completion shape on the way out to the client.
 //
 // formatChat (the zero value) means "no translation" — the client shape equals
-// the wire shape. It is threaded alongside `endpoint` through the dispatch and
-// the two response-write seams (buildHayaiNonStreamResponder /
-// buildHayaiFrameFactory) so the reshape happens only for legacy-completions
-// requests.
+// the wire shape. Server.dispatch hands it to the emitter, whose two write
+// seams (httpEmitter.reply / httpEmitter.frame) reshape only for
+// legacy-completions requests; the Client never sees it.
 type clientFormat int
 
 const (
@@ -70,7 +69,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// Dispatch as a chat request (the node/relay/wire never learn it began as a
 	// completions call); formatLegacyCompletions tells the response seams to
 	// reshape chat → text on the way back to this client.
-	s.dispatchHayai(w, r, endpointChatCompletions, chatBody, formatLegacyCompletions)
+	s.dispatch(w, r, endpointChatCompletions, chatBody, formatLegacyCompletions)
 }
 
 // chatRequestFromCompletions translates a legacy /v1/completions request body

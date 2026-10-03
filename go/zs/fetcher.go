@@ -309,7 +309,7 @@ func (s *ChainOperatorSource) EnrichSubset(ctx context.Context, ops []Operator, 
 }
 
 // resolveActiveNodes turns the fetched operator records into one routable
-// hayai.Operator per NODE. Evicted operators are skipped (discovery hides them,
+// Operator per NODE. Evicted operators are skipped (discovery hides them,
 // matching the contract's open() guard) — FetchNodesForOperators does that
 // filtering and the bounded-concurrent node fetch in one pass, so peak algod
 // concurrency stays capped regardless of fleet size. A single malformed node
@@ -957,7 +957,7 @@ func CandidatesExcluding(ops []selection.Operator, excluded map[NodeRef]bool) []
 // the same pair as any routing target. The keys are emitted flat as
 // relay_operator_id + relay_node_id (slog inlines an empty-key group). A nil hop
 // (direct route) yields the zero Attr, which slog drops. (Mirrors the server
-// package's relayAttr; kept here so package hayai needn't import it.)
+// package's relayAttr; kept here so package zs needn't import it.)
 func relayLogAttr(hop *RelayHop) slog.Attr {
 	if hop == nil {
 		return slog.Attr{}
@@ -1034,7 +1034,7 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 }
 
 // resolveOperatorNode projects one (operator, node) record pair into a
-// routable hayai.Operator: identity (operator id, node id, owner, nfd) from
+// routable Operator: identity (operator id, node id, owner, nfd) from
 // the operator box; the parsed age recipient, Ed25519 signing key, validated
 // base URL, and per-node reliability metrics from the node box. Reachable /
 // Models / BuiltinTools are left unset — the enrichment pass populates those

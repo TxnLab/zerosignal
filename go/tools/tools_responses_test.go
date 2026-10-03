@@ -19,7 +19,7 @@ func TestRewriteBuiltinToolsResponses_RewritesBuiltin(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 	if len(names) != 1 {
-		t.Fatalf("expected 1 hayai name, got %+v", names)
+		t.Fatalf("expected 1 zs name, got %+v", names)
 	}
 	var out struct {
 		Tools []struct {
@@ -377,13 +377,13 @@ func TestResponsesStitcher_ToolCallOnlyIteration(t *testing.T) {
 		t.Fatalf("response.created expected FrameUnknown, got %v", classes[0])
 	}
 	if classes[1] != FrameToolCallBuiltin {
-		t.Fatalf("output_item.added(function_call hayai) expected FrameToolCallBuiltin, got %v", classes[1])
+		t.Fatalf("output_item.added(function_call zs) expected FrameToolCallBuiltin, got %v", classes[1])
 	}
 	if classes[2] != FrameToolCallBuiltin || classes[3] != FrameToolCallBuiltin || classes[4] != FrameToolCallBuiltin {
 		t.Fatalf("arg deltas expected FrameToolCallBuiltin, got %+v", classes[2:5])
 	}
 	if classes[5] != FrameToolCallBuiltin {
-		t.Fatalf("output_item.done(function_call hayai) expected FrameToolCallBuiltin, got %v", classes[5])
+		t.Fatalf("output_item.done(function_call zs) expected FrameToolCallBuiltin, got %v", classes[5])
 	}
 	if classes[6] != FrameTerminal {
 		t.Fatalf("response.completed expected FrameTerminal, got %v", classes[6])

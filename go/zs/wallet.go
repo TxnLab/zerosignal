@@ -24,7 +24,7 @@ import (
 )
 
 // Wallet drives the escrow payment path from the proxy side.
-// One Wallet instance per process; shared across all hayai requests.
+// One Wallet instance per process; shared across all requests.
 // Per-request state lives on OpenHandle, which Wallet.Open returns
 // and the dispatcher threads through its factories so the
 // post-response verification path can call AckSettle or Protest with

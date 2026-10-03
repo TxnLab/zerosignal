@@ -13,23 +13,23 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // usageOperator is the serving node as the usage headers and frame name it.
-func usageOperator(ev hayai.ReceiptVerified) hayai.Operator {
-	return hayai.Operator{ID: ev.Target.Op, NodeID: ev.Target.Node, OwnerAddr: ev.OwnerAddr}
+func usageOperator(ev zs.ReceiptVerified) zs.Operator {
+	return zs.Operator{ID: ev.Target.Op, NodeID: ev.Target.Node, OwnerAddr: ev.OwnerAddr}
 }
 
 // setUsageHeaders renders a verified receipt as the X-Zs-* usage headers.
-func setUsageHeaders(h http.Header, ev hayai.ReceiptVerified) {
-	setHayaiUsageHeaders(h, &ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
+func setUsageHeaders(h http.Header, ev zs.ReceiptVerified) {
+	setReceiptUsageHeaders(h, &ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
 		ev.AlgoUSD, ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
 }
 
 // usageFrame renders a verified receipt as the zs.usage stream frame.
-func usageFrame(ev hayai.ReceiptVerified) hayai.Frame {
-	return hayaiUsageFrame(&ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
+func usageFrame(ev zs.ReceiptVerified) zs.Frame {
+	return receiptUsageFrame(&ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
 		ev.AlgoUSD, ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
 }
 
@@ -43,7 +43,7 @@ func inferenceDenom(_ *ticket.Ticket) (currency string, decimals int) {
 	return "USDC", 6
 }
 
-// setHayaiUsageHeaders surfaces the node's signed usage receipt plus
+// setReceiptUsageHeaders surfaces the node's signed usage receipt plus
 // the on-chain network fees the *payer* (this proxy) paid for the
 // request as plain response headers, so a non-streaming client can see
 // what the request cost in inference + fees. The settle fee is known
@@ -63,7 +63,7 @@ func inferenceDenom(_ *ticket.Ticket) (currency string, decimals int) {
 // SPEC.md §3.3a); network fees stay in ALGO regardless. The two USD
 // conversions are independent: inference USD comes straight from the
 // USDC amount (1 USDC ≈ $1), fee USD requires the ALGO/USD rate.
-func setHayaiUsageHeaders(h http.Header, r *ticket.UsageReceipt, ticket *ticket.Ticket, op hayai.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) {
+func setReceiptUsageHeaders(h http.Header, r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) {
 	currency, decimals := inferenceDenom(ticket)
 	totalFees := openFees + settleFees
 
@@ -158,51 +158,51 @@ func pow10(n int) float64 {
 	return out
 }
 
-// hayaiUsageFrameEvent is the SSE event name the proxy emits in place
+// usageFrameEvent is the SSE event name the proxy emits in place
 // of the swallowed signed receipt so streaming clients can display
-// per-request usage + cost. It is OPT-IN (hayaiUsageFrameHeader): the
+// per-request usage + cost. It is OPT-IN (usageFrameHeader): the
 // frame's `data:` payload is not a valid OpenAI chat chunk, and strict
 // OpenAI clients that parse every `data:` line rather than dispatching
 // on the SSE `event:` type (e.g. JetBrains/Koog) throw on it — so the
 // proxy stays a clean drop-in OpenAI endpoint by default and only emits
-// the frame for hayai-aware clients that ask for it.
-const hayaiUsageFrameEvent = "zs.usage"
+// the frame for zs-aware clients that ask for it.
+const usageFrameEvent = "zs.usage"
 
-// hayaiUsageFrameHeader is the request header a hayai-aware streaming
+// usageFrameHeader is the request header a zs-aware streaming
 // client sets (any non-empty value) to opt into receiving the
 // `event: zs.usage` SSE frame. Absent → the proxy suppresses the
 // frame for OpenAI compatibility. Settlement is unaffected either way —
 // it runs when the proxy reads the receipt, before this frame is built.
-const hayaiUsageFrameHeader = "X-Zs-Usage-Frame"
+const usageFrameHeader = "X-Zs-Usage-Frame"
 
-// hayaiInferenceCost groups the inference charge with its currency
+// inferenceCost groups the inference charge with its currency
 // designator so a future USDC ticket only flips the Currency value
 // (and Decimals if needed) — clients keying off the field names don't
 // have to change.
-type hayaiInferenceCost struct {
+type inferenceCost struct {
 	Amount    uint64  `json:"amount"`
 	Currency  string  `json:"currency"`
 	Decimals  int     `json:"decimals"`
 	AmountUsd float64 `json:"amount_usd,omitempty"`
 }
 
-// hayaiUsage is the unsigned client-facing projection of UsageReceipt
+// usageBody is the unsigned client-facing projection of UsageReceipt
 // + the proxy's known on-chain network-fee commitment. Sig + BodyHash
 // are deliberately omitted (internal audit fields the client cannot
 // verify on its own).
-type hayaiUsage struct {
+type usageBody struct {
 	Type       string `json:"type"`
 	TicketID   string `json:"ticket_id"`
 	OperatorID uint64 `json:"operator_id,omitempty"`
 	// NodeID is the serving node within OperatorID (operator/node split). Omitted
 	// when zero — node ids are 1-based on-chain (0 is the unset sentinel) — so the
 	// pair reads operator_id+node_id together for the node that actually served.
-	NodeID            uint64             `json:"node_id,omitempty"`
-	OperatorOwnerAddr string             `json:"operator_owner_addr,omitempty"`
-	ActualInputCount  uint64             `json:"actual_input_count"`
-	ActualOutputCount uint64             `json:"actual_output_count"`
-	Inference         hayaiInferenceCost `json:"inference"`
-	MaxPriceAmount    uint64             `json:"max_price_amount"`
+	NodeID            uint64        `json:"node_id,omitempty"`
+	OperatorOwnerAddr string        `json:"operator_owner_addr,omitempty"`
+	ActualInputCount  uint64        `json:"actual_input_count"`
+	ActualOutputCount uint64        `json:"actual_output_count"`
+	Inference         inferenceCost `json:"inference"`
+	MaxPriceAmount    uint64        `json:"max_price_amount"`
 	// MinPriceAmount mirrors the ticket's min_price (microUSDC) — the
 	// per-request floor the operator was committed to (SPEC.md §3a
 	// "Minimum charge"). 0 when the floor was disabled at reserve.
@@ -214,11 +214,11 @@ type hayaiUsage struct {
 	// Fee is the additive-fee breakdown (platform fee, refund, total debit)
 	// the proxy derives from the operator-signed amount_charged and the ticket
 	// box's open-time fee snapshot. Omitted when the proxy couldn't read the
-	// snapshot. See hayaiFeeBreakdown.
-	Fee *hayaiFeeBreakdown `json:"fee,omitempty"`
+	// snapshot. See feeBreakdown.
+	Fee *feeBreakdown `json:"fee,omitempty"`
 }
 
-// hayaiFeeBreakdown is the additive-fee decomposition derived from the
+// feeBreakdown is the additive-fee decomposition derived from the
 // operator-signed amount_charged and the payer's effective fee rate (feeBps;
 // the contract snapshots the same rate onto the ticket at open() as the
 // settlement authority; see SPEC.md §3a "Open-time fee snapshot").
@@ -229,7 +229,7 @@ type hayaiUsage struct {
 // whole `fee` object is omitted otherwise (escrow off, or the rate cache hasn't
 // warmed). It is a nested object precisely so "rate absent" is distinguishable
 // from a genuine 0 platform fee.
-type hayaiFeeBreakdown struct {
+type feeBreakdown struct {
 	FeeBps               uint64  `json:"fee_bps"`
 	DiscountBps          uint64  `json:"discount_bps"`
 	PlatformFeeMicrousdc uint64  `json:"platform_fee_microusdc"`
@@ -241,12 +241,12 @@ type hayaiFeeBreakdown struct {
 // feeBreakdownFor builds the additive-fee breakdown for a settled request, or
 // nil when the open-time snapshot wasn't read (haveFee == false). currency /
 // decimals come from inferenceDenom; the USD figure is emitted only for USDC.
-func feeBreakdownFor(amountCharged, maxPrice, feeBps, discountBps uint64, haveFee bool, currency string, decimals int) *hayaiFeeBreakdown {
+func feeBreakdownFor(amountCharged, maxPrice, feeBps, discountBps uint64, haveFee bool, currency string, decimals int) *feeBreakdown {
 	if !haveFee {
 		return nil
 	}
 	b := escrow.ComputeFeeBreakdown(amountCharged, maxPrice, feeBps, discountBps)
-	out := &hayaiFeeBreakdown{
+	out := &feeBreakdown{
 		FeeBps:               feeBps,
 		DiscountBps:          discountBps,
 		PlatformFeeMicrousdc: b.NetFee,
@@ -267,7 +267,7 @@ func feeBreakdownFor(amountCharged, maxPrice, feeBps, discountBps uint64, haveFe
 // discount.
 const retiredDiscountBps uint64 = 0
 
-// hayaiUsageFrame builds the synthetic SSE frame emitted after the
+// receiptUsageFrame builds the synthetic SSE frame emitted after the
 // operator's signed receipt has been verified. openFees + settleFees
 // are the *payer's* shares of the open and settle groups (operator's
 // pool fees are excluded), summed into algo_fees_microalgos so the
@@ -280,18 +280,18 @@ const retiredDiscountBps uint64 = 0
 //
 // Marshal cannot fail for this shape; JSON errors here would indicate
 // a stdlib bug.
-func hayaiUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op hayai.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) hayai.Frame {
+func receiptUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) zs.Frame {
 	currency, decimals := inferenceDenom(ticket)
 	totalFees := openFees + settleFees
-	u := hayaiUsage{
-		Type:              hayaiUsageFrameEvent,
+	u := usageBody{
+		Type:              usageFrameEvent,
 		TicketID:          r.TicketID,
 		OperatorID:        op.ID,
 		NodeID:            op.NodeID,
 		OperatorOwnerAddr: op.OwnerAddr,
 		ActualInputCount:  r.ActualInputCount,
 		ActualOutputCount: r.ActualOutputCount,
-		Inference: hayaiInferenceCost{
+		Inference: inferenceCost{
 			Amount:   r.AmountCharged,
 			Currency: currency,
 			Decimals: decimals,
@@ -309,5 +309,5 @@ func hayaiUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op hayai.Ope
 	}
 	u.Fee = feeBreakdownFor(r.AmountCharged, ticket.MaxPrice, feeBps, discountBps, haveFee, currency, decimals)
 	payload, _ := json.Marshal(u)
-	return hayai.Frame{Event: hayaiUsageFrameEvent, Data: payload}
+	return zs.Frame{Event: usageFrameEvent, Data: payload}
 }

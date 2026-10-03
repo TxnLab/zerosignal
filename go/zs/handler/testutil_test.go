@@ -18,7 +18,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/inject"
-	hayai "github.com/TxnLab/zerosignal/go/zs"
+	"github.com/TxnLab/zerosignal/go/zs"
 	"github.com/TxnLab/zerosignal/go/zs/handler/transform"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
@@ -40,9 +40,9 @@ func capturingLogger(buf *bytes.Buffer) *slog.Logger {
 type policy struct {
 	Network               string
 	FundingURL            string
-	Privacy               hayai.Privacy
+	Privacy               zs.Privacy
 	AllowPrivacyOverride  bool
-	Affinity              hayai.AffinityPolicy
+	Affinity              zs.AffinityPolicy
 	AllowStaging          bool
 	AllowPrivateOperators bool
 	TEERequiredModels     []string
@@ -51,18 +51,18 @@ type policy struct {
 // deps are the Client parts a handler test supplies. A nil network part gets
 // a stub, so the Client never builds one against a chain.
 type deps struct {
-	RegistryProvider hayai.RegistryProvider
-	ReserveClient    hayai.ReserveClient
-	Wallet           hayai.WalletOpener
-	ToolAffinity     *hayai.IDAffinity
-	ResponseAffinity *hayai.IDAffinity
+	RegistryProvider zs.RegistryProvider
+	ReserveClient    zs.ReserveClient
+	Wallet           zs.WalletOpener
+	ToolAffinity     *zs.IDAffinity
+	ResponseAffinity *zs.IDAffinity
 	Tokenizer        *tokenize.Registry
-	RelayReputation  hayai.RelayReputation
-	RelayLatency     hayai.RelayLatency
-	TargetBackoff    hayai.TargetBackoff
-	NodeExcluder     hayai.NodeExcluder
+	RelayReputation  zs.RelayReputation
+	RelayLatency     zs.RelayLatency
+	TargetBackoff    zs.TargetBackoff
+	NodeExcluder     zs.NodeExcluder
 	SpendGuard       spendGuard
-	Journal          hayai.TicketJournal
+	Journal          zs.TicketJournal
 	TrackCryptoTimes bool
 	DebugLogBodies   bool
 	RetryBudget      time.Duration
@@ -106,22 +106,22 @@ func newServer(p *policy, log *slog.Logger, reqTx transform.RequestTransformer, 
 	if d.Wallet == nil {
 		d.Wallet = &fakeWallet{}
 	}
-	var spend hayai.SpendGuard
+	var spend zs.SpendGuard
 	if d.SpendGuard != nil {
 		spend = admitAll{d.SpendGuard}
 	}
-	c, err := hayai.New(context.Background(), hayai.Config{
+	c, err := zs.New(context.Background(), zs.Config{
 		Signer:               testPayer{},
-		Network:              hayai.Network{Algod: algod.Config{Network: network}, EscrowAppID: 1},
+		Network:              zs.Network{Algod: algod.Config{Network: network}, EscrowAppID: 1},
 		Privacy:              p.Privacy,
 		AllowPrivacyOverride: p.AllowPrivacyOverride,
 		RequireTEEModels:     p.TEERequiredModels,
-		Affinity:             hayai.Affinity{Policy: p.Affinity},
+		Affinity:             zs.Affinity{Policy: p.Affinity},
 		AllowStaging:         p.AllowStaging,
 		AllowPrivateHosts:    p.AllowPrivateOperators,
 		RetryBudget:          d.RetryBudget,
 		SweepDelay:           d.SweepDelay,
-		Stores: hayai.Stores{
+		Stores: zs.Stores{
 			RelayReputation:  d.RelayReputation,
 			RelayLatency:     d.RelayLatency,
 			TargetBackoff:    d.TargetBackoff,
@@ -144,11 +144,11 @@ func newServer(p *policy, log *slog.Logger, reqTx transform.RequestTransformer, 
 	return New(c, &Config{FundingURL: p.FundingURL}, log, reqTx, respTx, Options{TrackCryptoTimes: d.TrackCryptoTimes})
 }
 
-// testCfg is the test policy plus the operator list setupHayai built the
+// testCfg is the test policy plus the operator list setup built the
 // static registry from, which tests edit and rebuild a registry from.
 type testCfg struct {
 	policy
-	ResolvedOperators []hayai.Operator
+	ResolvedOperators []zs.Operator
 }
 
 // testConfig returns a minimal policy for handler-level tests. Direct, because
@@ -157,15 +157,15 @@ type testCfg struct {
 // httptest fake nodes on 127.0.0.1, which the default-on SSRF dial guard would
 // refuse.
 func testConfig() *testCfg {
-	return &testCfg{policy: policy{Privacy: hayai.PrivacyDirect, AllowPrivateOperators: true}}
+	return &testCfg{policy: policy{Privacy: zs.PrivacyDirect, AllowPrivateOperators: true}}
 }
 
 // privacyMode maps the relay-on bool the routing tests are written in.
-func privacyMode(relay bool) hayai.Privacy {
+func privacyMode(relay bool) zs.Privacy {
 	if relay {
-		return hayai.PrivacyRelayRequired
+		return zs.PrivacyRelayRequired
 	}
-	return hayai.PrivacyDirect
+	return zs.PrivacyDirect
 }
 
 // testServer constructs a Server with silent logging and passthrough
@@ -200,28 +200,28 @@ func mustNewIdentity(t *testing.T) *age.X25519Identity {
 // registry can't be queried at all.
 type errRegistry struct{ err error }
 
-func (e errRegistry) Operators(_ context.Context, _ string) ([]hayai.Operator, error) {
+func (e errRegistry) Operators(_ context.Context, _ string) ([]zs.Operator, error) {
 	return nil, e.err
 }
 
-func (e errRegistry) Resolve(_ context.Context, _, _ uint64) (hayai.Operator, error) {
-	return hayai.Operator{}, e.err
+func (e errRegistry) Resolve(_ context.Context, _, _ uint64) (zs.Operator, error) {
+	return zs.Operator{}, e.err
 }
 
-func (e errRegistry) AllModels(_ context.Context) []string                     { return nil }
-func (e errRegistry) AllBuiltinTools(_ context.Context) []hayai.BuiltinToolDef { return nil }
+func (e errRegistry) AllModels(_ context.Context) []string                  { return nil }
+func (e errRegistry) AllBuiltinTools(_ context.Context) []zs.BuiltinToolDef { return nil }
 func (e errRegistry) AllModelDetails(_ context.Context) []inject.OperatorDetailsModel {
 	return nil
 }
 func (e errRegistry) AllNodeVersions(_ context.Context) []string { return nil }
-func (e errRegistry) AllOperators(_ context.Context) []hayai.Operator {
+func (e errRegistry) AllOperators(_ context.Context) []zs.Operator {
 	return nil
 }
-func (e errRegistry) ReprobeEphemeral(_ context.Context, op hayai.Operator) (hayai.Operator, bool) {
+func (e errRegistry) ReprobeEphemeral(_ context.Context, op zs.Operator) (zs.Operator, bool) {
 	return op, false
 }
 func (e errRegistry) RecordModelDemand(_ string) {}
 
 var (
-	_ hayai.RegistryProvider = errRegistry{}
+	_ zs.RegistryProvider = errRegistry{}
 )
