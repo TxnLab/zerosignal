@@ -19,9 +19,11 @@ import "errors"
 // A refusal ends the request with KindSpendCap, except a Reserve refusal that
 // wraps ErrDuplicateTicket, which ends it with KindOperatorFault.
 type SpendGuard interface {
-	// Admit runs before any reserve, with the SDK's worst-case estimate for
-	// the request. Refusing here costs nothing and spares the node a
-	// reservation. It records nothing.
+	// Admit runs before any reserve with the lowest max_price any candidate is
+	// expected to sign, priced from advertised rates. It is advisory: a signed
+	// ticket can exceed it, so a cap must also be enforced at Reserve. Refusing
+	// here spares the node a reservation. It records nothing, and is skipped
+	// when a candidate cannot be priced.
 	Admit(estimate uint64) error
 
 	// Reserve runs after the node signs a ticket and before escrow opens,

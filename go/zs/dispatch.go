@@ -473,6 +473,23 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	}
 	candidates := pick.Operators
 
+	// Admit before any reserve, so a request over the cap costs no node a
+	// reservation. Image routes are priced per image, not from token rates, and
+	// skip it; Reserve checks every route's signed max_price.
+	if s.spend != nil && !isImage && !isImageEdit {
+		if est, ok := s.admitEstimate(candidates, model, body, sizing); ok {
+			if err := s.spend.Admit(est); err != nil {
+				s.log.Warn("spend cap reached before reserve; refusing request",
+					slog.String("endpoint", endpoint),
+					slog.Uint64("estimate_microusdc", est),
+					slog.Any("err", err))
+				em.fail(newError("spend_cap_exceeded",
+					"spend cap reached ("+err.Error()+"): the cheapest available operator would escrow more than the limit allows; raise the limit or wait for it to reset. No reservation was made"))
+				return
+			}
+		}
+	}
+
 	var busyHint time.Duration
 	// anyBusy records that SOME candidate answered 429, sticky across sweeps.
 	// Deliberately separate from busyHint, which is only the largest Retry-After
@@ -2404,9 +2421,10 @@ func (s *Client) runHayaiSealed(
 	// actual charge is reconciled lower at settle) atomically against the
 	// per-request + daily caps. Reserving before the open is the safe order —
 	// the reservation holds the cap under concurrency; we Release it below if the
-	// open fails. The reserve runs after the (already-paid) reserve round-trip,
-	// so a cap trip wastes one operator reservation — acceptable for a rare
-	// safety event. Nil guard (no caps configured) is a no-op.
+	// open fails. Admit has already refused most over-cap requests before any
+	// reserve; a trip here means the signed ceiling came in above that estimate,
+	// and wastes one operator reservation. Nil guard (no caps configured) is a
+	// no-op.
 	if s.spend != nil {
 		if err := s.spend.Reserve(ticket.TicketID, ticket.MaxPrice); err != nil {
 			// Two opposite diagnoses share this one return. A duplicate ticket id
