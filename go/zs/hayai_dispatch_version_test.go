@@ -180,7 +180,7 @@ func TestPickCandidates_VersionFilter_ResponseIDPin_BlocksIncompatible(t *testin
 	// pointing at an operator that has since moved to an incompatible
 	// wire major would be re-served — and the resulting sealed request
 	// would fail mid-flight at decode time rather than producing the
-	// clean 503 no_compatible_operator the rest of the pipeline emits.
+	// clean no_compatible_operator the rest of the pipeline emits.
 	const model = "gpt-test"
 	op := versionOp(7, model, "10.0")
 	srv := minimalVersionServer(t, []Operator{op})

@@ -231,9 +231,9 @@ func TestStagingCatalogAndDispatchAgree(t *testing.T) {
 		if !ids["prod-model"] || ids["staging-only"] {
 			t.Fatalf("/v1/models = %v, want prod-model only", ids)
 		}
-		if code, body := postChat(t, s, "staging-only"); code != http.StatusServiceUnavailable ||
+		if code, body := postChat(t, s, "staging-only"); code != http.StatusBadRequest ||
 			!strings.Contains(body, `"no_production_operator"`) {
-			t.Errorf("POST staging-only = %d %s, want 503 no_production_operator", code, body)
+			t.Errorf("POST staging-only = %d %s, want 400 no_production_operator", code, body)
 		}
 	})
 

@@ -836,12 +836,12 @@ func (p *DynamicRegistryProvider) ReprobeEphemeral(ctx context.Context, op Opera
 // out unless the payer opted in via zs.allow_staging. The proxy must advertise
 // exactly what it routes to: SelectTargets' staging step already refuses these as
 // targets, so listing their models promises capacity that dispatch then answers
-// with 503 no_production_operator — and, more quietly, lets a staging node set the
+// with 400 no_production_operator — and, more quietly, lets a staging node set the
 // cross-operator context-window and "from $X" price floor for a model nobody can
 // buy. Mirrors the client's picker (filterStaging in selection-adapter.ts).
 //
 // 2. Wire compatibility. A node on a different wire-protocol major can never be
-// sealed for, so SelectTargets refuses it and the request ends in 503
+// sealed for, so SelectTargets refuses it and the request ends in 400
 // no_compatible_operator — the same advertise-then-refuse shape as staging. See
 // wireIncompatible on why an empty ProtoVersion is correctly treated as
 // incompatible here and cannot strand a node awaiting its first probe.

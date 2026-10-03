@@ -130,6 +130,9 @@ type nodeConfig struct {
 	// inference response before the mode writer runs — models node-set
 	// X-Zs-* metadata (e.g. X-Zs-Settle-Group) the proxy must strip.
 	extraRespHeaders map[string]string
+	// replyStatus, when non-zero, is the status of a modeNonStreamEncrypted
+	// or modeStreamEncrypted reply in place of 200.
+	replyStatus int
 	// reserveBadEnvelopeOnOpenFail makes a reserve the node can't age-open
 	// (sealed to a recipient that isn't node.identity) return the real node's
 	// OpenAI-shaped bad_reserve_envelope 400 instead of failing the test — used
@@ -521,6 +524,9 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 		w.WriteHeader(http.StatusGatewayTimeout)
 		_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>504 Gateway Timeout</title></head><body>origin unreachable</body></html>"))
 	case modeNonStreamEncrypted:
+		if cfg.replyStatus != 0 {
+			w = statusOverride{w, cfg.replyStatus}
+		}
 		writeEncryptedBody(t, w, k, cfg.replyPlaintext, ephemeral, txID, ticketID, false, false)
 	case modeNonStreamPlaintext200:
 		w.Header().Set("Content-Type", "application/json")
@@ -548,6 +554,9 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 		w.WriteHeader(http.StatusPaymentRequired)
 		_, _ = w.Write([]byte(`{"error":{"message":"ticket expired","type":"invalid_request_error","code":"ticket_invalid"}}`))
 	case modeStreamEncrypted:
+		if cfg.replyStatus != 0 {
+			w = statusOverride{w, cfg.replyStatus}
+		}
 		writeEncryptedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID, false)
 	case modeStreamPlaintext:
 		writePlainStream(t, w, cfg.streamFrames)
@@ -651,6 +660,16 @@ func writeEncryptedStreamWithReceipt(
 		f.Flush()
 	}
 }
+
+// statusOverride writes status wherever its writer would write another.
+type statusOverride struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s statusOverride) WriteHeader(int) { s.ResponseWriter.WriteHeader(s.status) }
+
+func (s statusOverride) Flush() { s.ResponseWriter.(http.Flusher).Flush() }
 
 func writeEncryptedBody(
 	t *testing.T,

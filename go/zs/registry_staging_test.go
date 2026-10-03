@@ -16,7 +16,7 @@ import (
 // The proxy must advertise exactly what it routes to. SelectTargets already
 // refuses a staging node as a target unless the payer set zs.allow_staging, so a
 // discovery surface that still lists its models promises capacity dispatch then
-// answers with 503 no_production_operator — and lets that node set the
+// answers with no_production_operator — and lets that node set the
 // cross-operator sizing and price floor for a model nobody can buy.
 //
 // These mirror the *ExcludesUnreachable family in registry_dynamic_test.go, with
@@ -189,7 +189,7 @@ func TestDynamicRegistry_AllOperatorsKeepsStagingForRelayUse(t *testing.T) {
 // TestDynamicRegistry_OperatorsKeepsStagingForDispatch is the sibling of
 // OperatorsKeepsUnreachableForDispatch. Operators(model) must keep the staging
 // node so pickCandidates' RegistryCount stays accurate — that is what lets
-// SelectTargets report staging_blocked (503 no_production_operator, with its
+// SelectTargets report staging_blocked (no_production_operator, with its
 // actionable "enable zs.allow_staging" hint) rather than a bare "nobody serves
 // this model" for a client that POSTs an id it never saw listed.
 func TestDynamicRegistry_OperatorsKeepsStagingForDispatch(t *testing.T) {
@@ -213,7 +213,7 @@ func TestDynamicRegistry_OperatorsKeepsStagingForDispatch(t *testing.T) {
 // --- wire-version gate ---
 //
 // The second half of "advertise exactly what you can route to". SelectTargets
-// refuses a node on a different wire major and dispatch answers 503
+// refuses a node on a different wire major and dispatch answers
 // no_compatible_operator, so listing its models is the same advertise-then-refuse
 // shape the staging gate closes above.
 

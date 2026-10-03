@@ -1479,7 +1479,7 @@ A divergence between an advertised value and the eventual ticket is therefore no
 
 The asymmetry lets a coordinated `proto_version` bump announce "this generation introduces new envelope crypto" *without* forcing the constant to track every internal tag change. Filtering is a discovery-time signal; the domain tags remain the in-the-clear cryptographic separator. Reference: the tags are `AdmissionTagDomain`, `ticketSigningTag`, `receiptSigningTag` and `ephemeralSigningTag`.
 
-**Why this is on details, not in the ticket.** The version field decides whether a client reaches reserve at all. Carrying it on `/v1/zs/details` lets a proxy or client skip an incompatible peer before computing any sealed round-trip, escrow group or admission tag. The failure then surfaces as a discovery-layer 503 (`no_compatible_operator` from the reference proxy), not as a cryptographic decode failure mid-flight.
+**Why this is on details, not in the ticket.** The version field decides whether a client reaches reserve at all. Carrying it on `/v1/zs/details` lets a proxy or client skip an incompatible peer before computing any sealed round-trip, escrow group or admission tag. The failure then surfaces as a discovery-layer 400 (`no_compatible_operator` from the reference proxy), not as a cryptographic decode failure mid-flight.
 
 ### Reference implementation
 
@@ -2333,7 +2333,7 @@ app pick identically.
     toggle.
   - When the only nodes serving a model are staging and the caller didn't opt
     in, the policy returns `staging_blocked` (distinct from "nobody serves this
-    model"), which the proxy surfaces as `503 no_production_operator`.
+    model"), which the proxy surfaces as `400 no_production_operator`.
   - It gates TARGET selection only. Staging nodes remain usable as relays, since
     a relay forwards bytes and runs no inference.
   - It is golden-vectored like the rest of the shared policy (`staging_*` cases
@@ -2412,7 +2412,7 @@ app pick identically.
 
   | Condition | Error | Notes |
   |---|---|---|
-  | `only` miss, or `order` with no fallbacks misses | `503 no_pinned_operator` | A pool-availability condition like `no_operator` / `no_tee_capacity`. The pin is well-formed (a malformed ref is skipped at parse time), so a retry can succeed once the pinned operator/node reappears. |
+  | `only` miss, or `order` with no fallbacks misses | `400 no_pinned_operator` | The pin is well-formed (a malformed ref is skipped at parse time) but names nothing available now. Not a 5xx: a pinned node returning is not something an automatic retry should wait on, so the caller drops or changes the pin. |
   | a `previous_response_id` continuation whose target the preferences exclude | `400 pin_conflicts_with_continuation` | A genuine client contradiction; retrying the same body never resolves it. |
   | `max_price` excludes everyone | `400 price_ceiling_exceeded` | |
   | `require_tools` with no capable operator | `503 no_tool_capacity` | § 10 |
@@ -3313,13 +3313,13 @@ puts it in the same differential path rather than a new one.
 | `escrow.settle` broadcast after `ticket.expires_at + ticket.settlement_grace_seconds` (both unix seconds) | On-chain revert `settle after refund deadline` | Neither party acked in time. The operator force-finalizes a pending operator claim via `escrow.settleLapsed`; the payer recovers funds via `escrow.refundInactive` when no operator claim is pending. |
 | `escrow.settleLapsed` broadcast while `pendingBy != OPERATOR` | On-chain revert `only operator claims can lapse into settle` | `settleLapsed` finalizes operator-initiated pending claims only. If the payer posted the pending claim and the operator never responded, the payer uses `refundInactive` instead. |
 | `Require-TEE` request when no operator survives the TEE filter (every otherwise-fitting candidate has `op.IsTEEAttested() == false`) | `503 service_unavailable`, `no_tee_capacity` | Proxy refuses; client should retry on a TEE-recovery cadence (typically the operator's `attestation.refresh_interval`). Distinct from `no_operator` and `operators_busy` — see § 3e. |
-| No operator serves the requested model (none registered, or all filtered by sizing) | `503 service_unavailable`, `no_operator` | Proxy-authored; pick a different model or retry later. |
-| Every otherwise-eligible node serving the model is flagged `staging` and the caller didn't opt in (§ 3f "Staging gate") | `503 service_unavailable`, `no_production_operator` | Proxy-authored; enable `allow_staging` to reach them, or pick a different model. |
+| No operator serves the requested model | `404 invalid_request_error`, `no_operator` | Proxy-authored; pick a different model. OpenAI's status for a model it doesn't serve. |
+| Every otherwise-eligible node serving the model is flagged `staging` and the caller didn't opt in (§ 3f "Staging gate") | `400 invalid_request_error`, `no_production_operator` | Proxy-authored; enable `allow_staging` to reach them, or pick a different model. |
 | Every otherwise-eligible node serving the model has a signing account below the 5 ALGO spendable floor, or a strict tool-affinity pin or a `previous_response_id` pin resolves to one (§ 3f "Signer-funding gate") | `503 service_unavailable`, `no_funded_operator` | Proxy-authored; clears when an operator tops up its signing account. Retry later; for an unpinned request, a different model; for a pinned one, a new conversation. |
 | A model is served but every candidate's reserve was refused for capacity (all 429'd) | `503 service_unavailable`, `operators_busy` | Proxy-authored after exhausting candidates; transient, retry shortly. |
 | Every candidate was unreachable through *infrastructure* (a transient-shaped status carrying **no** protocol `error.code`, per the status set above, or a transport failure) and none ever refused the request, after the full retry budget above | `503 service_unavailable`, `operators_unreachable` | Proxy-authored. Distinct from `operators_busy` on purpose: the pool is not at capacity but unreachable, and reporting congestion invites an immediate retry storm during a fleet-wide restart. `Retry-After` lands past a typical node restart. |
 | Node is shutting down (graceful drain) | `/v1/zs/reserve`: `503 server_error`, `node_draining`; new relay circuits: `503 server_error`, `relay_busy` | Node-authored. Tickets already issued are still honored for a short grace window; a *new* reservation is refused so the payer's escrow isn't opened against a node about to exit. A draining node also advertises zero models, so peers route away on their next probe. |
-| No candidate speaks a compatible `proto_version` major (all wire-incompatible, § 3c) | `503 service_unavailable`, `no_compatible_operator` | Proxy-authored; the fleet hasn't upgraded to this build's generation. |
+| No candidate speaks a compatible `proto_version` major (all wire-incompatible, § 3c) | `400 invalid_request_error`, `no_compatible_operator` | Proxy-authored; the fleet hasn't upgraded to this build's generation, and a retry won't change that. |
 | Every candidate lacked a verified, unexpired ephemeral recipient (mandatory FS, § 8) | `503 service_unavailable`, `no_ephemeral_capacity` | Proxy-authored after exhausting candidates; transient (nodes mid-rotation). |
 | Privacy mode on but no eligible relay for the target (§ 3f) | `503 service_unavailable`, `no_relay_available` | Proxy refuses rather than route direct (which would leak the client IP). |
 | Node has no fresh ephemeral to advertise / seal against | `/v1/zs/details`: `503 service_unavailable`, `no_fresh_ephemeral`; `/v1/zs/reserve`: `503 server_error`, `node_ephemeral_unavailable` | Node-authored; transient (mid-rotation or just-restarted). Proxy treats as operator-unavailable and tries another. |
@@ -3344,6 +3344,17 @@ the upstream's verbatim error, so the receipt's `body_hash` covers the
 synthesized bytes. Other structured upstream errors (e.g.
 `context_length_exceeded`) keep their own code and, non-streaming, are forwarded
 byte-identical.
+
+**`X-Should-Retry`.** Every error response the reference proxy writes, and every
+stream it opens, carries `X-Should-Retry: true` or `false`. A stream is always
+`false`: it is past the escrow open, and a node can open one under a failed
+status, which a client reads before the stream. OpenAI's SDKs read the header
+in place of their status rule (resend any 408, 409, 429 or 5xx). It is `true`
+only when a new turn could plausibly succeed (the SDK's `Error.Retryable`,
+pinned by `testdata/error_retry_vectors.json`) **and** escrow was not opened:
+after the open, an automatic resend is a second payment the payer did not
+choose, so a paid failure, its passed-through node error included, is always
+`false`. The proxy sets the header over any value a node sent.
 
 **`open_unconfirmed`.** Typically a balance shift between mempool admission and
 block production drops the group. It is detected in one of two ways:

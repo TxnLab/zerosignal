@@ -82,7 +82,7 @@ var ErrOperatorUnknown = errors.New("operator unknown")
 // on-chain unless the payer set zs.allow_staging, and nodes whose signing
 // account is below the routing floor, so the proxy advertises exactly what it
 // routes to. Operators(ctx, model) does not — dispatch needs the full
-// model-serving set to tell "held out for staging" (503 no_production_operator)
+// model-serving set to tell "held out for staging" (400 no_production_operator)
 // or "held out for funding" (503 no_funded_operator) from "nobody serves this
 // model".
 type RegistryProvider interface {
@@ -198,7 +198,7 @@ func HeldOutStaging(op Operator, allowStaging bool) bool {
 // generation than this build, so dispatch could never seal a request for it.
 // The second half of "advertise exactly what you can route to", alongside
 // HeldOutStaging — SelectTargets refuses these at its wire-version step and
-// answers 503 no_compatible_operator.
+// answers 400 no_compatible_operator.
 //
 // Note an EMPTY ProtoVersion counts as incompatible: ProtoVersionCompatible maps
 // it to wire.LegacyProtoVersion ("1.0"), a different major than this build's.

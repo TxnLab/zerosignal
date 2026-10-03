@@ -134,7 +134,7 @@ type Constraints struct {
 	// false — the opposite. Read it through FallbacksAllowed, never directly.
 	// As a plain bool, a caller who set Order and forgot the field silently
 	// converted a preference into a hard pin, surfacing as ProviderPinBlocked →
-	// 503 no_pinned_operator rather than a route; nothing caught it, because
+	// 400 no_pinned_operator rather than a route; nothing caught it, because
 	// the vectors only cover cases where the field was written explicitly. nil
 	// now means "caller said nothing" and resolves to true, matching the TS
 	// mirror's `?? true`.

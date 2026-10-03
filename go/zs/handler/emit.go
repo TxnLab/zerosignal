@@ -134,7 +134,7 @@ func (e *httpEmitter) fail(err error) {
 		return
 	}
 	if up, ok := errors.AsType[*zs.NodeReply](ze.Err); ok {
-		e.passThrough(up)
+		e.passThrough(up, shouldRetry(ze))
 		return
 	}
 	if ze.Code == "wallet_unfunded" {
@@ -146,12 +146,14 @@ func (e *httpEmitter) fail(err error) {
 }
 
 // passThrough writes an operator's error response. No node-set X-Zs-* header
-// reaches the client (SPEC §5.2 step 4); the proxy's own are kept.
-func (e *httpEmitter) passThrough(up *zs.NodeReply) {
+// reaches the client (SPEC §5.2 step 4); the proxy's own are kept. The retry
+// advice is the proxy's, set over any the node sent.
+func (e *httpEmitter) passThrough(up *zs.NodeReply, retry bool) {
 	h := e.w.Header()
 	proxyHdrs := snapshotHayaiHeaders(h)
 	copyResponseHeaders(h, up.Header)
 	stripNodeHayaiHeaders(h, proxyHdrs)
+	setShouldRetry(h, retry)
 	h.Del("Content-Length")
 	if up.ContentType != "" {
 		h.Set("Content-Type", up.ContentType)
@@ -170,6 +172,10 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 	stripNodeHayaiHeaders(h, proxyHdrs)
 	h.Del("Content-Length")
 	h.Set("Content-Type", "application/json")
+	if status >= http.StatusBadRequest {
+		// A reply comes after the open, so resending it pays again.
+		setShouldRetry(h, false)
+	}
 	if usage != nil {
 		setUsageHeaders(h, *usage)
 	}
@@ -194,6 +200,9 @@ func (e *httpEmitter) open(status int) error {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
+	// Every stream is past the escrow open, and a node may open one under a
+	// failed status, which an OpenAI SDK reads before the stream and resends.
+	setShouldRetry(h, false)
 	e.w.WriteHeader(status)
 	flusher.Flush()
 	return nil

@@ -345,13 +345,12 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		case pick.VersionBlocked:
 			// Wire-protocol incompatibility — registry had operators
 			// for this model but none advertise a proto_version major
-			// matching this build's wire.ProtoVersion. 503 (not 400)
-			// because the request shape is fine; the proxy just can't
-			// reach any peer speaking the same wire generation. The
-			// "no_compatible_operator" code is distinct from
-			// no_operator / no_tee_capacity so a client retry-loop
-			// can recognize "upgrade required" — a retry against the
-			// same fleet will keep failing until either side moves.
+			// matching this build's wire.ProtoVersion. The request shape
+			// is fine, but a retry against the same fleet keeps failing
+			// until either side upgrades, so it is not retryable and the
+			// HTTP adapter answers 400, not a 5xx a client would resend.
+			// Distinct from no_operator / no_tee_capacity so a caller can
+			// recognize "upgrade required".
 			em.fail(newError("no_compatible_operator",
 				"no operator advertises a compatible wire protocol version ("+wire.ProtoVersion+")"))
 		case pick.TEEBlocked:
@@ -368,9 +367,9 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		case pick.StagingBlocked:
 			// Operators advertise the model but every otherwise-fitting node is
 			// flagged on-chain as `staging` and this proxy isn't configured to use
-			// them. 503 (not 400): the request is well-formed; there's just no
-			// production node for the model right now. Distinct code so the owner
-			// sees the actionable hint rather than a generic no_operator.
+			// them. Nothing changes until the payer enables allow_staging, so it is
+			// not retryable (the HTTP adapter answers 400). Distinct code so the
+			// owner sees the actionable hint rather than a generic no_operator.
 			em.fail(newError("no_production_operator",
 				fmt.Sprintf("the model %q is only served by staging nodes; enable zs.allow_staging (or --allow-staging) to route to them", model)))
 		case pick.SignerUnderfundedBlocked:
@@ -386,7 +385,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			}
 			em.fail(newError("no_funded_operator", msg))
 		case pick.RegistryCount == 0:
-			// Name the model — this is the most common 503 (a client like
+			// Name the model — this is the most common no-route error (a client like
 			// Codex asking for a model id no operator in the pool serves), and
 			// the model id is loggable/surfaceable (not prompt content), so
 			// saying which one turns "no idea why" into a one-line diagnosis.
@@ -396,10 +395,9 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			// Operators advertise the model id but none publish the
 			// matching image factor — typically a model that serves
 			// edits only being requested for generation (or vice versa).
-			// 503 no_operator because, from the client's perspective,
-			// there is no operator serving this endpoint for this model
-			// right now; a different endpoint or a different model may
-			// succeed.
+			// no_operator because, from the client's perspective, there
+			// is no operator serving this endpoint for this model; a
+			// different endpoint or a different model may succeed.
 			var which string
 			if endpoint == endpointImages {
 				which = "image generation"
@@ -436,12 +434,12 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		case pick.ProviderPinBlocked:
 			// A caller routing preference (`provider.only`, or `provider.order`
 			// with allow_fallbacks=false) matched no operator that can serve
-			// this model right now. 503 (not 400): the request is well-formed —
-			// a malformed ref is skipped at parse time and never reaches here —
-			// so this is a pool-availability condition like no_operator /
-			// no_tee_capacity, and a retry can succeed once the pinned
-			// operator/node reappears. Distinct code so a client can tell "my
-			// pin is unsatisfiable right now" from a generic pool outage.
+			// this model right now. The request is well-formed — a malformed
+			// ref is skipped at parse time and never reaches here — but a pinned
+			// node returning is not something an automatic retry should wait
+			// on, so it is not retryable (the HTTP adapter answers 400) and the
+			// caller drops or changes the pin. Distinct code so a client can
+			// tell "my pin is unsatisfiable right now" from a generic pool gap.
 			em.fail(newError("no_pinned_operator",
 				fmt.Sprintf("no operator matching your provider preferences is currently available "+
 					"to serve %s; adjust provider.only / provider.order or remove the pin", model)))
@@ -1258,7 +1256,7 @@ func describeReserveSizeRejection(r reserveSizeRejection) string {
 // pickResult is what dispatch needs to choose the right error code
 // when the candidate list is empty:
 //
-//   - RegistryCount == 0         → nobody advertises this model (503 no_operator)
+//   - RegistryCount == 0         → nobody advertises this model (404 no_operator)
 //   - AffinityBlocked            → strict affinity pinned us to an operator
 //     that cannot serve this request; other operators may be able, but
 //     we won't silently relocate a tool-calling conversation or a
@@ -1291,7 +1289,7 @@ type pickResult struct {
 	// StagingBlocked is set when operators advertise the model but every
 	// otherwise-fitting node is flagged on-chain as `staging` and the request
 	// did not opt in (zs.allow_staging / --allow-staging /
-	// PROXY_ZS_ALLOW_STAGING). Surfaced as 503 no_production_operator with a
+	// PROXY_ZS_ALLOW_STAGING). Surfaced as 400 no_production_operator with a
 	// hint to enable staging — distinct from RegistryCount==0 so "the model is
 	// served, just only on staging nodes" is actionable rather than looking like
 	// nobody serves it.
@@ -1310,7 +1308,7 @@ type pickResult struct {
 
 	// VersionBlocked is set when the registry has otherwise-fitting
 	// operators for this model but none of them advertise a
-	// wire-protocol major matching wire.ProtoVersion. Surfaced as 503
+	// wire-protocol major matching wire.ProtoVersion. Surfaced as 400
 	// no_compatible_operator. Distinct from RegistryCount==0
 	// (nobody serves this model) and TEEBlocked (attestation gap):
 	// here, capacity exists but every candidate speaks a wire
@@ -1331,7 +1329,7 @@ type pickResult struct {
 	// "edit-only" advertisements are legitimate, not misconfigured.
 	// Distinct from RegistryCount==0 so the client can tell "no one
 	// serves this model at all" from "no one serves this model on
-	// this endpoint"; surfaced as 503 no_operator with an endpoint-
+	// this endpoint"; surfaced as 404 no_operator with an endpoint-
 	// specific message.
 	ImageEndpointUnsupported bool
 
@@ -1339,12 +1337,10 @@ type pickResult struct {
 	// `provider` object) matched no operator that could serve the request:
 	// an `only` allowlist that excluded every model-serving operator, or an
 	// `order` with allow_fallbacks=false whose refs matched no eligible
-	// candidate. Surfaced as 503 no_pinned_operator — like no_operator /
-	// no_tee_capacity / no_compatible_operator, this is a pool-availability
-	// condition (the pin is well-formed; nothing matches it right now), so a
-	// retry can succeed once the pinned operator/node reappears. NOT 400: a
-	// malformed ref is skipped at parse time and never reaches here, so the
-	// request itself is valid.
+	// candidate. Surfaced as 400 no_pinned_operator. The pin is well-formed (a
+	// malformed ref is skipped at parse time and never reaches here), but
+	// nothing matches it now, and waiting for the pinned node to return is the
+	// caller's call, not an automatic retry's.
 	ProviderPinBlocked bool
 
 	// PinConflict is set when a previous_response_id continuation resolves to a
@@ -1662,8 +1658,8 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 				// the caller's hard preferences (only / ignore / a no-fallback
 				// order) exclude it. We can serve EITHER the continuation OR the
 				// pin, not both — so surface the conflict rather than silently
-				// violate one. This is a client contradiction (400), distinct
-				// from a pool-availability pin miss (ProviderPinBlocked, 503):
+				// violate one. This is a client contradiction, distinct from a
+				// pin that matches nothing available (ProviderPinBlocked):
 				// the client drops the conflicting pin or starts a new
 				// conversation; retrying the same body never resolves it.
 				res.PinConflict = true

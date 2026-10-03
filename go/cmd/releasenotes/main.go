@@ -976,7 +976,7 @@ func post(ctx context.Context, o *options, reqBody []byte) (res *draftResult, re
 		if msg == "" {
 			msg = summarizeErrorBody(raw)
 		}
-		return nil, isRetryableStatus(resp.StatusCode, code),
+		return nil, isRetryableStatus(resp.StatusCode, code, resp.Header.Get("X-Should-Retry")),
 			fmt.Errorf("%s: %s", statusHint(resp.StatusCode, code, o), msg)
 	}
 
@@ -1170,7 +1170,16 @@ func summarizeErrorBody(raw []byte) string {
 // ticket and, on a gateway that timed out because our own request was too slow
 // for it, the identical failure. The proxy has already done the retrying that
 // can help, rotating relays across the whole candidate list on the reserve leg.
-func isRetryableStatus(status int, code string) bool {
+//
+// A zs-proxy answers both halves itself in X-Should-Retry, so that decides when
+// it is present; the status rule is for a proxy too old to send it.
+func isRetryableStatus(status int, code, shouldRetry string) bool {
+	switch shouldRetry {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
 	switch status {
 	case http.StatusTooManyRequests:
 		return true
@@ -1185,8 +1194,8 @@ func statusHint(status int, code string, o *options) string {
 	switch {
 	case status == http.StatusPaymentRequired:
 		return "402 wallet_unfunded: the proxy wallet can't cover this request — fund it, or re-run with -offline"
-	case status == http.StatusServiceUnavailable && (code == "no_operator" || code == "no_pinned_operator"):
-		return fmt.Sprintf("503 %s: no operator is serving %q right now — pick another -model, or re-run with -offline", code, o.model)
+	case code == "no_operator" || code == "no_pinned_operator":
+		return fmt.Sprintf("%d %s: no operator is serving %q right now — pick another -model, or re-run with -offline", status, code, o.model)
 	case status == http.StatusTooManyRequests:
 		return "429: rate limited — retry shortly"
 	}

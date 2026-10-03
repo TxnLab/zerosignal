@@ -491,7 +491,7 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	// mirror setHayaiUsageHeaders in usage.go — keep them in sync
 	// when adding a new non-streaming response header.
 	h.Set("Access-Control-Expose-Headers",
-		"Content-Type, Retry-After, "+
+		"Content-Type, Retry-After, X-Should-Retry, "+
 			"X-Zs-Ticket-Id, X-Zs-Operator-Id, X-Zs-Node-Id, X-Zs-Operator-Owner-Addr, "+
 			"X-Zs-Actual-Input-Count, X-Zs-Actual-Output-Count, "+
 			"X-Zs-Inference-Amount, X-Zs-Inference-Currency, X-Zs-Inference-Decimals, "+

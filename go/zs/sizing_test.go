@@ -64,7 +64,7 @@ func TestMaxDeclaredOutput(t *testing.T) {
 		},
 		{
 			// Nobody serves the model — pickCandidates turns this into its own
-			// 503 no_operator, so there is nothing to clamp against.
+			// no_operator, so there is nothing to clamp against.
 			name: "empty pool",
 			ops:  nil,
 			want: 0,
