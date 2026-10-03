@@ -322,6 +322,9 @@ func TestConfigValidateWarnings(t *testing.T) {
 		{name: "endpoint with its own app id", cfg: Config{Signer: signer, Network: pinned}},
 		{name: "diverging ceiling", cfg: Config{Signer: signer, Network: Testnet(), MaxOutputCeiling: 8192}, want: "MaxOutputCeiling 8192 differs"},
 		{name: "ceiling unused when max output is required", cfg: Config{Signer: signer, Network: Testnet(), MaxOutputCeiling: 8192, RequireMaxOutput: true}},
+		{name: "TEE required with verification off", cfg: Config{Signer: signer, Network: Testnet(), RequireTEEModels: []string{"m"}, DisableTEE: true}, want: "[m] have no route"},
+		{name: "TEE off, nothing required", cfg: Config{Signer: signer, Network: Testnet(), DisableTEE: true}},
+		{name: "TEE required with the default verifier", cfg: Config{Signer: signer, Network: Testnet(), RequireTEEModels: []string{"m"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

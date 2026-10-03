@@ -2027,7 +2027,7 @@ An absent or empty `app_compose` **MUST NOT be reported as a compose check that 
 | `VerifyComposeHash` — the digest gate that makes the document safe to read | **yes**, one per language | yes, on every verifier that reads a preimage |
 | `VerifyAppCompose` — manifest version, runner, `allowed_envs`, root-backdoor names, pre-launch digest, platform toggles, `features`, `storage_fs` | **yes** | **yes** — both the proxy and the browser client call it |
 | Preset production OS-image list, proxy and browser client | **yes** | yes |
-| `docker_compose_file` template match — release skeleton + published image | **yes** | **yes.** Both consumers ship `EnforceComposeSkeleton` on with the published `zs-node` release lists populated — the proxy in its config defaults, the browser client as a bundled constant |
+| `docker_compose_file` template match — release skeleton + published image | **yes** | **yes.** Both consumers ship `EnforceComposeSkeleton` on with the published `zs-node` release lists populated — the Go SDK's default verifier and the proxy's config defaults from `attest`, the browser client as a bundled constant |
 
 With the skeleton rule in force, a passing verdict means what the field is named for, and the browser client reports `measurementChecks.compose` accordingly. Without it, a compose could measure nothing at all (`image: ${SOME_VAR}` yields a stable `compose_hash` over arbitrary code), and a clean `VerifyAppCompose` would mean only "nothing structurally disqualifying, workload unchecked". Implementations MUST honor two consequences:
 

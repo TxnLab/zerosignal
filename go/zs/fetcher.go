@@ -975,7 +975,7 @@ func relayLogAttr(hop *RelayHop) slog.Attr {
 // Failure modes:
 //   - resp.TEE == nil → operator does not advertise TEE; op.TEE = nil,
 //     return.
-//   - TEEVerifier nil → proxy isn't configured for TEE verification;
+//   - TEEVerifier nil (Config.DisableTEE) → no TEE verification;
 //     op.TEE = nil (treated as not-attested for routing). This is the
 //     correct behavior for deployments that don't care about TEE.
 //   - Fetch fails → op.TEE.Verified=false, FailureTag=fetch_failed.

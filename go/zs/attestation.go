@@ -212,8 +212,10 @@ type BundleVerifier struct {
 	AllowStub bool
 
 	// TrustedComposeHashes / TrustedOSImages are the measurement
-	// allowlists handed to the dstack branch. EMPTY MEANS NOTHING
-	// VERIFIES on that branch — see DstackVerifier.
+	// allowlists handed to the dstack branch. An empty TrustedOSImages
+	// verifies nothing there; an empty TrustedComposeHashes verifies
+	// nothing only without ComposePolicy.EnforceComposeSkeleton — see
+	// DstackVerifier.
 	TrustedComposeHashes []string
 	TrustedOSImages      []string
 

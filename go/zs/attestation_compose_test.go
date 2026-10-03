@@ -386,12 +386,12 @@ func TestDstackVerifier_ComposePolicyIsTheSharedOne(t *testing.T) {
 	if len(p.AllowedEnvNames) == 0 {
 		t.Error("the shared policy permits no secret env names, so every real node fails")
 	}
-	// The per-release half is deliberately empty until a release compose
-	// is published — see app.go. If this starts failing, the lists were
-	// populated and EnforceComposeSkeleton needs turning on with them.
+	// The per-release half is layered on by the caller (DefaultComposePolicy).
+	// The shared policy keeps it off, because its lists are empty and the flag
+	// over empty lists refuses every node.
 	if p.EnforceComposeSkeleton {
-		t.Error("EnforceComposeSkeleton is set but the release lists ship empty, " +
-			"which fails closed and refuses every node")
+		t.Error("EnforceComposeSkeleton is set but the shared policy's release lists " +
+			"are empty, which fails closed and refuses every node")
 	}
 }
 

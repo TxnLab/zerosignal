@@ -126,9 +126,13 @@ type Config struct {
 	// RequireTEEModels route only to attested nodes.
 	RequireTEEModels []string
 	// TEEVerifier checks the attestation evidence nodes publish, in the
-	// discovery New builds. Nil checks none: every node counts as
-	// unattested, so RequireTEEModels have no route.
+	// discovery New builds. Nil uses DefaultTEEVerifier, which fetches each
+	// TEE node's evidence on every refresh and Intel's collateral to check it.
 	TEEVerifier TEEVerifier
+	// DisableTEE checks no attestation evidence: every node counts as
+	// unattested, so RequireTEEModels have no route. It overrides
+	// TEEVerifier.
+	DisableTEE bool
 
 	Affinity Affinity // AffinityPrefer, 10m, 1024 entries
 
@@ -258,6 +262,12 @@ func (c Config) withDefaults() Config {
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)
 	}
+	switch {
+	case c.DisableTEE:
+		c.TEEVerifier = nil
+	case c.TEEVerifier == nil:
+		c.TEEVerifier = DefaultTEEVerifier(c.Logger)
+	}
 	if c.Clock == nil {
 		c.Clock = time.Now
 	}
@@ -331,6 +341,11 @@ func (c Config) validate() (ac algod.Config, appID uint64, warnings []string, er
 		warnings = append(warnings, fmt.Sprintf(
 			"MaxOutputCeiling %d differs from the shared default %d: requests that omit max_output_tokens route differently from the client",
 			c.MaxOutputCeiling, selection.DefaultMaxOutputCeiling))
+	}
+	if c.TEEVerifier == nil && len(c.RequireTEEModels) > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"RequireTEEModels %v have no route: TEE verification is off, so no node counts as attested",
+			c.RequireTEEModels))
 	}
 	return ac, appID, warnings, nil
 }
