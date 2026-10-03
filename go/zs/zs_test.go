@@ -260,6 +260,7 @@ func TestConfigValidate(t *testing.T) {
 		name    string
 		cfg     Config
 		wantApp uint64
+		wantNet algod.Network // checked when set
 		wantErr string
 	}{
 		{name: "testnet preset", cfg: Config{Signer: signer, Network: Testnet()}, wantApp: 765860477},
@@ -268,7 +269,9 @@ func TestConfigValidate(t *testing.T) {
 		{name: "localnet needs an app id", cfg: Config{Signer: signer, Network: Localnet()}, wantErr: "EscrowAppID is required"},
 		{name: "localnet with app id", cfg: Config{Signer: signer, Network: Network{Algod: Localnet().Algod, EscrowAppID: 1001}}, wantApp: 1001},
 		{name: "custom endpoint needs an app id", cfg: Config{Signer: signer, Network: Network{Algod: algod.Config{Endpoint: "http://algod:4001"}}}, wantErr: "EscrowAppID is required"},
-		{name: "app id without algod", cfg: Config{Signer: signer, Network: Network{EscrowAppID: 1}}, wantErr: "needs a Network or an Endpoint"},
+		{name: "zero network is mainnet", cfg: Config{Signer: signer}, wantApp: 3628061142, wantNet: algod.NetworkMainnet},
+		{name: "app id alone names no chain", cfg: Config{Signer: signer, Network: Network{EscrowAppID: 1}}, wantErr: "required when Token or EscrowAppID is set"},
+		{name: "token alone names no chain", cfg: Config{Signer: signer, Network: Network{Algod: algod.Config{Token: "t"}}}, wantErr: "required when Token or EscrowAppID is set"},
 		{name: "unknown network", cfg: Config{Signer: signer, Network: Network{Algod: algod.Config{Network: "devnet"}}}, wantErr: "localnet|testnet|mainnet"},
 		{name: "no signer", cfg: Config{Network: Testnet()}, wantErr: "Signer is required"},
 		{name: "signer without address", cfg: Config{Signer: fakeSigner{}, Network: Testnet()}, wantErr: "no address"},
@@ -278,7 +281,7 @@ func TestConfigValidate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, app, _, err := c.cfg.withDefaults().validate()
+			ac, app, _, err := c.cfg.withDefaults().validate()
 			if c.wantErr != "" {
 				var zerr *Error
 				if !errors.As(err, &zerr) || zerr.Kind != KindInvalidRequest || zerr.Code != "invalid_config" {
@@ -294,6 +297,9 @@ func TestConfigValidate(t *testing.T) {
 			}
 			if app != c.wantApp {
 				t.Errorf("app id = %d, want %d", app, c.wantApp)
+			}
+			if c.wantNet != "" && ac.ResolvedNetwork != c.wantNet {
+				t.Errorf("network = %q, want %q", ac.ResolvedNetwork, c.wantNet)
 			}
 		})
 	}

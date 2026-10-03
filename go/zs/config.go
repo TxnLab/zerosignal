@@ -28,10 +28,15 @@ type Signer interface {
 	algo.MultipleWalletSigner
 }
 
-// Network selects the chain and the escrow application. EscrowAppID 0 takes
-// the id embedded for Algod.Network, which exists for testnet and mainnet
-// only; a localnet or private deployment must set it. Asset ids are never
-// configured: they are read from the contract's global state.
+// Network selects the chain and the escrow application. The zero value is
+// mainnet, the production network; a Network that sets a token or an app id
+// must also name its chain with Algod.Network or Algod.Endpoint. EscrowAppID 0
+// takes the id embedded for Algod.Network, which exists for testnet and
+// mainnet only; a localnet or private deployment must set it. Asset ids are
+// never configured: they are read from the contract's global state.
+//
+// Nothing here reads a wallet's recorded network (wallet.Metadata.Network):
+// a caller holding a testnet wallet passes Testnet() itself.
 type Network struct {
 	Algod       algod.Config
 	EscrowAppID uint64
@@ -298,11 +303,17 @@ func (c Config) validate() (ac algod.Config, appID uint64, warnings []string, er
 		return ac, 0, nil, configError(fmt.Sprintf("unknown Affinity.Policy %q", c.Affinity.Policy))
 	}
 	ac = c.Network.Algod
+	if ac.Network == "" && ac.Endpoint == "" {
+		// Only a Network left wholly unset means mainnet. A token or an app id
+		// on its own was meant for some chain, and guessing mainnet for it
+		// would pay there.
+		if ac.Token != "" || c.Network.EscrowAppID != 0 {
+			return algod.Config{}, 0, nil, configError("Network.Algod.Network or Endpoint is required when Token or EscrowAppID is set")
+		}
+		ac.Network = string(algod.NetworkMainnet)
+	}
 	if err := ac.Resolve(); err != nil {
 		return algod.Config{}, 0, nil, configError(err.Error())
-	}
-	if ac.ResolvedEndpoint == "" {
-		return algod.Config{}, 0, nil, configError("Network.Algod needs a Network or an Endpoint")
 	}
 	appID = c.Network.EscrowAppID
 	if appID == 0 {
