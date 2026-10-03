@@ -8,8 +8,6 @@ package zs
 import (
 	"fmt"
 	"time"
-
-	"github.com/TxnLab/zerosignal/go/transient"
 )
 
 // Kind tells the caller what to do about an Error. It is the stable contract:
@@ -59,12 +57,15 @@ type Error struct {
 	Code    string // wire or SDK code that produced it, e.g. "no_capacity"
 	Message string
 
-	// Retryable and Attribution come from the shared transient package's
-	// predicates, never from a status code alone. Retryable is advice to the
-	// caller about a fresh request; the SDK itself never resends after Paid.
-	Retryable   bool
-	RetryAfter  time.Duration
-	Attribution transient.Attribution
+	// Retryable reports whether the same request, sent again as a new turn,
+	// could plausibly succeed: the failure was capacity, transport or the
+	// provider's, not something the caller must change first. It is false
+	// when the caller's own context ended the turn. A new turn is a new
+	// payment, so a caller weighing a retry reads Paid too; the SDK itself
+	// never resends after Paid. RetryAfter, when set, is the wait to honor
+	// first.
+	Retryable  bool
+	RetryAfter time.Duration
 
 	// Paid reports whether escrow was opened for this turn. When it was,
 	// Ticket is the handle that can still move that money, and the SDK keeps
@@ -99,6 +100,9 @@ func (e *Error) Unwrap() error { return e.Err }
 type ProviderError struct {
 	Code    string
 	Message string
+	// Status is the HTTP status of the single-body reply that carried the
+	// error, or 0 when it came in a stream frame.
+	Status int
 }
 
 func (e *ProviderError) Error() string {

@@ -93,6 +93,9 @@ func (r *NodeReply) Error() string {
 type streamEmitter struct {
 	yield  func(Event, error) bool
 	cancel context.CancelFunc
+	// callerCtx is the context the caller passed: a turn it ended is not one
+	// to retry.
+	callerCtx context.Context
 	// dec decodes sealed frames into content events; nil for FramesOnly.
 	dec *decoder
 
@@ -118,13 +121,15 @@ func (e *streamEmitter) emit(ev Event) bool {
 	return true
 }
 
-// end delivers the terminal error. Once the request is paid, the error says
-// so and names the ticket, because nothing is resent after the open.
+// end delivers the terminal error, and decides whether it is Retryable here,
+// once, for every way a turn can fail. Once the request is paid, the error
+// says so and names the ticket, because nothing is resent after the open.
 func (e *streamEmitter) end(err *Error) {
 	if e.ended {
 		return
 	}
 	e.ended = true
+	err.Retryable = retryable(err) && (e.callerCtx == nil || e.callerCtx.Err() == nil)
 	if e.paid {
 		err.Paid = true
 		if err.Ticket == nil {
@@ -183,6 +188,9 @@ func (e *streamEmitter) reply(status int, header http.Header, body []byte, usage
 	}
 	if e.dec != nil && e.dec.failure != nil && status >= http.StatusBadRequest {
 		e.dec.failure.RetryAfter = parseRetryAfter(header.Get("Retry-After"))
+		if pe, ok := e.dec.failure.Err.(*ProviderError); ok {
+			pe.Status = status
+		}
 	}
 	e.finish()
 }

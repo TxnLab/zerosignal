@@ -110,7 +110,7 @@ func (s *Stream) Events() iter.Seq2[Event, error] {
 		}
 		ctx, cancel := context.WithCancel(s.ctx)
 		defer cancel()
-		em := &streamEmitter{yield: yield, cancel: cancel}
+		em := &streamEmitter{yield: yield, cancel: cancel, callerCtx: s.ctx}
 		if !s.req.FramesOnly {
 			em.dec = newDecoder(string(s.req.Endpoint))
 		}

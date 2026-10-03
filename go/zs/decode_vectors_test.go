@@ -22,7 +22,8 @@ import (
 	"testing"
 )
 
-var updateEventVectors = flag.Bool("update", false, "regenerate proto/testdata/stream_events_vectors.json")
+// updateVectors regenerates the fixture of whichever vector test -run selects.
+var updateVectors = flag.Bool("update", false, "regenerate the selected test's proto/testdata vectors")
 
 const eventVectorsPath = "../../testdata/stream_events_vectors.json"
 
@@ -394,7 +395,7 @@ func TestStreamEventVectors(t *testing.T) {
 	}
 	out = append(out, '\n')
 
-	if *updateEventVectors {
+	if *updateVectors {
 		if err := os.WriteFile(eventVectorsPath, out, 0o644); err != nil {
 			t.Fatal(err)
 		}

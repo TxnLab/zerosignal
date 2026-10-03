@@ -12,6 +12,29 @@ import (
 	"testing"
 )
 
+// A turn the caller's own context ended is not advised as a retry, whatever
+// the failure reads as by its kind.
+func TestStream_CallerCancelIsNotRetryable(t *testing.T) {
+	rc := &scriptedReserveClient{script: []error{context.Canceled}}
+	c := retryServer(t, false, rc, []Operator{retryOp(1, "OWNER_A")})
+	c.tokenizer = testTokenizer()
+	c.wallet = fakeFeeWallet{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := c.Stream(ctx, Request{Endpoint: EndpointChatCompletions, Body: []byte(`{"model":"gpt-test"}`)}).Text()
+	ze, ok := errors.AsType[*Error](err)
+	if !ok {
+		t.Fatalf("ended in %v, want *Error", err)
+	}
+	if !retryable(ze) {
+		t.Fatalf("%s/%s is not retryable by kind, so this asserts nothing", ze.Kind, ze.Code)
+	}
+	if ze.Retryable {
+		t.Errorf("%s/%s after the caller cancelled is Retryable", ze.Kind, ze.Code)
+	}
+}
+
 // A Stream runs its turn once. Ranging it again must not run the turn again:
 // a second run reserves and pays a second time.
 func TestStream_EventsRunsOnce(t *testing.T) {

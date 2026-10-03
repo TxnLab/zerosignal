@@ -45,6 +45,46 @@ func TestStreamEmitter_StopCancelsAndDrops(t *testing.T) {
 	}
 }
 
+// Every terminal error is judged Retryable as it is delivered, except one the
+// caller's own context ended, by cancel or deadline. Paid or not is a separate
+// answer: a paid failure can still be worth a new turn.
+func TestStreamEmitter_EndDecidesRetryable(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		code string
+		paid bool
+		want bool
+	}{
+		{"transport loss", context.Background(), "read_upstream", false, true},
+		{"transport loss after payment", context.Background(), "read_upstream", true, true},
+		{"caller cancelled", cancelled, "read_upstream", false, false},
+		{"caller's deadline passed", expired, "read_upstream", false, false},
+		{"caller must fix it", context.Background(), "missing_model", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotErr error
+			em := &streamEmitter{
+				yield:     func(_ Event, err error) bool { gotErr = err; return true },
+				cancel:    func() {},
+				callerCtx: tc.ctx,
+			}
+			if tc.paid {
+				em.committed("tid", "txid", 1000)
+			}
+			em.fail(newError(tc.code, "x"))
+			ze, ok := gotErr.(*Error)
+			if !ok || ze.Retryable != tc.want || ze.Paid != tc.paid {
+				t.Errorf("ended in %+v, want Retryable %v Paid %v", gotErr, tc.want, tc.paid)
+			}
+		})
+	}
+}
+
 // After the escrow open, a failure is paid and names the ticket, because
 // nothing is resent after the open.
 func TestStreamEmitter_FailAfterCommitIsPaid(t *testing.T) {
@@ -228,17 +268,20 @@ func TestStreamEmitter_ReplyDone(t *testing.T) {
 }
 
 // A sealed reply the node marked failed is not an answer, whether or not its
-// body says why, and its Retry-After is kept.
+// body says why, and its Retry-After is kept. Its status is what judges a
+// retry when the body names no code.
 func TestStreamEmitter_ReplyFailedStatus(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, wantMsg string
 		status              int
 		wantNodeReply       bool
+		wantRetryable       bool
 	}{
-		{"unexplained", `{"detail":"x"}`, "the node answered HTTP 503", 503, true},
-		{"not json", `<html>503</html>`, "the node answered HTTP 503", 503, true},
-		{"explained", `{"error":{"message":"overloaded","code":"provider_overloaded"}}`, "overloaded", 503, false},
-		{"the lowest failed status", `{"detail":"x"}`, "the node answered HTTP 400", 400, true},
+		{"unexplained", `{"detail":"x"}`, "the node answered HTTP 503", 503, true, true},
+		{"not json", `<html>503</html>`, "the node answered HTTP 503", 503, true, true},
+		{"explained", `{"error":{"message":"overloaded","code":"provider_overloaded"}}`, "overloaded", 503, false, true},
+		{"explained without a code", `{"error":{"message":"overloaded"}}`, "overloaded", 503, false, true},
+		{"the lowest failed status", `{"detail":"x"}`, "the node answered HTTP 400", 400, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotErr error
@@ -265,6 +308,9 @@ func TestStreamEmitter_ReplyFailedStatus(t *testing.T) {
 			}
 			if _, isReply := ze.Err.(*NodeReply); isReply != tc.wantNodeReply {
 				t.Errorf("cause = %T, want NodeReply %v", ze.Err, tc.wantNodeReply)
+			}
+			if ze.Retryable != tc.wantRetryable {
+				t.Errorf("Retryable = %v, want %v", ze.Retryable, tc.wantRetryable)
 			}
 		})
 	}
