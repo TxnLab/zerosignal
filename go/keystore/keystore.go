@@ -142,7 +142,7 @@ func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 }
 
 func (k *KeyStore) add(ctx context.Context, entry MnemonicEntry) error {
-	addr, signer, kind, err := decodeMnemonic(strings.TrimSpace(entry.Mnemonic), entry.Name)
+	addr, signer, kind, err := decodeMnemonic(strings.TrimSpace(entry.Mnemonic), fmt.Sprintf("mnemonic %q", entry.Name))
 	if err != nil {
 		return err
 	}
@@ -175,36 +175,46 @@ func (k *KeyStore) add(ctx context.Context, entry MnemonicEntry) error {
 //     not seed-representable, so an hdKey signs through the extended key.
 //
 // Any other word count is a configuration error. kind is a short label for
-// logs ("algorand-25" / "xhd-24").
-func decodeMnemonic(m, name string) (addr string, key accountKey, kind string, err error) {
+// logs ("algorand-25" / "xhd-24"). what names the phrase in errors.
+func decodeMnemonic(m, what string) (addr string, key accountKey, kind string, err error) {
 	switch n := len(strings.Fields(m)); n {
 	case 25:
 		priv, err := mnemonic.ToPrivateKey(m)
 		if err != nil {
-			return "", nil, "", fmt.Errorf("keystore: mnemonic %q: %w", name, err)
+			// Not wrapped: the SDK's error quotes a word it does not know,
+			// which is a mistyped word of the secret, and this error is logged.
+			return "", nil, "", fmt.Errorf("keystore: %s: invalid 25-word Algorand mnemonic (bad word or checksum)", what)
 		}
 		account, err := crypto.AccountFromPrivateKey(priv)
 		if err != nil {
-			return "", nil, "", fmt.Errorf("keystore: derive address from mnemonic %q: %w", name, err)
+			return "", nil, "", fmt.Errorf("keystore: derive address from %s: %w", what, err)
 		}
 		return account.Address.String(), stdKey{priv: priv}, "algorand-25", nil
 	case 24:
 		if !bip39.IsMnemonicValid(m) {
-			return "", nil, "", fmt.Errorf("keystore: mnemonic %q: invalid 24-word BIP-39 phrase (bad word or checksum)", name)
+			return "", nil, "", fmt.Errorf("keystore: %s: invalid 24-word BIP-39 phrase (bad word or checksum)", what)
 		}
 		w, err := xhd.NewWallet(bip39.NewSeed(m, "")) // Peikert (g=9), matching the client
 		if err != nil {
-			return "", nil, "", fmt.Errorf("keystore: derive xHD root from mnemonic %q: %w", name, err)
+			return "", nil, "", fmt.Errorf("keystore: derive xHD root from %s: %w", what, err)
 		}
 		path := w.Path00(0) // m/44'/283'/0'/0/0
 		account, err := path.AlgorandAddress()
 		if err != nil {
-			return "", nil, "", fmt.Errorf("keystore: derive address from mnemonic %q: %w", name, err)
+			return "", nil, "", fmt.Errorf("keystore: derive address from %s: %w", what, err)
 		}
 		return account.String(), hdKey{path: path}, "xhd-24", nil
 	default:
-		return "", nil, "", fmt.Errorf("keystore: mnemonic %q: unsupported word count %d (want 25-word Algorand or 24-word BIP-39)", name, n)
+		return "", nil, "", fmt.Errorf("keystore: %s: unsupported word count %d (want 25-word Algorand or 24-word BIP-39)", what, n)
 	}
+}
+
+// DeriveAddress returns the address and kind ("algorand-25" / "xhd-24") a
+// mnemonic loads as, without building a KeyStore, which logs every address it
+// loads.
+func DeriveAddress(mnemonic string) (addr, kind string, err error) {
+	addr, _, kind, err = decodeMnemonic(strings.TrimSpace(mnemonic), "recovery phrase")
+	return addr, kind, err
 }
 
 // HasAccount reports whether the keystore holds a private key for addr.
