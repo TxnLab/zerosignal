@@ -86,7 +86,10 @@ type Discovery struct {
 // Stores are the stateful pieces a process may want to persist or share.
 type Stores struct {
 	// Journal records open tickets. The in-memory default forgets them on
-	// exit, so a long-running process should supply a durable one.
+	// exit, so a long-running process should supply a durable one. Rows are
+	// finished and deleted only when the SDK builds the wallet; with a
+	// caller's Wallet there is no default, and a supplied journal is the
+	// caller's to drain.
 	Journal TicketJournal
 
 	// The routing signals: per-relay forward reputation, observed network

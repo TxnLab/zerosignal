@@ -62,6 +62,7 @@ type deps struct {
 	TargetBackoff    hayai.TargetBackoff
 	NodeExcluder     hayai.NodeExcluder
 	SpendGuard       spendGuard
+	Journal          hayai.TicketJournal
 	TrackCryptoTimes bool
 	DebugLogBodies   bool
 	RetryBudget      time.Duration
@@ -127,6 +128,7 @@ func newServer(p *policy, log *slog.Logger, reqTx transform.RequestTransformer, 
 			NodeExclusions:   d.NodeExcluder,
 			ToolAffinity:     d.ToolAffinity,
 			ResponseAffinity: d.ResponseAffinity,
+			Journal:          d.Journal,
 		},
 		SpendGuard:     spend,
 		Registry:       d.RegistryProvider,

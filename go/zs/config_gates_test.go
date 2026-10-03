@@ -11,9 +11,11 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -21,10 +23,12 @@ import (
 	"time"
 
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
+	"github.com/algorand/go-algorand-sdk/v2/crypto"
 	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // suppliedParts is a Config whose network parts are all supplied, so New
@@ -151,6 +155,8 @@ func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []str
 				group.FailureMessage = "logic eval error: err opcode executed"
 			}
 			writeJSON(w, models.SimulateResponse{Version: 2, LastRound: 100, TxnGroups: []models.SimulateTransactionGroupResult{group}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/transactions"):
+			writeJSON(w, map[string]string{"txId": "SUBMITTED"})
 		case strings.Contains(r.URL.Path, "/v2/applications/"):
 			writeJSON(w, models.Application{Id: 1, Params: models.ApplicationParams{GlobalState: []models.TealKeyValue{
 				{Key: base64.StdEncoding.EncodeToString([]byte("usdc")), Value: models.TealValue{Type: 2, Uint: 31566704}},
@@ -201,6 +207,126 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 		if s != algod.FeeSink("testnet") {
 			t.Errorf("simulated from %s, want the testnet fee sink", s)
 		}
+	}
+
+	// The built wallet gets a reconciler over the default journal, scoped to
+	// this payer and app, that leaves the watchdog's live tickets alone.
+	r := c.reconcile
+	if r == nil || c.journal == nil || r.journal != c.journal || r.payer != "PAYER" || r.appID != 1 {
+		t.Fatalf("reconciler %+v over journal %v, want one over the client's journal for PAYER on app 1", r, c.journal)
+	}
+	if wc, ok := r.chain.(walletChain); !ok || wc.w != w {
+		t.Errorf("reconciler chain %#v, want the built wallet", r.chain)
+	}
+	never := func(context.Context) (string, error) { return "", errors.New("unused") }
+	c.refunds.track("LIVE", time.Now().Add(time.Hour),
+		func(context.Context) (ticketProbe, error) { return ticketProbe{}, nil }, never, never)
+	defer c.refunds.Resolve("LIVE")
+	if !r.watching("LIVE") || r.watching("OTHER") {
+		t.Error("the reconciler does not defer to the client's refund watchdog")
+	}
+	c.Close()
+	select {
+	case <-r.done:
+	default:
+		t.Error("the reconciler is still running after Close")
+	}
+}
+
+// Each receipt value lands in its own SettleArgs slot. Every value is distinct
+// and non-zero, so a swap or a dropped field fails.
+func TestSettleArgsOf_EveryValueInItsSlot(t *testing.T) {
+	r := &ticket.UsageReceipt{AmountCharged: 1, TtftMs: 3, DecodeMs: 4, ActualInputCount: 5, ActualOutputCount: 6,
+		OutputUsageType: 7, AuxOutputUsageType: 8, AuxOutputCount: 9}
+	want := SettleArgs{AmountCharged: 1, ReceiptDigest: ticket.ReceiptSigDigest(r), TtftMs: 3, DecodeMs: 4,
+		InputTokens: 5, OutputTokens: 6, OutputUsageType: 7, AuxOutputUsageType: 8, AuxOutputCount: 9}
+	if got := settleArgsOf(r); got != want {
+		t.Errorf("settleArgsOf =\n  %+v\nwant\n  %+v", got, want)
+	}
+}
+
+// The payer's settle carries each receipt value in its own slot: the contract
+// freezes the ticket on any difference from the operator's half. Every value
+// is distinct, so a swap fails.
+func TestPayerSettleArgs_EveryValueInItsSlot(t *testing.T) {
+	h := &OpenHandle{Operator: Operator{ID: 11, NodeID: 12, OwnerAddr: "OWNER"}, MaxPrice: 13,
+		wallet: &Wallet{payerAddr: "PAYER"}}
+	a := SettleArgs{AmountCharged: 1, ReceiptDigest: [32]byte{2}, TtftMs: 3, DecodeMs: 4, InputTokens: 5,
+		OutputTokens: 6, OutputUsageType: 7, AuxOutputUsageType: 8, AuxOutputCount: 9}
+	want := escrow.SettleArgs{
+		TicketIDRaw: []byte{10}, AmountCharged: 1, MaxPrice: 13, ReceiptDigest: [32]byte{2}, TtftMs: 3, DecodeMs: 4,
+		InputCount: 5, OutputCount: 6, OutputUsageType: 7, AuxOutputUsageType: 8, AuxOutputCount: 9,
+		AsOperator: false, PayerAddr: "PAYER", OperatorOwnerAddr: "OWNER", OperatorID: 11, NodeID: 12,
+	}
+	if got := h.payerSettleArgs([]byte{10}, a); !reflect.DeepEqual(got, want) {
+		t.Errorf("payerSettleArgs =\n  %+v\nwant\n  %+v", got, want)
+	}
+}
+
+// The reconciler's lapse and re-settle reach the chain with the box's owner:
+// without it the call cannot name the account the contract pays, and fails.
+func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
+	url, _ := fakeEscrowAlgod(t, 123_400)
+	payer := crypto.GenerateAccount().Address.String()
+	cfg := suppliedParts(t)
+	cfg.Signer = fakeSigner{addr: payer}
+	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
+	cfg.Wallet = nil
+	c, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	chain := walletChain{c.Config().Wallet.(*Wallet)}
+	rec := TicketRecord{TicketID: "NkImzFiSJz3WK6cx7PFU1Q==", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99, Settle: &settled}
+	box := &escrow.TicketRecord{OperatorOwnerAddr: crypto.GenerateAccount().Address.String()}
+	if _, err := chain.lapse(context.Background(), rec, box); err != nil {
+		t.Errorf("lapse: %v", err)
+	}
+	if _, err := chain.resettle(context.Background(), rec, box); err != nil {
+		t.Errorf("re-settle: %v", err)
+	}
+}
+
+// The wallet's chain acts on the journaled ticket, paying the box's operator
+// owner, and refuses a re-settle with no recorded receipt.
+func TestWalletChain_HandleForARecord(t *testing.T) {
+	w := &Wallet{}
+	rec := TicketRecord{TicketID: "T", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99}
+	h := walletChain{w}.handle(rec, &escrow.TicketRecord{OperatorOwnerAddr: "OWNER"})
+	if h.TicketID != "T" || h.Operator.ID != 3 || h.Operator.NodeID != 4 || h.Operator.OwnerAddr != "OWNER" ||
+		h.MaxPrice != 99 || h.wallet != w {
+		t.Errorf("handle = %+v", h)
+	}
+	if h := (walletChain{w}).handle(rec, nil); h.Operator.OwnerAddr != "" {
+		t.Errorf("owner %q without a box", h.Operator.OwnerAddr)
+	}
+	if _, err := (walletChain{w}).resettle(context.Background(), rec, nil); err == nil {
+		t.Error("re-settle without a recorded receipt was submitted")
+	}
+}
+
+// A caller's wallet gets no reconciler, and so no default journal that only
+// grows; a journal the caller supplies is still written.
+func TestNew_CallersWalletRunsNoReconciler(t *testing.T) {
+	c, err := New(context.Background(), suppliedParts(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if c.reconcile != nil || c.journal != nil {
+		t.Errorf("reconciler %v journal %v, want neither", c.reconcile, c.journal)
+	}
+	cfg := suppliedParts(t)
+	j := newMemJournal()
+	cfg.Stores.Journal = j
+	c2, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	if c2.reconcile != nil || c2.journal != j {
+		t.Errorf("reconciler %v journal %v, want none and the supplied journal", c2.reconcile, c2.journal)
 	}
 }
 

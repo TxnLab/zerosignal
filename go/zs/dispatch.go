@@ -2532,6 +2532,7 @@ func (s *Client) runHayaiSealed(
 	// runReceiptChecks; a box the operator settled standalone is a cheap
 	// existence-probe no-op at fire time.
 	s.refunds.Track(openHandle, ticket.ExpiresAt)
+	s.journalOpen(openHandle, ticket)
 	txID := openHandle.AppCallTxID
 	em.committed(ticket.TicketID, txID, openHandle.OpenFeesMicroalgos)
 	s.log.Debug("wallet open submitted",
@@ -3597,6 +3598,7 @@ func (s *Client) checkReceipt(
 		if handle == nil {
 			return nil
 		}
+		s.journalReceipt(handle, receipt)
 		return withSettleCtx(func(settleCtx context.Context) uint64 {
 			// A failing ack is operational noise, not a client-visible error:
 			// the refund watchdog keeps tracking the ticket, so the escrow is

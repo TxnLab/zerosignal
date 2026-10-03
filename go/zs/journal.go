@@ -42,8 +42,9 @@ type TicketRecord struct {
 	Target      NodeRef
 	Payer       string
 	MaxPrice    uint64
-	// ExpiresAt is the operator-issued expiry, kept for logging and to skip
-	// obviously stale rows. The box's own deadline is authoritative.
+	// ExpiresAt is the ticket's expiry. The contract refuses an open after
+	// it, so a box still missing then never appears. Once the box exists its
+	// own deadline is authoritative.
 	ExpiresAt time.Time
 	Status    TicketStatus
 	CreatedAt time.Time

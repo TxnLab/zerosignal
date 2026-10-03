@@ -81,6 +81,7 @@ func TestMiddleware_LogsRequest(t *testing.T) {
 
 	cfg := testConfig()
 	s := newServer(&cfg.policy, logger, transform.Passthrough{}, transform.Passthrough{}, deps{})
+	buf.Reset() // drop the Client's startup lines
 
 	// Hit the health endpoint through the middleware.
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -111,6 +112,7 @@ func TestMiddleware_LogsErrorReason(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	s := newServer(&testConfig().policy, logger, transform.Passthrough{}, transform.Passthrough{}, deps{})
+	buf.Reset() // drop the Client's startup lines
 
 	// A handler that fails the way dispatchHayai does: an OpenAI-shaped 503.
 	failing := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

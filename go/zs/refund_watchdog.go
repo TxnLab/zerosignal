@@ -50,10 +50,10 @@ import (
 // Operator-pending hands off to driveLapse, which defers to the node's own
 // settleLapsed and only posts one itself if the node never does.
 //
-// State is in-memory only: a proxy restart drops pending probes and the
-// escrowed USDC then waits for a manual refundInactive (the ticket id is in
-// the logs). Deliberate v1 scope — the window is minutes (ticket TTL +
-// grace), not days.
+// State is in-memory only. A ticket outlives a restart through the journal
+// (Stores.Journal): the reconciler picks up any row the watchdog is not
+// watching. With the in-memory default journal, a restart leaves the escrowed
+// USDC to a manual refundInactive (the ticket id is in the logs).
 type RefundWatchdog struct {
 	log *slog.Logger
 
@@ -298,6 +298,15 @@ func (rw *RefundWatchdog) Resolve(ticketID string) {
 	if ok {
 		close(cancel)
 	}
+}
+
+// watching reports whether the watchdog is still driving ticketID: armed and
+// not yet resolved, settled or given up.
+func (rw *RefundWatchdog) watching(ticketID string) bool {
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	_, ok := rw.pending[ticketID]
+	return ok
 }
 
 // track is the injectable core (tests supply fake probe/refund closures and

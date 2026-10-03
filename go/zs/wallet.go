@@ -243,6 +243,9 @@ type OpenHandle struct {
 	// into the envelope's algorand_tx_id so the node can look it up
 	// directly via algod's PendingTransactionInformation(txid).
 	AppCallTxID string
+	// journaled is the ticket's journal row, set once it is written, so the
+	// receipt update rewrites the same row.
+	journaled TicketRecord
 	// GroupID is the submitted atomic group's id in its wire form
 	// (base32, 52 chars). Retained for audit/dispute logging; NOT
 	// threaded into the envelope — algod has no "find pending txn by
@@ -487,36 +490,105 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 	// settle-group header, or atomic path failed somewhere upstream. Here the
 	// PAYER funds the call — 1 outer + finalize's op-up + the disbursement
 	// inners this settle actually fires (sized from AmountCharged/MaxPrice).
-	ticketIDRaw, decErr := decodeTicketID(h.TicketID)
-	if decErr != nil {
-		return "", 0, groupRejected, fmt.Errorf("wallet: ack-settle decode ticket id: %w", decErr)
+	res, settleErr := h.settleStandalone(ctx, settleArgsOf(receipt))
+	if settleErr != nil {
+		return "", 0, groupRejected, fmt.Errorf("wallet: ack-settle: %w", settleErr)
 	}
-	receiptDigest := ticket.ReceiptSigDigest(receipt)
-	res, settleErr := h.wallet.escrow.ComposeSettleStandalone(ctx, escrow.SettleArgs{
-		TicketIDRaw:   ticketIDRaw,
-		AmountCharged: receipt.AmountCharged,
-		MaxPrice:      h.MaxPrice,
-		ReceiptDigest: receiptDigest,
-		// All co-signed metric args come straight from the operator's signed
-		// receipt so this payer-side ack matches the operator's first-half
-		// verbatim (mismatch on any one freezes the ticket).
+	return res.TxID, res.FeeMicroalgos, groupRejected, nil
+}
+
+// settleArgsOf is what the payer co-signs on settle() for a verified receipt.
+// Every value comes straight from the operator's signed receipt, so the
+// payer's half matches the operator's verbatim; a mismatch on any one freezes
+// the ticket.
+func settleArgsOf(receipt *ticket.UsageReceipt) SettleArgs {
+	return SettleArgs{
+		AmountCharged:      receipt.AmountCharged,
+		ReceiptDigest:      ticket.ReceiptSigDigest(receipt),
 		TtftMs:             receipt.TtftMs,
 		DecodeMs:           receipt.DecodeMs,
-		InputCount:         receipt.ActualInputCount,
-		OutputCount:        receipt.ActualOutputCount,
-		OutputUsageType:    uint64(receipt.OutputUsageType),
-		AuxOutputUsageType: uint64(receipt.AuxOutputUsageType),
+		InputTokens:        receipt.ActualInputCount,
+		OutputTokens:       receipt.ActualOutputCount,
+		OutputUsageType:    receipt.OutputUsageType,
+		AuxOutputUsageType: receipt.AuxOutputUsageType,
 		AuxOutputCount:     receipt.AuxOutputCount,
+	}
+}
+
+// settleStandalone submits the payer's settle() on its own, signed and paid
+// by the payer. The live ack falls back to it, and the reconciler re-fires it
+// from a journaled receipt.
+func (h *OpenHandle) settleStandalone(ctx context.Context, a SettleArgs) (escrow.CallResult, error) {
+	ticketIDRaw, err := decodeTicketID(h.TicketID)
+	if err != nil {
+		return escrow.CallResult{}, fmt.Errorf("decode ticket id: %w", err)
+	}
+	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
+	return h.wallet.escrow.ComposeSettleStandalone(ctx, h.payerSettleArgs(ticketIDRaw, a), signer, h.wallet.payerAddr)
+}
+
+// payerSettleArgs is the payer's half of settle() for a. The contract freezes
+// the ticket when any value differs from the operator's half.
+func (h *OpenHandle) payerSettleArgs(ticketIDRaw []byte, a SettleArgs) escrow.SettleArgs {
+	return escrow.SettleArgs{
+		TicketIDRaw:        ticketIDRaw,
+		AmountCharged:      a.AmountCharged,
+		MaxPrice:           h.MaxPrice,
+		ReceiptDigest:      a.ReceiptDigest,
+		TtftMs:             a.TtftMs,
+		DecodeMs:           a.DecodeMs,
+		InputCount:         a.InputTokens,
+		OutputCount:        a.OutputTokens,
+		OutputUsageType:    uint64(a.OutputUsageType),
+		AuxOutputUsageType: uint64(a.AuxOutputUsageType),
+		AuxOutputCount:     a.AuxOutputCount,
 		AsOperator:         false,
 		PayerAddr:          h.wallet.payerAddr,
 		OperatorOwnerAddr:  h.Operator.OwnerAddr,
 		OperatorID:         h.Operator.ID,
 		NodeID:             h.Operator.NodeID,
-	}, signer, h.wallet.payerAddr)
-	if settleErr != nil {
-		return "", 0, groupRejected, fmt.Errorf("wallet: ack-settle: %w", settleErr)
 	}
-	return res.TxID, res.FeeMicroalgos, groupRejected, nil
+}
+
+// walletChain is the reconciler's ticketChain: each call acts as the payer on
+// a ticket known only from its journal row and, where it has one, its box.
+type walletChain struct{ w *Wallet }
+
+func (c walletChain) readBox(ctx context.Context, ticketID string) (*escrow.TicketRecord, error) {
+	raw, err := decodeTicketID(ticketID)
+	if err != nil {
+		return nil, err
+	}
+	return c.w.escrow.ReadTicketBox(ctx, raw)
+}
+
+// handle is an OpenHandle for rec. The box's operator owner is the one the
+// contract pays, so it is preferred over none.
+func (c walletChain) handle(rec TicketRecord, box *escrow.TicketRecord) *OpenHandle {
+	op := Operator{ID: rec.Target.Op, NodeID: rec.Target.Node}
+	if box != nil {
+		op.OwnerAddr = box.OperatorOwnerAddr
+	}
+	return &OpenHandle{TicketID: rec.TicketID, Operator: op, MaxPrice: rec.MaxPrice, wallet: c.w}
+}
+
+func (c walletChain) refund(ctx context.Context, rec TicketRecord) (string, error) {
+	return c.handle(rec, nil).RefundInactive(ctx)
+}
+
+func (c walletChain) lapse(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord) (string, error) {
+	return c.handle(rec, box).SettleLapsed(ctx)
+}
+
+func (c walletChain) resettle(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord) (string, error) {
+	if rec.Settle == nil {
+		return "", errors.New("wallet: re-settle without a recorded receipt")
+	}
+	res, err := c.handle(rec, box).settleStandalone(ctx, *rec.Settle)
+	if err != nil {
+		return "", fmt.Errorf("wallet: re-settle: %w", err)
+	}
+	return res.TxID, nil
 }
 
 // settleGroupSpec builds the escrow.SettleGroupSpec the atomic-settle

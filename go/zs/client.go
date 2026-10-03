@@ -111,6 +111,12 @@ type Client struct {
 	// handles the watchdog skips).
 	refunds *RefundWatchdog
 
+	// journal records each open ticket until its box is gone; reconcile
+	// finishes the ones refunds is not watching. reconcile is nil when the
+	// wallet is not a *Wallet, which is the only one that can act on chain.
+	journal   TicketJournal
+	reconcile *reconciler
+
 	// settles counts escrow submits still running after their response was
 	// written (submitAfterResponse), so WaitSettles can drain them on
 	// shutdown; settlesInFlight holds their ticket ids for its timeout
@@ -201,6 +207,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		}
 		tok = tokenize.BuildRegistry(cfg.MaxOutputByModel, fallback)
 	}
+	// Only the SDK's own wallet runs a reconciler, which is what deletes rows;
+	// with a caller's wallet a default journal would only grow.
+	sdkWallet, _ := cfg.Wallet.(*Wallet)
+	if st.Journal == nil && sdkWallet != nil {
+		st.Journal = newMemJournal()
+		cfg.Logger.Info("open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.Journal to keep them")
+	}
 	cfg.Stores, cfg.Tokenizer = st, tok
 	c := &Client{
 		cfg:              cfg,
@@ -217,21 +230,29 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		nodeExcluder:     st.NodeExclusions,
 		spend:            cfg.SpendGuard,
 		refunds:          NewRefundWatchdog(cfg.Logger),
+		journal:          st.Journal,
 		wallet:           cfg.Wallet,
 		retryBudget:      cfg.RetryBudget,
 		sweepDelayFn:     cfg.SweepDelay,
 		debugLogBodies:   cfg.DebugLogBodies,
 		stop:             parts.stop,
 	}
+	if sdkWallet != nil {
+		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.Logger)
+		c.reconcile.start()
+	}
 	c.warmFeeRate()
 	return c, nil
 }
 
-// Close stops the discovery refresh New started. It does not wait for
-// settlements; see WaitSettles. Safe to call more than once.
+// Close stops the discovery refresh and the ticket reconciler New started. It
+// does not wait for settlements; see WaitSettles. Safe to call more than once.
 func (s *Client) Close() {
 	if s.stop != nil {
 		s.stop()
+	}
+	if s.reconcile != nil {
+		s.reconcile.close()
 	}
 }
 
