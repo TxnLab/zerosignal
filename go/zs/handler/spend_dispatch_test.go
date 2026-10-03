@@ -34,9 +34,13 @@ import (
 // than how many times it happened to call through.
 type fakeSpendGuard struct {
 	reserveErr error
-	reserved   []uint64
-	released   []uint64
-	settled    []settleCall
+	// refuseFirst refuses that many Reserves as cap trips, then admits.
+	refuseFirst int
+	refusals    int
+	asks        int // every Reserve call, refused or not
+	reserved    []uint64
+	released    []uint64
+	settled     []settleCall
 
 	open map[string]uint64
 }
@@ -44,8 +48,13 @@ type fakeSpendGuard struct {
 type settleCall struct{ maxPrice, spent uint64 }
 
 func (f *fakeSpendGuard) Reserve(ticketID string, amt uint64) error {
+	f.asks++
 	if f.reserveErr != nil {
 		return f.reserveErr
+	}
+	if f.refusals < f.refuseFirst {
+		f.refusals++
+		return errors.New("per-request spend cap exceeded (fake)")
 	}
 	if f.open == nil {
 		f.open = make(map[string]uint64)
@@ -266,6 +275,85 @@ func TestDispatchHayai_SpendCapExceeded_402(t *testing.T) {
 	}
 	if fw.openCalls != 0 {
 		t.Errorf("wallet.Open should NOT be called when the spend cap trips, got %d", fw.openCalls)
+	}
+}
+
+// Candidates come in routing order, not price order, so a cap trip on one
+// operator's ticket moves on to the next, which may be cheaper.
+func TestDispatchHayai_SpendCapTriesTheNextOperator(t *testing.T) {
+	a := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	b := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	cfg := testConfig()
+	opts := setupHayai(t, cfg, a, b)
+	fw := opts.Wallet.(*fakeWallet)
+	guard := &fakeSpendGuard{refuseFirst: 1}
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body=%s; want the second operator to serve it", w.Result().StatusCode, w.Body.String())
+	}
+	if guard.refusals != 1 || len(guard.reserved) != 1 || fw.openCalls != 1 {
+		t.Errorf("refusals %d, reserved %v, opens %d: want one refusal, then one reserve and one open",
+			guard.refusals, guard.reserved, fw.openCalls)
+	}
+}
+
+// A cap trip on one operator and a busy answer from another is operators_busy:
+// the busy one may fit once a slot frees. The cap trip also ends the sweeps,
+// so the capped operator is not asked for another reservation.
+func TestDispatchHayai_SpendCapYieldsToBusy(t *testing.T) {
+	busy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 7})
+	capped := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	cfg := testConfig()
+	opts := setupHayai(t, cfg, busy, capped)
+	guard := &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+	if w.Result().StatusCode != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "operators_busy") {
+		t.Errorf("status = %d body=%s; want 503 operators_busy", w.Result().StatusCode, w.Body.String())
+	}
+	if guard.asks != 1 {
+		t.Errorf("guard asked %d times, want 1: a cap trip must not trigger a busy re-sweep", guard.asks)
+	}
+}
+
+// A candidate that passed the image-tool factor gate and was refused only by
+// the spend cap proves the tool is serviceable, as a busy one does. Admit
+// prices no tool allowance, so the allowance is what tips the signed ticket
+// over the cap; the payer must hear about the cap, not that no operator serves
+// the tool.
+func TestDispatchHayai_ToolBudgets_SpendCapBeatsUnsupportedTool(t *testing.T) {
+	capped := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	factorless := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	capped.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+		"gpt-test": {ImageToolRateMicroUSDC: 100_000, OutputUSDPer1M: 10},
+	}
+	factorless.operator.ModelCapacities = map[string]hayai.ModelCapacity{
+		"gpt-test": {OutputUSDPer1M: 10},
+	}
+	cfg := testConfig()
+	opts := setupHayai(t, cfg, capped, factorless)
+	guard := &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
+	opts.SpendGuard = guard
+	s := testServer(cfg, opts)
+
+	body := `{"model":"gpt-test","input":[{"role":"user","content":"hi"}],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/responses", body))
+
+	if guard.asks != 1 {
+		t.Fatalf("guard asked %d times, want 1: the factored operator must reach the cap", guard.asks)
+	}
+	if got := w.Body.String(); w.Result().StatusCode != http.StatusPaymentRequired || !strings.Contains(got, "spend_cap_exceeded") {
+		t.Errorf("status = %d body = %s; want 402 spend_cap_exceeded, not unsupported_tool", w.Result().StatusCode, got)
 	}
 }
 

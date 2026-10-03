@@ -7,11 +7,15 @@ package zs
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // admitGuard records each Admit estimate and refuses any above limit.
@@ -224,6 +228,60 @@ func TestDispatch_AdmitThenReserve(t *testing.T) {
 	_ = turnErr(t, c, string(admitBody))
 	if len(guard.seen()) != 0 || rc.calls() == 0 {
 		t.Errorf("unpriced: Admit calls %d, reserves %d: want no Admit, then a reserve", len(guard.seen()), rc.calls())
+	}
+}
+
+// capGuard admits every estimate and refuses every reservation as a cap trip.
+type capGuard struct{ admitGuard }
+
+func (*capGuard) Reserve(string, uint64) error { return errors.New("daily spend cap exceeded") }
+
+// ticketPerOperator signs each operator a ticket whose input rate is far above
+// any advertised rate.
+type ticketPerOperator struct{}
+
+func (ticketPerOperator) Reserve(_ context.Context, op Operator, req ticket.ReserveRequest, _ *RelayHop) (*ReservedTicket, error) {
+	return &ReservedTicket{Ticket: &ticket.Ticket{
+		TicketID: fmt.Sprint(op.ID), Model: req.Model, InputCount: req.InputCount, MaxOutputCount: req.MaxOutputCount,
+		InputRate: 1_000_000_000, OutputRate: 1_000_000_000, MaxPrice: 1_000_000_000,
+	}}, nil
+}
+
+// One candidate over the cap and one whose ticket fails price verification is
+// a spend cap: the cap is the payer's to change, while "every operator was
+// mis-priced" would be false.
+func TestDispatch_SpendCapOutranksPriceRejection(t *testing.T) {
+	// The unpriced operator's ticket passes verification (no advertised rate
+	// to check against) and reaches the guard; the priced one is rejected.
+	ops := []Operator{retryOp(1, "OWNER_A"), pricedOp(2, 1, 2)}
+	guard := &capGuard{admitGuard{limit: ^uint64(0)}}
+	c, _ := admitClient(t, ops, guard)
+	c.reserveClient = ticketPerOperator{}
+	if ze := turnErr(t, c, string(admitBody)); ze.Code != "spend_cap_exceeded" {
+		t.Errorf("code %q, want spend_cap_exceeded", ze.Code)
+	}
+}
+
+// noEphemeralFor reserves like ticketPerOperator, except for operator id,
+// which has no valid ephemeral recipient.
+type noEphemeralFor struct{ id uint64 }
+
+func (n noEphemeralFor) Reserve(ctx context.Context, op Operator, req ticket.ReserveRequest, hop *RelayHop) (*ReservedTicket, error) {
+	if op.ID == n.id {
+		return nil, ErrNoEphemeral
+	}
+	return ticketPerOperator{}.Reserve(ctx, op, req, hop)
+}
+
+// A spend cap also outranks a candidate skipped for a missing ephemeral key:
+// the cap is the payer's own limit, and the key gap says nothing about
+// whether that node's ticket would have fit.
+func TestDispatch_SpendCapOutranksNoEphemeral(t *testing.T) {
+	ops := []Operator{retryOp(1, "OWNER_A"), retryOp(2, "OWNER_B")}
+	c, _ := admitClient(t, ops, &capGuard{admitGuard{limit: ^uint64(0)}})
+	c.reserveClient = noEphemeralFor{id: 2}
+	if ze := turnErr(t, c, string(admitBody)); ze.Code != "spend_cap_exceeded" {
+		t.Errorf("code %q, want spend_cap_exceeded", ze.Code)
 	}
 }
 

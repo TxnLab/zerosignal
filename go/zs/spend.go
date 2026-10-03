@@ -16,17 +16,21 @@ import "errors"
 // because until the box closes the operator can still claim up to MaxPrice.
 // The guard keeps that exposure until its own window ends.
 //
-// A refusal ends the request with KindSpendCap, except a Reserve refusal that
-// wraps ErrDuplicateTicket, which ends it with KindOperatorFault.
+// An Admit refusal ends the request with KindSpendCap. A Reserve refusal moves
+// on to the next candidate, and the request ends with KindSpendCap only when
+// no candidate fits and none was merely busy. A Reserve refusal that wraps
+// ErrDuplicateTicket ends the request at once with KindOperatorFault.
 type SpendGuard interface {
 	// Admit runs before any reserve with the lowest max_price any candidate is
-	// expected to sign, priced from advertised rates. It is advisory: a signed
-	// ticket can exceed it, so a cap must also be enforced at Reserve. Refusing
-	// here spares the node a reservation. It records nothing, and is skipped
-	// when a candidate cannot be priced.
+	// expected to sign, priced from advertised rates. It is advisory and errs
+	// both ways: a node can sign above it, so a cap must also be enforced at
+	// Reserve, or below it (a lower rate, or a tighter context window), so a
+	// guard refusing near its limit can turn away a request that would have
+	// fit. Refusing here spares the nodes a reservation. It records nothing,
+	// and is skipped when a candidate cannot be priced.
 	Admit(estimate uint64) error
 
-	// Reserve runs after the node signs a ticket and before escrow opens,
+	// Reserve runs after a node signs a ticket and before escrow opens,
 	// with the ticket's MaxPrice: the most the operator can claim. A nil
 	// return records that exposure against ticketID.
 	Reserve(ticketID string, maxPrice uint64) error

@@ -17,7 +17,8 @@ import (
 //
 // The lowest, not the highest, because Admit refuses before any candidate is
 // tried, and a refusal on the dearest could turn away a request a cheaper node
-// would have served within the cap.
+// would have served within the cap. Reserve then skips any candidate whose
+// signed ticket is over the cap.
 //
 // It leaves out the min-charge floor and the per-call tool headroom, which only
 // raise max_price. It can still exceed the signed ticket: the node may sign

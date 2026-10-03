@@ -540,6 +540,10 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	// rejection; when every candidate is rejected this way — none merely busy or
 	// relay-gapped — it surfaces as a terminal 502 after the loop.
 	var priceRejected bool
+	// capRefused is set when the spend guard refused a candidate's signed
+	// ceiling. Candidates come in routing order, not price order, so a cheaper
+	// one later in the list may still fit.
+	var capRefused bool
 	// Build the relay-candidate pool once for the whole reserve loop — it's
 	// target-independent, so rebuilding it per candidate (the old relayHopFor)
 	// was O(n)·candidates of wasted whole-fleet projection. nil when privacy is
@@ -855,6 +859,40 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					}
 					s.log.LogAttrs(ctx, slog.LevelDebug, "reserve response", attrs...)
 				}
+				// Spend guard: bound the aggregate USDC drain before committing
+				// money, atomically against both caps. The reservation holds the
+				// cap under concurrency; runHayaiSealed releases it if the open
+				// fails. Admit has already refused a request no candidate could
+				// fit, so a trip here is this operator's signed ceiling; the next
+				// candidate may be cheaper, and this ticket just expires unopened.
+				if s.spend != nil {
+					if err := s.spend.Reserve(rt.Ticket.TicketID, rt.Ticket.MaxPrice); err != nil {
+						// A duplicate id is the OPERATOR reusing a ticket id it
+						// already handed out, which no local config change can fix,
+						// so it is not reported as a cap breach.
+						if errors.Is(err, ErrDuplicateTicket) {
+							s.log.Warn("operator reused a ticket id; refusing request",
+								slog.String("endpoint", endpoint),
+								opAttr(op),
+								relayAttr(hop),
+								slog.String("ticket_id", rt.Ticket.TicketID),
+								slog.Any("err", err))
+							em.fail(newError("operator_ticket_reuse",
+								"the operator issued a ticket id that is already in flight for this payer; no payment was made"))
+							return
+						}
+						capRefused = true
+						sweepRefused = true
+						sweepHardRefusal = true
+						s.log.Info("spend cap: this operator's ticket is over the limit; trying next operator",
+							slog.String("endpoint", endpoint),
+							opAttr(op),
+							relayAttr(hop),
+							slog.Uint64("max_price_microusdc", rt.Ticket.MaxPrice),
+							slog.Any("err", err))
+						continue
+					}
+				}
 				s.runHayaiSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
 				return
 			case IsBusy(err):
@@ -1077,8 +1115,10 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	// reserve (and so only reports busy) AFTER passing the factor gate, so a
 	// busy operator proves the tool IS serviceable — surfacing this terminal
 	// 400 ahead of the retryable 503 would wrongly tell the client to give
-	// up. Those retryable outcomes win below.
-	if toolFactorMissing && !anyBusy && !relayUnavailable {
+	// up. Those retryable outcomes win below, and so does a spend-cap refusal:
+	// its candidate also passed the gate, and the cap is what the payer can
+	// change.
+	if toolFactorMissing && !anyBusy && !relayUnavailable && !capRefused {
 		em.fail(newError("unsupported_tool",
 			fmt.Sprintf("no operator serves a built-in image tool for model %s — the model does not advertise an image-tool factor", model)))
 		return
@@ -1090,6 +1130,13 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	if relayUnavailable {
 		em.fail(newError("no_relay_available",
 			"transport-privacy mode is enabled but no eligible relay operator is available for the selected target(s)"))
+		return
+	}
+	// Some candidate's ticket was over a spend cap. A busy candidate wins, since
+	// it may fit once a slot frees; without one, waiting lowers no ceiling.
+	if capRefused && !anyBusy {
+		em.fail(newError("spend_cap_exceeded",
+			"spend cap reached: this request would exceed the configured USDC limit — raise spend.daily_cap_usdc / spend.per_request_cap_usdc, or wait for the UTC day to roll over"))
 		return
 	}
 	// Fail-closed forward secrecy: every candidate
@@ -2416,43 +2463,7 @@ func (s *Client) runHayaiSealed(
 	algoUSDPrice := rt.AlgoUSDPrice
 	em.reserved(rt, op)
 
-	// Spend guard: bound the *aggregate* USDC drain before committing money.
-	// Reserve the ticket's MaxPrice (the upper bound the open group locks; the
-	// actual charge is reconciled lower at settle) atomically against the
-	// per-request + daily caps. Reserving before the open is the safe order —
-	// the reservation holds the cap under concurrency; we Release it below if the
-	// open fails. Admit has already refused most over-cap requests before any
-	// reserve; a trip here means the signed ceiling came in above that estimate,
-	// and wastes one operator reservation. Nil guard (no caps configured) is a
-	// no-op.
-	if s.spend != nil {
-		if err := s.spend.Reserve(ticket.TicketID, ticket.MaxPrice); err != nil {
-			// Two opposite diagnoses share this one return. A duplicate ticket id
-			// is the OPERATOR reusing an id it already handed out (the guard
-			// refuses it rather than letting the second request skip the cap check
-			// and resolve the first one's reservation) — no local config change can
-			// fix that, so reporting it as a cap breach would send the payer to a
-			// knob that cannot help. Everything else is a genuine cap trip.
-			if errors.Is(err, ErrDuplicateTicket) {
-				s.log.Warn("operator reused a ticket id; refusing request",
-					slog.String("endpoint", endpoint),
-					opAttr(op),
-					relayAttr(hop),
-					slog.String("ticket_id", ticket.TicketID),
-					slog.Any("err", err))
-				em.fail(newError("operator_ticket_reuse",
-					"the operator issued a ticket id that is already in flight for this payer; no payment was made"))
-				return
-			}
-			s.log.Warn("spend cap reached; refusing request",
-				slog.String("endpoint", endpoint),
-				slog.Uint64("max_price_microusdc", ticket.MaxPrice),
-				slog.Any("err", err))
-			em.fail(newError("spend_cap_exceeded",
-				"spend cap reached: this request would exceed the configured USDC limit — raise spend.daily_cap_usdc / spend.per_request_cap_usdc, or wait for the UTC day to roll over"))
-			return
-		}
-	}
+	// The caller has already reserved the ticket's ceiling with the spend guard.
 
 	// Compose + submit the Payment + escrow.open atomic group via the
 	// wallet. The app-call txid (group member 1) is threaded into the
