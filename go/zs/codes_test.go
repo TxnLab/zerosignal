@@ -57,6 +57,7 @@ func TestErrorKinds(t *testing.T) {
 		"operator_unsealed_response":      KindOperatorFault,
 		"operator_inconsistent_response":  KindOperatorFault,
 		"stream_interrupted":              KindInterrupted,
+		"upstream_error":                  KindUpstream,
 	}
 	if len(errorKinds) != len(want) {
 		t.Errorf("errorKinds has %d codes, this test pins %d", len(errorKinds), len(want))

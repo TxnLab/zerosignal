@@ -6,7 +6,6 @@
 package zs
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -86,10 +85,6 @@ func (r *NodeReply) Error() string {
 	return fmt.Sprintf("operator returned HTTP %d", r.Status)
 }
 
-// doneSentinel is the OpenAI stream terminator, passed through as the node
-// sent it.
-var doneSentinel = []byte("[DONE]")
-
 // streamEmitter is the emitter behind Stream.Events: each call becomes events
 // handed to the range loop's yield. A loop that stops ranging is a caller who
 // left, so it cancels the dispatch context, which the forwarder already reads
@@ -98,12 +93,16 @@ var doneSentinel = []byte("[DONE]")
 type streamEmitter struct {
 	yield  func(Event, error) bool
 	cancel context.CancelFunc
+	// dec decodes sealed frames into content events; nil for FramesOnly.
+	dec *decoder
 
 	stopped bool
-	ticket  *Ticket
-	paid    bool
-	content bool
-	err     *Error
+	// ended is set once the turn's one ending, Done or an error, is decided;
+	// nothing later can change it.
+	ended  bool
+	ticket *Ticket
+	paid   bool
+	err    *Error
 }
 
 // emit hands ev to the caller unless it has already stopped ranging.
@@ -122,6 +121,10 @@ func (e *streamEmitter) emit(ev Event) bool {
 // end delivers the terminal error. Once the request is paid, the error says
 // so and names the ticket, because nothing is resent after the open.
 func (e *streamEmitter) end(err *Error) {
+	if e.ended {
+		return
+	}
+	e.ended = true
 	if e.paid {
 		err.Paid = true
 		if err.Ticket == nil {
@@ -162,10 +165,58 @@ func (e *streamEmitter) reply(status int, header http.Header, body []byte, usage
 	if !e.emit(Frame{Data: body, Sealed: true}) {
 		return
 	}
+	if e.dec != nil && !e.emitAll(e.dec.body(body)) {
+		return
+	}
 	if usage != nil && !e.emit(usage.event()) {
 		return
 	}
-	e.emit(Done{Empty: len(body) == 0})
+	if e.dec != nil && status >= http.StatusBadRequest && e.dec.failure == nil {
+		// A sealed reply the node marked failed, in a body that does not say
+		// why, is not a finished answer.
+		e.dec.failure = &Error{
+			Kind:    KindUpstream,
+			Code:    "upstream_error",
+			Message: fmt.Sprintf("the node answered HTTP %d", status),
+			Err:     &NodeReply{Status: status, Header: nodeHeader(header), Body: body},
+		}
+	}
+	if e.dec != nil && e.dec.failure != nil && status >= http.StatusBadRequest {
+		e.dec.failure.RetryAfter = parseRetryAfter(header.Get("Retry-After"))
+	}
+	e.finish()
+}
+
+// emitAll hands evs to the caller in order, stopping if it stops ranging.
+func (e *streamEmitter) emitAll(evs []Event) bool {
+	for _, ev := range evs {
+		if !e.emit(ev) {
+			return false
+		}
+	}
+	return true
+}
+
+// finish ends a response that is over: a whole reply, or a stream once the
+// forwarder returns. The receipt has been handled by then, so a failed turn is
+// still settled at what the node charged. The decoder decides between Done
+// and an error from the node's sealed frames alone.
+func (e *streamEmitter) finish() {
+	if e.ended {
+		return
+	}
+	if e.dec == nil {
+		e.ended = true
+		e.emit(Done{})
+		return
+	}
+	done, err := e.dec.outcome()
+	if err != nil {
+		e.end(err)
+		return
+	}
+	e.ended = true
+	e.emit(done)
 }
 
 func (e *streamEmitter) open(status int, header http.Header) error {
@@ -180,15 +231,18 @@ func (e *streamEmitter) frame(out outFrame) (int, error) {
 	}
 	f := out.frame
 	n := len(f.SSE())
-	if f.Sealed {
-		e.content = true
-	}
-	if e.emit(f) && !f.Sealed && bytes.Equal(f.Data, doneSentinel) {
-		e.emit(Done{Empty: !e.content})
+	if e.emit(f) && f.Sealed && e.dec != nil {
+		e.emitAll(e.dec.frame(f.Data))
 	}
 	return n, nil
 }
 
+// interrupt ends a stream that broke. A failure the node already reported is
+// the better account of why, so it wins.
 func (e *streamEmitter) interrupt() {
+	if e.dec != nil && e.dec.failure != nil {
+		e.end(e.dec.failure)
+		return
+	}
 	e.end(newError("stream_interrupted", "the stream broke before its end"))
 }

@@ -97,6 +97,9 @@ var errorShapes = map[string]errorShape{
 	// status line is already on the wire by the time it can happen.
 	"stream_interrupted": {http.StatusBadGateway, "proxy_error"},
 	"no_flusher":         {http.StatusInternalServerError, "proxy_error"},
+	// Unreachable here: the handler sets FramesOnly, so the node's own error
+	// frame is what its caller sees.
+	"upstream_error": {http.StatusBadGateway, "bad_gateway"},
 }
 
 // kindShapes renders a code errorShapes doesn't list. The one site that can

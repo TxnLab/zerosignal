@@ -41,7 +41,8 @@ const (
 	// excluded the node. Paid or not depending on when it was caught.
 	KindOperatorFault Kind = "operator_fault"
 	// KindUpstream: the provider behind the node failed after payment; the
-	// charge follows the node's receipt, often zero.
+	// charge follows the node's receipt, often zero. Err is a *ProviderError
+	// when the node said why.
 	KindUpstream Kind = "upstream"
 	// KindInterrupted: the turn stopped after payment (caller cancel,
 	// transport loss, the node refusing admission). The SDK settles or
@@ -67,8 +68,7 @@ type Error struct {
 
 	// Paid reports whether escrow was opened for this turn. When it was,
 	// Ticket is the handle that can still move that money, and the SDK keeps
-	// driving it to settle, protest or refund; Stream.Wait reports when it is
-	// final.
+	// driving it to settle, protest or refund.
 	Paid   bool
 	Ticket *Ticket
 
@@ -91,3 +91,19 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// ProviderError is the cause of a KindUpstream Error: the failure the node
+// reported inside its response, for the provider behind it. Code is the
+// node's and is not one of the SDK's codes; like Message, it is the node's
+// claim, for display and logs.
+type ProviderError struct {
+	Code    string
+	Message string
+}
+
+func (e *ProviderError) Error() string {
+	if e.Code == "" {
+		return "provider error"
+	}
+	return "provider code " + e.Code
+}

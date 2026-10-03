@@ -61,6 +61,7 @@ func TestErrorShapes(t *testing.T) {
 		"operator_unsealed_response":      {502, "proxy_error"},
 		"operator_inconsistent_response":  {502, "proxy_error"},
 		"stream_interrupted":              {502, "proxy_error"},
+		"upstream_error":                  {502, "bad_gateway"},
 		"no_flusher":                      {500, "proxy_error"},
 	}
 	if len(errorShapes) != len(want) {

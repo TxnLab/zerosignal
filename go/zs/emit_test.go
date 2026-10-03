@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
@@ -67,64 +69,282 @@ func TestStreamEmitter_FailAfterCommitIsPaid(t *testing.T) {
 	}
 }
 
-// A pass-through [DONE] ends the stream; Empty reports whether any sealed
-// content came before it. Sealed content that happens to read "[DONE]" is
-// content, not the end.
-func TestStreamEmitter_DoneAtSentinel(t *testing.T) {
+// doneSentinel is the plaintext line that follows a node's stream.
+var doneSentinel = []byte("[DONE]")
+
+var (
+	answerFrame   = Frame{Data: []byte(`{"choices":[{"index":0,"delta":{"content":"hi"}}]}`), Sealed: true}
+	finishedFrame = Frame{Data: []byte(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`), Sealed: true}
+	errorFrame    = Frame{Data: []byte(`{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}`), Sealed: true}
+	sentinelFrame = Frame{Data: doneSentinel}
+)
+
+// endedEmitter runs frames through a chat emitter, then ends the stream as
+// Stream.Events does once the forwarder returns, and reports every event and
+// the terminal error.
+func endedEmitter(t *testing.T, frames ...Frame) ([]Event, error) {
+	t.Helper()
+	var evs []Event
+	var gotErr error
+	em := &streamEmitter{
+		yield: func(ev Event, err error) bool {
+			if err != nil {
+				if gotErr != nil {
+					t.Errorf("a second terminal error: %v after %v", err, gotErr)
+				}
+				gotErr = err
+				return true
+			}
+			if gotErr != nil {
+				t.Errorf("event %s after the terminal error", ev.EventType())
+			}
+			evs = append(evs, ev)
+			return true
+		},
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	for _, f := range frames {
+		em.frame(outFrame{frame: f})
+	}
+	em.finish()
+	em.finish()
+	em.interrupt()
+	if gotErr != nil && em.err != gotErr {
+		t.Errorf("Err() = %v, the loop got %v", em.err, gotErr)
+	}
+	return evs, gotErr
+}
+
+func dones(evs []Event) []Done {
+	var out []Done
+	for _, ev := range evs {
+		if d, ok := ev.(Done); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// The turn's one ending is decided from the node's sealed frames once the
+// stream is over. The plaintext [DONE] decides nothing: a relay can add one
+// early or drop it, and neither may pass for a finished answer.
+func TestStreamEmitter_EndsOnSealedEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		frames    []Frame
-		wantDone  int
+		wantErr   string // terminal error code, or "" for Done
 		wantEmpty bool
 	}{
-		{"content", []Frame{{Data: []byte("{}"), Sealed: true}, {Data: doneSentinel}}, 1, false},
-		{"empty", []Frame{{Data: doneSentinel}}, 1, true},
-		{"sealed [DONE] is content", []Frame{{Data: doneSentinel, Sealed: true}, {Data: doneSentinel}}, 1, false},
-		{"no sentinel", []Frame{{Data: doneSentinel, Sealed: true}}, 0, false},
+		{"finished", []Frame{answerFrame, finishedFrame, sentinelFrame}, "", false},
+		{"finished without the sentinel", []Frame{answerFrame, finishedFrame}, "", false},
+		{"sentinel added early", []Frame{answerFrame, sentinelFrame, finishedFrame, sentinelFrame}, "", false},
+		{"cut before the finish", []Frame{answerFrame, sentinelFrame}, "stream_interrupted", false},
+		{"nothing", []Frame{sentinelFrame}, "stream_interrupted", false},
+		{"finished with no answer", []Frame{finishedFrame, sentinelFrame}, "", true},
+		{"node error", []Frame{answerFrame, errorFrame, sentinelFrame, finishedFrame}, "upstream_error", false},
+		{"sealed [DONE] is content", []Frame{{Data: doneSentinel, Sealed: true}, answerFrame}, "stream_interrupted", false},
+		{"plaintext finish is not evidence", []Frame{answerFrame, {Data: finishedFrame.Data}}, "stream_interrupted", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var dones []Done
-			em := &streamEmitter{
-				yield: func(ev Event, _ error) bool {
-					if d, ok := ev.(Done); ok {
-						dones = append(dones, d)
-					}
-					return true
-				},
-				cancel: func() {},
+			evs, err := endedEmitter(t, tc.frames...)
+			ds := dones(evs)
+			if tc.wantErr != "" {
+				ze, ok := err.(*Error)
+				if !ok || ze.Code != tc.wantErr {
+					t.Fatalf("ended in %v, want %s", err, tc.wantErr)
+				}
+				if len(ds) != 0 {
+					t.Errorf("an errored turn also yielded Done: %+v", ds)
+				}
+				return
 			}
-			for _, f := range tc.frames {
-				em.frame(outFrame{frame: f})
+			if err != nil {
+				t.Fatalf("ended in %v, want Done", err)
 			}
-			if len(dones) != tc.wantDone {
-				t.Fatalf("Done fired %d times, want %d", len(dones), tc.wantDone)
+			if len(ds) != 1 {
+				t.Fatalf("Done fired %d times, want once", len(ds))
 			}
-			if tc.wantDone > 0 && dones[0].Empty != tc.wantEmpty {
-				t.Errorf("done = %+v, want Empty=%v", dones[0], tc.wantEmpty)
+			if ds[0].Empty != tc.wantEmpty || ds[0].FinishReason != "stop" {
+				t.Errorf("done = %+v, want stop, Empty=%v", ds[0], tc.wantEmpty)
+			}
+			if evs[len(evs)-1] != Event(ds[0]) {
+				t.Errorf("Done is not last: %v", evs)
 			}
 		})
 	}
 }
 
-// A single-body reply ends in Done too, and an empty body is reported as one.
+// A plaintext frame is passed on but never decoded: a relay can write one.
+func TestStreamEmitter_PlaintextFrameIsNotDecoded(t *testing.T) {
+	evs, _ := endedEmitter(t, Frame{Data: answerFrame.Data})
+	for _, ev := range evs {
+		if _, ok := ev.(TextDelta); ok {
+			t.Fatalf("a plaintext frame decoded into %+v", ev)
+		}
+	}
+	if len(evs) != 1 {
+		t.Errorf("events = %v, want the Frame alone", evs)
+	}
+}
+
+// A stream that broke keeps the node's own account of why, when it gave one.
+func TestStreamEmitter_InterruptPrefersTheNodesFailure(t *testing.T) {
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(_ Event, err error) bool { gotErr = err; return true },
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	em.frame(outFrame{frame: errorFrame})
+	em.interrupt()
+	if ze, ok := gotErr.(*Error); !ok || ze.Code != "upstream_error" {
+		t.Errorf("ended in %v, want the node's upstream error", gotErr)
+	}
+}
+
+// A single-body reply ends in Done too, and one with no answer says so.
 func TestStreamEmitter_ReplyDone(t *testing.T) {
 	for _, tc := range []struct {
 		body      []byte
 		wantEmpty bool
 	}{
 		{nil, true},
-		{[]byte("{}"), false},
+		{[]byte(`{"choices":[{"index":0,"message":{"content":"hi"},"finish_reason":"stop"}]}`), false},
+		{[]byte(`{"choices":[{"index":0,"message":{"content":"","reasoning":"hmm"},"finish_reason":"stop"}]}`), true},
 	} {
 		var last Event
 		em := &streamEmitter{
 			yield:  func(ev Event, _ error) bool { last = ev; return true },
 			cancel: func() {},
+			dec:    newDecoder(endpointChatCompletions),
 		}
 		em.reply(200, http.Header{}, tc.body, nil)
 		d, ok := last.(Done)
 		if !ok || d.Empty != tc.wantEmpty {
 			t.Errorf("body %q: last event %+v, want Done{Empty: %v}", tc.body, last, tc.wantEmpty)
 		}
+	}
+}
+
+// A sealed reply the node marked failed is not an answer, whether or not its
+// body says why, and its Retry-After is kept.
+func TestStreamEmitter_ReplyFailedStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, wantMsg string
+		status              int
+		wantNodeReply       bool
+	}{
+		{"unexplained", `{"detail":"x"}`, "the node answered HTTP 503", 503, true},
+		{"not json", `<html>503</html>`, "the node answered HTTP 503", 503, true},
+		{"explained", `{"error":{"message":"overloaded","code":"provider_overloaded"}}`, "overloaded", 503, false},
+		{"the lowest failed status", `{"detail":"x"}`, "the node answered HTTP 400", 400, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotErr error
+			em := &streamEmitter{
+				yield: func(ev Event, err error) bool {
+					if _, ok := ev.(Done); ok {
+						t.Error("a failed reply yielded Done")
+					}
+					gotErr = err
+					return true
+				},
+				cancel: func() {},
+				dec:    newDecoder(endpointChatCompletions),
+			}
+			h := http.Header{}
+			h.Set("Retry-After", "7")
+			em.reply(tc.status, h, []byte(tc.body), nil)
+			ze, ok := gotErr.(*Error)
+			if !ok || ze.Kind != KindUpstream || ze.Message != tc.wantMsg {
+				t.Fatalf("ended in %v, want upstream %q", gotErr, tc.wantMsg)
+			}
+			if ze.RetryAfter != 7*time.Second {
+				t.Errorf("RetryAfter = %v, want 7s", ze.RetryAfter)
+			}
+			if _, isReply := ze.Err.(*NodeReply); isReply != tc.wantNodeReply {
+				t.Errorf("cause = %T, want NodeReply %v", ze.Err, tc.wantNodeReply)
+			}
+		})
+	}
+}
+
+// FramesOnly yields the node's frames and nothing decoded from them, an error
+// frame included, and a Done with no fields once the stream is over.
+func TestStreamEmitter_FramesOnly(t *testing.T) {
+	var evs []Event
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(ev Event, err error) bool { evs = append(evs, ev); gotErr = err; return true },
+		cancel: func() {},
+	}
+	em.frame(outFrame{frame: answerFrame})
+	em.frame(outFrame{frame: errorFrame})
+	em.frame(outFrame{frame: sentinelFrame})
+	em.finish()
+
+	if gotErr != nil {
+		t.Fatalf("FramesOnly ended in %v, want Done", gotErr)
+	}
+	want := []string{"frame", "frame", "frame", "done"}
+	if len(evs) != len(want) {
+		t.Fatalf("events %v, want %v", evs, want)
+	}
+	for i, ev := range evs {
+		if ev.EventType() != want[i] {
+			t.Errorf("event %d = %s, want %s", i, ev.EventType(), want[i])
+		}
+	}
+	if d := evs[3].(Done); d != (Done{}) {
+		t.Errorf("Done = %+v, want zero", d)
+	}
+}
+
+// An error the node reports inside its response ends the turn as paid and
+// upstream, after the receipt, in place of Done.
+func TestStreamEmitter_ErrorFrameEndsInUpstreamError(t *testing.T) {
+	var evs []Event
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(ev Event, err error) bool { evs = append(evs, ev); gotErr = err; return true },
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	em.reserved(&ReservedTicket{Ticket: &ticket.Ticket{TicketID: "tid"}}, Operator{ID: 3, NodeID: 4})
+	em.committed("tid", "txid", 1000)
+	em.frame(outFrame{frame: errorFrame})
+	em.frame(outFrame{usage: &usageReport{receipt: &ticket.UsageReceipt{}, ticket: &ticket.Ticket{}}})
+	em.frame(outFrame{frame: sentinelFrame})
+	em.finish()
+
+	ze, ok := gotErr.(*Error)
+	if !ok {
+		t.Fatalf("ended in %v, want *Error", gotErr)
+	}
+	// The node's code is its claim, kept apart from the SDK's own codes.
+	if ze.Kind != KindUpstream || ze.Code != "upstream_error" || ze.Message != "rate limited" {
+		t.Errorf("error = %s/%s %q, want upstream/upstream_error", ze.Kind, ze.Code, ze.Message)
+	}
+	pe, ok := errors.AsType[*ProviderError](gotErr)
+	if !ok || pe.Code != "rate_limit_exceeded" || pe.Message != "rate limited" {
+		t.Errorf("cause = %v, want the node's rate_limit_exceeded", ze.Err)
+	}
+	if !ze.Paid || ze.Ticket == nil || ze.Ticket.ID != "tid" {
+		t.Errorf("error paid=%v ticket=%+v, want paid on tid", ze.Paid, ze.Ticket)
+	}
+	for _, ev := range evs {
+		if _, ok := ev.(Done); ok {
+			t.Error("a failed turn also ended in Done")
+		}
+	}
+	sawReceipt := false
+	for _, ev := range evs {
+		_, ok := ev.(ReceiptVerified)
+		sawReceipt = sawReceipt || ok
+	}
+	if !sawReceipt {
+		t.Error("the receipt was not reported before the error")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"strings"
 	"sync/atomic"
 
 	"github.com/TxnLab/zerosignal/go/selection"
@@ -49,6 +50,11 @@ type Request struct {
 	// Config.Privacy. A `provider.relay` in Body outranks it. RelayOff takes
 	// effect only with Config.AllowPrivacyOverride.
 	Relay string
+	// FramesOnly skips decoding, for a caller that re-emits the node's bytes:
+	// the Stream yields each Frame but no content events, an error the node
+	// reports inside its response passes as a Frame, and Done's fields are
+	// zero.
+	FramesOnly bool
 }
 
 func (r Request) turn() turn {
@@ -105,7 +111,15 @@ func (s *Stream) Events() iter.Seq2[Event, error] {
 		ctx, cancel := context.WithCancel(s.ctx)
 		defer cancel()
 		em := &streamEmitter{yield: yield, cancel: cancel}
+		if !s.req.FramesOnly {
+			em.dec = newDecoder(string(s.req.Endpoint))
+		}
 		s.c.dispatch(ctx, em, s.req.turn())
+		// A stream ends here, once the forwarder has read it all: only then is
+		// there no sealed frame left to change the outcome.
+		if !em.stopped {
+			em.finish()
+		}
 		if em.err != nil {
 			s.err = em.err
 		}
@@ -114,3 +128,19 @@ func (s *Stream) Events() iter.Seq2[Event, error] {
 
 // Err is the terminal error of a stream whose Events loop has finished, or nil.
 func (s *Stream) Err() error { return s.err }
+
+// Text runs the turn and returns its answer text, ignoring every other event.
+// On error it returns the text that arrived before it. With FramesOnly there
+// is no decoded text, so it returns "".
+func (s *Stream) Text() (string, error) {
+	var b strings.Builder
+	for ev, err := range s.Events() {
+		if err != nil {
+			return b.String(), err
+		}
+		if d, ok := ev.(TextDelta); ok {
+			b.WriteString(d.Delta)
+		}
+	}
+	return b.String(), nil
+}

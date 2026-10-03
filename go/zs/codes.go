@@ -69,6 +69,10 @@ var errorKinds = map[string]Kind{
 	"operator_inconsistent_response": KindOperatorFault,
 	// The stream broke after its first frame: the caller has part of a turn.
 	"stream_interrupted": KindInterrupted,
+	// The provider failed inside the node's response. The node's own code, if
+	// any, rides on the cause as a ProviderError, never here: it is the node's
+	// choice and could name one of these.
+	"upstream_error": KindUpstream,
 }
 
 // newError builds the Error for a code in errorKinds. An unlisted code is

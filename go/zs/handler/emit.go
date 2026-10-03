@@ -28,6 +28,8 @@ func (s *Server) dispatchHayai(w http.ResponseWriter, r *http.Request, endpoint 
 		ContentType: r.Header.Get("Content-Type"),
 		RequireTEE:  strings.TrimSpace(r.Header.Get("X-Zs-Require-TEE")) != "",
 		Relay:       r.Header.Get("X-Zs-Relay"),
+		// The node's own frames are the response, error frames included.
+		FramesOnly: true,
 	}
 	newHTTPEmitter(w, r, format, s.fundingHint()).serve(s.Client.Stream(r.Context(), req).Events())
 }

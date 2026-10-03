@@ -22,10 +22,9 @@ import (
 //
 // The set is closed: only this package implements Event.
 //
-// Some types are declared ahead of the code that emits them. A Stream yields
-// MaxOutputClamped, ReserveSucceeded, PaymentCommitted, ResponseStarted,
-// Frame, ReceiptVerified and Done; content arrives only as Frame.Data, and
-// Done carries Empty alone.
+// Some types are declared ahead of the code that emits them: RouteCandidates,
+// HopChanged, ReserveStarted, ReserveRetrying, ReceiptViolated,
+// SettleSubmitted, SettleConfirmed and NodeExcluded are not yet emitted.
 type Event interface {
 	EventType() string
 	event()
@@ -113,7 +112,8 @@ type ResponseStarted struct {
 // the original bytes (Frame.SSE). Sealed frames were decrypted from the node's
 // sealed stream; the rest (the `[DONE]` sentinel, keepalive comments) pass
 // through as the node sent them. A non-streaming response is one sealed Frame
-// holding the whole body.
+// holding the whole body. The content events decoded from a sealed Frame
+// follow it, unless the Request set FramesOnly.
 type Frame struct {
 	Event   string
 	ID      string
@@ -127,9 +127,11 @@ func (f Frame) isEmpty() bool {
 	return len(f.Data) == 0 && f.Event == "" && f.ID == "" && f.Retry == 0 && f.Comment == ""
 }
 
-// Item is one output item of the response (a message, reasoning block,
-// function call, image or built-in tool call), as the node's sealed frames
-// describe it. Raw is the item's JSON for fields the SDK does not model.
+// Item is one output item of a /v1/responses reply (a message, reasoning
+// block, function call, image or built-in tool call), as the node's sealed
+// frames describe it. Raw is the item's JSON for fields the SDK does not
+// model. Chat Completions has no items, so a chat turn yields none, and its
+// deltas carry no ItemID.
 type Item struct {
 	ID   string
 	Type string
@@ -139,16 +141,21 @@ type Item struct {
 type ItemOpened struct{ Item Item }
 type ItemClosed struct{ Item Item }
 
+// TextDelta is a piece of the answer text. A non-streaming reply yields each
+// text part whole, as one delta.
 type TextDelta struct {
 	ItemID string
 	Delta  string
 }
 
+// ReasoningDelta is a piece of the model's reasoning, or of its summary.
 type ReasoningDelta struct {
 	ItemID string
 	Delta  string
 }
 
+// ToolCallDelta is a piece of a function call's arguments. CallID and Name
+// are repeated on every delta of the call.
 type ToolCallDelta struct {
 	ItemID         string
 	CallID         string
@@ -171,12 +178,15 @@ const (
 )
 
 // ToolStatus reports a built-in tool the node runs on the caller's behalf.
+// Action is the node's description of what the tool did, without its icons;
+// Icons are the sources' favicons by host, as data URLs, limited in number,
+// size and type (no SVG) because the node chooses their bytes.
 type ToolStatus struct {
 	CallID string
 	Name   string
 	State  ToolState
 	Action json.RawMessage
-	Icons  []string
+	Icons  map[string]string
 }
 
 type ImageProgress struct {
@@ -191,8 +201,10 @@ type ImagePartial struct {
 	MIME   string
 }
 
-// Usage reports token counts as the stream carries them. The billed figures
-// are the receipt's, in ReceiptVerified.
+// Usage reports token counts as the response carries them; Source is
+// "response". Counts are running totals, so a later Usage replaces an earlier
+// one rather than adding to it. The billed figures are the receipt's, in
+// ReceiptVerified.
 type Usage struct {
 	InputTokens     uint64
 	OutputTokens    uint64
@@ -257,7 +269,22 @@ type NodeExcluded struct {
 	Reason string
 }
 
-// Done fires at the node's [DONE]. Empty is set when no content arrived.
+// Done is the last event of a turn whose response the node sealed as finished:
+// a chat finish_reason, a Responses completed or incomplete event, or a whole
+// reply. The stream's plaintext [DONE] decides nothing, since a relay can add
+// or drop it; a response that ends without the node's word is a
+// stream_interrupted *Error. One the node reports failed ends in a
+// KindUpstream *Error. Either error replaces Done.
+//
+// FinishReason is the dialect's own: a chat finish_reason ("stop", "length",
+// "tool_calls") or a response status ("completed", "incomplete").
+// IncompleteReason is set for an incomplete response. Empty means the turn
+// produced no answer: no text that is not blank, no refusal, no tool call and
+// no image. Reasoning alone is not an answer, so a model that stopped
+// mid-thought ends Empty.
+//
+// With Request.FramesOnly nothing is decoded, so Done carries no fields and
+// fires whenever the response ends.
 type Done struct {
 	FinishReason     string
 	IncompleteReason string
