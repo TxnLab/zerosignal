@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -85,6 +86,10 @@ type RefundWatchdog struct {
 
 	mu      sync.Mutex
 	pending map[string]chan struct{} // ticket_id → cancel signal
+	// handedOff is set by handOff: Track arms nothing more.
+	handedOff bool
+	// running counts the per-ticket goroutines, which handOff waits out.
+	running sync.WaitGroup
 }
 
 // NewRefundWatchdog constructs a watchdog with production timing defaults.
@@ -115,17 +120,40 @@ func NewRefundWatchdog(log *slog.Logger) *RefundWatchdog {
 // which is when the watchdog is most needed. The submit is the expensive half
 // (ComposeSettleLapsed re-reads the box, gathers params, then waits for
 // confirmation), so it must not inherit whatever the probe left over.
-func (rw *RefundWatchdog) probeOnce(probe func(context.Context) (ticketProbe, error)) (ticketProbe, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), rw.callTimeout)
-	defer cancel()
+//
+// A probe also ends when the ticket's cancel closes. A submit does not: once
+// it may have reached algod, handOff waits for its answer, so the next
+// sweeper reads the outcome rather than racing it. callOnce refuses to start
+// one after cancel.
+func (rw *RefundWatchdog) probeOnce(cancel <-chan struct{}, probe func(context.Context) (ticketProbe, error)) (ticketProbe, error) {
+	ctx, stop := context.WithTimeout(context.Background(), rw.callTimeout)
+	defer stop()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-cancel:
+			stop()
+		case <-done:
+		}
+	}()
 	return probe(ctx)
 }
 
-func (rw *RefundWatchdog) callOnce(call func(context.Context) (string, error)) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), rw.callTimeout)
-	defer cancel()
+func (rw *RefundWatchdog) callOnce(cancel <-chan struct{}, call func(context.Context) (string, error)) (string, error) {
+	select {
+	case <-cancel:
+		return "", errCancelled
+	default:
+	}
+	ctx, stop := context.WithTimeout(context.Background(), rw.callTimeout)
+	defer stop()
 	return call(ctx)
 }
+
+// errCancelled is callOnce's answer once the ticket was resolved or handed
+// off; the loops return on it rather than retry.
+var errCancelled = errors.New("refund watchdog: cancelled")
 
 // probeState renders what the last box read actually told us, for a give-up log.
 // On a probe error there is NO on-chain state to report — the attempt went ahead
@@ -233,7 +261,7 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 		// reached once the box's own deadline has already passed (Classify only
 		// says Lapse past it), and that deadline is immutable once written — so
 		// there is no "on-chain window still ahead" case left to wait out.
-		res, perr := rw.probeOnce(probe)
+		res, perr := rw.probeOnce(cancel, probe)
 		if perr == nil {
 			switch {
 			case !res.exists:
@@ -256,7 +284,10 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 		// Box still parked past the node's own lapse schedule (or the probe
 		// errored — try anyway; a revert is cheap and the error may be
 		// transient).
-		txid, lerr := rw.callOnce(lapse)
+		txid, lerr := rw.callOnce(cancel, lapse)
+		if errors.Is(lerr, errCancelled) {
+			return
+		}
 		if lerr == nil {
 			rw.log.Info("refund watchdog: finalized a stalled operator claim via settleLapsed",
 				slog.String("ticket_id", ticketID),
@@ -302,6 +333,23 @@ func (rw *RefundWatchdog) Resolve(ticketID string) {
 	}
 }
 
+// handOff cancels every armed ticket and arms no more, leaving them to the
+// reconciler that next sweeps a durable journal. Both driving one ticket
+// submit the same refund or lapse, and the loser pays a fee for a revert.
+func (rw *RefundWatchdog) handOff() {
+	rw.mu.Lock()
+	rw.handedOff = true
+	pending := rw.pending
+	rw.pending = map[string]chan struct{}{}
+	rw.mu.Unlock()
+	for _, cancel := range pending {
+		close(cancel)
+	}
+	// A submit already sent finishes first, for up to callTimeout: released
+	// sooner, the next sweeper would submit the same call alongside it.
+	rw.running.Wait()
+}
+
 // watching reports whether the watchdog is still driving ticketID: armed and
 // not yet resolved, settled or given up.
 func (rw *RefundWatchdog) watching(ticketID string) bool {
@@ -317,14 +365,20 @@ func (rw *RefundWatchdog) watching(ticketID string) bool {
 func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(context.Context) (ticketProbe, error), refund func(context.Context) (string, error), lapse func(context.Context) (string, error)) {
 	cancel := make(chan struct{})
 	rw.mu.Lock()
+	if rw.handedOff {
+		rw.mu.Unlock()
+		return
+	}
 	if _, dup := rw.pending[ticketID]; dup {
 		rw.mu.Unlock()
 		return // already tracked (shouldn't happen — ticket ids are single-use)
 	}
 	rw.pending[ticketID] = cancel
+	rw.running.Add(1)
 	rw.mu.Unlock()
 
 	go func() {
+		defer rw.running.Done()
 		// Entry stays in the map through the retry loop so Resolve can still
 		// cancel mid-retry; cleaned up on exit. Resolve is the only closer of
 		// the channel (delete+close under the lock), so there's no double-close.
@@ -342,7 +396,7 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 		}
 
 		for attempt := 1; ; attempt++ {
-			res, perr := rw.probeOnce(probe)
+			res, perr := rw.probeOnce(cancel, probe)
 			if perr == nil {
 				switch {
 				case !res.exists:
@@ -399,7 +453,10 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 			// Box live and past its deadline (or the probe errored — attempt
 			// the refund anyway; a revert is cheap and the error may be
 			// transient).
-			txid, rerr := rw.callOnce(refund)
+			txid, rerr := rw.callOnce(cancel, refund)
+			if errors.Is(rerr, errCancelled) {
+				return
+			}
 			if rerr == nil {
 				rw.log.Info("refund watchdog: recovered escrowed USDC via refundInactive",
 					slog.String("ticket_id", ticketID),

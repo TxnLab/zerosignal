@@ -15,10 +15,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -259,6 +261,9 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	default:
 		t.Error("the reconciler is still running after Close")
 	}
+	if !c.refunds.watching("LIVE") {
+		t.Error("Close stopped the watchdog over a memory journal, which nothing else finishes")
+	}
 }
 
 // Each receipt value lands in its own SettleArgs slot. Every value is distinct
@@ -493,6 +498,62 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	if got, asOperator := settleCallArgs(t, calls[0]); got != settled || asOperator {
 		t.Errorf("re-settle carried\n  %+v (asOperator %v)\nwant the journaled\n  %+v as the payer", got, asOperator, settled)
 	}
+}
+
+// Two reconcilers over one journal would each submit the other Client's live
+// tickets, so a second Client that would sweep it is refused until the first
+// closes. A Client with a caller's wallet runs no reconciler and may share it.
+func TestNew_OneReconcilerPerJournal(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	j, err := OpenFileJournal(filepath.Join(t.TempDir(), "journal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	sweeping := func() Config {
+		cfg := suppliedParts(t)
+		cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
+		cfg.Wallet = nil
+		cfg.Stores.Journal = j
+		return cfg
+	}
+	first, err := New(context.Background(), sweeping())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(context.Background(), sweeping()); err == nil || !strings.Contains(err.Error(), "Stores.Journal") {
+		t.Fatalf("second sweeping Client: err %v, want the journal named", err)
+	}
+	shared := suppliedParts(t)
+	shared.Stores.Journal = j
+	if c, err := New(context.Background(), shared); err != nil {
+		t.Errorf("caller's wallet sharing the journal: %v", err)
+	} else {
+		c.Close()
+	}
+	// Closing hands the first Client's live tickets to the journal's next
+	// sweeper: its watchdog must not race that sweeper's refund.
+	var refunds atomic.Int32
+	refund := func(context.Context) (string, error) { refunds.Add(1); return "TX", nil }
+	probe := func(context.Context) (ticketProbe, error) {
+		return ticketProbe{exists: true, verdict: escrow.VerdictRefund, deadline: time.Now().Add(-time.Minute)}, nil
+	}
+	first.refunds.track("LIVE", time.Now().Add(20*time.Millisecond), probe, refund, refund)
+	first.Close()
+	first.Close()
+	first.refunds.track("LATE", time.Now(), probe, refund, refund)
+	if first.refunds.watching("LIVE") || first.refunds.watching("LATE") {
+		t.Error("a closed Client's watchdog still drives tickets the journal hands on")
+	}
+	time.Sleep(60 * time.Millisecond)
+	if n := refunds.Load(); n != 0 {
+		t.Errorf("the closed Client's watchdog submitted %d refunds", n)
+	}
+	next, err := New(context.Background(), sweeping())
+	if err != nil {
+		t.Fatalf("after the first closed: %v", err)
+	}
+	next.Close()
 }
 
 // The wallet's chain acts on the journaled ticket, paying the box's operator

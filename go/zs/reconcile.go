@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"sync"
 	"time"
 
@@ -138,6 +139,11 @@ type reconciler struct {
 	watching func(ticketID string) bool
 	log      *slog.Logger
 	remedy   string // Remedies.RecoverTicket
+	// release gives back the claim New took on journal, once closed.
+	release func()
+	// handOff is set when journal outlives the Client: Close then stops the
+	// watchdog before releasing the claim, so the next sweeper owns the rows.
+	handOff bool
 
 	now           func() time.Time
 	interval      time.Duration
@@ -191,10 +197,37 @@ func (r *reconciler) start() {
 	}()
 }
 
-// close stops the loop, cancelling any call in flight, and waits for it.
-func (r *reconciler) close() {
+// close stops the loop, cancelling any call in flight, and waits for it. Then
+// it runs beforeRelease, if any, and gives up the journal claim: after a
+// sweep can no longer act and before another Client may.
+func (r *reconciler) close(beforeRelease func()) {
 	r.cancel()
 	<-r.done
+	if beforeRelease != nil {
+		beforeRelease()
+	}
+	if r.release != nil {
+		r.release()
+	}
+}
+
+// journalsSwept holds each journal a reconciler in this process sweeps. Two
+// reconcilers over one journal each read the other Client's live tickets as
+// nobody's, and both submit the same refund or lapse.
+var journalsSwept sync.Map
+
+// claimJournal reserves j for one reconciler, returning the release, or false
+// when another holds it. A journal value that cannot key a map is not
+// guarded; the type alone can't tell, since an interface field may hold a
+// slice.
+func claimJournal(j TicketJournal) (release func(), ok bool) {
+	if !reflect.ValueOf(j).Comparable() {
+		return func() {}, true
+	}
+	if _, taken := journalsSwept.LoadOrStore(j, struct{}{}); taken {
+		return nil, false
+	}
+	return sync.OnceFunc(func() { journalsSwept.Delete(j) }), true
 }
 
 func (r *reconciler) stopped() bool { return r.ctx.Err() != nil }

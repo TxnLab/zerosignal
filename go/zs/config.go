@@ -95,7 +95,10 @@ type Stores struct {
 	// exit, so a long-running process should supply a durable one. Rows are
 	// finished and deleted only when the SDK builds the wallet; with a
 	// caller's Wallet there is no default, and a supplied journal is the
-	// caller's to drain.
+	// caller's to drain. A Client that finishes rows needs a journal no other
+	// open Client in the process writes for the same payer: New refuses a
+	// second Client that finishes rows, but not one with a caller's Wallet,
+	// whose live tickets the first would then race its watchdog to refund.
 	Journal TicketJournal
 
 	// The routing signals: per-relay forward reputation, observed network

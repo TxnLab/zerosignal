@@ -38,8 +38,8 @@ type networkParts struct {
 }
 
 // buildNetworkParts builds each nil network part. The registry's refresh loop
-// starts last, and nothing after it in New can fail, so a failed New leaves
-// nothing running. The wallet goes first because its chain read is the one
+// starts last; New, failing after this returns, calls the parts' stop, so a
+// failed New leaves nothing running. The wallet goes first because its chain read is the one
 // that fails New outright; it fails before the slow discovery, not after.
 func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID uint64) (networkParts, error) {
 	p := networkParts{registry: cfg.Registry, reserve: cfg.ReserveClient, wallet: cfg.Wallet}

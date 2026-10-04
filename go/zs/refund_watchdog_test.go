@@ -72,6 +72,68 @@ func noLapse(t *testing.T) func(context.Context) (string, error) {
 	}
 }
 
+// A hand-off mid-probe ends the probe and sends nothing: the next sweeper
+// owns the ticket the moment handOff returns.
+func TestRefundWatchdog_HandOffStopsAProbeInFlight(t *testing.T) {
+	rw := testWatchdog()
+	rw.callTimeout = time.Hour // so only the hand-off can end the probe
+	probing := make(chan struct{})
+	var refunds atomic.Int32
+	rw.track("tik", time.Now(),
+		func(ctx context.Context) (ticketProbe, error) {
+			close(probing)
+			<-ctx.Done()
+			return liveBox()(ctx) // a box that would be refunded, had it got this far
+		},
+		func(context.Context) (string, error) { refunds.Add(1); return "TX", nil },
+		noLapse(t))
+	<-probing
+	handedOff := make(chan struct{})
+	go func() { rw.handOff(); close(handedOff) }()
+	select {
+	case <-handedOff:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handOff waited on a probe it should have ended")
+	}
+	if n := refunds.Load(); n != 0 {
+		t.Errorf("%d refunds sent after handOff returned", n)
+	}
+	rw.track("late", time.Now(), liveBox(),
+		func(context.Context) (string, error) { refunds.Add(1); return "TX", nil }, noLapse(t))
+	time.Sleep(20 * time.Millisecond)
+	if n := refunds.Load(); n != 0 {
+		t.Errorf("a ticket armed after handOff was refunded")
+	}
+}
+
+// A refund already sent is waited for: released sooner, the next sweeper
+// would send the same refund alongside it.
+func TestRefundWatchdog_HandOffWaitsOutASubmitInFlight(t *testing.T) {
+	rw := testWatchdog()
+	submitting, finish := make(chan struct{}), make(chan struct{})
+	rw.track("tik", time.Now(), liveBox(),
+		func(context.Context) (string, error) {
+			close(submitting)
+			<-finish
+			return "TX", nil
+		},
+		noLapse(t))
+	<-submitting
+	handedOff := make(chan struct{})
+	go func() { rw.handOff(); close(handedOff) }()
+	select {
+	case <-handedOff:
+		t.Fatal("handOff returned while a refund was still in flight")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(finish)
+	select {
+	case <-handedOff:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handOff never returned after the refund finished")
+	}
+}
+
 // A tracked ticket whose box still exists (deadline passed) gets a
 // refundInactive.
 func TestRefundWatchdog_FiresRefundAfterDeadline(t *testing.T) {

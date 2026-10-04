@@ -334,8 +334,8 @@ func TestReconciler_StartSweepsAtOnceAndCloseStops(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	r.close()
-	r.close()
+	r.close(nil)
+	r.close(nil)
 	select {
 	case <-r.done:
 	default:
@@ -568,7 +568,7 @@ func TestReconciler_CloseCancelsACallInFlight(t *testing.T) {
 	r.start()
 	<-chain.entered
 	done := make(chan struct{})
-	go func() { r.close(); close(done) }()
+	go func() { r.close(nil); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

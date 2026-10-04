@@ -210,9 +210,20 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	// Only the SDK's own wallet runs a reconciler, which is what deletes rows;
 	// with a caller's wallet a default journal would only grow.
 	sdkWallet, _ := cfg.Wallet.(*Wallet)
+	durableJournal := st.Journal != nil
 	if st.Journal == nil && sdkWallet != nil {
 		st.Journal = newMemJournal()
 		cfg.Logger.Info("open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.Journal to keep them")
+	}
+	var release func()
+	if sdkWallet != nil {
+		var ok bool
+		if release, ok = claimJournal(st.Journal); !ok {
+			if parts.stop != nil {
+				parts.stop()
+			}
+			return nil, configError("Stores.Journal is already swept by another Client in this process: each Client that builds or is handed a *Wallet needs its own journal")
+		}
 	}
 	cfg.Stores, cfg.Tokenizer = st, tok
 	c := &Client{
@@ -241,6 +252,10 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if sdkWallet != nil {
 		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.Logger)
 		c.reconcile.remedy = cfg.Remedies.RecoverTicket
+		c.reconcile.release = release
+		// A memory journal dies with this Client, so its watchdog stays the
+		// only thing that finishes its tickets.
+		c.reconcile.handOff = durableJournal
 		c.reconcile.start()
 	}
 	c.warmFeeRate()
@@ -252,13 +267,22 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults() }
 
 // Close stops the discovery refresh and the ticket reconciler New started. It
-// does not wait for settlements; see WaitSettles. Safe to call more than once.
+// does not wait for settlements; see WaitSettles. When New built the wallet
+// and Stores.Journal is set, Close also stops the refund watchdog, waiting out
+// a refund it already sent, and leaves the tickets it watched to the next
+// Client that sweeps that journal, or to the next process. A request still in
+// flight on the closed Client is then not watched here, so WaitSettles before
+// Close when no Client follows. Safe to call more than once.
 func (s *Client) Close() {
 	if s.stop != nil {
 		s.stop()
 	}
 	if s.reconcile != nil {
-		s.reconcile.close()
+		var handOff func()
+		if s.reconcile.handOff {
+			handOff = s.refunds.handOff
+		}
+		s.reconcile.close(handOff)
 	}
 }
 
