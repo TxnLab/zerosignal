@@ -163,6 +163,9 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"Settlement": fieldNames(Settlement{}),
 			// The cause a caller reads off an upstream Error.
 			"ProviderError": fieldNames(ProviderError{}),
+			// What a TicketJournal stores.
+			"TicketRecord": fieldNames(TicketRecord{}),
+			"SettleArgs":   fieldNames(SettleArgs{}),
 		},
 		Enums:   map[string][]string{},
 		Network: map[string]vocabularyNetwork{},
@@ -182,6 +185,8 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"latencyStateMax":       DefaultLatencyStateMax,
 			"retryBudgetMs":         transient.OverallDeadline.Milliseconds(),
 			"maxOutputCeiling":      int64(selection.DefaultMaxOutputCeiling),
+			"settlePendingGraceMs":  settlePendingGrace.Milliseconds(),
+			"lapseFallbackMs":       defaultLapseFallback.Milliseconds(),
 		},
 	}
 	for _, c := range eventTypeCases {

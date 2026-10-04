@@ -96,6 +96,7 @@ update-vectors:
 	cd go && $(GO) test ./escrow     -run TestEscrowVectors         -update
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update
 	cd go && $(GO) test ./zs         -run TestRetryVectors          -update
+	cd go && $(GO) test ./zs         -run TestReconcileVectors      -update
 	cd go && $(GO) test ./zs         -run TestVocabularyVectors     -update
 
 # testdata/sealed_vectors.json (Go seals, TS opens) and ts_sealed_vectors.json

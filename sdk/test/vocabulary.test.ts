@@ -26,11 +26,15 @@ import {
     type ReceiptViolation,
     type RelayHopReason,
     type Settlement,
+    type SettleArgs,
     type SettleKind,
     type Ticket,
+    type TicketRecord,
     type TicketStatus,
     type ToolState,
     type ZsErrorInit,
+    DEFAULT_LAPSE_FALLBACK_MS,
+    SETTLE_PENDING_GRACE_MS,
     defaults,
     kinds,
     localnet,
@@ -119,6 +123,30 @@ const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos'] as const
 const providerErrorFields = ['code', 'message', 'status'] as const satisfies readonly (keyof ProviderError)[]
 // What ProviderError adds to Error, plus the message Go declares as a field.
 type ProviderErrorOwn = Exclude<keyof ProviderError, keyof Error> | 'message'
+const ticketRecordFields = [
+    'ticketId',
+    'openTxId',
+    'escrowAppId',
+    'target',
+    'payer',
+    'maxPrice',
+    'expiresAt',
+    'status',
+    'createdAt',
+    'updatedAt',
+    'settle',
+] as const satisfies readonly (keyof TicketRecord)[]
+const settleArgsFields = [
+    'amountCharged',
+    'receiptDigest',
+    'ttftMs',
+    'decodeMs',
+    'inputTokens',
+    'outputTokens',
+    'outputUsageType',
+    'auxOutputUsageType',
+    'auxOutputCount',
+] as const satisfies readonly (keyof SettleArgs)[]
 const recordsComplete: [
     Covers<keyof ZsErrorInit, typeof errorFields>,
     Covers<keyof NodeRef, typeof nodeRefFields>,
@@ -126,7 +154,9 @@ const recordsComplete: [
     Covers<keyof Ticket, typeof ticketFields>,
     Covers<keyof Settlement, typeof settlementFields>,
     Covers<ProviderErrorOwn, typeof providerErrorFields>,
-] = [true, true, true, true, true, true]
+    Covers<keyof TicketRecord, typeof ticketRecordFields>,
+    Covers<keyof SettleArgs, typeof settleArgsFields>,
+] = [true, true, true, true, true, true, true, true]
 
 const privacies = ['relay_required', 'direct'] as const satisfies readonly Privacy[]
 const affinityPolicies = ['prefer', 'strict', 'none'] as const satisfies readonly AffinityPolicy[]
@@ -173,6 +203,8 @@ describe('vocabulary shared with the Go SDK', () => {
         expect(ticketFields).toEqual(vocab.records.Ticket)
         expect(settlementFields).toEqual(vocab.records.Settlement)
         expect(providerErrorFields).toEqual(vocab.records.ProviderError)
+        expect(ticketRecordFields).toEqual(vocab.records.TicketRecord)
+        expect(settleArgsFields).toEqual(vocab.records.SettleArgs)
     })
 
     it('spells every enum as Go does', () => {
@@ -237,6 +269,8 @@ describe('vocabulary shared with the Go SDK', () => {
             reserveTimeoutMs: defaults.reserveTimeout,
             retryBudgetMs: defaults.retryBudget,
             targetTopK: d.targetTopK,
+            settlePendingGraceMs: SETTLE_PENDING_GRACE_MS,
+            lapseFallbackMs: DEFAULT_LAPSE_FALLBACK_MS,
         }).toEqual(vocab.defaults)
     })
 })

@@ -24,6 +24,9 @@ const (
 	// before the sweep re-fires the payer's settle: the live settle may still
 	// be confirming, and a re-fire after it lands reverts and costs a fee.
 	settlePendingGrace = 2 * time.Minute
+	// defaultLapseFallback is how long past the deadline the sweep leaves an
+	// operator's claim to the node's own driver before calling settleLapsed.
+	defaultLapseFallback = 10 * time.Minute
 	// reconcileMaxFailures bounds the failed submits per ticket per process,
 	// so a ticket that can never settle doesn't cost a fee every sweep.
 	reconcileMaxFailures = 10
@@ -178,7 +181,7 @@ func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID
 		now:           time.Now,
 		interval:      reconcileInterval,
 		callTimeout:   30 * time.Second,
-		lapseFallback: 10 * time.Minute,
+		lapseFallback: defaultLapseFallback,
 		failures:      map[string]int{},
 		ctx:           ctx,
 		cancel:        cancel,

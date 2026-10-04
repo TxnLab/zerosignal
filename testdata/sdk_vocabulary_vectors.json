@@ -152,6 +152,17 @@
       "message",
       "status"
     ],
+    "SettleArgs": [
+      "amountCharged",
+      "receiptDigest",
+      "ttftMs",
+      "decodeMs",
+      "inputTokens",
+      "outputTokens",
+      "outputUsageType",
+      "auxOutputUsageType",
+      "auxOutputCount"
+    ],
     "Settlement": [
       "ticketId",
       "kind",
@@ -162,6 +173,19 @@
       "id",
       "signed",
       "target"
+    ],
+    "TicketRecord": [
+      "ticketId",
+      "openTxId",
+      "escrowAppId",
+      "target",
+      "payer",
+      "maxPrice",
+      "expiresAt",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "settle"
     ]
   },
   "enums": {
@@ -250,6 +274,7 @@
     "concurrentSlots": 10,
     "detailsConcurrency": 24,
     "detailsFetchTimeoutMs": 2000,
+    "lapseFallbackMs": 600000,
     "latencyStateMax": 4096,
     "maxCacheAgeMs": 900000,
     "maxCarryAgeMs": 5400000,
@@ -259,6 +284,7 @@
     "refreshTimeoutMs": 30000,
     "reserveTimeoutMs": 5000,
     "retryBudgetMs": 60000,
+    "settlePendingGraceMs": 120000,
     "targetTopK": 8
   }
 }
