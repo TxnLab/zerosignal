@@ -394,6 +394,38 @@ func TestStreamEmitter_ErrorFrameEndsInUpstreamError(t *testing.T) {
 	}
 }
 
+// A node cutting the stream because the payer's open dropped unconfirmed says
+// so only in its own frame. The turn stays paid, with its ticket, since the
+// SDK submitted the open and can't take the node's word that it never landed;
+// it is retryable, since a new turn opens anew.
+func TestStreamEmitter_OpenUnconfirmedIsRetryableAndStillPaid(t *testing.T) {
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(_ Event, err error) bool { gotErr = err; return true },
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	em.reserved(&ReservedTicket{Ticket: &ticket.Ticket{TicketID: "tid"}}, Operator{ID: 3, NodeID: 4})
+	em.committed("tid", "txid", 1000)
+	em.frame(outFrame{frame: Frame{
+		Data:   []byte(`{"error":{"message":"open_unconfirmed: open txn dropped from pool","code":"payment_verification_failed"}}`),
+		Sealed: true,
+	}})
+	em.frame(outFrame{frame: sentinelFrame})
+	em.finish()
+
+	ze, ok := gotErr.(*Error)
+	if !ok {
+		t.Fatalf("ended in %v, want *Error", gotErr)
+	}
+	if ze.Kind != KindUpstream || !ze.Retryable {
+		t.Errorf("error = %s retryable=%v, want a retryable upstream error", ze.Kind, ze.Retryable)
+	}
+	if !ze.Paid || ze.Ticket == nil || ze.Ticket.ID != "tid" {
+		t.Errorf("error paid=%v ticket=%+v, want paid on tid", ze.Paid, ze.Ticket)
+	}
+}
+
 // The stream tally counts what a frame costs on the wire, its SSE encoding. A
 // usage report is an event the caller may render or not, so it counts nothing.
 func TestStreamEmitter_FrameSizes(t *testing.T) {

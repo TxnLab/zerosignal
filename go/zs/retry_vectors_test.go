@@ -44,7 +44,7 @@ func retryVectorInputs() []retryVectorCase {
 	// The node's own code on an upstream failure: the allowlist, a code that
 	// is the caller's to fix, a generic one, and none.
 	for _, pc := range []string{
-		"provider_overloaded", "provider_error", "upstream_truncated", "rate_limit_exceeded",
+		"provider_overloaded", "provider_error", "upstream_truncated", "rate_limit_exceeded", "payment_verification_failed",
 		"context_length_exceeded", "image_generation_failed", "",
 	} {
 		cases = append(cases, retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &pc})

@@ -64,6 +64,13 @@ var retryableProviderCodes = map[string]bool{
 	"upstream_truncated": true,
 	// OpenAI's own, from a node that passes the provider's code through.
 	"rate_limit_exceeded": true,
+	// The node's watchdog saw the payer's open drop from the pool unconfirmed
+	// and cut the stream (SPEC §10 open_unconfirmed). A new turn submits a new
+	// open, which can land where the dropped one didn't. Trusting the claim
+	// costs more than a wasted retry when it is false (an algod that answers
+	// "not found" for a txn it never saw): a caller who resends escrows twice,
+	// and the first max_price stays locked until refundInactive.
+	"payment_verification_failed": true,
 }
 
 // retryableRefusalCodes are the node's admission refusals a new turn, with a

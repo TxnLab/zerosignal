@@ -68,9 +68,11 @@ type Error struct {
 	Retryable  bool
 	RetryAfter time.Duration
 
-	// Paid reports whether escrow was opened for this turn. When it was,
-	// Ticket is the handle that can still move that money, and the SDK keeps
-	// driving it to settle, protest or refund.
+	// Paid reports whether escrow was opened for this turn: the SDK submitted
+	// the open. A node saying the open never confirmed doesn't clear it, since
+	// that is the node's unverified claim. When it is set, Ticket is the handle
+	// that can still move that money, and the SDK keeps driving it to settle,
+	// protest or refund.
 	Paid   bool
 	Ticket *Ticket
 

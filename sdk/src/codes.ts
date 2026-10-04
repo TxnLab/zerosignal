@@ -154,6 +154,13 @@ const retryableProviderCodes: ReadonlySet<string> = new Set([
     'upstream_truncated',
     // OpenAI's own, from a node that passes the provider's code through.
     'rate_limit_exceeded',
+    // The node's watchdog saw the payer's open drop from the pool unconfirmed
+    // and cut the stream (SPEC §10 open_unconfirmed). A new turn submits a new
+    // open, which can land where the dropped one didn't. Trusting the claim
+    // costs more than a wasted retry when it is false (an algod that answers
+    // "not found" for a txn it never saw): a caller who resends escrows twice,
+    // and the first max_price stays locked until refundInactive.
+    'payment_verification_failed',
 ])
 
 // The node's admission refusals a new ticket gets past: it expired before its

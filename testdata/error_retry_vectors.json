@@ -226,6 +226,12 @@
   {
     "kind": "upstream",
     "code": "upstream_error",
+    "provider_code": "payment_verification_failed",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
     "provider_code": "context_length_exceeded",
     "retryable": false
   },

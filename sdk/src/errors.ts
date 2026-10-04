@@ -71,7 +71,11 @@ export class ZsError extends Error {
     readonly retryable: boolean
     /** Milliseconds to wait before retrying, when the node named one. */
     readonly retryAfter?: number
-    /** Whether escrow was opened for this turn. */
+    /**
+     * Whether escrow was opened for this turn: the SDK submitted the open. A
+     * node saying the open never confirmed doesn't clear it, since that is the
+     * node's unverified claim.
+     */
     readonly paid: boolean
     /**
      * The handle that can still move this turn's money, when paid. The SDK
