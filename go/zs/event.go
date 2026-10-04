@@ -20,24 +20,23 @@ import (
 // after. Switch on the concrete type; EventType is the dotted name the
 // TypeScript SDK uses as its discriminant.
 //
-// The set is closed: only this package implements Event.
-//
-// Some types are declared ahead of the code that emits them: RouteCandidates,
-// RelayHopChanged, ReserveStarted, ReserveRetrying, ReceiptViolated,
-// SettleSubmitted, SettleConfirmed and NodeExcluded are not yet emitted.
+// The set is closed: only this package implements Event. A consumer that
+// switches on the type must ignore the ones it does not handle, so a later
+// type can be added without breaking it.
 type Event interface {
 	EventType() string
 	event()
 }
 
-// RouteCandidates fires once per sweep with the ordered targets the sweep
-// will try.
+// RouteCandidates names the targets routing ordered for the request, once it
+// finds any, and again before each repeat sweep. A sweep repeats when every
+// candidate failed transiently or was at capacity, so a second one means the
+// first found nobody. A request the SpendGuard refuses at Admit ends after
+// the first. A candidate the sweep skips without asking (no relay to reach
+// it, or a route it does not serve) gets no RelayHopChanged.
 type RouteCandidates struct {
 	Model      string
 	Candidates []NodeRef
-	// SizeMisses are nodes serving Model that the request does not fit
-	// (context window or output reservation).
-	SizeMisses []NodeRef
 }
 
 // RelayHopReason says why a RelayHopChanged event fired.
@@ -48,26 +47,34 @@ const (
 	RelayHopRotated RelayHopReason = "rotated"
 )
 
-// RelayHopChanged fires when the SDK picks a relay, and again on each
-// pre-payment rotation. Relay is nil for a direct connection, which only
-// happens under PrivacyDirect.
+// RelayHopChanged fires when the SDK picks the route to a candidate, and
+// again on each pre-payment rotation to another relay. Relay is nil for a
+// direct connection, which only happens under PrivacyDirect.
 type RelayHopChanged struct {
 	Relay  *NodeRef
 	Target NodeRef
 	Reason RelayHopReason
 }
 
-// ReserveStarted fires on each reserve attempt.
+// ReserveStarted fires before each reserve. Attempt counts from 1 per
+// candidate; a resend after re-reading a restarted node's key repeats it. A
+// reserve the SDK refuses to seal, because its copy of the node's key has
+// expired, ends before reaching the node and is resent the same way.
 type ReserveStarted struct {
 	Target  NodeRef
 	Relay   *NodeRef
 	Attempt int
 }
 
-// ReserveRetrying fires before a busy or transient retry, which only ever
-// happens before payment.
+// ReserveRetrying fires before the SDK asks the same candidate again after
+// an infrastructure failure, which only ever happens before payment. Status
+// and Code describe the failure: Status is 0 for a transport failure, and
+// Code is empty when the answer carried none. Attempt is the attempt about
+// to start, after Wait; a request cancelled during the wait ends without it.
+// A whole sweep repeating shows as a new RouteCandidates instead.
 type ReserveRetrying struct {
 	Target      NodeRef
+	Status      int
 	Code        string
 	Attribution transient.Attribution
 	Wait        time.Duration
@@ -217,10 +224,6 @@ type Usage struct {
 // the payer's own: what it paid in ALGO network fees for the open and, on a
 // stream, the settle, which a non-streaming reply reports as 0 because the
 // settle is submitted after the reply.
-//
-// Until ReceiptViolated is emitted, a stream whose receipt failed its checks
-// ends with this event too, and SettleFeesMicroAlgos is then the protest's
-// fee.
 type ReceiptVerified struct {
 	Receipt ticket.UsageReceipt
 	// Ticket is the signed ticket the receipt settles; its MaxPrice and
@@ -240,18 +243,23 @@ type ReceiptVerified struct {
 	FeeBpsKnown bool
 }
 
-// ReceiptViolated replaces ReceiptVerified when a check fails. ProtestTxID is
-// set only for a body_hash violation: the contract rejects sig and amount
-// protests, so those are recorded and logged only.
+// ReceiptViolated replaces ReceiptVerified when a check fails, and nothing
+// is charged against the SpendGuard for the turn. Violation is "sig",
+// "amount", "body_hash" or "unknown". ProtestTxID is set only for a
+// body_hash violation on a stream, where the protest is submitted before
+// done: the contract rejects sig and amount protests, so those are only
+// logged, and a whole reply's protest is submitted after done, so
+// Stream.Wait reports it.
 type ReceiptViolated struct {
 	Violation   string
 	ProtestTxID string
 }
 
-// SettleSubmitted and SettleConfirmed are not emitted yet. Until they are,
-// Stream.Wait reports the submit, including one that ends after the Events
-// loop, where no event could carry it. Atomic is false when the SDK fell back
-// to a standalone payer ack.
+// SettleSubmitted fires on a stream, after ReceiptVerified, when the payer's
+// settle was submitted. A whole reply's settle is submitted after done, and
+// a failed submit carries no transaction, so Stream.Wait is what reports
+// those. Atomic is false when the SDK fell back to a standalone payer ack.
+// The SDK does not wait for confirmation.
 type SettleSubmitted struct {
 	TicketID       string
 	TxID           string
@@ -259,16 +267,10 @@ type SettleSubmitted struct {
 	Atomic         bool
 }
 
-type SettleConfirmed struct {
-	TicketID       string
-	TxID           string
-	FeesMicroAlgos uint64
-	Atomic         bool
-	Round          uint64
-}
-
-// NodeExcluded fires when the node's pre-signed settle group fails
-// verification. The node is barred for the rest of the process.
+// NodeExcluded fires on a stream, before SettleSubmitted, when the node's
+// pre-signed settle group fails verification. The node is barred for the
+// rest of the process. A whole reply learns this after done, and only logs
+// it.
 type NodeExcluded struct {
 	Node   NodeRef
 	Reason string
@@ -318,7 +320,6 @@ func (Usage) EventType() string            { return "usage" }
 func (ReceiptVerified) EventType() string  { return "receipt.verified" }
 func (ReceiptViolated) EventType() string  { return "receipt.violated" }
 func (SettleSubmitted) EventType() string  { return "settle.submitted" }
-func (SettleConfirmed) EventType() string  { return "settle.confirmed" }
 func (NodeExcluded) EventType() string     { return "node.excluded" }
 func (Done) EventType() string             { return "done" }
 
@@ -344,6 +345,5 @@ func (Usage) event()            {}
 func (ReceiptVerified) event()  {}
 func (ReceiptViolated) event()  {}
 func (SettleSubmitted) event()  {}
-func (SettleConfirmed) event()  {}
 func (NodeExcluded) event()     {}
 func (Done) event()             {}

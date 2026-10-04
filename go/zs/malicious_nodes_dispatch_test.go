@@ -91,11 +91,14 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 	// dispatcher excludes the node.
 	group := []types.SignedTxn{{}, {}}
 
-	srv.runReceiptChecks(
+	check := srv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",
 		tkt, op, handle, receipt, computed, plaintext, 0.20, group, nil,
 	)
 
+	if !check.excluded {
+		t.Error("the check does not report the exclusion, so no NodeExcluded event fires")
+	}
 	if handle.ackCalls != 1 {
 		t.Fatalf("AckSettle calls = %d, want 1", handle.ackCalls)
 	}
@@ -106,10 +109,13 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 	honestSource := &ChainOperatorSource{}
 	honestSrv := &Client{cfg: Config{Privacy: PrivacyDirect}, log: discard, refunds: NewRefundWatchdog(discard), nodeExcluder: honestSource}
 	honestHandle := &fakeSettlementHandle{groupRejected: false}
-	honestSrv.runReceiptChecks(
+	honest := honestSrv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",
 		tkt, op, honestHandle, receipt, computed, plaintext, 0.20, group, nil,
 	)
+	if honest.excluded {
+		t.Error("an honest settle reported an exclusion")
+	}
 	if honestSource.NodeExcluded(RefOf(op)) {
 		t.Error("an honest settle wrongly excluded the node")
 	}

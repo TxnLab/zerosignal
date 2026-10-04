@@ -2707,6 +2707,10 @@ func TestDispatch_Receipt_BodyHashMismatch_LoggedAsViolation(t *testing.T) {
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
 	}
+	// But it is not reported as what the turn cost: the charge is disputed.
+	if got := w.Header().Get("X-Zs-Actual-Input-Count"); got != "" {
+		t.Errorf("usage headers sent for a violated receipt (X-Zs-Actual-Input-Count=%q)", got)
+	}
 	// The protest submit runs after the response and writes to the same log.
 	if err := s.WaitSettles(context.Background()); err != nil {
 		t.Fatalf("WaitSettles: %v", err)

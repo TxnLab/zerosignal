@@ -74,6 +74,7 @@ const maxImageToolBudgetPerRequest uint64 = 64
 // doing its job and no payment has happened.
 func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	endpoint, body := t.endpoint, t.body
+	ctx = withNote(ctx, em.note)
 
 	isImage := endpoint == endpointImages
 	isImageEdit := endpoint == endpointImageEdits
@@ -472,6 +473,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		return
 	}
 	candidates := pick.Operators
+	em.note(routeCandidates(model, candidates))
 
 	// Admit before any reserve, so a request over the cap costs no node a
 	// reservation. Image routes are priced per image, not from token rates, and
@@ -615,6 +617,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				break
 			}
 			candidates = repick.Operators
+			em.note(routeCandidates(model, candidates))
 			// Re-project the relay pool too. relayPool is this path's only reader
 			// of RelayDownranked (the discovery buildSelAll is the other one, on
 			// its own cadence), so without this a relay that this very request
@@ -788,6 +791,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					r.InputCount, r.InputBoundVersion = reserveInputCount(o, model, body, maxOut)
 				}
 			}
+			em.note(RelayHopChanged{Relay: relayOf(hop), Target: RefOf(op), Reason: RelayHopChosen})
 			attempt := s.reserveWithTransientRetry(ctx, op, reserveReq, hop, relaySel, usePrivacy, retryDeadline, resize)
 			op, hop = attempt.Op, attempt.Hop
 			rt, err := attempt.Ticket, attempt.Err
@@ -3114,7 +3118,7 @@ func (s *Client) buildNonStreamResponder(
 		// and (step 8) drives escrow.protest.
 		receiptHdr := openSealedResponseMeta(s, upstreamResp.Header.Get(wire.ReceiptHeader), opener, ticket, wire.SealedHeaderReceipt, op, hop)
 		settleGroupHdr := openSealedResponseMeta(s, upstreamResp.Header.Get(wire.SettleGroupHeader), opener, ticket, wire.SealedHeaderSettleGroup, op, hop)
-		receipt, submitSettle := s.verifyNonStreamReceipt(ctx, receiptHdr, settleGroupHdr, endpoint, model, ticket, op, handle, plaintext, algoUSDPrice, hop)
+		receipt, submitSettle, violation := s.verifyNonStreamReceipt(ctx, receiptHdr, settleGroupHdr, endpoint, model, ticket, op, handle, plaintext, algoUSDPrice, hop)
 		// The escrow submit is launched asynchronously so the handler never
 		// blocks the client's response on an algod round-trip. The price is the
 		// fee headers below: they cannot include the payer's settle fee, which is
@@ -3149,7 +3153,8 @@ func (s *Client) buildNonStreamResponder(
 		// SPEC §5.2 step 4: the emitter passes none of the node's X-Zs-*
 		// headers on — not just the response key and receipt, but
 		// X-Zs-Settle-Group and anything a future node adds. Usage is the
-		// proxy's own report of the verified charge.
+		// proxy's own report of the receipt: the verified charge, or the
+		// check it failed.
 		var usage *usageReport
 		if receipt != nil {
 			// Payer-facing fee breakdown from the proxy payer's cached
@@ -3157,7 +3162,7 @@ func (s *Client) buildNonStreamResponder(
 			// never blocks this path). ok==false degrades to no breakdown.
 			feeBps, haveFee := s.feeRateNow()
 			usage = &usageReport{receipt: receipt, ticket: ticket, op: op, openFees: openFees, settleFees: settleFees,
-				algoUSDPrice: algoUSDPrice, feeBps: feeBps, haveFee: haveFee}
+				algoUSDPrice: algoUSDPrice, feeBps: feeBps, haveFee: haveFee, check: receiptCheck{violation: violation}}
 		}
 		em.reply(upstreamResp.StatusCode, upstreamResp.Header, plaintext, usage)
 		return nil
@@ -3378,13 +3383,13 @@ func (s *Client) verifyReservePrice(op Operator, req ticket.ReserveRequest, t *t
 // malformed — receipt-shape problems are recorded evidence, not a reason
 // to withhold the already-decrypted response. submit is nil when there is
 // nothing to put on chain.
-func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op Operator, handle settlementHandle, plaintext []byte, algoUSDPrice float64, hop *RelayHop) (*ticket.UsageReceipt, settleSubmit) {
+func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op Operator, handle settlementHandle, plaintext []byte, algoUSDPrice float64, hop *RelayHop) (*ticket.UsageReceipt, settleSubmit, string) {
 	if headerVal == "" {
 		s.log.Debug("no receipt header on zs response; tolerating",
 			opAttr(op),
 			relayAttr(hop),
 			slog.String("ticket_id", tkt.TicketID))
-		return nil, nil
+		return nil, nil, ""
 	}
 	receipt, err := ticket.DecodeReceiptHeader(headerVal)
 	if err != nil {
@@ -3393,11 +3398,12 @@ func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGr
 			relayAttr(hop),
 			slog.String("ticket_id", tkt.TicketID),
 			slog.Any("err", err))
-		return nil, nil
+		return nil, nil, ""
 	}
 	presignedSettleGroup := decodeSettleGroupHeader(s, settleGroupHeaderVal, op, tkt, hop)
-	submit := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, algoUSDPrice, presignedSettleGroup, hop)
-	return &receipt, submit
+	// Only the violation is known before the reply: the submit runs after it.
+	submit, check := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, algoUSDPrice, presignedSettleGroup, hop)
+	return &receipt, submit, check.violation
 }
 
 // submitAfterResponse runs an escrow submit in the background, so the
@@ -3533,25 +3539,36 @@ func (s *Client) runReceiptChecks(
 	algoUSDPrice float64,
 	presignedSettleGroup []types.SignedTxn,
 	hop *RelayHop,
-) uint64 {
-	submit := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, algoUSDPrice, presignedSettleGroup, hop)
-	if submit == nil {
-		return 0
+) receiptCheck {
+	submit, check := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, algoUSDPrice, presignedSettleGroup, hop)
+	if submit != nil {
+		_, _ = submit()
 	}
-	r, _ := submit()
-	return r.FeesMicroAlgos
+	return *check
 }
 
 // settleSubmit is the on-chain half of receipt handling (AckSettle or
 // Protest). Its Settlement's fee is what the payer paid, 0 when none was.
 type settleSubmit func() (Settlement, error)
 
+// receiptCheck is how a receipt fared and, once its submit has run, what the
+// submit did.
+type receiptCheck struct {
+	// violation names the failed check; empty when the receipt verified.
+	violation string
+	settled   Settlement
+	// excluded is set when the node's settle group failed verification and
+	// the node was barred for it.
+	excluded bool
+}
+
 // checkReceipt is runReceiptChecks without the submit: it verifies the
 // receipt, records the spend outcome, and returns the escrow submit the
 // verdict calls for, or nil when there is nothing to submit. The split
 // exists for the non-streaming responder, which must not hold the
 // client's response for an algod round-trip (up to settleSubmitTimeout),
-// so it writes the response first and runs the submit after.
+// so it writes the response first and runs the submit after. The check is
+// filled in by the submit when it runs.
 func (s *Client) checkReceipt(
 	ctx context.Context,
 	endpoint, model string,
@@ -3564,7 +3581,8 @@ func (s *Client) checkReceipt(
 	algoUSDPrice float64,
 	presignedSettleGroup []types.SignedTxn,
 	hop *RelayHop,
-) settleSubmit {
+) (settleSubmit, *receiptCheck) {
+	check := &receiptCheck{}
 	// Escrow finalization (AckSettle / Protest) must outlive the client
 	// request. The receipt frame is processed on the upstream (node→proxy)
 	// connection, which stays alive even after the client has disconnected —
@@ -3578,7 +3596,7 @@ func (s *Client) checkReceipt(
 	// algod can't leak a goroutine. The bound starts when the submit runs,
 	// not when the receipt was checked, so a deferred submit gets its full
 	// budget.
-	detached := context.WithoutCancel(ctx)
+	detached := withoutNote(context.WithoutCancel(ctx))
 	// The turn's Stream.Wait learns the outcome from slot, including a submit
 	// that panics, which would otherwise leave it waiting on its ctx.
 	slot := settleSlotFrom(ctx)
@@ -3600,6 +3618,7 @@ func (s *Client) checkReceipt(
 			defer cancelSettle()
 			r, err = fn(settleCtx)
 			r.TicketID = ticket.TicketID
+			check.settled = r
 			return r, err
 		}
 	}
@@ -3641,7 +3660,7 @@ func (s *Client) checkReceipt(
 			s.spend.Settle(ticket.TicketID, receipt.AmountCharged)
 		}
 		if handle == nil {
-			return nil
+			return nil, check
 		}
 		s.journalReceipt(handle, receipt)
 		return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
@@ -3660,6 +3679,7 @@ func (s *Client) checkReceipt(
 				// eligible).
 				ref := RefOf(op)
 				s.nodeExcluder.ExcludeNode(ref)
+				check.excluded = true
 				s.log.Warn("node excluded: handed a fraudulent settle group",
 					slog.String("ticket_id", ticket.TicketID),
 					slog.Uint64("operator_id", op.ID),
@@ -3708,7 +3728,7 @@ func (s *Client) checkReceipt(
 				}
 				return Settlement{Kind: kind, TxID: txid, FeesMicroAlgos: fee}, nil
 			}
-		})
+		}), check
 	}
 	re, ok := AsReceiptError(err)
 	if !ok {
@@ -3716,6 +3736,10 @@ func (s *Client) checkReceipt(
 		// keep a guard so a future caller passing some other non-nil
 		// error doesn't panic on the nil-deref of re.Violation below.
 		re = &ReceiptError{Violation: ReceiptOK, Err: err}
+	}
+	check.violation = re.Violation.String()
+	if re.Violation == ReceiptOK {
+		check.violation = "unknown"
 	}
 	s.log.Warn("receipt verification failed",
 		slog.String("endpoint", endpoint),
@@ -3733,7 +3757,7 @@ func (s *Client) checkReceipt(
 		s.spend.Release(ticket.TicketID)
 	}
 	if handle == nil || re.Violation != ReceiptViolationBodyHash {
-		return nil
+		return nil, check
 	}
 	excerpt := truncateDisputeExcerpt(plaintext, disputeExcerptCap)
 	return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
@@ -3755,7 +3779,7 @@ func (s *Client) checkReceipt(
 		// watchdog has nothing to do — resolution is off-chain arbitration.
 		s.refunds.Resolve(ticket.TicketID)
 		return Settlement{Kind: SettleProtest, TxID: txid, FeesMicroAlgos: fee}, nil
-	})
+	}), check
 }
 
 // protestReasonForViolation maps a verification violation to the
@@ -4058,7 +4082,7 @@ func (s *Client) buildFrameFactory(
 				// body_hash the receipt claimed, so truncating it head-
 				// wise preserves an arbiter-meaningful excerpt.
 				flat := flattenFrames(contentFrames)
-				settleFees := s.runReceiptChecks(
+				check := s.runReceiptChecks(
 					ctx,
 					endpoint,
 					model,
@@ -4080,10 +4104,11 @@ func (s *Client) buildFrameFactory(
 					ticket:       tkt,
 					op:           op,
 					openFees:     openFees,
-					settleFees:   settleFees,
+					settleFees:   check.settled.FeesMicroAlgos,
 					algoUSDPrice: algoUSDPrice,
 					feeBps:       feeBps,
 					haveFee:      haveFee,
+					check:        check,
 				}}, nil
 
 			default:

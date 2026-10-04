@@ -44,12 +44,25 @@ func mismatchingReceipt(_ []byte) *ticket.UsageReceipt {
 	return r
 }
 
+// verifyingReceipt returns a receipt over the content the node sent, which
+// the fake node signs, so it passes every check.
+func verifyingReceipt(plaintext []byte) *ticket.UsageReceipt {
+	r := &ticket.UsageReceipt{ActualInputCount: 8, ActualOutputCount: 3, AmountCharged: 321}
+	r.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
+	return r
+}
+
 func streamReceiptServer(t *testing.T, mode nodeMode) (*Server, *bytes.Buffer) {
+	t.Helper()
+	return streamReceiptServerWith(t, mode, mismatchingReceipt)
+}
+
+func streamReceiptServerWith(t *testing.T, mode nodeMode, build func([]byte) *ticket.UsageReceipt) (*Server, *bytes.Buffer) {
 	t.Helper()
 	node := newFakeNode(t, &nodeConfig{
 		mode:         mode,
 		streamFrames: [][]byte{[]byte(`{"delta":"A"}`), []byte(`{"delta":"B"}`)},
-		buildReceipt: mismatchingReceipt,
+		buildReceipt: build,
 	})
 	cfg := testConfig()
 	opts := setup(t, cfg, node)
@@ -156,8 +169,9 @@ func TestDispatch_Stream_UsageFrameOptIn(t *testing.T) {
 		}
 	})
 
-	t.Run("emitted on opt-in", func(t *testing.T) {
-		s, _ := streamReceiptServer(t, modeStreamReceiptIntact)
+	optIn := func(t *testing.T, build func([]byte) *ticket.UsageReceipt) string {
+		t.Helper()
+		s, _ := streamReceiptServerWith(t, modeStreamReceiptIntact, build)
 		w := httptest.NewRecorder()
 		req := clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","stream":true}`)
 		req.Header.Set(usageFrameHeader, "1")
@@ -165,8 +179,17 @@ func TestDispatch_Stream_UsageFrameOptIn(t *testing.T) {
 		if w.Result().StatusCode != http.StatusOK {
 			t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
 		}
-		if !strings.Contains(w.Body.String(), "zs.usage") {
-			t.Errorf("opt-in client did not receive the zs.usage frame: %s", w.Body.String())
+		return w.Body.String()
+	}
+	t.Run("emitted on opt-in", func(t *testing.T) {
+		if body := optIn(t, verifyingReceipt); !strings.Contains(body, "zs.usage") {
+			t.Errorf("opt-in client did not receive the zs.usage frame: %s", body)
+		}
+	})
+	// A receipt that failed its checks is not what the turn cost.
+	t.Run("not for a violated receipt", func(t *testing.T) {
+		if body := optIn(t, mismatchingReceipt); strings.Contains(body, "zs.usage") {
+			t.Errorf("a violated receipt was reported as the turn's usage: %s", body)
 		}
 	})
 }

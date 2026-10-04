@@ -19,9 +19,11 @@ import (
 // event sequence.
 //
 // A request ends in exactly one of: fail, reply, or open followed by frames
-// (and interrupt if the stream breaks). clamped, reserved and committed may
-// precede any of them.
+// (and interrupt if the stream breaks). clamped, reserved, committed and note
+// may precede any of them.
 type emitter interface {
+	// note reports a routing milestone. It never ends the request.
+	note(ev Event)
 	// clamped reports that the request's max_output was lowered to ceiling.
 	clamped(ceiling uint64)
 	// reserved reports the ticket a node signed.
@@ -31,7 +33,7 @@ type emitter interface {
 	// fail ends the request with e before any response has started.
 	fail(e *Error)
 	// reply delivers a complete response. header is the node's response
-	// header set; usage is nil when no receipt verified.
+	// header set; usage is nil when the node sent no readable receipt.
 	reply(status int, header http.Header, body []byte, usage *usageReport)
 	// open starts a stream. A non-nil error means it could not start and the
 	// caller has already been told.
@@ -43,7 +45,46 @@ type emitter interface {
 	interrupt()
 }
 
-// usageReport is what the payer is told a verified turn cost.
+type noteKey struct{}
+
+// withNote carries a turn's emitter note to the reserve retry, which runs
+// below dispatch and has no emitter of its own.
+func withNote(ctx context.Context, note func(Event)) context.Context {
+	return context.WithValue(ctx, noteKey{}, note)
+}
+
+// noteFrom is ctx's note, or one that drops the event.
+func noteFrom(ctx context.Context) func(Event) {
+	if note, ok := ctx.Value(noteKey{}).(func(Event)); ok && note != nil {
+		return note
+	}
+	return func(Event) {}
+}
+
+// withoutNote is ctx for work that can outlive the turn's events, such as a
+// settle submitted after the reply: the emitter can no longer take an event
+// then, and is not safe to call from another goroutine.
+func withoutNote(ctx context.Context) context.Context { return withNote(ctx, nil) }
+
+func routeCandidates(model string, ops []Operator) RouteCandidates {
+	refs := make([]NodeRef, len(ops))
+	for i, op := range ops {
+		refs[i] = RefOf(op)
+	}
+	return RouteCandidates{Model: model, Candidates: refs}
+}
+
+// relayOf is the relay a hop rides, nil for a direct connection.
+func relayOf(hop *RelayHop) *NodeRef {
+	if hop == nil {
+		return nil
+	}
+	r := hop.RelayRef()
+	return &r
+}
+
+// usageReport is what the payer is told about a turn's receipt, and, on a
+// stream, the settle submitted before done.
 type usageReport struct {
 	receipt      *ticket.UsageReceipt
 	ticket       *ticket.Ticket
@@ -53,9 +94,36 @@ type usageReport struct {
 	algoUSDPrice float64
 	feeBps       uint64
 	haveFee      bool
+	// check is how the receipt fared and what its submit did.
+	check receiptCheck
 }
 
-func (u *usageReport) event() ReceiptVerified {
+// events are the report in the order the payer hears it.
+func (u *usageReport) events() []Event {
+	c := u.check
+	if c.violation != "" {
+		v := ReceiptViolated{Violation: c.violation}
+		if c.settled.Kind == SettleProtest {
+			v.ProtestTxID = c.settled.TxID
+		}
+		return []Event{v}
+	}
+	evs := []Event{u.verified()}
+	if c.excluded {
+		evs = append(evs, NodeExcluded{Node: RefOf(u.op), Reason: "settle_group_rejected"})
+	}
+	if c.settled.TxID != "" {
+		evs = append(evs, SettleSubmitted{
+			TicketID:       u.ticket.TicketID,
+			TxID:           c.settled.TxID,
+			FeesMicroAlgos: c.settled.FeesMicroAlgos,
+			Atomic:         c.settled.Kind == SettleAtomic,
+		})
+	}
+	return evs
+}
+
+func (u *usageReport) verified() ReceiptVerified {
 	return ReceiptVerified{
 		Receipt:              *u.receipt,
 		Ticket:               *u.ticket,
@@ -143,6 +211,8 @@ func (e *streamEmitter) end(err *Error) {
 	}
 }
 
+func (e *streamEmitter) note(ev Event) { e.emit(ev) }
+
 func (e *streamEmitter) clamped(ceiling uint64) { e.emit(MaxOutputClamped{Ceiling: ceiling}) }
 
 func (e *streamEmitter) reserved(rt *ReservedTicket, op Operator) {
@@ -173,7 +243,7 @@ func (e *streamEmitter) reply(status int, header http.Header, body []byte, usage
 	if e.dec != nil && !e.emitAll(e.dec.body(body)) {
 		return
 	}
-	if usage != nil && !e.emit(usage.event()) {
+	if usage != nil && !e.emitAll(usage.events()) {
 		return
 	}
 	if e.dec != nil && status >= http.StatusBadRequest && e.dec.failure == nil {
@@ -234,7 +304,7 @@ func (e *streamEmitter) open(status int, header http.Header) error {
 
 func (e *streamEmitter) frame(out outFrame) (int, error) {
 	if out.usage != nil {
-		e.emit(out.usage.event())
+		e.emitAll(out.usage.events())
 		return 0, nil
 	}
 	f := out.frame

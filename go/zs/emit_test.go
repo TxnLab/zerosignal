@@ -586,7 +586,7 @@ func TestUsageReport_Event(t *testing.T) {
 		settleFees:   5,
 		algoUSDPrice: 0.25,
 	}
-	ev := u.event()
+	ev := u.verified()
 	if ev.FeeBpsKnown || ev.FeeBps != 0 {
 		t.Errorf("cold rate reported as FeeBps=%d known=%v", ev.FeeBps, ev.FeeBpsKnown)
 	}
@@ -598,7 +598,7 @@ func TestUsageReport_Event(t *testing.T) {
 	}
 
 	u.feeBps, u.haveFee = 150, true
-	if ev := u.event(); !ev.FeeBpsKnown || ev.FeeBps != 150 {
+	if ev := u.verified(); !ev.FeeBpsKnown || ev.FeeBps != 150 {
 		t.Errorf("warm rate reported as FeeBps=%d known=%v, want 150 known", ev.FeeBps, ev.FeeBpsKnown)
 	}
 }

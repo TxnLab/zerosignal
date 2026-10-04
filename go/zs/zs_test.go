@@ -175,7 +175,6 @@ var eventTypeCases = []struct {
 	{ReceiptVerified{}, "receipt.verified"},
 	{ReceiptViolated{}, "receipt.violated"},
 	{SettleSubmitted{}, "settle.submitted"},
-	{SettleConfirmed{}, "settle.confirmed"},
 	{NodeExcluded{}, "node.excluded"},
 	{Done{}, "done"},
 }

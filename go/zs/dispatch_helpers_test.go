@@ -59,6 +59,7 @@ func (h *healingRegistry) ReprobeEphemeral(_ context.Context, op Operator) (Oper
 // Stream's own emitter.
 type recEmitter struct {
 	mu      sync.Mutex
+	notes   []Event
 	frames  []Frame
 	usages  []*usageReport
 	failed  *Error
@@ -67,6 +68,11 @@ type recEmitter struct {
 	broken  bool
 }
 
+func (e *recEmitter) note(ev Event) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.notes = append(e.notes, ev)
+}
 func (e *recEmitter) clamped(uint64)                     {}
 func (e *recEmitter) reserved(*ReservedTicket, Operator) {}
 func (e *recEmitter) committed(string, string, uint64)   {}

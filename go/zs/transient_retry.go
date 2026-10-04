@@ -108,6 +108,16 @@ func shouldRecordTargetFailure(v transient.Verdict, usePrivacy bool) bool {
 	}
 }
 
+// reserveRetrying announces attempt, about to start against op after a wait
+// of d, because the previous one failed with err.
+func reserveRetrying(op Operator, err error, attr transient.Attribution, d time.Duration, attempt int) ReserveRetrying {
+	ev := ReserveRetrying{Target: RefOf(op), Attribution: attr, Wait: d, Attempt: attempt}
+	if re, ok := AsReserveHTTP(err); ok {
+		ev.Status, ev.Code = re.Status, re.Code
+	}
+	return ev
+}
+
 // classifyReserveErr runs the shared verdict over a reserve failure, then
 // narrows it with the route evidence the response body couldn't carry. Only
 // *ReserveHTTPError carries the raw status/code/marker needed to
@@ -223,6 +233,10 @@ func (s *Client) reserveWithTransientRetry(
 	// relay, that ambiguity resolves: the target was up, so these were at
 	// fault. If every attempt fails, the slice is discarded untouched.
 	var unattributed []*RelayHop
+	note := noteFrom(ctx)
+	// The previous attempt's failure, for the event announcing the retry.
+	var failed error
+	var failedAttr transient.Attribution
 
 	for attempt := 0; attempt < transient.InnerAttempts; attempt++ {
 		if attempt > 0 {
@@ -230,18 +244,19 @@ func (s *Client) reserveWithTransientRetry(
 			if !ok {
 				break
 			}
-			if !sleepCtx(ctx, d) {
-				break
-			}
 			// Rotate. With no relay in play (privacy off) there is nothing to
 			// rotate to and the retry is a straight re-attempt — still worth it,
-			// since a restarting node's gateway recovers on its own.
+			// since a restarting node's gateway recovers on its own. The next
+			// relay is picked before the wait, so a retry with no relay left
+			// to take it is never announced.
+			next := hop
 			if usePrivacy && hop != nil {
 				if excluded == nil {
 					excluded = make(map[NodeRef]bool, transient.InnerAttempts)
 				}
 				excluded[hop.RelayRef()] = true
-				next, err := s.relayHopForPool(CandidatesExcluding(relaySel, excluded), op, usePrivacy)
+				var err error
+				next, err = s.relayHopForPool(CandidatesExcluding(relaySel, excluded), op, usePrivacy)
 				if err != nil {
 					// Every other relay is excluded or ineligible. Stop rather
 					// than retry the one we just abandoned, and never fall back
@@ -255,11 +270,19 @@ func (s *Client) reserveWithTransientRetry(
 					slog.Uint64("failed_relay_node_id", hop.RelayNodeID),
 					relayAttr(next),
 					slog.Int("attempt", attempt+1))
-				hop = next
 			}
+			note(reserveRetrying(op, failed, failedAttr, d, attempt+1))
+			if next != hop {
+				note(RelayHopChanged{Relay: relayOf(next), Target: RefOf(op), Reason: RelayHopRotated})
+			}
+			if !sleepCtx(ctx, d) {
+				break
+			}
+			hop = next
 		}
 
 		start := time.Now()
+		note(ReserveStarted{Target: RefOf(op), Relay: relayOf(hop), Attempt: attempt + 1})
 		rt, err := s.reserveClient.Reserve(ctx, op, req, hop)
 		if !reprobed && (IsNoEphemeral(err) || IsBadReserveEnvelope(err)) {
 			// Self-heal a stale forward-secrecy ephemeral. A node mints its
@@ -290,6 +313,7 @@ func (s *Client) reserveWithTransientRetry(
 					resize(op, &req)
 				}
 				start = time.Now()
+				note(ReserveStarted{Target: RefOf(op), Relay: relayOf(hop), Attempt: attempt + 1})
 				rt, err = s.reserveClient.Reserve(ctx, op, req, hop)
 			}
 		}
@@ -335,6 +359,7 @@ func (s *Client) reserveWithTransientRetry(
 			return last
 		}
 		retryAfter = hint
+		failed, failedAttr = err, v.Attribution
 		if usePrivacy && hop != nil {
 			switch v.Attribution {
 			case transient.AttrRelay:
