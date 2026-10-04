@@ -195,6 +195,11 @@
       "relay_required",
       "direct"
     ],
+    "ReceiptViolation": [
+      "sig",
+      "amount",
+      "body_hash"
+    ],
     "RelayHopReason": [
       "chosen",
       "rotated"

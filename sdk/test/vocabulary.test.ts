@@ -22,6 +22,7 @@ import {
     type Kind,
     type NodeRef,
     type Privacy,
+    type ReceiptViolation,
     type RelayHopReason,
     type Settlement,
     type SettleKind,
@@ -33,6 +34,7 @@ import {
     kinds,
     localnet,
     networkNames,
+    receiptViolations,
     resolveNetwork,
 } from '../src/index.js'
 
@@ -144,7 +146,8 @@ const enumsComplete: [
     Covers<SettleKind, typeof settleKinds>,
     Covers<Endpoint, typeof endpoints>,
     Covers<Attribution, typeof attributions>,
-] = [true, true, true, true, true, true, true, true, true]
+    Covers<ReceiptViolation, typeof receiptViolations>,
+] = [true, true, true, true, true, true, true, true, true, true]
 
 describe('vocabulary shared with the Go SDK', () => {
     it('is complete at compile time', () => {
@@ -176,6 +179,7 @@ describe('vocabulary shared with the Go SDK', () => {
         expect(settleKinds).toEqual(vocab.enums.SettleKind)
         expect(endpoints).toEqual(vocab.enums.Endpoint)
         expect(attributions).toEqual(vocab.enums.Attribution)
+        expect(receiptViolations).toEqual(vocab.enums.ReceiptViolation)
         expect(Object.keys(vocab.enums).sort()).toEqual(
             [
                 'AffinityPolicy',
@@ -183,6 +187,7 @@ describe('vocabulary shared with the Go SDK', () => {
                 'Endpoint',
                 'Kind',
                 'Privacy',
+                'ReceiptViolation',
                 'RelayHopReason',
                 'SettleKind',
                 'TicketStatus',

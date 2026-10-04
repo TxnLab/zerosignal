@@ -191,6 +191,10 @@ func buildVocabulary(t *testing.T) vocabulary {
 		v.Enums[name] = stringConsts(t, ".", name)
 	}
 	v.Enums["Attribution"] = stringConsts(t, "../transient", "Attribution")
+	// An int enum, so its names come from String(): every value but ReceiptOK.
+	for rv := ReceiptViolationSig; rv <= ReceiptViolationBodyHash; rv++ {
+		v.Enums["ReceiptViolation"] = append(v.Enums["ReceiptViolation"], rv.String())
+	}
 	for _, n := range []algod.Network{algod.NetworkLocalnet, algod.NetworkTestnet, algod.NetworkMainnet} {
 		ac := algod.Config{Network: string(n)}
 		if err := ac.Resolve(); err != nil {

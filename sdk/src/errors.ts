@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The one error type every SDK call rejects with, mirroring proto/go/zs Error
-// and Kind (names pinned by testdata/sdk_vocabulary_vectors.json).
+// The error a Client call rejects with, mirroring proto/go/zs Error and Kind
+// (names pinned by testdata/sdk_vocabulary_vectors.json). The low-level checks
+// a Client is built from throw their own classified errors (ReceiptError,
+// TicketSignatureInvalidError, …), which the Client wraps.
 
 import type { Ticket } from './types.js'
 
