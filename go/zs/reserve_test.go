@@ -373,6 +373,29 @@ func TestHTTPReserveClient_Non200NonBusy(t *testing.T) {
 	}
 }
 
+// A body our own deadline cuts off is not a ReserveHTTPError: a response did
+// arrive, so there is no transport failure to charge, and no code to read. The
+// TS SDK's reserve mirrors this (reserve-call.test.ts).
+func TestHTTPReserveClient_BodyCutOffByDeadline_Unclassified(t *testing.T) {
+	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":`))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	_, err := c.Reserve(ctx, h.operator, sampleReserveReq(), nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "read reserve response: ") {
+		t.Fatalf("err = %v; want the body read failure", err)
+	}
+	if _, ok := AsReserveHTTP(err); ok {
+		t.Error("a cut-off body must not read as a ReserveHTTPError")
+	}
+}
+
 // A 400 carrying the node's OpenAI-shaped "context_length_exceeded"
 // error must come back as *SizeError so dispatch can prefer
 // 400 context_length_exceeded over 503 operators_busy when every
