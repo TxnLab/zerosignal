@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -76,6 +77,61 @@ func TestEventTypesCoverEveryEvent(t *testing.T) {
 	}
 	if declared != len(eventTypeCases) {
 		t.Errorf("event.go declares %d events, TestEventTypes pins %d", declared, len(eventTypeCases))
+	}
+}
+
+// The SDK logs through the Logger it was given. A call on the slog package
+// itself writes to the host's default logger, which a program that set
+// Config.Logger has no reason to watch.
+func TestNoPackageLevelSlogCalls(t *testing.T) {
+	pkgs, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, _ := filepath.Glob("*/*.go")
+	subsub, _ := filepath.Glob("*/*/*.go")
+	logging := map[string]bool{"Debug": true, "Info": true, "Warn": true, "Error": true, "Log": true, "LogAttrs": true,
+		"DebugContext": true, "InfoContext": true, "WarnContext": true, "ErrorContext": true}
+	fset := token.NewFileSet()
+	for _, path := range append(append(pkgs, sub...), subsub...) {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if imp.Path.Value == `"log"` {
+				t.Errorf("%s: imports the standard log package, which logs past Config.Logger", path)
+			}
+		}
+		isSlog := func(e ast.Expr, name string) bool {
+			sel, ok := e.(*ast.SelectorExpr)
+			if !ok {
+				return false
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			return ok && pkg.Name == "slog" && (name == "" || sel.Sel.Name == name)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !logging[sel.Sel.Name] {
+				return true
+			}
+			// slog.Warn(...), and slog.Default().Warn(...), which is the same
+			// call spelled longer. slog.Default() as a nil fallback is fine.
+			if isSlog(sel, "") {
+				t.Errorf("%s: slog.%s logs past Config.Logger", fset.Position(call.Pos()), sel.Sel.Name)
+			} else if inner, ok := sel.X.(*ast.CallExpr); ok && isSlog(inner.Fun, "Default") {
+				t.Errorf("%s: slog.Default().%s logs past Config.Logger", fset.Position(call.Pos()), sel.Sel.Name)
+			}
+			return true
+		})
 	}
 }
 

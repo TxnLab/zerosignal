@@ -6,11 +6,14 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -659,5 +662,41 @@ func TestCachingGetter_AttachStore(t *testing.T) {
 	}
 	if c.store.path != path {
 		t.Errorf("store moved to %s", c.store.path)
+	}
+}
+
+// What the cache fetched before the store was attached reaches the file
+// without waiting for another fetch.
+func TestCachingGetter_AttachWritesWhatWasFetchedBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), collateralStoreFile)
+	c := &cachingGetter{
+		ttl:             collateralTTL,
+		entries:         map[string]collateralEntry{"https://pcs.example/a": {body: []byte("fetched"), fetched: time.Now()}},
+		persistDebounce: time.Millisecond,
+	}
+	if err := c.attachStore(path); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the fetched entry on disk", func() bool {
+		return len((&collateralStore{path: path}).load()) == 1
+	})
+}
+
+// The store logs through the cache's logger as it is when it logs, so a
+// Client that gives the cache a logger after the attach is heard.
+func TestCachingGetter_StoreLogsThroughTheCachesLogger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), collateralStoreFile)
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &cachingGetter{ttl: collateralTTL, entries: map[string]collateralEntry{}}
+	if err := c.attachStore(path); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	c.useLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	c.store.load()
+	if !strings.Contains(buf.String(), "persisted collateral is unreadable") {
+		t.Errorf("the store logged elsewhere: %q", buf.String())
 	}
 }

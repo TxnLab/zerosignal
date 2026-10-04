@@ -21,7 +21,8 @@ import (
 // and by VerifyTDXQuoteChain, since Intel's documents are the same for all of
 // them; so it persists to one directory, and naming another is an error. New
 // calls it with Stores.CollateralDir; a program that verifies quotes without a
-// Client calls it itself.
+// Client calls it itself, ideally before the first check, though entries
+// fetched earlier are written too.
 func PersistCollateral(dir string) error {
 	if dir == "" {
 		return nil
@@ -107,9 +108,42 @@ const collateralStoreMaxBytes = 32 << 20
 
 type collateralStore struct {
 	path string
+	// owner is the cache the store persists, whose logger it logs to; nil
+	// for a store a test builds alone.
+	owner *cachingGetter
 
 	mu    sync.Mutex
 	timer *time.Timer
+}
+
+// logger asks the owner each time, since a Client may give the cache its
+// logger after the store was attached. Never called under owner.mu.
+func (s *collateralStore) logger() *slog.Logger {
+	if s.owner == nil {
+		return slog.Default()
+	}
+	s.owner.mu.Lock()
+	defer s.owner.mu.Unlock()
+	return s.owner.loggerLocked()
+}
+
+// useLogger gives the cache its logger unless a Client already did. Only a
+// Logger the caller set counts: a Client built without one must not silence
+// the cache for the Clients after it.
+func (g *cachingGetter) useLogger(log *slog.Logger) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.log == nil {
+		g.log = log
+	}
+}
+
+// loggerLocked is the cache's logger. Caller holds mu.
+func (g *cachingGetter) loggerLocked() *slog.Logger {
+	if g.log == nil {
+		return slog.Default()
+	}
+	return g.log
 }
 
 // newCollateralStoreAt is the store persisting to path. A nil store means
@@ -122,26 +156,42 @@ func newCollateralStoreAt(path string) *collateralStore {
 // attachStore starts persisting g to path, loading what path holds under the
 // entries g already has: those were fetched in this process, so they are no
 // older than the file's. A cache persists to one path; a second is an error.
+// The file is read outside g.mu, which attestation lookups wait on.
 func (g *cachingGetter) attachStore(path string) error {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.store != nil {
+		defer g.mu.Unlock()
 		if g.store.path == path {
 			return nil
 		}
 		return fmt.Errorf("zs: TEE collateral already persists to %s, not %s", g.store.path, path)
 	}
 	s := newCollateralStoreAt(path)
+	s.owner = g
+	g.store = s
+	g.mu.Unlock()
+
+	fromDisk := s.load()
+	g.mu.Lock()
 	loaded := 0
-	for url, e := range s.load() {
+	for url, e := range fromDisk {
 		if _, ok := g.entries[url]; !ok {
 			g.entries[url] = e
 			loaded++
 		}
 	}
-	g.store = s
+	// Entries fetched before the attach are not on disk yet.
+	unsaved := len(g.entries) > len(fromDisk)
+	log := g.loggerLocked()
+	g.mu.Unlock()
 	if loaded > 0 {
-		slog.Debug("attestation: warm-started the collateral cache from disk", slog.Int("artifacts", loaded))
+		log.Debug("attestation: warm-started the collateral cache from disk", slog.Int("artifacts", loaded))
+	}
+	if unsaved {
+		g.persistSoon()
 	}
 	return nil
 }
@@ -165,7 +215,7 @@ func (s *collateralStore) load() map[string]collateralEntry {
 	f, err := os.Open(s.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Debug("attestation: could not read persisted collateral",
+			s.logger().Debug("attestation: could not read persisted collateral",
 				slog.String("path", s.path), slog.Any("err", err))
 		}
 		return nil
@@ -173,18 +223,18 @@ func (s *collateralStore) load() map[string]collateralEntry {
 	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, collateralStoreMaxBytes+1))
 	if err != nil {
-		slog.Debug("attestation: could not read persisted collateral",
+		s.logger().Debug("attestation: could not read persisted collateral",
 			slog.String("path", s.path), slog.Any("err", err))
 		return nil
 	}
 	if len(raw) > collateralStoreMaxBytes {
-		slog.Debug("attestation: persisted collateral is larger than this proxy could have written it, starting cold",
+		s.logger().Debug("attestation: persisted collateral is larger than this proxy could have written it, starting cold",
 			slog.String("path", s.path), slog.Int("bytes", len(raw)))
 		return nil
 	}
 	var doc persistedCollateral
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		slog.Debug("attestation: persisted collateral is unreadable, starting cold",
+		s.logger().Debug("attestation: persisted collateral is unreadable, starting cold",
 			slog.String("path", s.path), slog.Any("err", err))
 		return nil
 	}
@@ -248,31 +298,31 @@ func (s *collateralStore) save(entries map[string]collateralEntry) {
 	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
-		slog.Debug("attestation: could not encode collateral for persistence", slog.Any("err", err))
+		s.logger().Debug("attestation: could not encode collateral for persistence", slog.Any("err", err))
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		slog.Debug("attestation: could not create state directory", slog.Any("err", err))
+		s.logger().Debug("attestation: could not create state directory", slog.Any("err", err))
 		return
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), collateralStoreFile+".*")
 	if err != nil {
-		slog.Debug("attestation: could not open temp file for collateral", slog.Any("err", err))
+		s.logger().Debug("attestation: could not open temp file for collateral", slog.Any("err", err))
 		return
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
-		slog.Debug("attestation: could not write collateral", slog.Any("err", err))
+		s.logger().Debug("attestation: could not write collateral", slog.Any("err", err))
 		return
 	}
 	if err := tmp.Close(); err != nil {
-		slog.Debug("attestation: could not close collateral temp file", slog.Any("err", err))
+		s.logger().Debug("attestation: could not close collateral temp file", slog.Any("err", err))
 		return
 	}
 	if err := os.Rename(tmpName, s.path); err != nil {
-		slog.Debug("attestation: could not install collateral file", slog.Any("err", err))
+		s.logger().Debug("attestation: could not install collateral file", slog.Any("err", err))
 	}
 }
 

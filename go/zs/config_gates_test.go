@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -210,11 +211,15 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	cfg.Wallet = nil
 	cfg.ConcurrentSlots = 7
 	cfg.Remedies.RecoverTicket = "recover it by hand"
+	cfg.Logger = slog.New(slog.DiscardHandler)
 	c, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	if w, _ := c.Config().Wallet.(*Wallet); w == nil || w.logger() != cfg.Logger {
+		t.Error("the built wallet does not log through Config.Logger")
+	}
 	// Both give-up logs are the only trace of a ticket left on chain.
 	if c.refunds.remedy != "recover it by hand" || c.reconcile == nil || c.reconcile.remedy != "recover it by hand" {
 		t.Errorf("watchdog remedy %q, reconciler %+v: want both to carry Remedies.RecoverTicket", c.refunds.remedy, c.reconcile)
@@ -500,25 +505,63 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	}
 }
 
+// The collateral cache is the process's, so a Client naming another directory
+// still builds, on the cache's own, and says so; one naming that directory
+// says nothing.
+func TestNew_CollateralDirIsTheProcesses(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dir  string
+		warn bool
+	}{
+		{"another dir", t.TempDir(), true},
+		{"the process's dir", testStateDir, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cfg := suppliedParts(t)
+			cfg.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+			cfg.Stores.CollateralDir = tc.dir
+			c, err := New(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Close()
+			if got := strings.Contains(buf.String(), "Stores.CollateralDir"); got != tc.warn {
+				t.Errorf("warned %v, want %v: %s", got, tc.warn, buf.String())
+			}
+		})
+	}
+}
+
+// A Client built without a Logger leaves the process's collateral cache on
+// whatever logger it had: New's discard default must not silence it for the
+// Clients that do set one.
+func TestNew_NoLoggerLeavesTheCollateralCachesLogger(t *testing.T) {
+	cache := sharedCollateralCache()
+	cache.mu.Lock()
+	before := cache.log
+	cache.log = nil
+	cache.mu.Unlock()
+	t.Cleanup(func() { cache.mu.Lock(); cache.log = before; cache.mu.Unlock() })
+
+	cfg := suppliedParts(t)
+	cfg.Logger = nil
+	c, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.log != nil {
+		t.Error("a Client with no Logger gave the collateral cache its discard default")
+	}
+}
+
 // Two reconcilers over one journal would each submit the other Client's live
 // tickets, so a second Client that would sweep it is refused until the first
 // closes. A Client with a caller's wallet runs no reconciler and may share it.
-// The collateral cache is the process's, so New refuses to persist it to a
-// directory other than the one it already uses, and accepts that one.
-func TestNew_CollateralDirIsTheProcesss(t *testing.T) {
-	cfg := suppliedParts(t)
-	cfg.Stores.CollateralDir = t.TempDir()
-	if _, err := New(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "Stores.CollateralDir") {
-		t.Errorf("a second collateral dir: err %v, want Stores.CollateralDir named", err)
-	}
-	cfg.Stores.CollateralDir = testStateDir
-	c, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("the process's own collateral dir: %v", err)
-	}
-	c.Close()
-}
-
 func TestNew_OneReconcilerPerJournal(t *testing.T) {
 	url, _, _ := fakeEscrowAlgod(t, 123_400)
 	j, err := OpenFileJournal(filepath.Join(t.TempDir(), "journal.json"))

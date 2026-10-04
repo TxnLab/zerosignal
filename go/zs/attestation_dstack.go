@@ -866,6 +866,10 @@ type cachingGetter struct {
 	// state directory falls back to.
 	store *collateralStore
 
+	// log is the first Client's Config.Logger, the cache being the
+	// process's; nil uses slog.Default(). Guarded by mu.
+	log *slog.Logger
+
 	// persistDebounce overrides collateralPersistDebounce; zero means the
 	// constant. It exists so a test can observe the write itself rather
 	// than only the scheduling of it — a five-second wait would push the
@@ -984,11 +988,12 @@ func (g *cachingGetter) warnStale(url string, age time.Duration, cause error) {
 	}
 	first := !g.staleWarned[url]
 	g.staleWarned[url] = true
+	log := g.loggerLocked()
 	g.mu.Unlock()
 	if !first {
 		return
 	}
-	slog.Warn("attestation: Intel PCS unreachable, serving cached collateral past its refresh window",
+	log.Warn("attestation: Intel PCS unreachable, serving cached collateral past its refresh window",
 		slog.String("artifact", url),
 		slog.Duration("age", age.Round(time.Minute)),
 		slog.Duration("refuse_after", collateralStaleMax),

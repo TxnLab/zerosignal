@@ -33,6 +33,7 @@ type Wallet struct {
 	escrow    *escrow.Client
 	keystore  algo.MultipleWalletSigner
 	payerAddr string
+	log       *slog.Logger // nil: slog.Default()
 
 	// pool is the narrow escrow-dependency surface the prepaid-MBR-pool
 	// path (EnsureDeposit + the Open deposit-revert retry) drives. It's a
@@ -187,6 +188,8 @@ type WalletConfig struct {
 	// DepositSlots is the prepaid-MBR-pool working set (zs.concurrent_slots);
 	// 0 falls back to DefaultDepositSlots.
 	DepositSlots uint64
+	// Logger receives the wallet's warnings; nil uses slog.Default().
+	Logger *slog.Logger
 }
 
 // NewWallet validates its dependencies and checks that payerAddr is
@@ -211,7 +214,15 @@ func NewWallet(cfg WalletConfig) (*Wallet, error) {
 		keystore:     cfg.Keystore,
 		payerAddr:    cfg.PayerAddr,
 		depositSlots: cfg.DepositSlots,
+		log:          cfg.Logger,
 	}, nil
+}
+
+func (w *Wallet) logger() *slog.Logger {
+	if w.log == nil {
+		return slog.Default()
+	}
+	return w.log
 }
 
 // PayerAddr returns the Algorand address the wallet signs with. Used
@@ -460,7 +471,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 			// for a signature-verified ticket. Log and fall through to the
 			// standalone receipt-sourced ack rather than block settlement. NOT a
 			// node fault, so groupRejected stays false.
-			slog.Warn("ack-settle: settle-group spec build failed; falling back to standalone",
+			h.wallet.logger().Warn("ack-settle: settle-group spec build failed; falling back to standalone",
 				"operator_id", h.Operator.ID, "node_id", h.Operator.NodeID, "err", specErr)
 		} else {
 			res, subErr := h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
@@ -479,7 +490,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 				// claim (pendingBy=PAYER → refundInactive-eligible), preserving the
 				// clean-refund guarantee — while surfacing groupRejected so the
 				// dispatcher hard-excludes this (operatorId,nodeId) from selection.
-				slog.Warn("ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack",
+				h.wallet.logger().Warn("ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack",
 					"operator_id", h.Operator.ID, "node_id", h.Operator.NodeID,
 					"field", rejected.Field, "detail", rejected.Detail)
 				groupRejected = true

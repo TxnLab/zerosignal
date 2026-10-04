@@ -91,6 +91,7 @@ func buildWallet(ctx context.Context, cfg Config, ac algod.Config, appID uint64,
 		Keystore:     cfg.Signer,
 		PayerAddr:    cfg.Signer.Address(),
 		DepositSlots: uint64(cfg.ConcurrentSlots),
+		Logger:       cfg.Logger,
 	})
 }
 

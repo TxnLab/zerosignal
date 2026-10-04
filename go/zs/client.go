@@ -164,6 +164,7 @@ type Client struct {
 // the background. ctx bounds those reads only. Close stops the background
 // work.
 func New(ctx context.Context, cfg Config) (*Client, error) {
+	callerLogger := cfg.Logger
 	cfg = cfg.withDefaults()
 	ac, appID, warnings, err := cfg.validate()
 	if err != nil {
@@ -172,8 +173,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	for _, w := range warnings {
 		cfg.Logger.Warn(w)
 	}
+	if callerLogger != nil {
+		sharedCollateralCache().useLogger(callerLogger)
+	}
+	// Another directory already in use still serves this Client: the
+	// documents are the same, only where they persist differs.
 	if err := PersistCollateral(cfg.Stores.CollateralDir); err != nil {
-		return nil, configError("Stores.CollateralDir: " + err.Error())
+		cfg.Logger.Warn("Stores.CollateralDir is not used", slog.Any("err", err))
 	}
 	cfg.Network = Network{Algod: ac, EscrowAppID: appID}
 	parts, err := buildNetworkParts(ctx, cfg, ac, appID)

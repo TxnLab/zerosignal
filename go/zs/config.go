@@ -104,9 +104,9 @@ type Stores struct {
 	// CollateralDir is a state directory the TEE collateral cache persists
 	// to, so a restart during an Intel PCS outage still has collateral to
 	// verify against. Empty keeps it in memory. The cache is the process's
-	// (see PersistCollateral): New fails on a directory other than the one
-	// it already persists to. Use a state directory, not a cache directory
-	// the OS may sweep.
+	// (see PersistCollateral), so it persists to the first directory named;
+	// New logs a later, different one and goes on. Use a state directory,
+	// not a cache directory the OS may sweep.
 	CollateralDir string
 
 	// The routing signals: per-relay forward reputation, observed network
