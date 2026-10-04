@@ -1,0 +1,70 @@
+{
+    "name": "@txnlab/zerosignal",
+    "version": "0.1.1",
+    "license": "Apache-2.0",
+    "description": "ZeroSignal payer SDK for TypeScript: discovery, routing, reserve, escrow, sealing, relay hops, streaming and receipt checks for private LLM inference on Algorand.",
+    "keywords": [
+        "zerosignal",
+        "private-inference",
+        "llm",
+        "openai",
+        "algorand",
+        "escrow",
+        "sdk"
+    ],
+    "engines": {
+        "node": ">=20.19"
+    },
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./proto": {
+            "types": "./dist/proto/index.d.ts",
+            "import": "./dist/proto/index.js"
+        },
+        "./proto/*": {
+            "types": "./dist/proto/*.d.ts",
+            "import": "./dist/proto/*.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TxnLab/zerosignal.git",
+        "directory": "sdk"
+    },
+    "homepage": "https://github.com/TxnLab/zerosignal/tree/main/sdk#readme",
+    "bugs": {
+        "url": "https://github.com/TxnLab/zerosignal/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "prepublishOnly": "pnpm test && pnpm build",
+        "test": "vitest --run",
+        "test:watch": "vitest",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    },
+    "dependencies": {
+        "@txnlab/zs-proto": "workspace:*",
+        "algosdk": "^3.6.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "typescript": "5.6.3",
+        "vitest": "3.2.6"
+    }
+}

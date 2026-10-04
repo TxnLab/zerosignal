@@ -4,6 +4,10 @@
 #   go/  — github.com/TxnLab/zerosignal/go    (canonical impl; generates the golden vectors)
 #   ts/  — @txnlab/zs-proto                   (browser impl; mirrors the vectored go/ packages)
 #
+# and the TypeScript payer SDK, sdk/ (@txnlab/zerosignal), the twin of go/zs. ts/
+# and sdk/ are one pnpm workspace with one lockfile at this directory's root;
+# sdk/ builds against ts/'s dist, as a consumer of the published package would.
+#
 # testdata/*.json are the cross-impl golden fixtures. Most are DERIVED: regenerated
 # from the Go side (`make update-vectors`), each go/<pkg>/*vectors_test.go
 # bytes.Equal-checks its fixture, and the matching ts/test/*-vectors.test.ts loads
@@ -15,19 +19,34 @@
 GO   ?= go
 PNPM ?= pnpm
 
-.PHONY: test test-go test-ts verify-vectors update-vectors update-sealed-vectors \
+.PHONY: test test-go test-ts test-sdk build-ts check-lockstep verify-vectors update-vectors update-sealed-vectors \
 	update-ts-sealed-vectors check-vector-generators check-no-hayai vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
 # vector-staleness is caught here too.
-test: check-vector-generators check-no-hayai test-go test-ts
+test: check-vector-generators check-no-hayai check-lockstep test-go test-ts test-sdk
 
 test-go:
 	cd go && $(GO) test ./... -count 1
 
-test-ts: ts/node_modules
+test-ts: node_modules
 	cd ts && $(PNPM) test
+
+# The typecheck runs here too: sdk/'s vocabulary test checks its lists against
+# their types at compile time, which vitest alone does not.
+test-sdk: build-ts
+	cd sdk && $(PNPM) typecheck && $(PNPM) test
+
+# ts/ and sdk/ release as a matching pair; see the script. The test runs first,
+# for the same reason as check-no-hayai's.
+check-lockstep:
+	./scripts/check-lockstep.test.sh
+	./scripts/check-lockstep.sh
+
+# sdk/ resolves @txnlab/zs-proto to ts/dist, so it needs a current build.
+build-ts: node_modules
+	cd ts && $(PNPM) build
 
 # Read-only check that every testdata fixture matches what the current Go code
 # emits, and that Go still opens the TS-sealed fixture. No -update — on drift it
@@ -77,6 +96,7 @@ update-vectors:
 	cd go && $(GO) test ./escrow     -run TestEscrowVectors         -update
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update
 	cd go && $(GO) test ./zs         -run TestRetryVectors          -update
+	cd go && $(GO) test ./zs         -run TestVocabularyVectors     -update
 
 # testdata/sealed_vectors.json (Go seals, TS opens) and ts_sealed_vectors.json
 # (TS seals, Go opens) are CAPTURED, not derived: sealing draws a fresh nonce per
@@ -87,18 +107,19 @@ update-vectors:
 update-sealed-vectors:
 	cd go && $(GO) test ./wire       -run TestSealedVectors         -update
 
-update-ts-sealed-vectors: ts/node_modules
+update-ts-sealed-vectors: node_modules
 	cd ts && ZS_UPDATE_TS_SEALED_VECTORS=1 $(PNPM) vitest --run test/ts-sealed-vectors.test.ts
 	cd go && $(GO) test ./wire       -run TestOpensTSSealedArtifacts -count 1
 
 vet:
 	cd go && $(GO) vet ./...
 
-typecheck: ts/node_modules
+typecheck: build-ts
 	cd ts && $(PNPM) typecheck
+	cd sdk && $(PNPM) typecheck
 
-# Install (or refresh) the TS package's dependencies so `make test` works from a
+# Install (or refresh) the workspace's dependencies so `make test` works from a
 # clean checkout and re-installs when the lockfile changes.
-ts/node_modules: ts/package.json ts/pnpm-lock.yaml
-	cd ts && $(PNPM) install --frozen-lockfile
-	@touch ts/node_modules
+node_modules: package.json ts/package.json sdk/package.json pnpm-lock.yaml
+	$(PNPM) install --frozen-lockfile
+	@touch node_modules

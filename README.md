@@ -112,6 +112,15 @@ Wire-shaped types use snake_case property names matching the JSON wire format, s
 
 Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (transaction composition, box reads, group verification).
 
+### TypeScript SDK — [`sdk/`](./sdk/), npm package `@txnlab/zerosignal`
+
+The twin of `go/zs`, in development. It holds the shared API vocabulary (events, error kinds,
+config and its defaults, network presets) and the ports a host app implements (signer, storage,
+cache, logger, clock, fetch); the client is being ported from the chat app. It depends on
+`@txnlab/zs-proto` at exactly its own version and re-exports it under
+`@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
+`testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).
+
 ### Golden vectors — [`testdata/`](./testdata/)
 
 Each vectored Go package writes its fixture (`vectors.json`, `selection_vectors.json`, …) from
@@ -138,7 +147,8 @@ changes on purpose, with `make update-sealed-vectors` and `make update-ts-sealed
 ## Build & test
 
 ```bash
-make test                  # vector-generator check + Go suite + TS suite
+pnpm install               # one workspace: ts/ and sdk/
+make test                  # vector-generator check + Go suite + ts and sdk suites
 make vet typecheck
 make verify-vectors        # read-only: every fixture matches current Go output; Go opens the TS-sealed one
 make update-vectors        # regenerate fixtures after an intentional format change

@@ -1,5 +1,7 @@
 node_modules/
 ts/dist/
+sdk/dist/
+sdk/*.tgz
 .DS_Store
 .idea/
 .claude/

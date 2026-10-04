@@ -1,0 +1,99 @@
+/*
+ * Copyright (c) 2026. TxnLab Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// The one error type every SDK call rejects with, mirroring proto/go/zs Error
+// and Kind (names pinned by testdata/sdk_vocabulary_vectors.json).
+
+import type { Ticket } from './types.js'
+
+/**
+ * Kind tells the caller what to do about a ZsError. It is the stable
+ * contract: codes may be added under a kind without breaking callers, so
+ * branch on kind and treat code as diagnostic.
+ */
+export type Kind =
+    | 'invalid_request'
+    | 'context_exceeded'
+    | 'no_route'
+    | 'busy'
+    | 'unreachable'
+    | 'price_rejected'
+    | 'funds'
+    | 'spend_cap'
+    | 'operator_fault'
+    | 'upstream'
+    | 'interrupted'
+    | 'internal'
+
+// as const, not Kind[]: the vocabulary test checks this list covers Kind, which
+// a list typed as Kind[] always would.
+export const kinds = [
+    'invalid_request',
+    'context_exceeded',
+    'no_route',
+    'busy',
+    'unreachable',
+    'price_rejected',
+    'funds',
+    'spend_cap',
+    'operator_fault',
+    'upstream',
+    'interrupted',
+    'internal',
+] as const satisfies readonly Kind[]
+
+export interface ZsErrorInit {
+    kind: Kind
+    /** The wire or SDK code that produced it, e.g. "no_capacity". */
+    code: string
+    message: string
+    retryable?: boolean
+    retryAfter?: number
+    paid?: boolean
+    ticket?: Ticket
+    cause?: unknown
+}
+
+export class ZsError extends Error {
+    readonly kind: Kind
+    readonly code: string
+    /**
+     * Whether the same request, sent again as a new turn, could plausibly
+     * succeed: the failure was capacity, transport or the provider's, not
+     * something the caller must change first. False when the caller's own
+     * abort ended the turn. A new turn is a new payment, so a caller weighing
+     * a retry reads paid too; the SDK never resends after paid.
+     */
+    readonly retryable: boolean
+    /** Milliseconds to wait before retrying, when the node named one. */
+    readonly retryAfter?: number
+    /** Whether escrow was opened for this turn. */
+    readonly paid: boolean
+    /**
+     * The handle that can still move this turn's money, when paid. The SDK
+     * keeps driving it to settle, protest or refund.
+     */
+    readonly ticket?: Ticket
+
+    constructor(init: ZsErrorInit) {
+        super(init.message, init.cause === undefined ? undefined : { cause: init.cause })
+        this.name = 'ZsError'
+        this.kind = init.kind
+        this.code = init.code
+        this.retryable = init.retryable ?? false
+        this.paid = init.paid ?? false
+        if (init.retryAfter !== undefined) this.retryAfter = init.retryAfter
+        if (init.ticket !== undefined) this.ticket = init.ticket
+    }
+}
+
+export function isZsError(err: unknown): err is ZsError {
+    return err instanceof ZsError
+}
+
+/** configError is a ZsError for a Config the SDK cannot run with. */
+export function configError(message: string): ZsError {
+    return new ZsError({ kind: 'invalid_request', code: 'invalid_config', message })
+}

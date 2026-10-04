@@ -41,7 +41,7 @@ allowed=(
 # A template, because macOS mktemp without one ignores TMPDIR.
 files=$(mktemp "${TMPDIR:-/tmp}/check-no-hayai.XXXXXX")
 trap 'rm -f "$files"' EXIT
-grep -rlIi --null hayai go ts/src ts/test >"$files" || [ $? -eq 1 ]
+grep -rlIi --null hayai go ts/src ts/test sdk/src sdk/test >"$files" || [ $? -eq 1 ]
 bad=()
 while IFS= read -r -d '' path; do
   lines=$(grep -nIi hayai "$path")
@@ -63,10 +63,10 @@ while IFS= read -r -d '' path; do
     shopt -u nocasematch
   done <<<"$lines"
 done <"$files"
-names=$(find go ts/src ts/test -iname '*hayai*')
+names=$(find go ts/src ts/test sdk/src sdk/test -iname '*hayai*')
 
 if [ ${#bad[@]} -gt 0 ] || [ -n "$names" ]; then
-  echo "the old project name appears under go/ or ts/ (rename it, or extend the allow-list in $0):" >&2
+  echo "the old project name appears under go/, ts/ or sdk/ (rename it, or extend the allow-list in $0):" >&2
   { printf '%s\n' "$names"; [ ${#bad[@]} -eq 0 ] || printf '%s\n' "${bad[@]}"; } | sed '/^$/d' >&2
   exit 1
 fi

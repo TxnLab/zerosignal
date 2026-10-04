@@ -22,7 +22,7 @@ fails=0
 # The allow-listed lines, as the repository holds them.
 seed() {
   local t=$1
-  mkdir -p "$t/scripts" "$t/go/wire" "$t/go/cmd/releasenotes" "$t/ts/src" "$t/ts/test"
+  mkdir -p "$t/scripts" "$t/go/wire" "$t/go/cmd/releasenotes" "$t/ts/src" "$t/ts/test" "$t/sdk/src" "$t/sdk/test"
   cp "$script" "$t/scripts/check-no-hayai.sh"
   chmod +x "$t/scripts/check-no-hayai.sh"
   printf '%s\n' 'package wire' \
@@ -39,6 +39,7 @@ seed() {
     '		"- Cloned from hayai-node.\n"' \
     > "$t/go/cmd/releasenotes/main_test.go"
   printf '%s\n' 'export const x = 1;' > "$t/ts/src/index.ts"
+  printf '%s\n' 'export const x = 1;' > "$t/sdk/src/index.ts"
 }
 
 # run <name> <pass|fail> <plant-function>
@@ -68,6 +69,9 @@ none()               { :; }
 lower_in_go()        { printf '// hayai\n' > "$1/go/x.go"; }
 upper_in_ts_src()    { printf '// HAYAI\n' > "$1/ts/src/x.ts"; }
 in_ts_test()         { printf '// Hayai\n' > "$1/ts/test/x.test.ts"; }
+in_sdk_src()         { printf '// hayai\n' > "$1/sdk/src/x.ts"; }
+in_sdk_test()        { printf '// Hayai\n' > "$1/sdk/test/x.test.ts"; }
+name_in_sdk()        { printf 'x\n' > "$1/sdk/src/hayai.ts"; }
 invalid_utf8()       { printf '// \377 hayai\n' > "$1/go/x.txt"; }
 name_only()          { printf 'package x\n' > "$1/go/hayai_util.go"; }
 name_mixed_case()    { printf 'x\n' > "$1/ts/src/HayAI.ts"; }
@@ -135,6 +139,9 @@ run baseline             pass none
 run lower_in_go          fail lower_in_go
 run upper_in_ts_src      fail upper_in_ts_src
 run in_ts_test           fail in_ts_test
+run in_sdk_src           fail in_sdk_src
+run in_sdk_test          fail in_sdk_test
+run name_in_sdk          fail name_in_sdk
 run invalid_utf8         fail invalid_utf8
 run name_only            fail name_only
 run name_mixed_case      fail name_mixed_case

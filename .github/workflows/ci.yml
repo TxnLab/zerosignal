@@ -47,7 +47,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          cache-dependency-path: ts/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Vet and typecheck
         run: make vet typecheck

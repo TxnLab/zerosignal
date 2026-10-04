@@ -102,8 +102,11 @@ make update-vectors    # regenerate fixtures after an intentional format change
 
 ## Development
 
+This package and the SDK (`../sdk`) are one pnpm workspace with one lockfile, rooted one
+directory up, so install from there.
+
 ```bash
-pnpm install
+cd .. && pnpm install && cd ts
 pnpm test          # vitest --run
 pnpm typecheck
 pnpm build
