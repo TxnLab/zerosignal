@@ -176,12 +176,11 @@ func VerifyTicketPrice(t ticket.Ticket, adv Advertised, feeBps, reserveInputCoun
 		// whole tier — a 2x multiplier on the entire request, which rate_bound
 		// then waves through because an exactly-2x surcharge sits precisely on the
 		// base × RateMaxMultiple boundary. So check the TIER, not the count: an
-		// honest node only ever clamps input_count DOWN (its own ReserveInputCount
-		// call carries no headroom term; the sole raise is the min_input_count
-		// floor, orders of magnitude below any real threshold), so a sub-threshold
-		// request can never legitimately come back tiered. Skipped when the caller
-		// has no bound of its own (reserveInputCount == 0), same as
-		// input_count_bound.
+		// honest node only ever caps input_count DOWN (an older node's
+		// min_input_count floor, default 256, is orders of magnitude below any
+		// real threshold), so a sub-threshold request can never legitimately
+		// come back tiered. Skipped when the caller has no bound of its own
+		// (reserveInputCount == 0), same as input_count_bound.
 		if reserveInputCount > 0 &&
 			IsLongContext(t.InputCount, adv.LongContextThresholdTokens) &&
 			!IsLongContext(reserveInputCount, adv.LongContextThresholdTokens) {

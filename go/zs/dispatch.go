@@ -4175,10 +4175,14 @@ func verifyCommitK(tkt *ticket.Ticket, key [wire.ResponseKeySize]byte) error {
 // node still needs a concrete ceiling to compute max_price, and silently
 // guessing one would mask configuration drift.
 
-// defaultToolHeadroomPerIteration / reserveMinInputCount mirror the node's
-// zs.reserve defaults, used when the operator advertises neither on
-// /v1/zs/details (a pre-field node). The node re-clamps whatever the proxy
-// sends, so these only affect the reserve magnitude, never correctness.
+// defaultToolHeadroomPerIteration mirrors the node's zs.reserve default, used
+// when the operator doesn't advertise one on /v1/zs/details (a pre-field node).
+//
+// reserveMinInputCount is not a node default any more: a node never raises
+// input_count. A node built before that floored it at min_input_count
+// (default 256), and VerifyTicketPrice refuses a signed count past ours + 10%,
+// so flooring at 256 here keeps a short request reservable on those nodes.
+// Drop it once they are gone.
 const (
 	defaultToolHeadroomPerIteration uint64 = 4000
 	reserveMinInputCount            uint64 = 256

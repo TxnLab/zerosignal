@@ -108,8 +108,9 @@ func InputTokenBound(body []byte) uint64 {
 // behavior). The cap is applied LAST so the returned value always satisfies
 // input + max_output ≤ context_window (inject.FitsContextWindow).
 //
-// The node uses the same clamp semantics on the caller's already-headroom'd
-// value by calling with carriesTools=false and bodyBound=input_count.
+// The node caps the caller's already-headroom'd value by calling with
+// carriesTools=false, bodyBound=input_count and floor=0: it must never raise
+// a payer's count past the payer's own input_count_bound.
 func ReserveInputCount(bodyBound uint64, carriesTools bool, maxToolIterations, perIterHeadroom, maxOutput, contextWindow, floor uint64) uint64 {
 	headroom := uint64(0)
 	if carriesTools {
