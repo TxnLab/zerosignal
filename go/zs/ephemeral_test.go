@@ -448,7 +448,7 @@ func TestReserve_SealsToEphemeralRecipient(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	rt, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
@@ -486,7 +486,7 @@ func TestReserve_NoEphemeralSkips(t *testing.T) {
 	op.EphemeralRecipient = nil
 	op.EphemeralRecipientPubkey = ""
 	op.EphemeralExpiry = 0
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if !IsNoEphemeral(err) {
 		t.Fatalf("Reserve err = %v, want errNoEphemeral (no ephemeral)", err)
@@ -523,7 +523,7 @@ func TestReserve_BadEnvelopeSurfaced(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("ephemeral-sealed bad_reserve_envelope must surface as an error")
@@ -564,7 +564,7 @@ func TestReserve_DispatchSharesPinnedRecipient(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	rt, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)

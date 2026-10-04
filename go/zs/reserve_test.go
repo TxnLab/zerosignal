@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -218,7 +219,7 @@ func TestHTTPReserveClient_HappyPath(t *testing.T) {
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
 
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	got, err := c.Reserve(context.Background(), h.operator, req, nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
@@ -241,13 +242,29 @@ func TestHTTPReserveClient_HappyPath(t *testing.T) {
 	}
 }
 
+// A caller that leaves HTTPClient nil gets New's guard, not http.DefaultClient:
+// the reserve to a loopback node is refused at dial, and the per-reserve
+// deadline still applies.
+func TestHTTPReserveClient_NilClientIsGuarded(t *testing.T) {
+	var reached atomic.Bool
+	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) { reached.Store(true) })
+
+	_, err := (&HTTPReserveClient{}).Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
+	if err == nil || reached.Load() {
+		t.Fatalf("a nil-client reserve reached a loopback node (err %v, reached %v)", err, reached.Load())
+	}
+	if defaultReserveHTTPClient.Timeout != DefaultReserveTimeout {
+		t.Errorf("nil-client timeout = %v, want %v", defaultReserveHTTPClient.Timeout, DefaultReserveTimeout)
+	}
+}
+
 func TestHTTPReserveClient_BusyReturnsBusyError(t *testing.T) {
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "7")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"busy"}}`))
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if !IsBusy(err) {
 		t.Fatalf("err = %v, want BusyError", err)
@@ -271,7 +288,7 @@ func TestHTTPReserveClient_BadSigRejected(t *testing.T) {
 		resp.Ticket.Sig = base64.StdEncoding.EncodeToString(sigBytes)
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want sig verify error")
@@ -314,7 +331,7 @@ func TestHTTPReserveClient_CommitKMismatchRejected(t *testing.T) {
 		resp.WrappedResponseKey = base64.StdEncoding.EncodeToString(buf.Bytes())
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want commit_k mismatch error, got nil")
@@ -332,7 +349,7 @@ func TestHTTPReserveClient_TicketModelMismatch(t *testing.T) {
 		resp := h.issueValidTicket(t, rr)
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil || !strings.Contains(err.Error(), "model") {
 		t.Errorf("err = %v, want model mismatch", err)
@@ -343,7 +360,7 @@ func TestHTTPReserveClient_Non200NonBusy(t *testing.T) {
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusBadRequest)
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil || strings.Contains(err.Error(), "busy") {
 		t.Errorf("err = %v; want non-busy error", err)
@@ -366,7 +383,7 @@ func TestHTTPReserveClient_ContextLengthExceeded_ReturnsSizeError(t *testing.T) 
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"max_output_tokens exceeds this operator's cap for the model","type":"invalid_request_error","code":"context_length_exceeded"}}`))
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if !IsSize(err) {
 		t.Fatalf("err = %v, want SizeError", err)
@@ -397,7 +414,7 @@ func TestHTTPReserveClient_OtherEnvelopedBadRequest_NotSizeError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"bad payer addr","type":"invalid_request_error","code":"invalid_payer_addr"}}`))
 	})
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want error")
@@ -556,7 +573,7 @@ func TestHTTPReserveClient_SealsRequest(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = "PAYERADDR1234567890"
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -598,7 +615,7 @@ func TestHTTPReserveClient_SignsPayer(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -656,7 +673,7 @@ func TestHTTPReserveClient_ResyncsOnClockSkew(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve should succeed after the node_time resync: %v", err)
 	}
@@ -699,7 +716,7 @@ func TestHTTPReserveClient_ResyncsAtMostOnce(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err == nil {
 		t.Fatal("Reserve should fail when the node persistently rejects the signature")
 	}
@@ -721,7 +738,7 @@ func TestHTTPReserveClient_NoSignerOmitsSig(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = "PAYERADDR1234567890"
-	c := &HTTPReserveClient{} // no Signer
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient} // no Signer
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -740,7 +757,7 @@ func TestHTTPReserveClient_NoEphemeral_Error(t *testing.T) {
 		TicketSigningKey: make(ed25519.PublicKey, ed25519.PublicKeySize),
 		BaseURL:          "http://127.0.0.1:1",
 	}
-	c := &HTTPReserveClient{}
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if !IsNoEphemeral(err) {
 		t.Fatalf("err = %v, want errNoEphemeral for an operator with no ephemeral recipient", err)

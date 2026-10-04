@@ -347,9 +347,10 @@ type ReserveClient interface {
 }
 
 // HTTPReserveClient is the default ReserveClient — wraps an
-// *http.Client. httpClient may be nil, in which case http.DefaultClient
-// is used; tests typically inject a client with a shorter timeout or a
-// custom RoundTripper.
+// *http.Client. A nil HTTPClient gets the client New would build from a zero
+// Config: DefaultReserveTimeout, no environment proxy, and private addresses
+// refused at dial. http.DefaultClient is none of those, and a reserve dials a
+// node-registered address, which is what the dial guard exists for.
 //
 // Signer, when non-nil, signs the reserve request under the payer address
 // (req.PayerAddr, set by the dispatcher) so the node can authenticate the
@@ -366,6 +367,10 @@ type HTTPReserveClient struct {
 
 // reservePath is the node-side endpoint from SPEC.md § 3a.
 const reservePath = "/v1/zs/reserve"
+
+// defaultReserveHTTPClient is shared so a nil-client HTTPReserveClient still
+// reuses connections across reserves.
+var defaultReserveHTTPClient = Config{}.nodeHTTPClient(DefaultReserveTimeout, 0)
 
 // DefaultReserveTimeout bounds a single POST /v1/zs/reserve. The
 // reserve handler does Algorand simulation in escrow.ComposeOpenGroup
@@ -587,7 +592,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 
 	client := c.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultReserveHTTPClient
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
