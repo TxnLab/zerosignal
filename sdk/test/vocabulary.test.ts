@@ -22,6 +22,7 @@ import {
     type Kind,
     type NodeRef,
     type Privacy,
+    type ProviderError,
     type ReceiptViolation,
     type RelayHopReason,
     type Settlement,
@@ -115,13 +116,17 @@ const nodeRefFields = ['op', 'node'] as const satisfies readonly (keyof NodeRef)
 const itemFields = ['id', 'type', 'raw'] as const satisfies readonly (keyof Item)[]
 const ticketFields = ['id', 'signed', 'target'] as const satisfies readonly (keyof Ticket)[]
 const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos'] as const satisfies readonly (keyof Settlement)[]
+const providerErrorFields = ['code', 'message', 'status'] as const satisfies readonly (keyof ProviderError)[]
+// What ProviderError adds to Error, plus the message Go declares as a field.
+type ProviderErrorOwn = Exclude<keyof ProviderError, keyof Error> | 'message'
 const recordsComplete: [
     Covers<keyof ZsErrorInit, typeof errorFields>,
     Covers<keyof NodeRef, typeof nodeRefFields>,
     Covers<keyof Item, typeof itemFields>,
     Covers<keyof Ticket, typeof ticketFields>,
     Covers<keyof Settlement, typeof settlementFields>,
-] = [true, true, true, true, true]
+    Covers<ProviderErrorOwn, typeof providerErrorFields>,
+] = [true, true, true, true, true, true]
 
 const privacies = ['relay_required', 'direct'] as const satisfies readonly Privacy[]
 const affinityPolicies = ['prefer', 'strict', 'none'] as const satisfies readonly AffinityPolicy[]
@@ -167,6 +172,7 @@ describe('vocabulary shared with the Go SDK', () => {
         expect(itemFields).toEqual(vocab.records.Item)
         expect(ticketFields).toEqual(vocab.records.Ticket)
         expect(settlementFields).toEqual(vocab.records.Settlement)
+        expect(providerErrorFields).toEqual(vocab.records.ProviderError)
     })
 
     it('spells every enum as Go does', () => {

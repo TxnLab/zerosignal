@@ -245,6 +245,20 @@
     "kind": "upstream",
     "code": "upstream_error",
     "provider_code": "",
+    "node_status": 429,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 502,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
     "node_status": 503,
     "retryable": true
   },
@@ -252,7 +266,21 @@
     "kind": "upstream",
     "code": "upstream_error",
     "provider_code": "",
+    "node_status": 504,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
     "node_status": 400,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 507,
     "retryable": false
   },
   {
@@ -283,6 +311,12 @@
   {
     "kind": "upstream",
     "code": "upstream_error",
+    "node_status": 501,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
     "node_status": 502,
     "retryable": true
   },
@@ -297,6 +331,18 @@
     "code": "upstream_error",
     "node_status": 504,
     "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 505,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 507,
+    "retryable": false
   },
   {
     "kind": "interrupted",
@@ -361,13 +407,31 @@
   {
     "kind": "interrupted",
     "code": "",
+    "node_status": 502,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
     "node_status": 504,
     "retryable": true
   },
   {
     "kind": "interrupted",
     "code": "",
+    "node_status": 507,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
     "node_status": 404,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "canceled",
+    "node_status": 503,
     "retryable": false
   }
 ]

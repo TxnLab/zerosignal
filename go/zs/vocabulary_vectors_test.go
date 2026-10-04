@@ -161,6 +161,8 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"Item":       fieldNames(Item{}),
 			"Ticket":     fieldNames(Ticket{}),
 			"Settlement": fieldNames(Settlement{}),
+			// The cause a caller reads off an upstream Error.
+			"ProviderError": fieldNames(ProviderError{}),
 		},
 		Enums:   map[string][]string{},
 		Network: map[string]vocabularyNetwork{},

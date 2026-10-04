@@ -147,6 +147,11 @@
       "op",
       "node"
     ],
+    "ProviderError": [
+      "code",
+      "message",
+      "status"
+    ],
     "Settlement": [
       "ticketId",
       "kind",

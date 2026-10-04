@@ -99,3 +99,35 @@ export function isZsError(err: unknown): err is ZsError {
 export function configError(message: string): ZsError {
     return new ZsError({ kind: 'invalid_request', code: 'invalid_config', message })
 }
+
+/**
+ * ProviderError is the cause of an upstream ZsError: the failure the node
+ * reported inside its response, for the provider behind it. code is the node's,
+ * not one of the SDK's; like message, which is the node's text verbatim and
+ * empty when it gave none, it is the node's claim, for display and logs.
+ */
+export class ProviderError extends Error {
+    readonly code: string
+    /**
+     * The HTTP status of the single-body reply that carried it, or 0 for a
+     * stream frame. Not readonly: the body is decoded before the reply's
+     * status is read.
+     */
+    status: number
+    constructor(code: string, message: string, status = 0) {
+        super(message)
+        this.name = 'ProviderError'
+        this.code = code
+        this.status = status
+    }
+}
+
+/** NodeReply is a failed reply from the node, as the cause of a ZsError. */
+export class NodeReply extends Error {
+    readonly status: number
+    constructor(status: number) {
+        super(`operator returned HTTP ${status}`)
+        this.name = 'NodeReply'
+        this.status = status
+    }
+}

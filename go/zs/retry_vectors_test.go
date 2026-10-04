@@ -8,6 +8,8 @@ package zs
 // Generates / verifies proto/testdata/error_retry_vectors.json: an Error's
 // kind, code and cause in, Retryable out. Every code in errorKinds is a row,
 // so a new code lands in the fixture and fails the check until regenerated.
+// Those are the only causeless rows: a port reads them back as the whole
+// table, so give any further row a cause.
 //
 //	cd proto/go && go test ./zs -run TestRetryVectors -update
 
@@ -51,12 +53,17 @@ func retryVectorInputs() []retryVectorCase {
 	// and a code it does give outranks the status.
 	noCode, refused := "", "context_length_exceeded"
 	cases = append(cases,
+		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 429},
+		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 502},
 		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 503},
+		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 504},
 		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 400},
+		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &noCode, NodeStatus: 507},
 		retryVectorCase{Kind: KindUpstream, Code: "upstream_error", ProviderCode: &refused, NodeStatus: 503},
 	)
-	// A failed sealed reply that did not say why.
-	for _, st := range []int{400, 429, 500, 502, 503, 504} {
+	// A failed sealed reply that did not say why: the node retries only 429
+	// and 502-504, so the 5xx either side of that run is not retryable.
+	for _, st := range []int{400, 429, 500, 501, 502, 503, 504, 505, 507} {
 		cases = append(cases, retryVectorCase{Kind: KindUpstream, Code: "upstream_error", NodeStatus: st})
 	}
 	// A paid turn the node refused before its envelope opened: a refusal a new
@@ -69,7 +76,9 @@ func retryVectorInputs() []retryVectorCase {
 		{"ticket_invalid", 402}, {"payment_verification_failed", 402},
 		{"ticket_required", 402}, {"admission_tag_invalid", 402}, {"bad_envelope", 400},
 		{"request_too_large", 413}, {"node_draining", 503},
-		{"", 408}, {"", 429}, {"", 500}, {"", 504}, {"", 404},
+		{"", 408}, {"", 429}, {"", 500}, {"", 502}, {"", 504}, {"", 507}, {"", 404},
+		// The caller's cancel outranks whatever the node answered.
+		{"canceled", 503},
 	} {
 		cases = append(cases, retryVectorCase{Kind: KindInterrupted, Code: r.code, NodeStatus: r.status})
 	}
