@@ -10,7 +10,6 @@
 import {
     type Ticket,
     type UsageReceipt,
-    type UsageType,
     bodyHashBytes,
     commitResponseKey,
     verifyReceipt as verifyReceiptSig,
@@ -128,62 +127,12 @@ export function verifyReceipt(r: UsageReceipt, t: Ticket, signingKey: Uint8Array
 }
 
 /**
- * parseReceiptJSON decodes a receipt from opened JSON bytes, as strictly as
- * Go's encoding/json decodes into the struct. Every signed field is rebuilt, so
- * the recomputed signature digest matches the node's. A field that is absent
- * or null reads as zero; one that is present must fit its Go type, or this
- * throws.
- *
- * The strictness is what makes the amount check sound: the canonical bytes
- * write a uint64, so a node that signed 2^64-1 and sent -1 would otherwise
- * verify and pass `amount_charged ≤ max_price`. An integer above 2^53 can't be
- * held exactly in a number, so it throws here where Go would decode it; both
- * reject the receipt.
+ * The receipt decoders verifyReceipt needs ahead of it: the stream's receipt
+ * frame and the buffered response's X-Zs-Receipt header. Both are zs-proto's,
+ * and refuse a value that doesn't fit its Go type; a lax decode would let a
+ * node sign 2^64-1 and send -1 past the amount check.
  */
-export function parseReceiptJSON(plaintext: Uint8Array): UsageReceipt {
-    let parsed: unknown
-    try {
-        parsed = JSON.parse(new TextDecoder().decode(plaintext))
-    } catch (err) {
-        throw new Error(`decode receipt json: ${message(err)}`)
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('decode receipt json: not an object')
-    }
-    const r = parsed as Record<string, unknown>
-    const absent = (v: unknown) => v === undefined || v === null
-    const uint = (name: string, max = Number.MAX_SAFE_INTEGER): number => {
-        const v = r[name]
-        if (absent(v)) return 0
-        if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > max) {
-            throw new Error(`decode receipt json: ${name} ${JSON.stringify(v)} is not an integer in [0, ${max}]`)
-        }
-        return v
-    }
-    const str = (name: string): string => {
-        const v = r[name]
-        if (absent(v)) return ''
-        if (typeof v !== 'string') throw new Error(`decode receipt json: ${name} is not a string`)
-        return v
-    }
-    const num = (name: keyof UsageReceipt) => uint(name)
-    const usage = (name: keyof UsageReceipt) => uint(name, 255) as UsageType
-    return {
-        ticket_id: str('ticket_id'),
-        actual_input_count: num('actual_input_count'),
-        actual_output_count: num('actual_output_count'),
-        amount_charged: num('amount_charged'),
-        ttft_ms: num('ttft_ms'),
-        decode_ms: num('decode_ms'),
-        body_hash: str('body_hash'),
-        input_usage_type: usage('input_usage_type'),
-        output_usage_type: usage('output_usage_type'),
-        aux_output_usage_type: usage('aux_output_usage_type'),
-        aux_output_count: num('aux_output_count'),
-        cached_input_count: num('cached_input_count'),
-        sig: str('sig'),
-    }
-}
+export { decodeReceiptHeader, parseReceiptJSON } from '@txnlab/zs-proto/ticket'
 
 function base64(b: Uint8Array): string {
     let s = ''

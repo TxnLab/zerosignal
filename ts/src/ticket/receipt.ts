@@ -153,7 +153,7 @@ export function encodeReceiptHeader(r: UsageReceipt): string {
 }
 
 // decodeReceiptHeader parses the base64(JSON) shape the node writes to
-// X-Zs-Receipt. Use before verifyReceipt.
+// X-Zs-Receipt, as strictly as parseReceiptJSON. Use before verifyReceipt.
 export function decodeReceiptHeader(value: string): UsageReceipt {
     let raw: Uint8Array
     try {
@@ -161,10 +161,67 @@ export function decodeReceiptHeader(value: string): UsageReceipt {
     } catch (err) {
         throw new Error(`decode receipt header base64: ${err instanceof Error ? err.message : String(err)}`)
     }
+    return receiptFromJSON(raw, 'decode receipt header json')
+}
+
+// parseReceiptJSON decodes a receipt from its JSON bytes, refusing any value
+// that doesn't fit its field's Go type. A field that is absent or null reads as
+// zero.
+//
+// The strictness is what makes verifyReceipt's amount check sound. The
+// canonical bytes write a uint64, so a node that signed 2^64-1 and sent -1
+// would otherwise verify and pass amount_charged ≤ max_price. An integer above
+// 2^53 can't be held exactly in a number, so it throws here where Go would
+// decode it; both reject the receipt.
+//
+// Go is stricter in one way that doesn't touch the amount check. JSON.parse
+// has already normalised a number's spelling, so 1e3, 1.0 and -0 are accepted
+// here as the integers they denote. Go's uint64 decode refuses all three.
+export function parseReceiptJSON(raw: Uint8Array): UsageReceipt {
+    return receiptFromJSON(raw, 'decode receipt json')
+}
+
+function receiptFromJSON(raw: Uint8Array, what: string): UsageReceipt {
+    let parsed: unknown
     try {
-        return JSON.parse(new TextDecoder().decode(raw)) as UsageReceipt
+        parsed = JSON.parse(new TextDecoder().decode(raw))
     } catch (err) {
-        throw new Error(`decode receipt header json: ${err instanceof Error ? err.message : String(err)}`)
+        throw new Error(`${what}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${what}: not an object`)
+    }
+    const r = parsed as Record<string, unknown>
+    const absent = (v: unknown) => v === undefined || v === null
+    const uint = (name: keyof UsageReceipt, max = Number.MAX_SAFE_INTEGER): number => {
+        const v = r[name]
+        if (absent(v)) return 0
+        if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > max) {
+            throw new Error(`${what}: ${name} ${JSON.stringify(v)} is not an integer in [0, ${max}]`)
+        }
+        return v
+    }
+    const str = (name: keyof UsageReceipt): string => {
+        const v = r[name]
+        if (absent(v)) return ''
+        if (typeof v !== 'string') throw new Error(`${what}: ${name} is not a string`)
+        return v
+    }
+    const usage = (name: keyof UsageReceipt) => uint(name, 255) as UsageType
+    return {
+        ticket_id: str('ticket_id'),
+        actual_input_count: uint('actual_input_count'),
+        actual_output_count: uint('actual_output_count'),
+        amount_charged: uint('amount_charged'),
+        ttft_ms: uint('ttft_ms'),
+        decode_ms: uint('decode_ms'),
+        body_hash: str('body_hash'),
+        input_usage_type: usage('input_usage_type'),
+        output_usage_type: usage('output_usage_type'),
+        aux_output_usage_type: usage('aux_output_usage_type'),
+        aux_output_count: uint('aux_output_count'),
+        cached_input_count: uint('cached_input_count'),
+        sig: str('sig'),
     }
 }
 

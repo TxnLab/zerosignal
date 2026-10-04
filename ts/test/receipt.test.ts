@@ -11,6 +11,7 @@ import {
     bodyHashBytes,
     decodeReceiptHeader,
     encodeReceiptHeader,
+    parseReceiptJSON,
     receiptCanonicalBytes,
     setBodyHashBytes,
     signReceipt,
@@ -98,6 +99,78 @@ describe('header codec', () => {
     it('decode rejects non-json payload', () => {
         const garbage = base64.encode(new TextEncoder().encode('{not'))
         expect(() => decodeReceiptHeader(garbage)).toThrow(/decode receipt header json/)
+    })
+
+    // The image path decodes the header, the stream path the frame; both must
+    // refuse a value Go's decoder would.
+    it('decode refuses a field Go could not decode', () => {
+        const header = base64.encode(new TextEncoder().encode(JSON.stringify({ ...sampleReceipt(), amount_charged: -1 })))
+        expect(() => decodeReceiptHeader(header)).toThrow(/decode receipt header json: amount_charged/)
+    })
+})
+
+describe('parseReceiptJSON', () => {
+    const enc = (v: unknown) => new TextEncoder().encode(JSON.stringify(v))
+
+    // Distinct values, so a field read from its neighbour can't pass.
+    it('round-trips every signed field', async () => {
+        const { signer, address } = newFakeSigner()
+        const r = {
+            ...sampleReceipt(),
+            cached_input_count: 25,
+            aux_output_count: 3,
+            ttft_ms: 9,
+            decode_ms: 11,
+            input_usage_type: UsageType.Tokens,
+            output_usage_type: UsageType.Images,
+            aux_output_usage_type: UsageType.Characters,
+        }
+        await signReceipt(r, signer, address)
+        expect(parseReceiptJSON(enc(r))).toEqual(r)
+    })
+
+    it('accepts each bound itself', () => {
+        const r = { ...sampleReceipt(), amount_charged: Number.MAX_SAFE_INTEGER, input_usage_type: 255 as UsageType }
+        expect(parseReceiptJSON(enc(r))).toMatchObject({
+            amount_charged: Number.MAX_SAFE_INTEGER,
+            input_usage_type: 255,
+        })
+    })
+
+    it('reads an absent or null field as zero', () => {
+        expect(parseReceiptJSON(enc({ ticket_id: 't', decode_ms: null, sig: null }))).toMatchObject({
+            ticket_id: 't',
+            decode_ms: 0,
+            cached_input_count: 0,
+            body_hash: '',
+            sig: '',
+        })
+    })
+
+    // The canonical bytes write a uint64, so -1 signs as 2^64-1 and would pass
+    // amount_charged ≤ max_price; 256 masks to 0 in a usage-type byte.
+    it.each([
+        ['amount_charged', -1],
+        ['amount_charged', 1.5],
+        ['amount_charged', '5'],
+        ['amount_charged', 2 ** 53],
+        ['actual_input_count', true],
+        ['input_usage_type', 256],
+        ['output_usage_type', 256],
+        ['aux_output_usage_type', 256],
+        ['aux_output_usage_type', -1],
+        ['ticket_id', 5],
+        ['body_hash', {}],
+    ])('refuses %s = %j', (field, value) => {
+        expect(() => parseReceiptJSON(enc({ ...sampleReceipt(), [field]: value }))).toThrow(
+            new RegExp(`decode receipt json: ${field}`),
+        )
+    })
+
+    it('refuses malformed JSON or a non-object', () => {
+        for (const s of ['not json', '1', 'null', '[]']) {
+            expect(() => parseReceiptJSON(new TextEncoder().encode(s))).toThrow(/decode receipt json/)
+        }
     })
 })
 

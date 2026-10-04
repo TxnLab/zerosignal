@@ -12,6 +12,7 @@ import {
     CommitKMismatchError,
     ReceiptError,
     TicketSignatureInvalidError,
+    decodeReceiptHeader,
     parseReceiptJSON,
     verifyCommitK,
     verifyReceipt,
@@ -199,31 +200,13 @@ describe('parseReceiptJSON', () => {
         expect(violation(() => verifyReceipt(parsed, TICKET, pub, sha256(hello)))).toBeUndefined()
     })
 
-    it('reads an omitted or null field as zero', () => {
-        const parsed = parseReceiptJSON(new TextEncoder().encode('{"ticket_id":"t","decode_ms":null,"sig":null}'))
-        expect(parsed).toMatchObject({ ticket_id: 't', decode_ms: 0, cached_input_count: 0, body_hash: '', sig: '' })
-    })
-
-    // The canonical bytes write a uint64, so -1 signs as 2^64-1: accepted, it
-    // would verify and pass amount_charged ≤ max_price.
-    it.each([
-        ['amount_charged', -1],
-        ['amount_charged', 1.5],
-        ['amount_charged', '5'],
-        ['amount_charged', 2 ** 53],
-        ['actual_input_count', true],
-        ['input_usage_type', 256],
-        ['aux_output_usage_type', -1],
-        ['ticket_id', 5],
-        ['body_hash', {}],
-    ])('refuses %s = %j, as Go would', (field, value) => {
-        const json = JSON.stringify({ ...RECEIPT, [field]: value })
-        expect(() => parseReceiptJSON(new TextEncoder().encode(json))).toThrow(new RegExp(`decode receipt json: ${field}`))
-    })
-
-    it('throws on malformed JSON or a non-object', () => {
-        for (const s of ['not json', '1', 'null', '[]']) {
-            expect(() => parseReceiptJSON(new TextEncoder().encode(s))).toThrow(/decode receipt json/)
-        }
+    // The canonical bytes write a uint64, so -1 signs as 2^64-1 and would pass
+    // the amount check. Both decoders a payer reaches must refuse it; the rest
+    // of the strictness is tested in zs-proto.
+    it('both receipt decoders refuse a negative amount', async () => {
+        const { v } = await signed(RECEIPT, 'receipt')
+        const json = new TextEncoder().encode(JSON.stringify({ ...v, amount_charged: -1 }))
+        expect(() => parseReceiptJSON(json)).toThrow(/amount_charged/)
+        expect(() => decodeReceiptHeader(b64(json))).toThrow(/amount_charged/)
     })
 })
