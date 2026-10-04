@@ -257,7 +257,7 @@ func (e *streamEmitter) reply(status int, header http.Header, body []byte, usage
 		}
 	}
 	if e.dec != nil && e.dec.failure != nil && status >= http.StatusBadRequest {
-		e.dec.failure.RetryAfter = parseRetryAfter(header.Get("Retry-After"))
+		e.dec.failure.RetryAfter = NodeRetryAfter(header)
 		if pe, ok := e.dec.failure.Err.(*ProviderError); ok {
 			pe.Status = status
 		}

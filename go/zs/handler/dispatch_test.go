@@ -1411,6 +1411,25 @@ func TestDispatch_MissingModel(t *testing.T) {
 	}
 }
 
+// One busy node asking for a day must not park the caller for one: its hint
+// reaches the client capped at five minutes.
+func TestDispatch_BusyRetryAfterIsCapped(t *testing.T) {
+	busy := newFakeNode(t, &nodeConfig{mode: modeReserveBusy, retryAfterSeconds: 86400})
+	cfg := testConfig()
+	opts := setup(t, cfg, busy)
+	opts.SweepDelay = noSweepDelay
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+	if w.Result().StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Result().StatusCode)
+	}
+	if got := w.Header().Get("Retry-After"); got != "300" {
+		t.Errorf("Retry-After = %q, want 300", got)
+	}
+}
+
 // An operator that stays busy for the whole budget still terminates in
 // 503 operators_busy + Retry-After. The busy re-sweep bounds the waiting; it
 // must not turn a persistently-full pool into a hang or a different code.

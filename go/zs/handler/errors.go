@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/zs"
 )
@@ -139,10 +140,18 @@ func writeError(w http.ResponseWriter, e *zs.Error) {
 		sh = kindShapes[e.Kind]
 	}
 	setShouldRetry(w.Header(), shouldRetry(e))
-	if e.RetryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(int(e.RetryAfter.Seconds())))
-	}
+	setRetryAfter(w.Header(), e.RetryAfter)
 	writeOpenAIError(w, sh.status, sh.errType, e.Code, e.Message)
+}
+
+// setRetryAfter writes d in whole seconds, and removes any Retry-After when
+// there is no wait to advise.
+func setRetryAfter(h http.Header, d time.Duration) {
+	if d <= 0 {
+		h.Del("Retry-After")
+		return
+	}
+	h.Set("Retry-After", strconv.Itoa(int(d.Seconds())))
 }
 
 // shouldRetryHeader overrides the status for OpenAI's SDKs (Python, Node,

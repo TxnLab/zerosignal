@@ -539,6 +539,37 @@ func TestValidateTicketShape_AcceptsAClampedInputCount(t *testing.T) {
 	}
 }
 
+// A free-ticket allowance resets up to a day out, and the caller is told when;
+// the TypeScript SDK's parseRetryAfter holds the same cases.
+func TestParseRetryAfter(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want time.Duration
+	}{
+		{"", 0},
+		{"0", 0},
+		{"-5", 0},
+		{"1.5", 0},
+		{"Wed, 21 Oct 2026 07:28:00 GMT", 0},
+		{" 30 ", 30 * time.Second},
+		{"+30", 30 * time.Second},
+		{"86400", 24 * time.Hour},
+		{"86401", 24 * time.Hour},
+		{"76172", 76172 * time.Second},
+		// Past where seconds × 1e9 overflows an int64, and past an int.
+		{"9223372037", 24 * time.Hour},
+		{"18446744074", 24 * time.Hour},
+		// The last value an int64 holds still reads as a day; one past it is no hint.
+		{"9223372036854775807", 24 * time.Hour},
+		{"9223372036854775808", 0},
+		{"99999999999999999999", 0},
+	} {
+		if got := parseRetryAfter(c.in); got != c.want {
+			t.Errorf("parseRetryAfter(%q) = %s, want %s", c.in, got, c.want)
+		}
+	}
+}
+
 func TestHTTPReserveClient_NetworkFailure(t *testing.T) {
 	// Operator with an unreachable URL but a valid, unexpired ephemeral
 	// recipient, so the seal step succeeds and the failure is genuinely the
@@ -735,11 +766,42 @@ func TestHTTPReserveClient_ResyncsAtMostOnce(t *testing.T) {
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
 	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
-	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err == nil {
+	_, err = c.Reserve(context.Background(), h.operator, req, nil)
+	if err == nil {
 		t.Fatal("Reserve should fail when the node persistently rejects the signature")
 	}
 	if calls != 2 {
 		t.Fatalf("want exactly 2 attempts (initial + one resync), got %d", calls)
+	}
+	// As any other refusal, so the dispatcher classifies it rather than
+	// reading an unknown error as busy.
+	if re, ok := AsReserveHTTP(err); !ok || re.Status != http.StatusUnauthorized || re.Code != "invalid_payer_sig" {
+		t.Fatalf("err = %#v, want a *ReserveHTTPError 401 invalid_payer_sig", err)
+	}
+}
+
+// An unsigned reserve can't resync, so a skew 401 surfaces as a refusal.
+func TestHTTPReserveClient_UnsignedSkewIsARefusal(t *testing.T) {
+	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = h.decodeReserve(t, r)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":{"code":"invalid_payer_sig","message":"required (node_time=1700000123)"}}`)
+	})
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
+	if re, ok := AsReserveHTTP(err); !ok || re.Status != http.StatusUnauthorized {
+		t.Fatalf("err = %#v, want a *ReserveHTTPError 401", err)
+	}
+}
+
+// One node's hint is capped where it becomes the caller's wait.
+func TestNodeRetryHint(t *testing.T) {
+	if got := nodeRetryHint(24 * time.Hour); got != maxNodeRetryHint {
+		t.Errorf("nodeRetryHint(24h) = %s, want %s", got, maxNodeRetryHint)
+	}
+	if got := nodeRetryHint(30 * time.Second); got != 30*time.Second {
+		t.Errorf("nodeRetryHint(30s) = %s, want 30s", got)
 	}
 }
 

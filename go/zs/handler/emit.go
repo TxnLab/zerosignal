@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/zs"
 )
@@ -134,7 +135,7 @@ func (e *httpEmitter) fail(err error) {
 		return
 	}
 	if up, ok := errors.AsType[*zs.NodeReply](ze.Err); ok {
-		e.passThrough(up, shouldRetry(ze))
+		e.passThrough(up, shouldRetry(ze), ze.RetryAfter)
 		return
 	}
 	if ze.Code == "wallet_unfunded" && e.fundingHint != "" {
@@ -147,13 +148,15 @@ func (e *httpEmitter) fail(err error) {
 
 // passThrough writes an operator's error response. No node-set X-Zs-* header
 // reaches the client (SPEC §5.2 step 4); the proxy's own are kept. The retry
-// advice is the proxy's, set over any the node sent.
-func (e *httpEmitter) passThrough(up *zs.NodeReply, retry bool) {
+// advice is the proxy's, set over any the node sent: Retry-After is the
+// Error's, which caps one node's hint, not the node's header.
+func (e *httpEmitter) passThrough(up *zs.NodeReply, retry bool, retryAfter time.Duration) {
 	h := e.w.Header()
 	proxyHdrs := snapshotZsHeaders(h)
 	copyResponseHeaders(h, up.Header)
 	stripNodeZsHeaders(h, proxyHdrs)
 	setShouldRetry(h, retry)
+	setRetryAfter(h, retryAfter)
 	h.Del("Content-Length")
 	if up.ContentType != "" {
 		h.Set("Content-Type", up.ContentType)
@@ -172,6 +175,7 @@ func (e *httpEmitter) reply(status int, header http.Header, body []byte, usage *
 	stripNodeZsHeaders(h, proxyHdrs)
 	h.Del("Content-Length")
 	h.Set("Content-Type", "application/json")
+	setRetryAfter(h, zs.NodeRetryAfter(header))
 	if status >= http.StatusBadRequest {
 		// A reply comes after the open, so resending it pays again.
 		setShouldRetry(h, false)

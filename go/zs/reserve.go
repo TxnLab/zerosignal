@@ -272,6 +272,10 @@ func parsePayerRefusal(body []byte, retryAfter time.Duration) *PayerRefusalError
 // the generic non-200 error and no resync is attempted.
 type payerSigSkewError struct {
 	nodeTime int64
+	// http is the 401 as any other refusal, which Reserve returns when it
+	// can't resync: the dispatcher classifies a *ReserveHTTPError, and this
+	// type would otherwise reach it as an unknown error and read as busy.
+	http *ReserveHTTPError
 }
 
 func (e *payerSigSkewError) Error() string {
@@ -530,6 +534,11 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 			}
 		}
 	}
+	// Unsigned, or still skewed after the resync: the 401 is an ordinary refusal.
+	var skew *payerSigSkewError
+	if errors.As(err, &skew) {
+		return nil, skew.http
+	}
 	if err != nil {
 		// A bad_reserve_envelope means the node couldn't age-open the body (the
 		// recipient we sealed to is defunct — a stale-but-unexpired ephemeral).
@@ -662,7 +671,13 @@ func (c *HTTPReserveClient) reserveAttempt(
 		}
 		if json.Unmarshal(respBody, &env) == nil && env.Error.Code == "invalid_payer_sig" {
 			if nt, ok := parseNodeTime(env.Error.Message); ok {
-				return nil, &payerSigSkewError{nodeTime: nt}
+				return nil, &payerSigSkewError{nodeTime: nt, http: &ReserveHTTPError{
+					Status:         resp.StatusCode,
+					Code:           env.Error.Code,
+					RetryAfter:     parseRetryAfter(resp.Header.Get("Retry-After")),
+					Message:        truncate(string(respBody), 256),
+					RelayHopMarked: resp.Header.Get(wire.RelayHopHeader) != "",
+				}}
 			}
 		}
 	}
@@ -817,9 +832,10 @@ func validateTicketShape(t *ticket.Ticket, op Operator, req ticket.ReserveReques
 
 // parseRetryAfter interprets the HTTP Retry-After header as a duration.
 // Per RFC 7231 the value may be either a delta-seconds integer or an
-// HTTP-date; we only parse delta-seconds (what the node emits) and
-// clamp to a sane range so a hostile operator can't ask the proxy to
-// wait arbitrarily.
+// HTTP-date; we only parse delta-seconds (what the node emits). It reads the
+// node's value up to a day, because a free-ticket allowance resets on that
+// scale and the caller is told when. Where one node's hint becomes the
+// caller's wait otherwise, nodeRetryHint caps it.
 func parseRetryAfter(v string) time.Duration {
 	if v == "" {
 		return 0
@@ -828,12 +844,28 @@ func parseRetryAfter(v string) time.Duration {
 	if err != nil || n <= 0 {
 		return 0
 	}
-	const maxRetryAfter = 5 * time.Minute
-	d := time.Duration(n) * time.Second
-	if d > maxRetryAfter {
+	const maxRetryAfter = 24 * time.Hour
+	// Compared before the multiply, which overflows int64 past ~292 years.
+	if n >= int(maxRetryAfter/time.Second) {
 		return maxRetryAfter
 	}
-	return d
+	return time.Duration(n) * time.Second
+}
+
+// maxNodeRetryHint caps one node's Retry-After where it becomes the wait an
+// Error tells its caller to honor: a single hostile or misconfigured node must
+// not park the caller for a day. The free-ticket reset (PayerRefusalError) is
+// enforced on chain against the payer, so it keeps its full value.
+const maxNodeRetryHint = 5 * time.Minute
+
+func nodeRetryHint(d time.Duration) time.Duration { return min(d, maxNodeRetryHint) }
+
+// NodeRetryAfter is the wait one node's reply asks for, as its Retry-After
+// header reads and capped at maxNodeRetryHint. A server passing a node's
+// reply through sets this in place of the node's own header, or the cap is
+// lost on the way out.
+func NodeRetryAfter(h http.Header) time.Duration {
+	return nodeRetryHint(parseRetryAfter(h.Get("Retry-After")))
 }
 
 func truncate(s string, n int) string {

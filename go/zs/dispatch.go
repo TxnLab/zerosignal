@@ -914,8 +914,8 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					// safe rather than dereferencing a nil below.
 					break
 				}
-				if be.RetryAfter > busyHint {
-					busyHint = be.RetryAfter
+				if h := nodeRetryHint(be.RetryAfter); h > busyHint {
+					busyHint = h
 				}
 				// Gate on the code, never the bare 429: re-asking a payer_slot_cap
 				// spends a penalty strike per ask. transient.RetryableBusyCode has
@@ -3040,7 +3040,7 @@ func (s *Client) buildNonStreamResponder(
 				// into a terminal refusal for any caller that classifies our response.
 				msg := fmt.Sprintf("operator returned HTTP %d with a body this proxy could not parse as an OpenAI error (content-type %q)",
 					upstreamResp.StatusCode, ctSafe)
-				em.fail(&Error{Kind: KindInterrupted, Message: msg, RetryAfter: parseRetryAfter(upstreamResp.Header.Get("Retry-After")), Err: &NodeReply{
+				em.fail(&Error{Kind: KindInterrupted, Message: msg, RetryAfter: NodeRetryAfter(upstreamResp.Header), Err: &NodeReply{
 					Status:      upstreamResp.StatusCode,
 					Header:      nodeHeader(upstreamResp.Header),
 					Body:        openAIErrorBody("server_error", "", msg),
@@ -3056,7 +3056,7 @@ func (s *Client) buildNonStreamResponder(
 			// back to the caller (ticket_required, ticket_invalid, ...). Even
 			// here no node-set X-Zs-* header reaches the client, since a hostile
 			// node could stuff arbitrary values into them.
-			em.fail(&Error{Kind: KindInterrupted, Code: openAIErrorCode(respBody), Message: msg, RetryAfter: parseRetryAfter(upstreamResp.Header.Get("Retry-After")), Err: &NodeReply{
+			em.fail(&Error{Kind: KindInterrupted, Code: openAIErrorCode(respBody), Message: msg, RetryAfter: NodeRetryAfter(upstreamResp.Header), Err: &NodeReply{
 				Status: upstreamResp.StatusCode,
 				Header: nodeHeader(upstreamResp.Header),
 				Body:   respBody,

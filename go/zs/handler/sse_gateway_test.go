@@ -87,6 +87,21 @@ func TestForwardStream_NonOpenAIErrorBody_PreservesRetryAfter(t *testing.T) {
 	}
 }
 
+// Kept, but one node's day is capped like any other node hint.
+func TestForwardStream_NonOpenAIErrorBody_CapsRetryAfter(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{mode: modeInferenceGatewayHTMLError, gatewayRetryAfter: "86400"})
+	cfg := testConfig()
+	s := testServer(cfg, setup(t, cfg, node))
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
+		`{"model":"gpt-test","stream":true}`))
+
+	if got := w.Header().Get("Retry-After"); got != "300" {
+		t.Errorf("Retry-After = %q, want 300", got)
+	}
+}
+
 // A hostile operator must not be able to write an unbounded Content-Type into the
 // payer's log or the client-visible error.
 func TestForwardStream_NonOpenAIErrorBody_TruncatesContentType(t *testing.T) {

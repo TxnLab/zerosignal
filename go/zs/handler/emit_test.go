@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs"
@@ -49,6 +50,34 @@ func testReceipt() zs.ReceiptVerified {
 	return zs.ReceiptVerified{Receipt: ticket.UsageReceipt{TicketID: "tid"}}
 }
 
+// A sealed reply passes the node's headers through too, but not its
+// Retry-After uncapped. A value that reads as no hint — an HTTP-date, which
+// the parser doesn't take, or zero — is removed rather than copied, since a
+// client would still honour it.
+func TestHTTPEmitter_ReplyCapsRetryAfter(t *testing.T) {
+	for _, status := range []int{200, 400, 503} {
+		for _, tc := range []struct{ node, want string }{
+			{"86400", "300"}, {"7", "7"}, {"", ""}, {"0", ""},
+			{"Wed, 21 Oct 2099 07:28:00 GMT", ""},
+		} {
+			w := httptest.NewRecorder()
+			h := http.Header{}
+			if tc.node != "" {
+				h.Set("Retry-After", tc.node)
+			}
+			h.Set("X-Should-Retry", "true")
+			emitterFor(w, "/v1/chat/completions", formatChat).reply(status, h, []byte(`{}`), nil)
+			if got := w.Header().Get("Retry-After"); got != tc.want {
+				t.Errorf("%d with node Retry-After %q: sent %q, want %q", status, tc.node, got, tc.want)
+			}
+			// An error reply comes after the open, so resending it pays again.
+			if got := w.Header().Get("X-Should-Retry"); status >= 400 && got != "false" {
+				t.Errorf("%d: x-should-retry %q, want false", status, got)
+			}
+		}
+	}
+}
+
 // An operator's own error passes through with its status and body, and the
 // proxy's X-Zs-* headers survive the strip while the node's do not.
 func TestHTTPEmitter_PassThrough(t *testing.T) {
@@ -59,12 +88,14 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 	node := http.Header{}
 	node.Set("Content-Type", "application/json; charset=utf-8")
 	node.Set("Content-Length", "5")
-	node.Set("Retry-After", "3")
+	// A day from the node; the Error carries it capped, as the SDK sets it.
+	node.Set("Retry-After", "86400")
 	node.Set("X-Zs-Max-Output-Clamped", "999")
 	node.Set("X-Zs-Future-Field", "leak-me")
 	em.serve((&script{
 		events: []zs.Event{zs.MaxOutputClamped{Ceiling: 100}},
-		err:    &zs.Error{Kind: zs.KindInterrupted, Code: "ticket_invalid", Err: &zs.NodeReply{Status: 402, Header: node, Body: body}},
+		err: &zs.Error{Kind: zs.KindInterrupted, Code: "ticket_invalid", RetryAfter: 5 * time.Minute,
+			Err: &zs.NodeReply{Status: 402, Header: node, Body: body}},
 	}).seq())
 
 	if w.Code != 402 || w.Body.String() != string(body) {
@@ -77,8 +108,8 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 	if got := h.Get("X-Zs-Future-Field"); got != "" {
 		t.Errorf("node-set X-Zs-Future-Field leaked: %q", got)
 	}
-	if got := h.Get("Retry-After"); got != "3" {
-		t.Errorf("Retry-After %q, want the node's 3", got)
+	if got := h.Get("Retry-After"); got != "300" {
+		t.Errorf("Retry-After %q, want the Error's 300, not the node's day", got)
 	}
 	if got := h.Get("Content-Length"); got != "" {
 		t.Errorf("Content-Length %q passed through", got)
@@ -96,6 +127,16 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 		Err: &zs.NodeReply{Status: 504, Header: html, Body: []byte("{}\n"), ContentType: "application/json"}})
 	if got := w.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type %q, want application/json", got)
+	}
+
+	// An Error with no hint sends none, even where the node's page had one.
+	w = httptest.NewRecorder()
+	day := http.Header{}
+	day.Set("Retry-After", "86400")
+	emitterFor(w, "/", formatChat).fail(&zs.Error{Kind: zs.KindInterrupted,
+		Err: &zs.NodeReply{Status: 503, Header: day, Body: []byte("{}")}})
+	if got := w.Header().Get("Retry-After"); got != "" {
+		t.Errorf("Retry-After %q, want none: the Error carried no hint", got)
 	}
 }
 

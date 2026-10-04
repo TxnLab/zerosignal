@@ -267,6 +267,26 @@ func TestStreamEmitter_ReplyDone(t *testing.T) {
 	}
 }
 
+// One node may ask for a day; the caller is told at most maxNodeRetryHint.
+func TestStreamEmitter_ReplyFailedCapsRetryAfter(t *testing.T) {
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(_ Event, err error) bool { gotErr = err; return true },
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	h := http.Header{}
+	h.Set("Retry-After", "86400")
+	em.reply(503, h, []byte(`{"detail":"x"}`), nil)
+	ze, ok := gotErr.(*Error)
+	if !ok {
+		t.Fatalf("ended in %v, want an *Error", gotErr)
+	}
+	if ze.RetryAfter != maxNodeRetryHint {
+		t.Errorf("RetryAfter = %v, want %v", ze.RetryAfter, maxNodeRetryHint)
+	}
+}
+
 // A sealed reply the node marked failed is not an answer, whether or not its
 // body says why, and its Retry-After is kept. Its status is what judges a
 // retry when the body names no code.
@@ -528,7 +548,8 @@ func TestNonStreamResponder_PreEnvelopeErrorIsInterrupted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			em := &recEmitter{}
 			resp := &http.Response{StatusCode: 402, Header: http.Header{}}
-			resp.Header.Set("Retry-After", "3")
+			// A day, which one node's hint is capped from.
+			resp.Header.Set("Retry-After", "86400")
 			setNodeHeaders(resp.Header)
 			if err := responder(em, resp, []byte(tc.body)); err != nil {
 				t.Fatal(err)
@@ -546,8 +567,8 @@ func TestNonStreamResponder_PreEnvelopeErrorIsInterrupted(t *testing.T) {
 			if !strings.Contains(string(up.Body), "{") {
 				t.Errorf("reply body %q, want JSON", up.Body)
 			}
-			if em.failed.RetryAfter == 0 {
-				t.Error("RetryAfter not copied from the node's Retry-After")
+			if em.failed.RetryAfter != maxNodeRetryHint {
+				t.Errorf("RetryAfter = %v, want the node's day capped to %v", em.failed.RetryAfter, maxNodeRetryHint)
 			}
 			assertNodeHeader(t, "NodeReply", up.Header)
 		})
