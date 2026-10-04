@@ -66,6 +66,7 @@ interface VectorsFile {
     body_hash_frames: { frames_hex: string[]; expected_hex: string }
     commit_response_key: { k_hex: string; expected_hex: string }
     ticket: { value: Ticket; canonical_bytes_hex: string; sig_digest_hex: string }
+    ticket_edge: { value: Ticket; canonical_bytes_hex: string; sig_digest_hex: string }
     receipt: { value: UsageReceipt; canonical_bytes_hex: string; sig_digest_hex: string }
     ephemeral_advertisement: {
         operator_id: number
@@ -153,6 +154,14 @@ describe('cross-impl golden vectors (proto/testdata/vectors.json)', () => {
 
     it('ticket sig digest = sha256(canonical)', () => {
         const v = vectors.ticket
+        expect(bytesToHex(ticketSigDigest(v.value))).toBe(v.sig_digest_hex)
+    })
+
+    // stream false, empty strings and a negative expires_at.
+    it('edge ticket canonicalBytes and sig digest', () => {
+        const v = vectors.ticket_edge
+        expect([v.value.stream, v.value.model, v.value.expires_at]).toEqual([false, '', -1])
+        expect(bytesToHex(ticketCanonicalBytes(v.value))).toBe(v.canonical_bytes_hex)
         expect(bytesToHex(ticketSigDigest(v.value))).toBe(v.sig_digest_hex)
     })
 
