@@ -23,7 +23,7 @@ import (
 // The set is closed: only this package implements Event.
 //
 // Some types are declared ahead of the code that emits them: RouteCandidates,
-// HopChanged, ReserveStarted, ReserveRetrying, ReceiptViolated,
+// RelayHopChanged, ReserveStarted, ReserveRetrying, ReceiptViolated,
 // SettleSubmitted, SettleConfirmed and NodeExcluded are not yet emitted.
 type Event interface {
 	EventType() string
@@ -40,21 +40,21 @@ type RouteCandidates struct {
 	SizeMisses []NodeRef
 }
 
-// HopReason says why a HopChanged event fired.
-type HopReason string
+// RelayHopReason says why a RelayHopChanged event fired.
+type RelayHopReason string
 
 const (
-	HopChosen  HopReason = "chosen"
-	HopRotated HopReason = "rotated"
+	RelayHopChosen  RelayHopReason = "chosen"
+	RelayHopRotated RelayHopReason = "rotated"
 )
 
-// HopChanged fires when the SDK picks a relay, and again on each
+// RelayHopChanged fires when the SDK picks a relay, and again on each
 // pre-payment rotation. Relay is nil for a direct connection, which only
 // happens under PrivacyDirect.
-type HopChanged struct {
+type RelayHopChanged struct {
 	Relay  *NodeRef
 	Target NodeRef
-	Reason HopReason
+	Reason RelayHopReason
 }
 
 // ReserveStarted fires on each reserve attempt.
@@ -297,7 +297,7 @@ type Done struct {
 }
 
 func (RouteCandidates) EventType() string  { return "route.candidates" }
-func (HopChanged) EventType() string       { return "relay.hop" }
+func (RelayHopChanged) EventType() string  { return "relay.hop" }
 func (ReserveStarted) EventType() string   { return "reserve.started" }
 func (ReserveRetrying) EventType() string  { return "reserve.retrying" }
 func (ReserveSucceeded) EventType() string { return "reserve.succeeded" }
@@ -323,7 +323,7 @@ func (NodeExcluded) EventType() string     { return "node.excluded" }
 func (Done) EventType() string             { return "done" }
 
 func (RouteCandidates) event()  {}
-func (HopChanged) event()       {}
+func (RelayHopChanged) event()  {}
 func (ReserveStarted) event()   {}
 func (ReserveRetrying) event()  {}
 func (ReserveSucceeded) event() {}
