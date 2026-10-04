@@ -40,6 +40,7 @@ import {
     decryptSSEDataValue,
     openReserveResponse,
     openSealedHeader,
+    ResponseOpener,
     unwrapResponseKey,
     RESPONSE_KEY_SIZE,
     SEALED_HEADER_RECEIPT,
@@ -156,5 +157,60 @@ describe('sealed_vectors.json', () => {
                 ).toThrow(/aead open/)
             })
         }
+    })
+
+    describe('ResponseOpener', () => {
+        it('numbers the fixture frames from 0', () => {
+            expect(v.frames.map((f) => f.index)).toEqual(v.frames.map((_, i) => i))
+        })
+
+        // A settle group arrives between content frames on a real stream; opening
+        // it must leave the receipt frame on the index the content frames reached.
+        it('opens the frames in order with a header between each, the counter moved by frames only', () => {
+            const o = new ResponseOpener(key, v.tx_id, v.ticket_id)
+            for (const f of v.frames) {
+                for (const h of v.headers) {
+                    expect(o.openHeader(h.value_b64, h.name)).toEqual(hex.decode(h.plaintext_hex))
+                }
+                expect(o.frameIndex).toBe(f.index)
+                expect(o.openNextFrame(f.data_b64)).toEqual(hex.decode(f.plaintext_hex))
+            }
+            expect(o.frameIndex).toBe(v.frames.length)
+        })
+
+        it('does not advance on a failed open, so the next frame still opens', () => {
+            const o = new ResponseOpener(key, v.tx_id, v.ticket_id)
+            const second = v.frames[1]
+            expect(second).toBeDefined()
+            expect(() => o.openNextFrame(second!.data_b64)).toThrow(/aead open/)
+            expect(o.frameIndex).toBe(0)
+            expect(o.openNextFrame(v.frames[0]!.data_b64)).toEqual(hex.decode(v.frames[0]!.plaintext_hex))
+            expect(o.frameIndex).toBe(1)
+        })
+
+        it('binds the ids in the order given', () => {
+            const o = new ResponseOpener(key, v.ticket_id, v.tx_id)
+            expect(() => o.openNextFrame(v.frames[0]!.data_b64)).toThrow(/aead open/)
+            expect(() => o.openBody(enc.encode(v.body_envelope_json))).toThrow(/aead open/)
+        })
+
+        it('opens the body without touching the counter', () => {
+            const o = new ResponseOpener(key, v.tx_id, v.ticket_id)
+            expect(o.openBody(enc.encode(v.body_envelope_json))).toEqual(hex.decode(v.body_plaintext_hex))
+            expect(o.frameIndex).toBe(0)
+        })
+
+        it('refuses a key that is not 32 bytes', () => {
+            expect(() => new ResponseOpener(key.subarray(0, 31), v.tx_id, v.ticket_id)).toThrow(/32 bytes/)
+            expect(() => new ResponseOpener(new Uint8Array(33), v.tx_id, v.ticket_id)).toThrow(/32 bytes/)
+        })
+
+        // Held by reference so the caller's zeroing reaches it.
+        it('stops opening once the caller zeroes the key', () => {
+            const k = key.slice()
+            const o = new ResponseOpener(k, v.tx_id, v.ticket_id)
+            k.fill(0)
+            expect(() => o.openNextFrame(v.frames[0]!.data_b64)).toThrow(/aead open/)
+        })
     })
 })
