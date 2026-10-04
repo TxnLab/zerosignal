@@ -765,21 +765,12 @@ var (
 
 func sharedCollateralCache() *cachingGetter {
 	collateralOnce.Do(func() {
-		store := newCollateralStore()
-		entries := store.load()
-		if entries == nil {
-			entries = make(map[string]collateralEntry)
-		}
+		// No store until PersistCollateral attaches one.
 		collateralCache = &cachingGetter{
 			inner:       &pcsGetter{},
-			entries:     entries,
+			entries:     make(map[string]collateralEntry),
 			ttl:         collateralTTL,
-			store:       store,
 			staleWarned: make(map[string]bool),
-		}
-		if n := len(entries); n > 0 {
-			slog.Debug("attestation: warm-started the collateral cache from disk",
-				slog.Int("artifacts", n))
 		}
 	})
 	return collateralCache

@@ -503,6 +503,22 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 // Two reconcilers over one journal would each submit the other Client's live
 // tickets, so a second Client that would sweep it is refused until the first
 // closes. A Client with a caller's wallet runs no reconciler and may share it.
+// The collateral cache is the process's, so New refuses to persist it to a
+// directory other than the one it already uses, and accepts that one.
+func TestNew_CollateralDirIsTheProcesss(t *testing.T) {
+	cfg := suppliedParts(t)
+	cfg.Stores.CollateralDir = t.TempDir()
+	if _, err := New(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "Stores.CollateralDir") {
+		t.Errorf("a second collateral dir: err %v, want Stores.CollateralDir named", err)
+	}
+	cfg.Stores.CollateralDir = testStateDir
+	c, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("the process's own collateral dir: %v", err)
+	}
+	c.Close()
+}
+
 func TestNew_OneReconcilerPerJournal(t *testing.T) {
 	url, _, _ := fakeEscrowAlgod(t, 123_400)
 	j, err := OpenFileJournal(filepath.Join(t.TempDir(), "journal.json"))

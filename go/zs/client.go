@@ -172,6 +172,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	for _, w := range warnings {
 		cfg.Logger.Warn(w)
 	}
+	if err := PersistCollateral(cfg.Stores.CollateralDir); err != nil {
+		return nil, configError("Stores.CollateralDir: " + err.Error())
+	}
 	cfg.Network = Network{Algod: ac, EscrowAppID: appID}
 	parts, err := buildNetworkParts(ctx, cfg, ac, appID)
 	if err != nil {

@@ -309,9 +309,9 @@ func TestSharedCollateralCacheIsAProcessSingleton(t *testing.T) {
 	// cold and stale-while-revalidate has nothing to serve. The path is
 	// asserted too: it must be the directory the process configured, which
 	// TestMain sets to a temporary one.
-	dir := CollateralStateDir
+	dir := testStateDir
 	if dir == "" {
-		t.Fatal("TestMain did not set CollateralStateDir")
+		t.Fatal("TestMain did not persist the collateral cache")
 	}
 	if a.store == nil {
 		t.Fatal("the shared cache has no store — nothing survives a restart")

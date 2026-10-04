@@ -624,3 +624,40 @@ func TestCachingGetter_PersistsAfterASuccessfulFetch(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// A store attached to a cache already in use loads what the file holds
+// without overwriting what this process fetched, then persists to that path
+// and no other.
+func TestCachingGetter_AttachStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), collateralStoreFile)
+	old := time.Now().Add(-time.Hour)
+	(&collateralStore{path: path}).save(map[string]collateralEntry{
+		"https://pcs.example/a": {body: []byte("disk a"), fetched: old},
+		"https://pcs.example/b": {body: []byte("disk b"), fetched: old},
+	})
+	c := &cachingGetter{
+		ttl:     collateralTTL,
+		entries: map[string]collateralEntry{"https://pcs.example/a": {body: []byte("fetched a"), fetched: time.Now()}},
+	}
+	if err := c.attachStore(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(c.entries["https://pcs.example/a"].body); got != "fetched a" {
+		t.Errorf("entry a = %q: the file replaced what this process fetched", got)
+	}
+	if got := string(c.entries["https://pcs.example/b"].body); got != "disk b" {
+		t.Errorf("entry b = %q, want the file's", got)
+	}
+	if c.store == nil || c.store.path != path {
+		t.Fatalf("store %+v, want one at %s", c.store, path)
+	}
+	if err := c.attachStore(path); err != nil {
+		t.Errorf("the same path again: %v", err)
+	}
+	if err := c.attachStore(filepath.Join(t.TempDir(), collateralStoreFile)); err == nil {
+		t.Error("a second path was accepted; the cache persists to one")
+	}
+	if c.store.path != path {
+		t.Errorf("store moved to %s", c.store.path)
+	}
+}

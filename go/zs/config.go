@@ -101,6 +101,14 @@ type Stores struct {
 	// whose live tickets the first would then race its watchdog to refund.
 	Journal TicketJournal
 
+	// CollateralDir is a state directory the TEE collateral cache persists
+	// to, so a restart during an Intel PCS outage still has collateral to
+	// verify against. Empty keeps it in memory. The cache is the process's
+	// (see PersistCollateral): New fails on a directory other than the one
+	// it already persists to. Use a state directory, not a cache directory
+	// the OS may sweep.
+	CollateralDir string
+
 	// The routing signals: per-relay forward reputation, observed network
 	// latency, per-target failure backoff, and nodes proven to have handed a
 	// fraudulent settle group. A nil store keeps no such signal.

@@ -7,6 +7,7 @@ package zs
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -15,10 +16,18 @@ import (
 	"time"
 )
 
-// CollateralStateDir is the directory the TEE collateral cache persists to.
-// Empty disables persistence. It is read once, at the first attestation
-// check, so a process must set it before then.
-var CollateralStateDir string
+// PersistCollateral keeps the process's TEE collateral cache in dir and loads
+// what dir already holds. The cache is one per process, shared by every Client
+// and by VerifyTDXQuoteChain, since Intel's documents are the same for all of
+// them; so it persists to one directory, and naming another is an error. New
+// calls it with Stores.CollateralDir; a program that verifies quotes without a
+// Client calls it itself.
+func PersistCollateral(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	return sharedCollateralCache().attachStore(filepath.Join(dir, collateralStoreFile))
+}
 
 // Intel PCS collateral, kept across restarts.
 //
@@ -40,8 +49,8 @@ var CollateralStateDir string
 //
 // STATE, NOT CACHE. A directory under os.UserCacheDir is swept routinely,
 // by the OS or the user, which would silently re-open the restart hole
-// this file exists to close; CollateralStateDir should be a state
-// directory for that reason.
+// this file exists to close; the directory given to PersistCollateral
+// should be a state directory for that reason.
 const collateralStoreFile = "tee-collateral.json"
 
 // collateralPersistDebounce coalesces writes after a successful fetch.
@@ -103,26 +112,38 @@ type collateralStore struct {
 	timer *time.Timer
 }
 
-// newCollateralStore resolves the state path. A nil store means "no
-// persistence" and every method tolerates it, so a process with no state
+// newCollateralStoreAt is the store persisting to path. A nil store means
+// "no persistence" and every method tolerates it, so a process with no state
 // directory degrades to the in-memory cache rather than failing to start.
-func newCollateralStore() *collateralStore {
-	if CollateralStateDir == "" {
-		slog.Debug("attestation: no state directory, collateral cache will not persist")
-		return nil
-	}
-	return newCollateralStoreAt(filepath.Join(CollateralStateDir, collateralStoreFile))
-}
-
-// newCollateralStoreAt is newCollateralStore against an explicit path,
-// so a test that builds its own cachingGetter can exercise the real
-// persistence wiring against a temp directory.
-//
-// The process singleton reads CollateralStateDir instead, which this
-// package's TestMain points at a temporary directory, so tests never touch
-// a real tee-collateral.json.
 func newCollateralStoreAt(path string) *collateralStore {
 	return &collateralStore{path: path}
+}
+
+// attachStore starts persisting g to path, loading what path holds under the
+// entries g already has: those were fetched in this process, so they are no
+// older than the file's. A cache persists to one path; a second is an error.
+func (g *cachingGetter) attachStore(path string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.store != nil {
+		if g.store.path == path {
+			return nil
+		}
+		return fmt.Errorf("zs: TEE collateral already persists to %s, not %s", g.store.path, path)
+	}
+	s := newCollateralStoreAt(path)
+	loaded := 0
+	for url, e := range s.load() {
+		if _, ok := g.entries[url]; !ok {
+			g.entries[url] = e
+			loaded++
+		}
+	}
+	g.store = s
+	if loaded > 0 {
+		slog.Debug("attestation: warm-started the collateral cache from disk", slog.Int("artifacts", loaded))
+	}
+	return nil
 }
 
 // load reads the persisted entries.
@@ -257,26 +278,29 @@ func (s *collateralStore) save(entries map[string]collateralEntry) {
 
 // persistSoon schedules a debounced save of the cache's current entries.
 func (g *cachingGetter) persistSoon() {
-	if g.store == nil {
+	g.mu.Lock()
+	store := g.store
+	g.mu.Unlock()
+	if store == nil {
 		return
 	}
 	debounce := g.persistDebounce
 	if debounce <= 0 {
 		debounce = collateralPersistDebounce
 	}
-	g.store.mu.Lock()
-	defer g.store.mu.Unlock()
-	if g.store.timer != nil {
-		g.store.timer.Reset(debounce)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.timer != nil {
+		store.timer.Reset(debounce)
 		return
 	}
-	g.store.timer = time.AfterFunc(debounce, func() {
+	store.timer = time.AfterFunc(debounce, func() {
 		g.mu.Lock()
 		snapshot := make(map[string]collateralEntry, len(g.entries))
 		for k, v := range g.entries {
 			snapshot[k] = v
 		}
 		g.mu.Unlock()
-		g.store.save(snapshot)
+		store.save(snapshot)
 	})
 }
