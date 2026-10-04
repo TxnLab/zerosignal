@@ -79,8 +79,8 @@ type Client struct {
 	// demotes a currently-backed-off node to the tail so a persistently-failing
 	// operator stops costing every request a doomed round-trip; the reserve loop
 	// records target-attributable transient failures into it. Nil in tests —
-	// every consult and record is then a no-op. Mirrors the client's
-	// target-backoff.ts.
+	// every consult and record is then a no-op. Mirrors the TS SDK's
+	// TargetBackoffStore.
 	targetBackoff TargetBackoff
 
 	// nodeExcluder is the write-once, never-reset set of nodes proven to have
@@ -89,7 +89,7 @@ type Client struct {
 	// and pickCandidates / the relay pool hard-drop excluded nodes — the one
 	// deliberately non-self-healing routing signal (proven misbehaviour, not a
 	// transient fault). Nil in tests — every consult and record is then a no-op.
-	// Mirrors the client's excluded-nodes.ts.
+	// Mirrors the TS SDK's NodeExclusionStore.
 	nodeExcluder NodeExcluder
 
 	// weightsWarned dedupes the "digest contradicts peer consensus" WARN to one

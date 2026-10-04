@@ -54,6 +54,17 @@ const config = resolveConfig({ signer, network: testnet() })
 and private deployments set `network.escrowAppId`. Durations are milliseconds. A config the SDK
 cannot run with throws a `ZsError` with kind `invalid_request` and code `invalid_config`.
 
+## Routing stores
+
+`@txnlab/zerosignal/routing` holds the payer's own routing signals: `RelayReputationStore`,
+`RelayLatencyStore`, `TargetBackoffStore` and `NodeExclusionStore`, each mirroring a store in
+the Go SDK, and `RelayHealthStore`, the transient exclusions and direct-contact verdict a
+browser needs because it can't reach every node a server can. Relay selection
+(`selectRelayHopWeighted`, `applyRelay`) comes with them. They are per-instance and take an
+injected clock. A wall clock that steps back costs at most one window, since each store
+re-dates a record it finds in the future. A `Client` will own one of each; until it exists, a
+host that routes for itself constructs them.
+
 ## Errors and events
 
 The SDK's own failures are `ZsError`s. Branch on `kind`, the stable contract; `code` is

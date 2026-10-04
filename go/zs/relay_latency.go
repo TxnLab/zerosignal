@@ -11,8 +11,8 @@ import "time"
 // the "how fast" signal that complements the "can I reach it" signals
 // (lastReachable, RelayReputation). The proxy is a localhost single-user (payer)
 // process, so this is genuinely the payer's own vantage on the mesh, the exact
-// analog of the client app's in-memory latency store (client/src/operators/
-// latency-store.ts) — same EWMA, same three keyings, same staleness gate. It lets
+// analog of the TS SDK's RelayLatencyStore (sdk/src/routing/latency.ts) — same
+// EWMA, same three keyings, same staleness gate, same eviction. It lets
 // relayHopFor prefer relays that are fast FOR A GIVEN TARGET and pickCandidates
 // demote pathologically-slow targets, as the fleet grows and paths diverge.
 //

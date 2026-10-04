@@ -24,6 +24,10 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
+        "./routing": {
+            "types": "./dist/routing/index.d.ts",
+            "import": "./dist/routing/index.js"
+        },
         "./proto": {
             "types": "./dist/proto/index.d.ts",
             "import": "./dist/proto/index.js"

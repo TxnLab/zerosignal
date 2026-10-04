@@ -19,11 +19,10 @@ import (
 // node stops costing every request a doomed round-trip.
 //
 // The window arithmetic is steering's (30s doubling to a 5m cap),
-// golden-vectored against its TS twin in proto/ts/src/steering, so the proxy
-// and the browser app route around a sick node identically once
-// client/src/operators/target-backoff.ts adopts it; until then that file is a
-// hand copy to keep in step. The store stays here: what it holds depends on
-// which dispatches THIS process made.
+// golden-vectored against its TS twin in proto/ts/src/steering, which the TS
+// SDK's TargetBackoffStore (sdk/src/routing/backoff.ts) calls, so the two SDKs
+// route around a sick node identically. The store stays here: what it holds
+// depends on which dispatches THIS process made.
 //
 // What records here is narrow on purpose. A transient failure attributed to the
 // TARGET counts; a relay-side fault does not (relay reputation owns that), and

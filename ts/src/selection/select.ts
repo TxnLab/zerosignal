@@ -699,8 +699,9 @@ function exceedsCeiling(rate: number, ceiling: number): boolean {
  * Such a caller MUST feed `reachable` from its OWN direct evidence of forwarding
  * through the node — never from target reachability alone — or the preferred tier
  * fills with un-relay-able nodes and the usable relays sink into the fallback
- * tier. See client `operators/relay-health.ts` (the sticky verdict) and
- * `operators/relay-decision.ts` (where it overrides the catalog hint).
+ * tier. See the TS SDK's `RelayHealthStore` (the sticky verdict) and the
+ * client app's `operators/relay-decision.ts` (where it overrides the catalog
+ * hint).
  *
  * Returns null when no operator qualifies; the caller MUST hard-fail the
  * request rather than route direct (un-relayed) — that would defeat the

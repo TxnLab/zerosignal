@@ -892,8 +892,9 @@ func exceedsCeiling(rate, ceiling float64) bool {
 // blocked, firewalled), and vice-versa. Such a caller MUST feed Reachable from
 // its OWN direct evidence of forwarding through the node — never from target
 // reachability alone — or the preferred tier fills with un-relay-able nodes and
-// the genuinely-usable relays sink into the fallback tier. See the client's
-// relay-health verdict (operators/relay-health.ts) for that derivation.
+// the genuinely-usable relays sink into the fallback tier. See the TS SDK's
+// RelayHealthStore (the sticky verdict) and the client app's
+// operators/relay-decision.ts (where it overrides the catalog hint).
 //
 // Determinism for golden vectors comes from sorting the chosen pool by id and
 // indexing with seed: pool[seed % len]. In production the caller supplies a

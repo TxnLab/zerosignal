@@ -12,9 +12,8 @@ import (
 )
 
 // The thresholds, cooldowns, and decay arithmetic are steering's, golden-vectored
-// against its TS twin in proto/ts/src/steering. client/src/operators/
-// relay-reputation.ts still carries its own copy until it adopts that module, so
-// a change here must be made there by hand until then. What stays here
+// against its TS twin in proto/ts/src/steering, which the TS SDK's
+// RelayReputationStore (sdk/src/routing/reputation.ts) calls. What stays here
 // is the store: which streak a given piece of evidence lands on, and the
 // reachability differential that decides whether it lands at all. Those depend
 // on what THIS process has observed, so they can't be shared.

@@ -27,7 +27,8 @@ package zs
 // process; a restart is the operator owner's explicit choice to give the node
 // another chance). Like the sibling stores it is deliberately NOT in
 // proto/.../selection: it is stateful and vantage-specific, so it can't be
-// golden-vectored. Mirrors client/src/operators/excluded-nodes.ts.
+// golden-vectored. Mirrors the TS SDK's NodeExclusionStore
+// (sdk/src/routing/exclusion.ts).
 
 // NodeExcluder is the proxy's proven-malicious-node memory. Keyed by the
 // (operator id, node id) pair like every other routing store: a target/relay is a
