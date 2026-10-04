@@ -22,7 +22,9 @@ import { base64 } from '@scure/base'
 
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
+import { parseObject } from '../util/strictjson.js'
 import type { BytesSigner } from './signing.js'
+import { readTicket } from './ticketfields.js'
 import type { UsageType } from './usagetype.js'
 
 export interface Ticket {
@@ -173,6 +175,14 @@ export function verifyTicket(t: Ticket, pub: Uint8Array): void {
     if (!ed25519.verify(sig, digest, pub)) {
         throw new Error('ticket signature verification failed')
     }
+}
+
+// parseTicketJSON decodes a ticket from its JSON bytes, refusing any value
+// that doesn't fit its field's Go type (see util/strictjson.ts). A payer
+// escrows max_price and checks it against its own ceiling, so a node that
+// signed 2^64-1 must not get -1 past either.
+export function parseTicketJSON(raw: Uint8Array): Ticket {
+    return readTicket(parseObject(raw, 'decode ticket json'))
 }
 
 // commitResponseKey returns sha256(K) — the commitment a node places

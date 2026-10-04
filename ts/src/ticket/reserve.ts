@@ -17,8 +17,10 @@ import { base64 } from '@scure/base'
 
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
+import { parseObject } from '../util/strictjson.js'
 import type { BytesSigner } from './signing.js'
 import type { Ticket } from './ticket.js'
+import { readTicket } from './ticketfields.js'
 
 // Content-Type for a POST /v1/zs/reserve *error* response — plaintext
 // OpenAI-shaped JSON, carrying no ticket and no payer. A successful response
@@ -109,6 +111,22 @@ export interface ReserveResponse {
     // base64(msgpack(SignedTxn)) — the node's pre-signed gtxn[1] (the
     // open() AppCall) of the 2-tx open group [usdcPayment, open()].
     presigned_open_txn?: string
+}
+
+// parseReserveResponseJSON decodes a reserve response's opened plaintext,
+// refusing any value that doesn't fit its field's Go type; the ticket is read
+// as strictly as parseTicketJSON.
+export function parseReserveResponseJSON(raw: Uint8Array): ReserveResponse {
+    const f = parseObject(raw, 'decode reserve response json')
+    const out: ReserveResponse = { ticket: readTicket(f.object('ticket')) }
+    // Go's omitempty: a zero value stays off, so a re-marshal matches Go's.
+    const wrapped = f.str('wrapped_response_key')
+    if (wrapped) out.wrapped_response_key = wrapped
+    const price = f.float('algo_usd_price')
+    if (price) out.algo_usd_price = price
+    const presigned = f.str('presigned_open_txn')
+    if (presigned) out.presigned_open_txn = presigned
+    return out
 }
 
 // RESERVE_SIGNING_TAG domain-separates the reserve-request payer signature from
