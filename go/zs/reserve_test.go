@@ -521,6 +521,24 @@ func TestValidateTicketShape_NodeIDMismatch(t *testing.T) {
 	}
 }
 
+// The node clamps input_count to its own floor and the context-window cap
+// (SPEC §3a), and the floor is operator config the payer can't see, so an
+// honest ticket can carry a different count than was asked for.
+func TestValidateTicketShape_AcceptsAClampedInputCount(t *testing.T) {
+	op := Operator{ID: 7, NodeID: 2}
+	req := ticket.ReserveRequest{Model: "gpt-test", InputCount: 300, MaxOutputCount: 50}
+	for _, signed := range []uint64{512, 200} {
+		tk := ticket.Ticket{
+			OperatorID: op.ID, NodeID: op.NodeID, Model: req.Model,
+			InputCount: signed, MaxOutputCount: req.MaxOutputCount,
+			ExpiresAt: time.Now().Add(time.Minute).Unix(), TicketID: "id", CommitK: "commit", MaxPrice: 1_000,
+		}
+		if err := validateTicketShape(&tk, op, req); err != nil {
+			t.Errorf("input_count %d against a request of %d: %v", signed, req.InputCount, err)
+		}
+	}
+}
+
 func TestHTTPReserveClient_NetworkFailure(t *testing.T) {
 	// Operator with an unreachable URL but a valid, unexpired ephemeral
 	// recipient, so the seal step succeeds and the failure is genuinely the
