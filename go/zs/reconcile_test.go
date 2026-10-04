@@ -6,12 +6,15 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -277,11 +280,18 @@ func TestReconciler_FailureCap(t *testing.T) {
 	put(t, j, openRec())
 	chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": box(escrow.StatusOpen, 0, -time.Minute)}, callErr: errors.New("rejected")}
 	r := testReconciler(j, chain)
+	var logs bytes.Buffer
+	r.log = slog.New(slog.NewTextHandler(&logs, nil))
+	r.remedy = "recover it by hand"
 	for range reconcileMaxFailures + 3 {
 		r.sweep()
 	}
 	if got := len(chain.seen()); got != reconcileMaxFailures {
 		t.Errorf("%d submits, want %d", got, reconcileMaxFailures)
+	}
+	// The ticket is left on chain, so the give-up line is the payer's lead.
+	if !strings.Contains(logs.String(), `remedy="recover it by hand"`) {
+		t.Errorf("give-up log lacks the remedy:\n%s", logs.String())
 	}
 	if got := ids(t, j); len(got) != 1 {
 		t.Errorf("journal %v, want the ticket kept for the next start", got)

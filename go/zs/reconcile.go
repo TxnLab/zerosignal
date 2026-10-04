@@ -137,6 +137,7 @@ type reconciler struct {
 	appID    uint64
 	watching func(ticketID string) bool
 	log      *slog.Logger
+	remedy   string // Remedies.RecoverTicket
 
 	now           func() time.Time
 	interval      time.Duration
@@ -161,6 +162,7 @@ func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID
 		appID:         appID,
 		watching:      watching,
 		log:           log,
+		remedy:        Remedies{}.withDefaults().RecoverTicket,
 		now:           time.Now,
 		interval:      reconcileInterval,
 		callTimeout:   30 * time.Second,
@@ -266,8 +268,8 @@ func (r *reconciler) reconcile(rec TicketRecord) {
 	n := r.failures[rec.TicketID]
 	r.mu.Unlock()
 	if n >= reconcileMaxFailures {
-		r.log.Warn("ticket reconciler: "+action.String()+" keeps failing; leaving the ticket for the next start — inspect with `zs-proxy tickets`, finish with `zs-proxy tickets recover`",
-			slog.String("ticket_id", rec.TicketID), slog.Int("attempts", n), slog.Any("err", err))
+		r.log.Warn("ticket reconciler: "+action.String()+" keeps failing; leaving the ticket for the next start",
+			slog.String("ticket_id", rec.TicketID), slog.Int("attempts", n), slog.Any("err", err), slog.String("remedy", r.remedy))
 		return
 	}
 	r.log.Debug("ticket reconciler: "+action.String()+" failed; retrying next sweep",

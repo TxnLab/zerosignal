@@ -8,6 +8,6 @@
 // image generation and edits, model discovery, and /v1/zs/details.
 //
 // Each request is routed, reserved, paid for in escrow, sealed to the chosen
-// node, and its signed receipt verified before the response is settled. zs-proxy
-// is this package plus a CLI; its error remedies still name zs-proxy commands.
+// node, and its signed receipt verified before the response is settled. The
+// fixes its errors name come from the Client's Config.Remedies.
 package handler

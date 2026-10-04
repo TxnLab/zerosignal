@@ -145,6 +145,7 @@ func TestDispatch_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			opts := setup(t, cfg, node)
 			opts.Wallet = &fakeWallet{payer: "PAYERADDR", err: errors.New("wallet: submit presigned open group: overspend (account XYZ)")}
 			opts.SpendGuard = &fakeSpendGuard{}
+			opts.Remedies.Fund = "run the fund remedy"
 			s := testServer(cfg, opts)
 			if tc.nilConfig {
 				s = New(s.Client, nil, silentLogger(), transform.Passthrough{}, transform.Passthrough{}, Options{})
@@ -159,7 +160,7 @@ func TestDispatch_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			}
 			// The deposit address is the actionable part; swapped with the
 			// network it would point the payer at a non-address.
-			if want := "wallet PAYERADDR can't pay for this request on " + strings.ToLower(tc.network) + " "; !strings.Contains(body, want) {
+			if want := "wallet PAYERADDR can't pay for this request on " + strings.ToLower(tc.network) + ". "; !strings.Contains(body, want) {
 				t.Errorf("body missing %q:\n%s", want, body)
 			}
 			if got := strings.Contains(body, "web app"); got != tc.wantWebApp {
@@ -168,8 +169,8 @@ func TestDispatch_WalletUnfunded_402_FundingHintByNetwork(t *testing.T) {
 			if tc.wantWebApp && !strings.Contains(body, tc.fundingURL) {
 				t.Errorf("body offers the web app without naming %s:\n%s", tc.fundingURL, body)
 			}
-			if !strings.Contains(body, "zs-proxy fund") {
-				t.Errorf("body doesn't name `zs-proxy fund`:\n%s", body)
+			if !strings.Contains(body, "run the fund remedy.") {
+				t.Errorf("body doesn't carry Remedies.Fund:\n%s", body)
 			}
 		})
 	}
@@ -188,6 +189,7 @@ func TestDispatch_MbrPoolUnderfunded_402(t *testing.T) {
 	// errors.Is must still see the sentinel through the wrap.
 	opts.Wallet = &fakeWallet{err: fmt.Errorf("wallet: ensure MBR deposit: %w: need 577000 µALGO (575000 shortfall + 2000 fee), have 489000 µALGO spendable — fund the wallet with more ALGO", zs.ErrDepositUnaffordable)}
 	opts.SpendGuard = &fakeSpendGuard{}
+	opts.Remedies.Fund = "run the fund remedy"
 	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
@@ -206,6 +208,9 @@ func TestDispatch_MbrPoolUnderfunded_402(t *testing.T) {
 	// The actionable µALGO detail from the sentinel must reach the caller.
 	if !strings.Contains(body, "spendable") || !strings.Contains(body, "ALGO") {
 		t.Errorf("body missing the actionable ALGO shortfall detail: %s", body)
+	}
+	if !strings.Contains(body, "run the fund remedy") {
+		t.Errorf("body must carry Remedies.Fund: %s", body)
 	}
 }
 
@@ -230,6 +235,7 @@ func TestDispatch_MbrPoolExhausted_429(t *testing.T) {
 		Err:     errors.New("logic eval error: assert failed pc=3255"),
 	})}
 	opts.SpendGuard = &fakeSpendGuard{}
+	opts.Remedies.RaiseSlots = "raise the slots remedy"
 	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
@@ -245,8 +251,8 @@ func TestDispatch_MbrPoolExhausted_429(t *testing.T) {
 	if !strings.Contains(body, `"mbr_pool_exhausted"`) {
 		t.Errorf("body missing mbr_pool_exhausted code: %s", body)
 	}
-	if !strings.Contains(body, "zs.concurrent_slots") {
-		t.Errorf("body must name the knob that fixes it: %s", body)
+	if !strings.Contains(body, "raise the slots remedy") {
+		t.Errorf("body must carry Remedies.RaiseSlots: %s", body)
 	}
 }
 
@@ -262,6 +268,7 @@ func TestDispatch_SpendCapExceeded_402(t *testing.T) {
 	}
 	opts.Wallet = fw
 	opts.SpendGuard = &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
+	opts.Remedies.RaiseSpendCap = "raise the cap remedy"
 	s := testServer(cfg, opts)
 
 	w := httptest.NewRecorder()
@@ -272,6 +279,9 @@ func TestDispatch_SpendCapExceeded_402(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"spend_cap_exceeded"`) {
 		t.Errorf("body missing spend_cap_exceeded code: %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "raise the cap remedy") {
+		t.Errorf("body must carry Remedies.RaiseSpendCap: %s", w.Body.String())
 	}
 	if fw.openCalls != 0 {
 		t.Errorf("wallet.Open should NOT be called when the spend cap trips, got %d", fw.openCalls)

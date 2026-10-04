@@ -184,11 +184,16 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
 	cfg.Wallet = nil
 	cfg.ConcurrentSlots = 7
+	cfg.Remedies.RecoverTicket = "recover it by hand"
 	c, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	// Both give-up logs are the only trace of a ticket left on chain.
+	if c.refunds.remedy != "recover it by hand" || c.reconcile == nil || c.reconcile.remedy != "recover it by hand" {
+		t.Errorf("watchdog remedy %q, reconciler %+v: want both to carry Remedies.RecoverTicket", c.refunds.remedy, c.reconcile)
+	}
 	w, ok := c.Config().Wallet.(*Wallet)
 	if !ok {
 		t.Fatalf("wallet %T, want the built *Wallet", c.Config().Wallet)
@@ -415,7 +420,7 @@ func TestPickCandidates_ZeroAffinityPinsLikePrefer(t *testing.T) {
 }
 
 // Under prefer, an underfunded pin with no funded peer is a model-wide outage.
-// Naming the pin and "affinity_policy: strict" would send the payer to a knob
+// Naming the pin and "strict affinity" would send the payer to a knob
 // they already have set the way the message recommends.
 func TestPickCandidates_ToolAffinityPrefer_UnderfundedPinNotReportedAsStrict(t *testing.T) {
 	const model = "gpt-4o-mini"

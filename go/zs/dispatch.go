@@ -371,7 +371,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			// not retryable (the HTTP adapter answers 400). Distinct code so the
 			// owner sees the actionable hint rather than a generic no_operator.
 			em.fail(newError("no_production_operator",
-				fmt.Sprintf("the model %q is only served by staging nodes; enable zs.allow_staging (or --allow-staging) to route to them", model)))
+				fmt.Sprintf("the model %q is only served by staging nodes; allow routing to staging nodes to reach them", model)))
 		case pick.SignerUnderfundedBlocked:
 			// Every otherwise-eligible node (or the strict-affinity pin) has a
 			// signing account too low to pay the fees of the open/settle it would
@@ -484,7 +484,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					slog.Uint64("estimate_microusdc", est),
 					slog.Any("err", err))
 				em.fail(newError("spend_cap_exceeded",
-					"spend cap reached ("+err.Error()+"): the cheapest available operator would escrow more than the limit allows; raise the limit or wait for it to reset. No reservation was made"))
+					"spend cap reached ("+err.Error()+"): the cheapest available operator would escrow more than the limit allows. No reservation was made. To fix it, "+s.remedies().RaiseSpendCap+"."))
 				return
 			}
 		}
@@ -1148,7 +1148,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	// it may fit once a slot frees; without one, waiting lowers no ceiling.
 	if capRefused && !anyBusy {
 		em.fail(newError("spend_cap_exceeded",
-			"spend cap reached: this request would exceed the configured USDC limit — raise spend.daily_cap_usdc / spend.per_request_cap_usdc, or wait for the UTC day to roll over"))
+			"spend cap reached: this request would exceed the configured USDC limit — to fix it, "+s.remedies().RaiseSpendCap+"."))
 		return
 	}
 	// Fail-closed forward secrecy: every candidate
@@ -1852,8 +1852,8 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	if res.SignerUnderfundedBlocked && preferredOp != nil && preferredOp.SignerUnderfunded() &&
 		s.cfg.Affinity.Policy == AffinityStrict {
 		res.SignerUnderfundedReason = fmt.Sprintf(
-			"this tool-call continuation is pinned (affinity_policy: strict) to operator %d node %d, whose signing account "+
-				"has less than %d ALGO spendable to pay network fees; retry later, or set affinity_policy to prefer so another node can continue it",
+			"this tool-call continuation is pinned (strict affinity) to operator %d node %d, whose signing account "+
+				"has less than %d ALGO spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it",
 			preferredOp.ID, preferredOp.NodeID, selection.MinSignerSpendableMicroAlgos/1_000_000)
 	}
 	res.ImageEndpointUnsupported = tr.Diagnostics.ImageEndpointUnsupported
@@ -2506,8 +2506,8 @@ func (s *Client) runSealed(
 		if isPoolExhaustedOpenError(err) {
 			e := newError("mbr_pool_exhausted",
 				fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
-					"raise zs.concurrent_slots (run `zs-proxy slots <n>`, which also funds the pool), or retry once in-flight requests settle.",
-					s.wallet.PayerAddr(), s.networkName()))
+					"retry once in-flight requests settle, or to allow more at once, %s.",
+					s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
 			e.RetryAfter = 2 * time.Second
 			em.fail(e)
 			return
@@ -2527,7 +2527,7 @@ func (s *Client) runSealed(
 		if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
 			em.fail(newError("mbr_pool_underfunded",
 				fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
-					"Add ALGO with `zs-proxy fund`.", s.wallet.PayerAddr(), s.networkName(), err)))
+					"To fix it, %s.", s.wallet.PayerAddr(), s.networkName(), err, s.remedies().Fund)))
 			return
 		}
 		// "Always up, tells you what it needs": an open that fails because the
@@ -2535,11 +2535,10 @@ func (s *Client) runSealed(
 		// surfaces an actionable 402 with the deposit address, not a generic 502.
 		// The daemon binds unfunded (the escrow-config read simulates from the
 		// fee sink), so this is the path an unfunded wallet hits per request.
-		// How to fund it is the caller's to say: an adapter adds its own hint.
 		if isUnderfundedOpenError(err) {
 			em.fail(newError("wallet_unfunded",
-				fmt.Sprintf("zerosignal wallet %s can't pay for this request on %s",
-					s.wallet.PayerAddr(), s.networkName())))
+				fmt.Sprintf("zerosignal wallet %s can't pay for this request on %s. To fix it, %s.",
+					s.wallet.PayerAddr(), s.networkName(), s.remedies().Fund)))
 			return
 		}
 		em.fail(newError("wallet_open", "payment group could not be submitted"))

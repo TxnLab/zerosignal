@@ -34,15 +34,15 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, endpoint strin
 	newHTTPEmitter(w, r, format, s.fundingHint()).serve(s.Client.Stream(r.Context(), req).Events())
 }
 
-// fundingHint is what a wallet_unfunded error tells the payer to do. The web
-// app is offered only on mainnet: the hosted client is built for one network,
-// so a testnet payer sent there would fund the wrong chain.
+// fundingHint is the web app, added to a wallet_unfunded error after the
+// Client's own remedy. It is offered only on mainnet: the hosted client is
+// built for one network, so a testnet payer sent there would fund the wrong
+// chain.
 func (s *Server) fundingHint() string {
 	if s.network == "mainnet" && s.cfg.FundingURL != "" {
-		return "add funds in the web app (" + s.cfg.FundingURL + ") if this is your web account, " +
-			"or run `zs-proxy fund` for a deposit address."
+		return "If this is your web account, you can add funds in the web app instead (" + s.cfg.FundingURL + ")."
 	}
-	return "run `zs-proxy fund`."
+	return ""
 }
 
 // httpEmitter renders a Stream as an OpenAI-compatible HTTP response.
@@ -137,9 +137,9 @@ func (e *httpEmitter) fail(err error) {
 		e.passThrough(up, shouldRetry(ze))
 		return
 	}
-	if ze.Code == "wallet_unfunded" {
+	if ze.Code == "wallet_unfunded" && e.fundingHint != "" {
 		c := *ze
-		c.Message += " — " + e.fundingHint
+		c.Message += " " + e.fundingHint
 		ze = &c
 	}
 	writeError(e.w, ze)

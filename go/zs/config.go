@@ -6,6 +6,7 @@
 package zs
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -171,6 +172,9 @@ type Config struct {
 
 	Stores     Stores
 	SpendGuard SpendGuard // none: no cap
+	// Remedies is what errors and logs tell the payer to do about what only
+	// they can fix, in the caller's own terms; see Remedies.
+	Remedies Remedies
 
 	// UseEnvProxy sends node traffic (discovery, reserve, inference) through
 	// the proxy named by HTTPS_PROXY / HTTP_PROXY / NO_PROXY. The
@@ -205,6 +209,38 @@ type Config struct {
 	// HTTPClient carries inference (see defaultHTTPClient). The reserve and
 	// discovery clients New builds are its own.
 	HTTPClient *http.Client
+}
+
+// Remedies are the instructions an error or log line ends with when the fix is
+// the payer's: a command in the caller's CLI, a settings page in its app. Each
+// is a clause that reads after "to fix it, ". An empty field gets one that
+// names no tool.
+type Remedies struct {
+	// Fund adds ALGO and USDC to the payer's wallet. It ends wallet_unfunded
+	// and mbr_pool_underfunded.
+	Fund string
+	// RaiseSlots raises ConcurrentSlots and funds the larger pool.
+	RaiseSlots string
+	// RaiseSpendCap raises the SpendGuard's limits.
+	RaiseSpendCap string
+	// RecoverTicket inspects a ticket the SDK gave up settling or refunding,
+	// and finishes it.
+	RecoverTicket string
+}
+
+// The defaults name only what the SDK itself offers. It has no USDC opt-in, so
+// Fund says to do it; ConcurrentSlots is read once, when New builds the wallet,
+// so RaiseSlots says to rebuild; the log a RecoverTicket rides carries the
+// ticket id, which ReadTicketBox takes.
+func (r Remedies) withDefaults() Remedies {
+	r.Fund = cmp.Or(r.Fund,
+		"fund the payer address: ALGO for fees and the ticket pool, and USDC for requests once the address has opted in to the USDC asset")
+	r.RaiseSlots = cmp.Or(r.RaiseSlots,
+		"raise Config.ConcurrentSlots (WalletConfig.DepositSlots for a Wallet you built) and rebuild the Client; the next request funds the larger pool")
+	r.RaiseSpendCap = cmp.Or(r.RaiseSpendCap, "raise the SpendGuard's limits")
+	r.RecoverTicket = cmp.Or(r.RecoverTicket,
+		"read its box with escrow.Client.ReadTicketBox and, once the deadline passes, call refundInactive on an open ticket or settleLapsed on an operator's claim")
+	return r
 }
 
 // defaultHTTPClient has no overall timeout, because streams end by context;
@@ -244,6 +280,7 @@ func (c Config) withDefaults() Config {
 	}
 	c.Affinity.TTL = orDefault(c.Affinity.TTL, defaultAffinityTTL)
 	c.Affinity.Max = orDefault(c.Affinity.Max, defaultAffinityMax)
+	c.Remedies = c.Remedies.withDefaults()
 	c.MaxOutputCeiling = orDefault(c.MaxOutputCeiling, selection.DefaultMaxOutputCeiling)
 	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, DefaultDepositSlots)
 	c.ReserveTimeout = orDefault(c.ReserveTimeout, DefaultReserveTimeout)

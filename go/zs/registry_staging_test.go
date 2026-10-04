@@ -190,7 +190,7 @@ func TestDynamicRegistry_AllOperatorsKeepsStagingForRelayUse(t *testing.T) {
 // OperatorsKeepsUnreachableForDispatch. Operators(model) must keep the staging
 // node so pickCandidates' RegistryCount stays accurate — that is what lets
 // SelectTargets report staging_blocked (no_production_operator, with its
-// actionable "enable zs.allow_staging" hint) rather than a bare "nobody serves
+// actionable "allow routing to staging nodes" hint) rather than a bare "nobody serves
 // this model" for a client that POSTs an id it never saw listed.
 func TestDynamicRegistry_OperatorsKeepsStagingForDispatch(t *testing.T) {
 	op := stagingOp(1, "staging-only")

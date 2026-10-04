@@ -67,6 +67,7 @@ type deps struct {
 	DebugLogBodies   bool
 	RetryBudget      time.Duration
 	SweepDelay       func(sweep int) time.Duration
+	Remedies         zs.Remedies
 }
 
 // spendGuard is a zs.SpendGuard without Admit, which no handler test needs.
@@ -131,6 +132,7 @@ func newServer(p *policy, log *slog.Logger, reqTx transform.RequestTransformer, 
 			Journal:          d.Journal,
 		},
 		SpendGuard:     spend,
+		Remedies:       d.Remedies,
 		Registry:       d.RegistryProvider,
 		ReserveClient:  d.ReserveClient,
 		Wallet:         d.Wallet,

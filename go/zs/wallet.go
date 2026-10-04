@@ -1107,7 +1107,7 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 				// nil here would latch depositReady and strand the pool below
 				// target for the process lifetime.
 				return res.TxID, quotaOnly, fmt.Errorf(
-					"%w: deposited %d µALGO for the free-quota box, still %d µALGO short of %d slot(s) — add ALGO and re-run `zs-proxy fund`",
+					"%w: deposited %d µALGO for the free-quota box, still %d µALGO short of %d slot(s) — add ALGO and deposit again",
 					ErrDepositBelowTarget, quotaOnly, shortfall-quotaOnly, slots)
 			}
 		}

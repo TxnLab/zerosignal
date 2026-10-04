@@ -42,7 +42,7 @@ func (s *script) seq() iter.Seq2[zs.Event, error] {
 }
 
 func emitterFor(w http.ResponseWriter, path string, format clientFormat) *httpEmitter {
-	return newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, path, nil), format, "run `zs-proxy fund`.")
+	return newHTTPEmitter(w, httptest.NewRequest(http.MethodPost, path, nil), format, "Or use the web app.")
 }
 
 func testReceipt() zs.ReceiptVerified {
@@ -103,11 +103,11 @@ func TestHTTPEmitter_PassThrough(t *testing.T) {
 // what the payer can do about it.
 func TestHTTPEmitter_FailShapesAndHintsFunding(t *testing.T) {
 	w := httptest.NewRecorder()
-	emitterFor(w, "/", formatChat).fail(&zs.Error{Kind: zs.KindFunds, Code: "wallet_unfunded", Message: "payer has no USDC"})
+	emitterFor(w, "/", formatChat).fail(&zs.Error{Kind: zs.KindFunds, Code: "wallet_unfunded", Message: "payer has no USDC."})
 	if w.Code != http.StatusPaymentRequired {
 		t.Errorf("status %d, want 402", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "payer has no USDC — run `zs-proxy fund`.") {
+	if !strings.Contains(w.Body.String(), "payer has no USDC. Or use the web app.") {
 		t.Errorf("body %s, want the funding hint appended", w.Body.String())
 	}
 

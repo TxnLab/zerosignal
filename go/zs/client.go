@@ -237,13 +237,19 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		debugLogBodies:   cfg.DebugLogBodies,
 		stop:             parts.stop,
 	}
+	c.refunds.remedy = cfg.Remedies.RecoverTicket
 	if sdkWallet != nil {
 		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.Logger)
+		c.reconcile.remedy = cfg.Remedies.RecoverTicket
 		c.reconcile.start()
 	}
 	c.warmFeeRate()
 	return c, nil
 }
+
+// remedies fills the defaults here rather than trusting New to have, because a
+// Client built in a test skips New.
+func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults() }
 
 // Close stops the discovery refresh and the ticket reconciler New started. It
 // does not wait for settlements; see WaitSettles. Safe to call more than once.

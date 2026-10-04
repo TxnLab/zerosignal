@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -205,6 +206,9 @@ func TestDispatch_AdmitRefusalReservesNothing(t *testing.T) {
 	ze := turnErr(t, c, string(admitBody))
 	if ze.Code != "spend_cap_exceeded" || ze.Kind != KindSpendCap {
 		t.Errorf("code %q kind %q, want spend_cap_exceeded / spend_cap", ze.Code, ze.Kind)
+	}
+	if want := (Remedies{}).withDefaults().RaiseSpendCap; !strings.Contains(ze.Message, want) {
+		t.Errorf("message %q, want it to end with the remedy %q", ze.Message, want)
 	}
 	if rc.calls() != 0 {
 		t.Errorf("%d reserves made after Admit refused", rc.calls())

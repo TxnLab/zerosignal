@@ -148,7 +148,7 @@ func TestPickCandidates_ToolAffinityStrict_UnderfundedNamesThePin(t *testing.T) 
 	if !pick.SignerUnderfundedBlocked || len(pick.Operators) != 0 {
 		t.Fatalf("got %+v, want empty + SignerUnderfundedBlocked", pick)
 	}
-	if r := pick.SignerUnderfundedReason; !strings.Contains(r, "operator 7 node") || !strings.Contains(r, "affinity_policy") {
+	if r := pick.SignerUnderfundedReason; !strings.Contains(r, "operator 7 node") || !strings.Contains(r, "affinity policy to prefer") {
 		t.Errorf("reason = %q, want the pinned node and the prefer hint", r)
 	}
 }

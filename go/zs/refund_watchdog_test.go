@@ -6,9 +6,14 @@
 package zs
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -240,6 +245,46 @@ func TestRefundWatchdog_LapseRetriesThenGivesUp(t *testing.T) {
 	if got := int(lapses.Load()); got != rw.attempts {
 		t.Fatalf("settleLapsed attempts = %d, want exactly %d", got, rw.attempts)
 	}
+}
+
+// The box outlives the process, so the give-up line is the payer's only lead:
+// it carries the configured remedy, and the default one when none was set.
+func TestRefundWatchdog_GiveUpLogsTheRemedy(t *testing.T) {
+	for _, remedy := range []string{"", "recover it by hand"} {
+		var buf bytes.Buffer
+		var mu sync.Mutex
+		rw := testWatchdog()
+		rw.log = slog.New(slog.NewTextHandler(&lockedWriter{w: &buf, mu: &mu}, nil))
+		if remedy != "" {
+			rw.remedy = remedy
+		}
+		want := cmp.Or(remedy, Remedies{}.withDefaults().RecoverTicket)
+		var refunds atomic.Int32
+		rw.track("tik-give-up", time.Now().Add(2*time.Millisecond), liveBox(),
+			func(context.Context) (string, error) { refunds.Add(1); return "", errors.New("algod down") },
+			noLapse(t))
+		waitFor(t, "the give-up line", func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return strings.Contains(buf.String(), "giving up")
+		})
+		mu.Lock()
+		if !strings.Contains(buf.String(), strconv.Quote(want)) {
+			t.Errorf("give-up log lacks remedy %q:\n%s", want, buf.String())
+		}
+		mu.Unlock()
+	}
+}
+
+type lockedWriter struct {
+	w  *bytes.Buffer
+	mu *sync.Mutex
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // A box these bindings can't classify (they disagree with the deployed app)

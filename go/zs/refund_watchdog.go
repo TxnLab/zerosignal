@@ -79,6 +79,9 @@ type RefundWatchdog struct {
 	// reverts on the deleted box), it just spends a fee racing a node that was
 	// going to succeed, so this is deliberately generous.
 	lapseFallback time.Duration
+	// remedy is Remedies.RecoverTicket. The box outlives this process, so a
+	// give-up log that names only the ticket id is a dead end.
+	remedy string
 
 	mu      sync.Mutex
 	pending map[string]chan struct{} // ticket_id → cancel signal
@@ -96,6 +99,7 @@ func NewRefundWatchdog(log *slog.Logger) *RefundWatchdog {
 		attempts:      3,
 		callTimeout:   30 * time.Second,
 		lapseFallback: 10 * time.Minute,
+		remedy:        Remedies{}.withDefaults().RecoverTicket,
 		pending:       map[string]chan struct{}{},
 	}
 }
@@ -244,7 +248,7 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 			case res.verdict == escrow.VerdictUnknown:
 				// These bindings can't classify the box, so settleLapsed is a
 				// guess. Don't spend fees on it.
-				rw.log.Warn("refund watchdog: unrecognized ticket state; not attempting settleLapsed — inspect with `zs-proxy tickets`",
+				rw.log.Warn("refund watchdog: unrecognized ticket state, likely a contract newer than these escrow bindings; not attempting settleLapsed — upgrade before acting on this ticket",
 					slog.String("ticket_id", ticketID))
 				return
 			}
@@ -260,11 +264,9 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 			return
 		}
 		if attempt >= rw.attempts {
-			// The box outlives this process, so the ticket id alone is a dead
-			// end — name the command that can still read its state and finish
-			// the job.
-			rw.log.Warn("refund watchdog: settleLapsed failed; giving up — inspect with `zs-proxy tickets`, finish with `zs-proxy tickets recover`",
+			rw.log.Warn("refund watchdog: settleLapsed failed; giving up",
 				slog.String("ticket_id", ticketID),
+				slog.String("remedy", rw.remedy),
 				slog.Int("attempts", attempt),
 				slog.Any("err", lerr),
 				probeState(res, perr))
@@ -370,7 +372,7 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 				case res.verdict == escrow.VerdictUnknown:
 					// These bindings can't classify the box, so refundInactive
 					// is a guess. Don't spend fees on it.
-					rw.log.Warn("refund watchdog: unrecognized ticket state; not attempting refundInactive — inspect with `zs-proxy tickets`",
+					rw.log.Warn("refund watchdog: unrecognized ticket state, likely a contract newer than these escrow bindings; not attempting refundInactive — upgrade before acting on this ticket",
 						slog.String("ticket_id", ticketID))
 					return
 				}
@@ -405,11 +407,9 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 				return
 			}
 			if attempt >= rw.attempts {
-				// The box outlives this process, so the ticket id alone is a
-				// dead end — name the command that can still read its state
-				// and finish the job.
-				rw.log.Warn("refund watchdog: refundInactive failed; giving up — inspect with `zs-proxy tickets`, finish with `zs-proxy tickets recover`",
+				rw.log.Warn("refund watchdog: refundInactive failed; giving up",
 					slog.String("ticket_id", ticketID),
+					slog.String("remedy", rw.remedy),
 					slog.Int("attempts", attempt),
 					slog.Any("err", rerr),
 					probeState(res, perr))
