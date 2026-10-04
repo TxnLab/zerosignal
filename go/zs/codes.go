@@ -149,10 +149,10 @@ func isUnderfundedOpenError(err error) bool {
 // poolExhaustedAsserts are the three open() guards on the payer's prepaid
 // ticket-MBR pool: not enough headroom for another ticket slot, not enough for
 // the one-time free-quota box, or no deposit at all (the pool was closed or
-// drained out from under an in-flight open). All three mean the same thing to
-// the payer — fund the pool — and none of them is a balance shortfall, so
-// without this branch the operator gets a misleading generic 502 instead of
-// "raise zs.concurrent_slots".
+// drained out from under an in-flight open). None of them is a balance
+// shortfall, so without this branch the operator gets a misleading generic 502.
+// A revert Wallet.Open could not clear by topping the pool up carries that
+// top-up's failure too, which dispatch answers first.
 var poolExhaustedAsserts = map[string]bool{
 	escrow.AssertInsufficientMbrDeposit:          true,
 	escrow.AssertInsufficientMbrDepositFreeQuota: true,

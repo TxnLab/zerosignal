@@ -258,6 +258,59 @@ func TestDispatch_MbrPoolExhausted_429(t *testing.T) {
 	}
 }
 
+// No pool at all is the one pool guard waiting cannot clear: the wallet has
+// already tried to fund one and failed. It is a 402 to fund the wallet, not a
+// 429 to retry.
+func TestDispatch_NoPoolDeposit_402(t *testing.T) {
+	noPool := &escrow.ApprovalError{
+		Method:  "open",
+		PC:      3260,
+		Message: escrow.AssertPayerHasNoMbrDeposit,
+		Err:     errors.New("logic eval error: assert failed pc=3260"),
+	}
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		// Wallet.Open could not fund the pool: only more ALGO helps.
+		{"the top-up failed", fmt.Errorf("wallet: submit presigned open group: %w; topping up the ticket pool: %w",
+			noPool, fmt.Errorf("%w: need 50000 µALGO", zs.ErrDepositUnaffordable)),
+			http.StatusPaymentRequired, "mbr_pool_underfunded"},
+		// The pool covers the working set by now (another request funded
+		// it), so waiting clears it.
+		{"no top-up was needed", fmt.Errorf("wallet: submit presigned open group: %w", noPool),
+			http.StatusTooManyRequests, "mbr_pool_exhausted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+			cfg := testConfig()
+			opts := setup(t, cfg, node)
+			opts.Wallet = &fakeWallet{err: tc.err}
+			opts.SpendGuard = &fakeSpendGuard{}
+			opts.Remedies.Fund = "run the fund remedy"
+			s := testServer(cfg, opts)
+
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+			body := w.Body.String()
+			if w.Result().StatusCode != tc.status || !strings.Contains(body, `"`+tc.code+`"`) {
+				t.Fatalf("status = %d body=%s; want %d %s", w.Result().StatusCode, body, tc.status, tc.code)
+			}
+			if tc.status == http.StatusPaymentRequired {
+				if got := w.Header().Get("Retry-After"); got != "" {
+					t.Errorf("Retry-After = %q: waiting cannot fund a pool", got)
+				}
+				if !strings.Contains(body, "run the fund remedy") || !strings.Contains(body, "need 50000") {
+					t.Errorf("body must carry Remedies.Fund and the shortfall: %s", body)
+				}
+			}
+		})
+	}
+}
+
 // TestDispatch_SpendCapExceeded_402 asserts the spend guard refuses past
 // the cap with a 402 spend_cap_exceeded and never opens the escrow (no money
 // committed).

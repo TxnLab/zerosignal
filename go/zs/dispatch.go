@@ -2496,22 +2496,6 @@ func (s *Client) runSealed(
 			relayAttr(hop),
 			slog.String("ticket_id", ticket.TicketID),
 			slog.Any("err", err))
-		// Pool exhaustion (vs a balance shortfall): the wallet HOLDS the ALGO,
-		// but every prepaid-pool slot is reserved by an in-flight ticket, so
-		// open() reverted 'insufficient MBR deposit' / 'no MBR deposit'. That's a
-		// transient concurrency cap, not an unfunded wallet — surface a 429 that
-		// points at the knob (raise zs.concurrent_slots) rather than a
-		// misleading "fund me" 402 or an opaque 502. Self-heals as in-flight
-		// tickets settle, so a retry-after nudge is honest.
-		if isPoolExhaustedOpenError(err) {
-			e := newError("mbr_pool_exhausted",
-				fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
-					"retry once in-flight requests settle, or to allow more at once, %s.",
-					s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
-			e.RetryAfter = 2 * time.Second
-			em.fail(e)
-			return
-		}
 		// Prepaid MBR pool can't be funded: the payer holds USDC but is short on
 		// ALGO to grow the ticket-MBR pool (and has no free slot to serve on).
 		// This is specifically an ALGO shortfall, NOT a USDC/"unfunded wallet"
@@ -2524,10 +2508,29 @@ func (s *Client) runSealed(
 		// deposit that left the pool short of the working set AND with no free
 		// slot to serve on is the same actionable condition — the wallet needs
 		// more ALGO — and its message names the remaining shortfall the same way.
+		//
+		// Checked before exhaustion: Wallet.Open wraps the pool revert with the
+		// top-up that failed, and that revert alone reads as exhaustion.
 		if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
 			em.fail(newError("mbr_pool_underfunded",
 				fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
 					"To fix it, %s.", s.wallet.PayerAddr(), s.networkName(), err, s.remedies().Fund)))
+			return
+		}
+		// Pool exhaustion (vs a balance shortfall): the wallet HOLDS the ALGO,
+		// but every prepaid-pool slot is reserved by an in-flight ticket, so
+		// open() reverted 'insufficient MBR deposit'. That's a transient
+		// concurrency cap, not an unfunded wallet — surface a 429 that points
+		// at the knob rather than a misleading "fund me" 402 or an opaque 502.
+		// Self-heals as in-flight tickets settle, so a retry-after nudge is
+		// honest.
+		if isPoolExhaustedOpenError(err) {
+			e := newError("mbr_pool_exhausted",
+				fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
+					"retry once in-flight requests settle, or to allow more at once, %s.",
+					s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
+			e.RetryAfter = 2 * time.Second
+			em.fail(e)
 			return
 		}
 		// "Always up, tells you what it needs": an open that fails because the

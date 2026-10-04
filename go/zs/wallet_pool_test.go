@@ -589,6 +589,36 @@ func TestOpen_DepositRevert_NoTopUpSurfacesOriginal(t *testing.T) {
 	}
 }
 
+// A pool revert the top-up could not clear because the payer can't afford it
+// surfaces both: the revert, still typed, and the top-up's failure, which
+// names what the pool needs and decides the caller's answer.
+func TestOpen_DepositRevert_TopUpFailureRidesAlong(t *testing.T) {
+	ctx := context.Background()
+	pool := &fakePool{
+		ticketMbr: testTicketMbr,
+		dep:       escrow.PayerDeposit{}, // drained → the re-ensure wants to deposit
+		optedIn:   true,
+		minFee:    1_000,
+		spendable: 0, // and can't
+		submitResults: []submitOutcome{
+			{err: &escrow.ApprovalError{Method: "open", Message: escrow.AssertPayerHasNoMbrDeposit, Err: errors.New("assert failed")}},
+		},
+	}
+	w := newPoolWallet(pool)
+	w.depositReady = true
+
+	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	if !errors.Is(err, ErrDepositUnaffordable) {
+		t.Errorf("err = %v, want the top-up's ErrDepositUnaffordable", err)
+	}
+	if revert, ok := errors.AsType[*escrow.ApprovalError](err); !ok || revert.Message != escrow.AssertPayerHasNoMbrDeposit {
+		t.Errorf("err = %v, want the open revert still typed", err)
+	}
+	if pool.submitCalls != 1 {
+		t.Errorf("submit calls = %d, want 1: nothing was deposited to retry on", pool.submitCalls)
+	}
+}
+
 // algodRejectingSubmit serves suggested-params and answers the submit with
 // algod's real logic-eval-error shape for the given PC. algod knows nothing
 // about the contract's assert strings — a PC is the whole signal on the wire.

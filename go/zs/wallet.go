@@ -389,6 +389,13 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 		if deposited > 0 {
 			result, err = w.pool.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
 		}
+		// The re-ensure's failure is the one the caller can act on (it names
+		// the ALGO the pool needs), so it rides along with the revert; with
+		// none, the pool already covers the working set and the revert is
+		// exhaustion that waiting clears.
+		if err != nil && derr != nil {
+			err = fmt.Errorf("%w; topping up the ticket pool: %w", err, derr)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("wallet: submit presigned open group: %w", err)
