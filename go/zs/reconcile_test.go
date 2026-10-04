@@ -175,7 +175,7 @@ func (f *fakeChain) seen() []string {
 }
 
 func testReconciler(j TicketJournal, chain ticketChain, watching ...string) *reconciler {
-	r := newReconciler(j, chain, "PAYER", 7, func(id string) bool { return slices.Contains(watching, id) }, discardLogger())
+	r := newReconciler(j, chain, "PAYER", 7, func(id string) bool { return slices.Contains(watching, id) }, nil, discardLogger())
 	r.now = func() time.Time { return reconcileNow }
 	return r
 }

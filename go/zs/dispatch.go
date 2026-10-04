@@ -3635,6 +3635,8 @@ func (s *Client) checkReceipt(
 		// spend guard and drop the ticket's reserved ceiling — this is what
 		// `zs status` reports as spent today. Independent of the on-chain
 		// AckSettle below (and runs even when handle is nil in no-escrow mode).
+		// It stays ahead of journalReceipt: the reconciler reads a journaled
+		// receipt as a charge already counted.
 		if s.spend != nil {
 			s.spend.Settle(ticket.TicketID, receipt.AmountCharged)
 		}

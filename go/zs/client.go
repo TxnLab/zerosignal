@@ -258,8 +258,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		stop:             parts.stop,
 	}
 	c.refunds.remedy = cfg.Remedies.RecoverTicket
+	if cfg.SpendGuard != nil {
+		// A ticket whose request failed after its escrow opened keeps its
+		// reservation in dispatch; its refund is what frees it.
+		c.refunds.refunded = cfg.SpendGuard.Release
+	}
 	if sdkWallet != nil {
-		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.Logger)
+		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
 		c.reconcile.remedy = cfg.Remedies.RecoverTicket
 		c.reconcile.release = release
 		// A memory journal dies with this Client, so its watchdog stays the

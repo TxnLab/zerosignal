@@ -144,6 +144,9 @@ type reconciler struct {
 	// handOff is set when journal outlives the Client: Close then stops the
 	// watchdog before releasing the claim, so the next sweeper owns the rows.
 	handOff bool
+	// spend learns how each ticket ended, so a reservation a restarted
+	// SpendGuard restored frees its headroom then; nil when there is none.
+	spend SpendGuard
 
 	now           func() time.Time
 	interval      time.Duration
@@ -159,7 +162,9 @@ type reconciler struct {
 	done   chan struct{}
 }
 
-func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID uint64, watching func(string) bool, log *slog.Logger) *reconciler {
+// spend is an argument rather than a field set later because start sweeps at
+// once, and that first sweep is the one that finds what a restart left behind.
+func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID uint64, watching func(string) bool, spend SpendGuard, log *slog.Logger) *reconciler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &reconciler{
 		journal:       journal,
@@ -167,6 +172,7 @@ func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID
 		payer:         payer,
 		appID:         appID,
 		watching:      watching,
+		spend:         spend,
 		log:           log,
 		remedy:        Remedies{}.withDefaults().RecoverTicket,
 		now:           time.Now,
@@ -294,6 +300,19 @@ func (r *reconciler) reconcile(rec TicketRecord) {
 		// a confirmed one.
 		r.log.Info("ticket reconciler: submitted "+action.String(),
 			slog.String("ticket_id", rec.TicketID), slog.String("txid", txid))
+		if r.spend != nil {
+			// Once algod accepts a refund or a lapse no other outcome is
+			// legal: no charge for a refund (see RefundWatchdog.refunded), the
+			// operator's claim for a lapse. A journaled receipt means the
+			// request path already counted its charge, so a lapse only drops
+			// what reservation is left, rather than counting a second charge.
+			switch {
+			case action == reconcileRefund, action == reconcileLapse && rec.Settle != nil:
+				r.spend.Release(rec.TicketID)
+			case action == reconcileLapse:
+				r.spend.Settle(rec.TicketID, box.PendingAmount)
+			}
+		}
 		return
 	}
 	r.mu.Lock()
@@ -361,9 +380,17 @@ func (s *Client) journalPut(rec TicketRecord) {
 func (r *reconciler) forget(rec TicketRecord, box *escrow.TicketRecord) {
 	if box != nil {
 		// Frozen: no contract call accepts it, and the escrowed USDC and the
-		// MBR slot stay locked until arbitration.
+		// MBR slot stay locked until arbitration. The reservation stays too.
 		r.log.Warn("ticket reconciler: ticket is frozen; leaving it to arbitration",
 			slog.String("ticket_id", rec.TicketID))
+	} else if rec.Settle != nil && r.spend != nil {
+		// Closed, with a verified receipt. The request path settles before it
+		// journals the receipt, so the charge is already counted; a
+		// reservation still open here survived a crash between the guard's
+		// two writes, and settling it again would count the charge twice.
+		// With no receipt nothing here says what the ticket cost, so its
+		// reservation ages out.
+		r.spend.Release(rec.TicketID)
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
 	defer cancel()

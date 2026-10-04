@@ -88,6 +88,12 @@ type RefundWatchdog struct {
 	pending map[string]chan struct{} // ticket_id → cancel signal
 	// handedOff is set by handOff: Track arms nothing more.
 	handedOff bool
+	// refunded hears each ticket a refundInactive was submitted for; nil
+	// when nothing listens. Submitted is enough: algod accepts the call only
+	// past the settlement deadline and with no operator claim on the box, so
+	// no charge can land after it, and the only call that can beat it to the
+	// box is another refund.
+	refunded func(ticketID string)
 	// running counts the per-ticket goroutines, which handOff waits out.
 	running sync.WaitGroup
 }
@@ -461,6 +467,9 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 				rw.log.Info("refund watchdog: recovered escrowed USDC via refundInactive",
 					slog.String("ticket_id", ticketID),
 					slog.String("txid", txid))
+				if rw.refunded != nil {
+					rw.refunded(ticketID)
+				}
 				return
 			}
 			if attempt >= rw.attempts {

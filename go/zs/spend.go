@@ -10,11 +10,20 @@ import "errors"
 // SpendGuard is the caller's spending policy, consulted at two checkpoints.
 // All amounts are microUSDC. Implementations must be safe for concurrent use.
 //
-// After a successful Reserve the SDK calls Settle or Release at most once for
-// that ticket, and possibly neither: a ticket that ends in a refund, a lapse
-// or an interruption without a verified receipt is never resolved here,
-// because until the box closes the operator can still claim up to MaxPrice.
-// The guard keeps that exposure until its own window ends.
+// After a successful Reserve the request resolves the ticket with Settle or
+// Release at most once. When it cannot (no verified receipt arrived), the
+// refund watchdog and the ticket reconciler may resolve it once the ticket
+// ends on chain. Both Release on a refund they submitted. The reconciler also
+// Settles a lapse it submitted, at the operator's claim, and Releases
+// whatever is left of a ticket whose receipt the request already settled. A
+// ticket none of them sees end is never resolved here, because until the box
+// closes the operator can still claim up to MaxPrice; the guard keeps that
+// exposure until its own window ends. Neither resolves a lapse the node sends
+// itself, which is the usual one.
+//
+// So Settle and Release can arrive more than once for a ticket, and for one
+// already resolved; a guard keyed by ticket id, counting only the first,
+// counts each charge once.
 //
 // An Admit refusal ends the request with KindSpendCap. A Reserve refusal moves
 // on to the next candidate, and the request ends with KindSpendCap only when
@@ -39,8 +48,14 @@ type SpendGuard interface {
 	Settle(ticketID string, charged uint64)
 
 	// Release drops a reservation that never became a charge: the open
-	// failed, or the receipt failed verification.
+	// failed, the receipt failed verification, or a refund ended the ticket.
 	Release(ticketID string)
+
+	// The watchdog and the reconciler call Settle and Release from their own
+	// goroutines, for tickets the request already resolved and, after a
+	// restart, for tickets this process never reserved. Both must be a no-op
+	// for a ticket with no open reservation; a guard that persists its
+	// reservations is what gives the second kind something to free.
 }
 
 // ErrDuplicateTicket marks a Reserve refusal caused by a ticket id that

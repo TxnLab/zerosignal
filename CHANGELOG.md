@@ -31,6 +31,17 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-03 — a `SpendGuard` hears how a ticket ended on chain
+
+`zs.SpendGuard.Settle` and `Release` were called at most once per reserved ticket, from the
+request. Now the refund watchdog and the ticket reconciler call them too, from their own
+goroutines, once a ticket ends on chain. Both Release on a refund they submitted. The
+reconciler also Settles a lapse it submitted, at the operator's claim, and Releases a ticket
+whose journaled receipt the request already settled. A call can repeat, can follow an earlier
+resolution, and can name a ticket this process never reserved. A guard that adds every
+`Settle` to its total now double-counts. Key the reservations by ticket id and count only the
+first resolution, as the proxy's guard does.
+
 ### 2026-10-03 — one error message no longer names the old project
 
 `tools.ErrUnknownBuiltinTool` now reads "unknown zs builtin tool type" (was "unknown hayai
