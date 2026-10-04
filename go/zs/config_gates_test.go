@@ -536,26 +536,27 @@ func TestNew_CollateralDirIsTheProcesses(t *testing.T) {
 
 // A Client built without a Logger leaves the process's collateral cache on
 // whatever logger it had: New's discard default must not silence it for the
-// Clients that do set one.
+// Clients that do set one. tee.UseCollateralLogger ignores nil, so the
+// property is that New hands it the caller's logger and not its default.
 func TestNew_NoLoggerLeavesTheCollateralCachesLogger(t *testing.T) {
-	cache := sharedCollateralCache()
-	cache.mu.Lock()
-	before := cache.log
-	cache.log = nil
-	cache.mu.Unlock()
-	t.Cleanup(func() { cache.mu.Lock(); cache.log = before; cache.mu.Unlock() })
+	before := useCollateralLogger
+	t.Cleanup(func() { useCollateralLogger = before })
+	var got []*slog.Logger
+	useCollateralLogger = func(log *slog.Logger) { got = append(got, log) }
 
-	cfg := suppliedParts(t)
-	cfg.Logger = nil
-	c, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.Close()
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if cache.log != nil {
-		t.Error("a Client with no Logger gave the collateral cache its discard default")
+	mine := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, want := range []*slog.Logger{nil, mine} {
+		got = nil
+		cfg := suppliedParts(t)
+		cfg.Logger = want
+		c, err := New(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Close()
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("Logger %p: the collateral cache was handed %v, want exactly [%p]", want, got, want)
+		}
 	}
 }
 

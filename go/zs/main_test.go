@@ -8,6 +8,8 @@ package zs
 import (
 	"os"
 	"testing"
+
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // testStateDir is where TestMain persists the collateral cache's process
@@ -23,7 +25,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testStateDir = dir
-	if err := PersistCollateral(dir); err != nil {
+	if err := tee.PersistCollateral(dir); err != nil {
 		panic(err)
 	}
 	code := m.Run()

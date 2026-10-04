@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"log/slog"
@@ -15,7 +15,7 @@ import (
 // shared rules, with the published zs-node releases as the only workloads
 // that verify.
 //
-// The release match is ENFORCED, which is what lets DefaultTEEVerifier carry
+// The release match is ENFORCED, which is what lets DefaultVerifier carry
 // no compose hashes: a node is identified by the release it runs, not by a
 // per-deployment digest a payer would have to collect by hand.
 func DefaultComposePolicy() attest.ComposePolicy {
@@ -26,14 +26,14 @@ func DefaultComposePolicy() attest.ComposePolicy {
 	return p
 }
 
-// DefaultTEEVerifier verifies dstack evidence against the production guest
+// DefaultVerifier verifies dstack evidence against the production guest
 // images and the published zs-node releases this build knows, the same trust
-// zs-proxy ships with. New uses it when Config.TEEVerifier is nil.
+// zs-proxy ships with. zs.New uses it when Config.TEEVerifier is nil.
 //
 // A node running a release newer than this build is refused until the build
 // is updated: the lists are compiled in, because a served list would let
 // whoever serves it decide which workloads count as attested.
-func DefaultTEEVerifier(log *slog.Logger) *BundleVerifier {
+func DefaultVerifier(log *slog.Logger) *BundleVerifier {
 	return &BundleVerifier{
 		TrustedOSImages: attest.TrustedDstackOSImages(),
 		ComposePolicy:   DefaultComposePolicy(),

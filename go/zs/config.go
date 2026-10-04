@@ -17,6 +17,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
@@ -104,7 +105,7 @@ type Stores struct {
 	// CollateralDir is a state directory the TEE collateral cache persists
 	// to, so a restart during an Intel PCS outage still has collateral to
 	// verify against. Empty keeps it in memory. The cache is the process's
-	// (see PersistCollateral), so it persists to the first directory named;
+	// (see tee.PersistCollateral), so it persists to the first directory named;
 	// New logs a later, different one and goes on. Use a state directory,
 	// not a cache directory the OS may sweep.
 	CollateralDir string
@@ -138,9 +139,9 @@ type Config struct {
 	// RequireTEEModels route only to attested nodes.
 	RequireTEEModels []string
 	// TEEVerifier checks the attestation evidence nodes publish, in the
-	// discovery New builds. Nil uses DefaultTEEVerifier, which fetches each
+	// discovery New builds. Nil uses tee.DefaultVerifier, which fetches each
 	// TEE node's evidence on every refresh and Intel's collateral to check it.
-	TEEVerifier TEEVerifier
+	TEEVerifier tee.Verifier
 	// DisableTEE checks no attestation evidence: every node counts as
 	// unattested, so RequireTEEModels have no route. It overrides
 	// TEEVerifier.
@@ -314,7 +315,7 @@ func (c Config) withDefaults() Config {
 	case c.DisableTEE:
 		c.TEEVerifier = nil
 	case c.TEEVerifier == nil:
-		c.TEEVerifier = DefaultTEEVerifier(c.Logger)
+		c.TEEVerifier = tee.DefaultVerifier(c.Logger)
 	}
 	if c.Clock == nil {
 		c.Clock = time.Now

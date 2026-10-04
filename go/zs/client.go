@@ -17,8 +17,13 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
+
+// useCollateralLogger hands the process's collateral cache New's caller's
+// logger; a variable so a test can watch what it hands over.
+var useCollateralLogger = tee.UseCollateralLogger
 
 // Client is the payer: routing, reserve, escrow, sealing and settlement. One
 // Client serves every concurrent request, so per-request state never goes on
@@ -173,12 +178,12 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	for _, w := range warnings {
 		cfg.Logger.Warn(w)
 	}
-	if callerLogger != nil {
-		sharedCollateralCache().useLogger(callerLogger)
-	}
+	// Only a Logger the caller set: the cache is the process's, so the
+	// discard default would silence it for every later Client too.
+	useCollateralLogger(callerLogger)
 	// Another directory already in use still serves this Client: the
 	// documents are the same, only where they persist differs.
-	if err := PersistCollateral(cfg.Stores.CollateralDir); err != nil {
+	if err := tee.PersistCollateral(cfg.Stores.CollateralDir); err != nil {
 		cfg.Logger.Warn("Stores.CollateralDir is not used", slog.Any("err", err))
 	}
 	cfg.Network = Network{Algod: ac, EscrowAppID: appID}

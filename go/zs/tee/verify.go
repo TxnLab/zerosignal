@@ -3,30 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+// Package tee verifies the attestation evidence a ZeroSignal node
+// publishes: the bundle-level checks every platform shares, the dstack TDX
+// verifier, and the process-wide cache of Intel collateral both use. The
+// payer SDK (package zs) fetches the evidence and calls a Verifier; a
+// program that inspects a node's evidence on its own can call the same
+// functions without the rest of the SDK.
+package tee
 
 import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/attest"
-	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/inject"
 )
-
-// DefaultAttestationFetchTimeout bounds a single
-// /v1/zs/attestation probe. Same default as DefaultDetailsFetchTimeout
-// since the two probes share the per-operator deadline.
-const DefaultAttestationFetchTimeout = 2 * time.Second
 
 // EvidenceMaxAgeCeiling is the widest evidence-age window this verifier
 // will apply, whatever the bundle's own refresh_seconds says. It exists
@@ -76,7 +70,7 @@ const EvidenceMaxAgeCeiling = 80 * time.Minute
 
 // Verifier failure tags. These are the canonical tags proto/SPEC.md §3e
 // "Verifier responsibilities" names step by step, and they populate the
-// FailureTag field on TEEStatus. (proto/TEE.md §4.3 walks the same
+// FailureTag field on zs.TEEStatus. (proto/TEE.md §4.3 walks the same
 // checks in prose and names no tags — don't look for a column there.)
 // They are the canonical telemetry handles for diagnosing verification
 // problems — keep them stable so dashboards / alerts / logs can be
@@ -112,24 +106,6 @@ const (
 	FailurePostureUpstreamUnverifiable = attest.TagPostureUpstreamUnverifiable
 )
 
-// maxOperatorResponseBytes caps how much we'll read from an
-// operator-controlled HTTP response body. The cap exists to keep a
-// hostile or buggy operator from streaming a multi-GB body and OOM-ing
-// the proxy; the per-operator probe loop in fetcher.enrich runs
-// concurrently, so one bad operator would otherwise amplify into
-// N×size pressure.
-//
-// The headroom is narrower than it was. This used to say bundles are
-// "well under 64 KB in practice", which stopped being true at proto
-// 9.6: an evidence bundle now carries the app_compose PREIMAGE, which
-// is ~22 KB on the 2026-08 capture and grows with the operator's own
-// NODE_CONFIG_YAML, since that config is literal text inside the
-// measured document. 256 KiB still holds with room to spare, and an
-// over-cap body fails closed at json.Unmarshal rather than truncating
-// into a plausible document — but the number to watch is now the
-// config, which an operator controls, not the fixed fields.
-const maxOperatorResponseBytes = 256 << 10 // 256 KiB
-
 // VerifierIDBuiltin stamps a verdict that BundleVerifier decided on its
 // own — a stub bundle, or a mode with no platform verifier behind it.
 // Mirrored from the proxy config's TEEVerifierBuiltin so the package
@@ -137,14 +113,26 @@ const maxOperatorResponseBytes = 256 << 10 // 256 KiB
 //
 // A verdict that reached a platform verifier carries THAT verifier's id
 // instead (VerifierIDDstack), so this value surviving to the operator's
-// TEEStatus is itself informative: no platform chain was checked.
+// zs.TEEStatus is itself informative: no platform chain was checked.
 const VerifierIDBuiltin = "builtin"
 
-// Verdict is the outcome of a single TEEVerifier.Verify call. Pass is
+// Node is what a verifier checks evidence against: the node it came from,
+// as discovery knows it.
+type Node struct {
+	OperatorID uint64
+	NodeID     uint64
+	// EphemeralRecipientPubkey is the age recipient the payer will seal the
+	// prompt to, already verified against the node's signed advertisement;
+	// empty when no verified one is current. See BundleVerifier.Verify for
+	// why the evidence must bind this key rather than the signing key.
+	EphemeralRecipientPubkey string
+}
+
+// Verdict is the outcome of a single Verifier.Verify call. Pass is
 // the routing-relevant bit; FailureTag is empty iff Pass is true and
 // otherwise carries one of the Failure* constants. AttestedAt is the
 // bundle's GeneratedAt — surfaced so the caller can stamp it on the
-// operator's TEEStatus regardless of the pass/fail outcome (the
+// operator's zs.TEEStatus regardless of the pass/fail outcome (the
 // dashboard wants to show "evidence generated at X but failed
 // verification" cases too).
 type Verdict struct {
@@ -169,7 +157,7 @@ type Verdict struct {
 	AttestedModelIDs []string
 }
 
-// TEEVerifier verifies an evidence bundle against an advertisement.
+// Verifier verifies an evidence bundle against an advertisement.
 // A typed interface (rather than a free function) so a future
 // LocalNvtrustVerifier (or alternative-vendor implementation) lands
 // behind the same shape as a config-switch, not a refactor.
@@ -178,8 +166,8 @@ type Verdict struct {
 // Verdict and SHOULD populate AttestedAt from bundle.GeneratedAt
 // regardless of whether Pass is true. Pass=false MUST come with a
 // non-empty FailureTag drawn from the Failure* constants.
-type TEEVerifier interface {
-	Verify(ctx context.Context, advertised inject.TEEAdvertisement, bundle inject.TEEEvidenceBundle, op Operator) Verdict
+type Verifier interface {
+	Verify(ctx context.Context, advertised inject.TEEAdvertisement, bundle inject.TEEEvidenceBundle, node Node) Verdict
 }
 
 // BundleVerifier checks everything about an evidence bundle that does
@@ -206,7 +194,7 @@ type TEEVerifier interface {
 // do for itself, which is why they run BEFORE any dispatch.
 //
 // Operators that don't advertise TEE never reach a verifier — the
-// fetcher only calls Verify when the details probe surfaced a TEE
+// zs fetcher only calls Verify when the details probe surfaced a TEE
 // advertisement.
 type BundleVerifier struct {
 	AllowStub bool
@@ -238,9 +226,9 @@ type BundleVerifier struct {
 	Log *slog.Logger
 }
 
-// Verify implements TEEVerifier. See BundleVerifier for the layered
+// Verify implements Verifier. See BundleVerifier for the layered
 // check semantics.
-func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvertisement, bundle inject.TEEEvidenceBundle, op Operator) Verdict {
+func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvertisement, bundle inject.TEEEvidenceBundle, op Node) Verdict {
 	verdict := Verdict{
 		VerifierID: VerifierIDBuiltin,
 		AttestedAt: bundle.GeneratedAt,
@@ -263,7 +251,7 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 	// still pass every check.
 	//
 	// EphemeralRecipientPubkey is the right ground truth precisely because
-	// applyEphemeralAdvertisement has already vetted it this same refresh
+	// zs's applyEphemeralAdvertisement has already vetted it this same refresh
 	// pass — signature-verified under the on-chain Ed25519 key, bound to
 	// (operator_id, node_id), issued-at checked and capped at
 	// MaxEphemeralLifetime — so the attested key is provably fresh and
@@ -271,7 +259,7 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 	//
 	// Because that key rotates (node: server.EphemeralRotationPeriod), the
 	// node re-mints evidence on rotation. Both are read in one refresh pass
-	// (applyEphemeralAdvertisement then probeAttestation), so a matching pair
+	// (zs's applyEphemeralAdvertisement then probeAttestation), so a matching pair
 	// is the steady state; the brief window where the node has rotated but
 	// not yet re-minted fails closed here and clears on the next probe.
 	if op.EphemeralRecipientPubkey == "" {
@@ -286,7 +274,7 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 		verdict.FailureTag = FailureAdvertisementMismatch
 		return verdict
 	}
-	if bundle.OperatorID != op.ID {
+	if bundle.OperatorID != op.OperatorID {
 		verdict.FailureTag = FailureAdvertisementMismatch
 		return verdict
 	}
@@ -354,7 +342,7 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 	// equivalently hash bundle.NodePubkey here; hashing nodePubkey makes
 	// the security property — "the binding is to the key the proxy will
 	// actually seal to" — explicit at the call site.
-	expected := computeReportData(nodePubkey, op.ID)
+	expected := computeReportData(nodePubkey, op.OperatorID)
 	got, err := base64.StdEncoding.DecodeString(bundle.ReportData)
 	if err != nil || subtle.ConstantTimeCompare(expected, got) != 1 {
 		verdict.FailureTag = FailureKeyBindingMismatch
@@ -433,111 +421,4 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 // that is entirely valid.
 func computeReportData(nodePubkey string, operatorID uint64) []byte {
 	return attest.ReportData(nodePubkey, operatorID)
-}
-
-// AttestationClient fetches /v1/zs/attestation from a node. Mirrors
-// the shape of DetailsClient (see details.go) so the per-operator
-// probe layer doesn't need a second timeout / HTTP-pool model.
-type AttestationClient struct {
-	HTTP    *http.Client
-	Timeout time.Duration
-}
-
-// NewAttestationClient constructs an AttestationClient. timeout falls
-// back to DefaultAttestationFetchTimeout when non-positive. Pass an
-// existing *http.Client to share connection pools across operators;
-// per-fetch deadlines are enforced via context inside Fetch (we do not
-// set http.Client.Timeout because the proxy's project-wide convention
-// is to keep client timeouts at zero and rely on the request context).
-func NewAttestationClient(client *http.Client, timeout time.Duration) *AttestationClient {
-	if timeout <= 0 {
-		timeout = DefaultAttestationFetchTimeout
-	}
-	if client == nil {
-		// Timeout 0: the per-fetch deadline is enforced via context in Fetch.
-		// The tuned transport gives a short dial timeout and a per-host idle
-		// pool, matching DetailsClient (see details.go).
-		client = httpx.Client(0, httpx.Options{})
-	}
-	return &AttestationClient{HTTP: client, Timeout: timeout}
-}
-
-// Fetch joins evidenceURL onto baseURL (so a node can advertise an
-// absolute or relative path) and issues a GET. Any error (network,
-// non-2xx, malformed JSON) is returned to the caller — Fetch does not
-// silently swallow them; the fetcher logs each failure with the
-// FailureFetchFailed tag. A 404 is treated as a normal error here
-// (operator advertised TEE but the endpoint is absent / misrouted) —
-// the caller handles it the same as any other fetch failure.
-// When hop is non-nil the probe is routed through that relay (transport-privacy
-// mode). The relay forwards to the target's standard /v1/zs/attestation path
-// (the only attestation path on the relay allow-list); an operator advertising
-// a non-standard / absolute evidence URL cannot be relay-probed for attestation
-// under privacy mode — a known limitation tracked for the privacy rollout.
-func (c *AttestationClient) Fetch(ctx context.Context, baseURL, evidenceURL string, hop *RelayHop) (inject.TEEEvidenceBundle, error) {
-	endpoint, err := joinAttestationURL(baseURL, evidenceURL)
-	if err != nil {
-		return inject.TEEEvidenceBundle{}, err
-	}
-
-	fetchCtx := ctx
-	if c.Timeout > 0 {
-		var cancel context.CancelFunc
-		fetchCtx, cancel = context.WithTimeout(ctx, c.Timeout)
-		defer cancel()
-	}
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", inject.AttestationContentType)
-	if err := ApplyRelay(req, hop, "/v1/zs/attestation", http.MethodGet); err != nil {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("apply relay: %w", err)
-	}
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("attestation request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("attestation endpoint returned %d %s", resp.StatusCode, resp.Status)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxOperatorResponseBytes))
-	if err != nil {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("read attestation body: %w", err)
-	}
-	var bundle inject.TEEEvidenceBundle
-	if err := json.Unmarshal(raw, &bundle); err != nil {
-		return inject.TEEEvidenceBundle{}, fmt.Errorf("decode attestation: %w", err)
-	}
-	return bundle, nil
-}
-
-// joinAttestationURL resolves evidenceURL against baseURL. Handles
-// three shapes the node may advertise:
-//
-//   - empty           → falls back to "/v1/zs/attestation"
-//   - "/path/..."     → joined onto baseURL
-//   - "http(s)://..." → used verbatim (the node has TLS-terminated the
-//     attestation endpoint behind a different host than its base URL)
-//
-// Only http and https schemes are accepted on absolute URLs to
-// prevent a malicious operator from steering the proxy at file:// or
-// gopher:// targets via a crafted EvidenceURL.
-func joinAttestationURL(baseURL, evidenceURL string) (string, error) {
-	trimmed := strings.TrimRight(baseURL, "/")
-	if trimmed == "" {
-		return "", errors.New("empty operator base_url")
-	}
-	if evidenceURL == "" {
-		return trimmed + "/v1/zs/attestation", nil
-	}
-	if strings.HasPrefix(evidenceURL, "http://") || strings.HasPrefix(evidenceURL, "https://") {
-		return evidenceURL, nil
-	}
-	if !strings.HasPrefix(evidenceURL, "/") {
-		evidenceURL = "/" + evidenceURL
-	}
-	return trimmed + evidenceURL, nil
 }

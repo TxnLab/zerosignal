@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"context"
@@ -208,7 +208,7 @@ func (v *DstackVerifier) verifyQuoteChain(ctx context.Context, quote []byte, car
 // Verify runs the dstack branch and returns a failure tag, or "" on
 // success. op supplies the independently-verified ephemeral recipient
 // the binding must be to.
-func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBundle, op Operator) string {
+func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBundle, op Node) string {
 	quote, err := base64.StdEncoding.DecodeString(bundle.CPUReport)
 	if err != nil || len(quote) == 0 {
 		return FailureVendorChainInvalid
@@ -221,14 +221,14 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	teeType, ok := attest.QuoteTEEType(quote)
 	if !ok || teeType != attest.TEETypeTDX {
 		v.log().Debug("attestation: report is not a TDX v4 quote",
-			slog.Uint64("operator_id", op.ID), slog.Uint64("tee_type", uint64(teeType)))
+			slog.Uint64("operator_id", op.OperatorID), slog.Uint64("tee_type", uint64(teeType)))
 		return FailureVendorChainInvalid
 	}
 
 	// 2. The vendor chain. Everything below is a statement about
 	// software; this is the step that makes it a statement about
 	// software running on real Intel hardware.
-	if err := v.verifyQuoteChain(ctx, quote, bundle.Collateral, op.ID); err != nil {
+	if err := v.verifyQuoteChain(ctx, quote, bundle.Collateral, op.OperatorID); err != nil {
 		// ErrStaleCollateralRejected joins the outage tag HERE and only
 		// here. Routing cannot tell whether our aging document or the
 		// node's evidence caused the refusal, both tags fail closed, and
@@ -253,11 +253,11 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 				msg = "attestation: TDX quote refused by our own cached Intel collateral " +
 					"during a PCS outage — cause not attributable from here"
 			}
-			v.log().Warn(msg, slog.Uint64("operator_id", op.ID), slog.Any("err", err))
+			v.log().Warn(msg, slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 			return FailureCollateralUnreachable
 		}
 		v.log().Warn("attestation: TDX quote failed vendor-chain verification",
-			slog.Uint64("operator_id", op.ID), slog.Any("err", err))
+			slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 		return FailureVendorChainInvalid
 	}
 
@@ -268,7 +268,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	measurements, err := attest.VerifyEventLog(bundle.EventLog, quote)
 	if err != nil {
 		v.log().Warn("attestation: event log does not replay to the quote's RTMR3",
-			slog.Uint64("operator_id", op.ID), slog.Any("err", err))
+			slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 		return FailureMeasurementMismatch
 	}
 	// THE WHOLE-DOCUMENT PIN, and the condition is the interesting part.
@@ -284,7 +284,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	if len(v.TrustedComposeHashes) > 0 || !v.ComposePolicy.EnforceComposeSkeleton {
 		if !containsHexFold(v.TrustedComposeHashes, measurements[attest.EventComposeHash]) {
 			v.log().Warn("attestation: compose hash is not in the trusted set",
-				slog.Uint64("operator_id", op.ID),
+				slog.Uint64("operator_id", op.OperatorID),
 				slog.String("compose_hash", measurements[attest.EventComposeHash]))
 			return FailureMeasurementMismatch
 		}
@@ -295,7 +295,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// guarantees do not hold.
 	if !containsHexFold(v.TrustedOSImages, measurements[attest.EventOSImageHash]) {
 		v.log().Warn("attestation: OS image hash is not in the trusted set",
-			slog.Uint64("operator_id", op.ID),
+			slog.Uint64("operator_id", op.OperatorID),
 			slog.String("os_image_hash", measurements[attest.EventOSImageHash]))
 		return FailureMeasurementMismatch
 	}
@@ -337,7 +337,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 		if v.ComposePolicy.EnforceComposeSkeleton {
 			v.log().Warn("attestation: node published no app_compose, so the release "+
 				"match has nothing to check — refusing rather than skipping",
-				slog.Uint64("operator_id", op.ID))
+				slog.Uint64("operator_id", op.OperatorID))
 			return FailureMeasurementMismatch
 		}
 	} else {
@@ -354,10 +354,10 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 			var pe *attest.ComposePolicyError
 			if errors.As(err, &pe) {
 				v.log().Warn("attestation: the measured compose violates policy",
-					slog.Uint64("operator_id", op.ID), slog.Any("err", err))
+					slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 			} else {
 				v.log().Warn("attestation: the published compose is not the one this quote measured",
-					slog.Uint64("operator_id", op.ID), slog.Any("err", err))
+					slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 			}
 			return FailureMeasurementMismatch
 		}
@@ -371,7 +371,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	halves, err := attest.SplitReportData(quote)
 	if errors.Is(err, attest.ErrReportDataAbsent) {
 		v.log().Warn("attestation: quote is too short to hold report_data",
-			slog.Uint64("operator_id", op.ID))
+			slog.Uint64("operator_id", op.OperatorID))
 		return FailureKeyBindingMismatch
 	}
 
@@ -379,15 +379,15 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// upper half's zero test (SplitReportData returns KeyBinding with
 	// ErrAuxBindingAbsent), so a quote over the wrong key is reported as
 	// that, not as an out-of-date node.
-	expected := computeReportData(op.EphemeralRecipientPubkey, op.ID)
+	expected := computeReportData(op.EphemeralRecipientPubkey, op.OperatorID)
 	if subtle.ConstantTimeCompare(halves.KeyBinding[:], expected) != 1 {
 		v.log().Warn("attestation: the quote binds a different key than the one we would seal to",
-			slog.Uint64("operator_id", op.ID))
+			slog.Uint64("operator_id", op.OperatorID))
 		return FailureKeyBindingMismatch
 	}
 	if errors.Is(err, attest.ErrAuxBindingAbsent) {
 		v.log().Warn("attestation: report_data upper half is all zero — node predates proto 9.9",
-			slog.Uint64("operator_id", op.ID), slog.Uint64("node_id", op.NodeID))
+			slog.Uint64("operator_id", op.OperatorID), slog.Uint64("node_id", op.NodeID))
 		return FailureAuxBindingAbsent
 	}
 
@@ -398,7 +398,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	if err := halves.VerifyAux(op.NodeID, bundle.AppModels, bundle.Posture, bundle.Nonce, nil); err != nil {
 		tag := attest.AuxFailureTag(err)
 		v.log().Warn("attestation: aux binding refused",
-			slog.Uint64("operator_id", op.ID), slog.Uint64("node_id", op.NodeID),
+			slog.Uint64("operator_id", op.OperatorID), slog.Uint64("node_id", op.NodeID),
 			slog.String("tag", tag), slog.Int("published_models", len(bundle.AppModels)),
 			slog.Any("err", err))
 		return tag
@@ -424,7 +424,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 // a node that publishes none is making no claim, which is the honest
 // outcome for a verifier to pass through. VerifyAux has already committed
 // the absence, so a relay cannot have stripped one.
-func (v *DstackVerifier) checkPosture(p *inject.TEEPosture, upstreamAttested bool, op Operator) string {
+func (v *DstackVerifier) checkPosture(p *inject.TEEPosture, upstreamAttested bool, op Node) string {
 	if p == nil {
 		return ""
 	}
@@ -434,7 +434,7 @@ func (v *DstackVerifier) checkPosture(p *inject.TEEPosture, upstreamAttested boo
 		// leaves is self-contradictory. Refuse rather than pick a reading.
 		if p.UpstreamBaseURL != "" || p.UpstreamAttested {
 			v.log().Warn("attestation: in_enclave posture names an upstream",
-				slog.Uint64("operator_id", op.ID))
+				slog.Uint64("operator_id", op.OperatorID))
 			return FailureAdvertisementMismatch
 		}
 	case inject.PlaintextNamedUpstream:
@@ -443,12 +443,12 @@ func (v *DstackVerifier) checkPosture(p *inject.TEEPosture, upstreamAttested boo
 		// not making the claim.
 		if p.UpstreamBaseURL == "" {
 			v.log().Warn("attestation: named_upstream posture names no upstream",
-				slog.Uint64("operator_id", op.ID))
+				slog.Uint64("operator_id", op.OperatorID))
 			return FailureAdvertisementMismatch
 		}
 		if !inject.NamedUpstreamAdmissible(p, upstreamAttested) {
 			v.log().Warn("attestation: named_upstream posture names an upstream the payer cannot hold to its claim",
-				slog.Uint64("operator_id", op.ID),
+				slog.Uint64("operator_id", op.OperatorID),
 				slog.String("upstream_base_url", p.UpstreamBaseURL),
 				slog.Bool("zero_retention", p.ZeroRetention),
 				slog.Bool("upstream_attested", upstreamAttested))
@@ -458,7 +458,7 @@ func (v *DstackVerifier) checkPosture(p *inject.TEEPosture, upstreamAttested boo
 		// Unrecognized values are unknown, and unknown must never be
 		// read as the stronger of the two.
 		v.log().Warn("attestation: unrecognized posture",
-			slog.Uint64("operator_id", op.ID),
+			slog.Uint64("operator_id", op.OperatorID),
 			slog.String("plaintext_terminates", p.PlaintextTerminates))
 		return FailureAdvertisementMismatch
 	}
@@ -516,16 +516,16 @@ func normalizeHex(s string) string {
 // Intel PCK chain verification
 // ---------------------------------------------------------------------------
 
-// collateralTimeout bounds one verification's Intel PCS traffic.
+// CollateralTimeout bounds one verification's Intel PCS traffic.
 //
 // Sized against the REFRESH CYCLE, not against PCS: the whole cycle —
 // chain read plus every operator's probes — runs under
-// DefaultRefreshTimeout (30s), so a ceiling anywhere near that
+// zs.DefaultRefreshTimeout (30s), so a ceiling anywhere near that
 // lets one unreachable third party cost the proxy a complete refresh.
 // A warm cache makes this moot (the artifacts move on Intel's
 // publication cadence, days to weeks); it bounds the cold path and the
 // hour-boundary refetch. Measured cold against real PCS: ~1.1s.
-const collateralTimeout = 8 * time.Second
+const CollateralTimeout = 8 * time.Second
 
 // collateralTTL is how long a fetched Intel PCS artifact is reused.
 // The collateral (TCB info, QE identity, CRLs) moves on Intel's
@@ -607,7 +607,7 @@ func VerifyTDXQuoteChainStale(ctx context.Context, quote []byte) (bool, error) {
 // the ones that decide whether an Intel outage reads as an outage or as
 // a fleet of forged quotes — without depending on Intel being down.
 func verifyTDXQuoteChainWith(ctx context.Context, quote []byte, cache contextGetter) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, collateralTimeout)
+	ctx, cancel := context.WithTimeout(ctx, CollateralTimeout)
 	defer cancel()
 
 	getter := &verifyGetter{inner: cache, ctx: ctx}
@@ -785,13 +785,13 @@ func sharedCollateralCache() *cachingGetter {
 // BETWEEN retries. So on the exact condition this code is written to
 // survive (PCS unreachable, or accepting the connection and going
 // silent), a single artifact fetch blocks for two minutes or forever,
-// and collateralTimeout would only ever have skipped the artifacts
+// and CollateralTimeout would only ever have skipped the artifacts
 // AFTER the one that hung.
 //
 // That is not one slow probe. The per-operator probes run under a
 // shared WaitGroup inside one refresh cycle bounded by
-// DefaultRefreshTimeout (30s), so one stalled dstack operator delays
-// discovery for the whole fleet — the precise outcome collateralTimeout
+// zs.DefaultRefreshTimeout (30s), so one stalled dstack operator delays
+// discovery for the whole fleet — the precise outcome CollateralTimeout
 // was sized to prevent. Correctly declining to cache failures means
 // every dstack operator pays it independently.
 //
@@ -837,7 +837,7 @@ const maxCollateralBytes = 4 << 20
 // case a context somehow does not reach it. The context is the primary
 // bound; this is defence in depth against exactly the shape of bug this
 // getter exists to fix.
-var pcsHTTPClient = &http.Client{Timeout: collateralTimeout}
+var pcsHTTPClient = &http.Client{Timeout: CollateralTimeout}
 
 type collateralEntry struct {
 	header  map[string][]string

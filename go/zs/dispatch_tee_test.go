@@ -13,6 +13,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/wire"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // minimalTEEServer builds a Client with just enough wiring to drive
@@ -48,15 +49,15 @@ func teeOp(id uint64, model string, tee *TEEStatus) Operator {
 
 var attestedTEE = &TEEStatus{
 	Mode:       "stub",
-	VerifierID: VerifierIDBuiltin,
+	VerifierID: tee.VerifierIDBuiltin,
 	Verified:   true,
 }
 
 var failedTEE = &TEEStatus{
 	Mode:       "stub",
-	VerifierID: VerifierIDBuiltin,
+	VerifierID: tee.VerifierIDBuiltin,
 	Verified:   false,
-	FailureTag: FailureStubNotAllowed,
+	FailureTag: tee.FailureStubNotAllowed,
 }
 
 func TestPickCandidates_TEEFilter_KeepsOnlyAttested(t *testing.T) {

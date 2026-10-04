@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -698,5 +699,33 @@ func TestCachingGetter_StoreLogsThroughTheCachesLogger(t *testing.T) {
 	c.store.load()
 	if !strings.Contains(buf.String(), "persisted collateral is unreadable") {
 		t.Errorf("the store logged elsewhere: %q", buf.String())
+	}
+}
+
+// A nil logger — a Client built without one — leaves the shared cache on the
+// logger it had, so it does not silence the cache for the Clients that set one.
+func TestUseCollateralLogger_NilLeavesTheCachesLogger(t *testing.T) {
+	cache := sharedCollateralCache()
+	cache.mu.Lock()
+	before := cache.log
+	cache.log = nil
+	cache.mu.Unlock()
+	t.Cleanup(func() { cache.mu.Lock(); cache.log = before; cache.mu.Unlock() })
+
+	UseCollateralLogger(nil)
+	cache.mu.Lock()
+	got := cache.log
+	cache.mu.Unlock()
+	if got != nil {
+		t.Fatal("UseCollateralLogger(nil) set the cache's logger")
+	}
+
+	mine := slog.New(slog.NewTextHandler(io.Discard, nil))
+	UseCollateralLogger(mine)
+	cache.mu.Lock()
+	got = cache.log
+	cache.mu.Unlock()
+	if got != mine {
+		t.Error("UseCollateralLogger did not give the cache its first logger")
 	}
 }

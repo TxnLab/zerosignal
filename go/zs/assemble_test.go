@@ -18,6 +18,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/keystore"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // A keystore is a Signer once an address is chosen.
@@ -56,11 +57,11 @@ func TestSimulateSender(t *testing.T) {
 // Every field here is a silent no-op when dropped: discovery still runs, and
 // only the knob stops working.
 func TestNewChainSource_MapsConfig(t *testing.T) {
-	tee := &BundleVerifier{}
+	verifier := &tee.BundleVerifier{}
 	cfg := Config{
 		Signer:      fakeSigner{addr: "PAYER"},
 		Privacy:     PrivacyRelayRequired,
-		TEEVerifier: tee,
+		TEEVerifier: verifier,
 		Discovery: Discovery{
 			OperatorIDs:        []uint64{3, 5},
 			DetailsTimeout:     7 * time.Second,
@@ -75,7 +76,7 @@ func TestNewChainSource_MapsConfig(t *testing.T) {
 	if src.DetailsTimeout != 7*time.Second || src.DetailsConcurrency != 11 || src.LatencyStateMax != 13 {
 		t.Errorf("timeout %v concurrency %d latency max %d", src.DetailsTimeout, src.DetailsConcurrency, src.LatencyStateMax)
 	}
-	if src.TEEVerifier != TEEVerifier(tee) {
+	if src.TEEVerifier != tee.Verifier(verifier) {
 		t.Error("TEEVerifier dropped")
 	}
 	if !src.Privacy {

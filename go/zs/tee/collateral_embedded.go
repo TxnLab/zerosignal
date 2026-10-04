@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"context"
@@ -197,7 +197,7 @@ func VerifyTDXQuoteChainCarried(ctx context.Context, quote []byte, c *inject.TEE
 		return err
 	}
 	// No timeout wrapper: this path performs no I/O — the getter is a map —
-	// and verifyTDXQuoteChainWith applies collateralTimeout itself. A second
+	// and verifyTDXQuoteChainWith applies CollateralTimeout itself. A second
 	// one here was decorative, and a decorative deadline on a hermetic path
 	// is the kind of thing a later reader mistakes for a network boundary.
 	_, err = verifyTDXQuoteChainWith(ctx, quote, getter)

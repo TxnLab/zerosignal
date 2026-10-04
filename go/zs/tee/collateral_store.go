@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"encoding/json"
@@ -19,15 +19,25 @@ import (
 // PersistCollateral keeps the process's TEE collateral cache in dir and loads
 // what dir already holds. The cache is one per process, shared by every Client
 // and by VerifyTDXQuoteChain, since Intel's documents are the same for all of
-// them; so it persists to one directory, and naming another is an error. New
-// calls it with Stores.CollateralDir; a program that verifies quotes without a
-// Client calls it itself, ideally before the first check, though entries
-// fetched earlier are written too.
+// them; so it persists to one directory, and naming another is an error.
+// zs.New calls it with Stores.CollateralDir; a program that verifies quotes
+// without a zs.Client calls it itself, ideally before the first check, though
+// entries fetched earlier are written too.
 func PersistCollateral(dir string) error {
 	if dir == "" {
 		return nil
 	}
 	return sharedCollateralCache().attachStore(filepath.Join(dir, collateralStoreFile))
+}
+
+// UseCollateralLogger gives the process's collateral cache its logger, unless
+// one was given already; until then it logs to slog.Default. zs.New passes a
+// Logger its caller set, and only one: a Client built without one must not
+// silence the cache for the Clients after it.
+func UseCollateralLogger(log *slog.Logger) {
+	if log != nil {
+		sharedCollateralCache().useLogger(log)
+	}
 }
 
 // Intel PCS collateral, kept across restarts.
@@ -127,9 +137,7 @@ func (s *collateralStore) logger() *slog.Logger {
 	return s.owner.loggerLocked()
 }
 
-// useLogger gives the cache its logger unless a Client already did. Only a
-// Logger the caller set counts: a Client built without one must not silence
-// the cache for the Clients after it.
+// useLogger gives the cache its logger unless one was given already.
 func (g *cachingGetter) useLogger(log *slog.Logger) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

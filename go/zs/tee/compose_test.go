@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"bytes"
@@ -213,7 +213,7 @@ func TestDstackVerifier_ComposeHashPinNarrowsButDoesNotSubstitute(t *testing.T) 
 	// refused by the absent-preimage branch above and passes no matter what
 	// the pin does — measured: all of them were green with the pin change
 	// reverted until the document was attached.
-	withDoc := func(t *testing.T) (*BundleVerifier, Operator, inject.TEEEvidenceBundle) {
+	withDoc := func(t *testing.T) (*BundleVerifier, Node, inject.TEEEvidenceBundle) {
 		t.Helper()
 		v, op, bundle := dstackFixture(t)
 		bundle.AppCompose = capturedAppCompose(t)

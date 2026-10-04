@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"context"
@@ -95,8 +95,8 @@ func TestVerifyTDXQuoteChain_UnreachablePCS(t *testing.T) {
 		// context-aware getter exists to prevent.
 		//
 		// THE BOUNDS ARE LITERALS, NOT MULTIPLES OF collateralTimEOUT.
-		// An earlier version blocked `10 * collateralTimeout` and
-		// asserted `elapsed < collateralTimeout + 2s`, which scales
+		// An earlier version blocked `10 * CollateralTimeout` and
+		// asserted `elapsed < CollateralTimeout + 2s`, which scales
 		// with the constant under test and therefore passes for ANY
 		// value of it — including 80s, which blows the refresh cycle
 		// this constant exists to stay inside.
@@ -153,27 +153,6 @@ func TestRequireCollateralFetched(t *testing.T) {
 		if err := requireCollateralFetched(n); err != nil {
 			t.Errorf("requireCollateralFetched(%d) = %v, want nil", n, err)
 		}
-	}
-}
-
-// collateralTimeout is sized against the REFRESH CYCLE, and that
-// relationship is the whole reason for its value — the probes share one
-// WaitGroup under DefaultRefreshTimeout, so a ceiling near it lets one
-// unreachable third party cost the proxy a complete refresh.
-//
-// Asserted against the thing it is sized against rather than against
-// itself.
-func TestCollateralTimeoutFitsTheRefreshCycle(t *testing.T) {
-	if collateralTimeout >= DefaultRefreshTimeout {
-		t.Errorf("collateralTimeout = %v, DefaultRefreshTimeout = %v — one stalled "+
-			"operator can now consume the whole refresh cycle",
-			collateralTimeout, DefaultRefreshTimeout)
-	}
-	// Comfortably inside, not merely under: several operators may stall
-	// in the same cycle.
-	if collateralTimeout > DefaultRefreshTimeout/2 {
-		t.Errorf("collateralTimeout = %v is more than half of DefaultRefreshTimeout (%v)",
-			collateralTimeout, DefaultRefreshTimeout)
 	}
 }
 
@@ -352,9 +331,9 @@ func TestPCSGetter_HonoursTheContext(t *testing.T) {
 		t.Error("pcsHTTPClient has no timeout; a silent socket would block forever " +
 			"if a context ever failed to reach it")
 	}
-	if pcsHTTPClient.Timeout > collateralTimeout {
-		t.Errorf("pcsHTTPClient.Timeout = %v exceeds collateralTimeout = %v",
-			pcsHTTPClient.Timeout, collateralTimeout)
+	if pcsHTTPClient.Timeout > CollateralTimeout {
+		t.Errorf("pcsHTTPClient.Timeout = %v exceeds CollateralTimeout = %v",
+			pcsHTTPClient.Timeout, CollateralTimeout)
 	}
 }
 
@@ -429,7 +408,7 @@ func TestPCSGetter_Response(t *testing.T) {
 		t.Cleanup(func() { pcsHTTPClient = orig })
 
 		rt := &recordingRoundTripper{inner: http.DefaultTransport}
-		pcsHTTPClient = &http.Client{Transport: rt, Timeout: collateralTimeout}
+		pcsHTTPClient = &http.Client{Transport: rt, Timeout: CollateralTimeout}
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("ok"))

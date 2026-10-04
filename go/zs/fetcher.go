@@ -23,6 +23,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/steering"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // OperatorSource produces the current list of operators the proxy may
@@ -89,7 +90,7 @@ type ChainOperatorSource struct {
 	// which is the correct behavior when the proxy isn't configured
 	// for TEE verification (e.g. a deployment that doesn't yet care
 	// about confidential mode).
-	TEEVerifier TEEVerifier
+	TEEVerifier tee.Verifier
 
 	// Log receives refresh diagnostics. Nil is tolerated — output goes
 	// to slog.Default() in that case.
@@ -999,9 +1000,9 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 		op.TEE = &TEEStatus{
 			Mode:       advertised.Mode,
 			AttestedAt: advertised.AttestedAt,
-			VerifierID: VerifierIDBuiltin,
+			VerifierID: tee.VerifierIDBuiltin,
 			Verified:   false,
-			FailureTag: FailureFetchFailed,
+			FailureTag: tee.FailureFetchFailed,
 		}
 		log.Warn("operator attestation probe failed",
 			slog.Uint64("operator_id", op.ID),
@@ -1013,7 +1014,7 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 		)
 		return
 	}
-	verdict := s.TEEVerifier.Verify(ctx, advertised, bundle, *op)
+	verdict := s.TEEVerifier.Verify(ctx, advertised, bundle, op.TEENode())
 	op.TEE = &TEEStatus{
 		Mode:             advertised.Mode,
 		AttestedAt:       verdict.AttestedAt,

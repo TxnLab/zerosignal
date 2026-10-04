@@ -3,17 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,25 +19,23 @@ import (
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
-// testOperatorAndPubkey returns an Operator and the string used as the bundle's
+// testSigningAddr stands in for a node's on-chain signing address, which the
+// verifier must not bind to.
+const testSigningAddr = "SIGNING-ADDR-NOT-THE-BINDING-TARGET"
+
+// testOperatorAndPubkey returns a Node and the string used as the bundle's
 // NodePubkey, in lockstep so the verifier's cross-check passes. The TEE
 // key-binding target is the node's current ephemeral age recipient — the key
 // the proxy actually seals to — which applyEphemeralAdvertisement populates
 // (signature-verified, lifetime-capped) earlier in the same refresh pass.
-// SigningAddr is set too, since a real operator always has one, but the
-// verifier no longer binds to it.
-func testOperatorAndPubkey(t *testing.T, id uint64) (Operator, string) {
+func testOperatorAndPubkey(t *testing.T, id uint64) (Node, string) {
 	t.Helper()
 	ageID, err := age.GenerateX25519Identity()
 	if err != nil {
 		t.Fatalf("generate age identity: %v", err)
 	}
 	recipient := ageID.Recipient().String()
-	return Operator{
-		ID:                       id,
-		SigningAddr:              "SIGNING-ADDR-NOT-THE-BINDING-TARGET",
-		EphemeralRecipientPubkey: recipient,
-	}, recipient
+	return Node{OperatorID: id, EphemeralRecipientPubkey: recipient}, recipient
 }
 
 // stubBundleFor returns a well-formed stub-mode evidence bundle bound
@@ -204,13 +198,13 @@ func TestBundleVerifier_NodePubkeyMismatch(t *testing.T) {
 }
 
 func TestBundleVerifier_NoEphemeralRecipientFailsClosed(t *testing.T) {
-	// An Operator with no verified ephemeral this cycle (never advertised,
+	// A Node with no verified ephemeral this cycle (never advertised,
 	// expired, or a bad signature) must fail closed instead of computing a
 	// binding hash over an empty key — that hash is deterministic, so a
 	// hostile bundle could be crafted to match it. Such an operator is
 	// unsealable anyway.
 	v := &BundleVerifier{AllowStub: true}
-	op := Operator{ID: 7, SigningAddr: "SIGNING-ADDR-PRESENT"} // no ephemeral
+	op := Node{OperatorID: 7} // no ephemeral
 	bundle := stubBundleFor("age1-does-not-need-to-parse", 7)
 	advertised := inject.TEEAdvertisement{Mode: inject.TEEModeStub}
 
@@ -479,10 +473,10 @@ func TestBundleVerifier_AlwaysPopulatesVerifierID(t *testing.T) {
 	v := &BundleVerifier{AllowStub: false}
 	cases := []struct {
 		name string
-		mut  func(*inject.TEEEvidenceBundle, *inject.TEEAdvertisement, *Operator)
+		mut  func(*inject.TEEEvidenceBundle, *inject.TEEAdvertisement, *Node)
 	}{
-		{"stub_not_allowed", func(b *inject.TEEEvidenceBundle, a *inject.TEEAdvertisement, _ *Operator) {}},
-		{"key_binding_mismatch", func(b *inject.TEEEvidenceBundle, _ *inject.TEEAdvertisement, _ *Operator) {
+		{"stub_not_allowed", func(b *inject.TEEEvidenceBundle, a *inject.TEEAdvertisement, _ *Node) {}},
+		{"key_binding_mismatch", func(b *inject.TEEEvidenceBundle, _ *inject.TEEAdvertisement, _ *Node) {
 			b.ReportData = base64.StdEncoding.EncodeToString(make([]byte, 32))
 		}},
 	}
@@ -503,125 +497,13 @@ func TestBundleVerifier_AlwaysPopulatesVerifierID(t *testing.T) {
 	}
 }
 
-func TestAttestationClient_FetchHappyPath(t *testing.T) {
-	want := stubBundleFor("age1abc", 7)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/zs/attestation" {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", inject.AttestationContentType)
-		_ = json.NewEncoder(w).Encode(want)
-	}))
-	defer srv.Close()
-
-	c := NewAttestationClient(srv.Client(), 2*time.Second)
-	got, err := c.Fetch(context.Background(), srv.URL, "/v1/zs/attestation", nil)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if got.Mode != want.Mode || got.NodePubkey != want.NodePubkey || got.OperatorID != want.OperatorID {
-		t.Errorf("bundle round-trip mismatch: got %+v, want %+v", got, want)
-	}
-}
-
-func TestAttestationClient_FetchNon2xx(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	c := NewAttestationClient(srv.Client(), 500*time.Millisecond)
-	_, err := c.Fetch(context.Background(), srv.URL, "/v1/zs/attestation", nil)
-	if err == nil {
-		t.Fatal("Fetch should error on 503")
-	}
-	if !strings.Contains(err.Error(), "503") {
-		t.Errorf("error should mention 503: %v", err)
-	}
-}
-
-func TestAttestationClient_FetchEmptyEvidenceURL(t *testing.T) {
-	// Empty evidence URL → falls back to /v1/zs/attestation on
-	// the operator's BaseURL.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/zs/attestation" {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(stubBundleFor("age1abc", 7))
-	}))
-	defer srv.Close()
-	c := NewAttestationClient(srv.Client(), 2*time.Second)
-	if _, err := c.Fetch(context.Background(), srv.URL, "", nil); err != nil {
-		t.Fatalf("empty evidence URL fallback failed: %v", err)
-	}
-}
-
-func TestAttestationClient_FetchAbsoluteEvidenceURL(t *testing.T) {
-	// Absolute URL (different host) is honored verbatim.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(stubBundleFor("age1abc", 7))
-	}))
-	defer srv.Close()
-	c := NewAttestationClient(srv.Client(), 2*time.Second)
-	if _, err := c.Fetch(context.Background(), "http://operator.example", srv.URL, nil); err != nil {
-		t.Fatalf("absolute evidence URL failed: %v", err)
-	}
-}
-
-func TestJoinAttestationURL(t *testing.T) {
-	cases := []struct {
-		name     string
-		base     string
-		evidence string
-		want     string
-		wantErr  bool
-	}{
-		{"empty evidence falls back", "https://op.example", "", "https://op.example/v1/zs/attestation", false},
-		{"trailing slash stripped", "https://op.example/", "/v1/zs/attestation", "https://op.example/v1/zs/attestation", false},
-		{"path normalized", "https://op.example", "v1/zs/attestation", "https://op.example/v1/zs/attestation", false},
-		{"absolute http accepted", "https://op.example", "http://other.example/x", "http://other.example/x", false},
-		{"absolute https accepted", "https://op.example", "https://other.example/x", "https://other.example/x", false},
-		{"empty base errors", "", "/v1/zs/attestation", "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := joinAttestationURL(tc.base, tc.evidence)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
-			}
-			if got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestOperator_IsTEEAttested(t *testing.T) {
-	cases := []struct {
-		name string
-		op   Operator
-		want bool
-	}{
-		{"nil TEE", Operator{}, false},
-		{"verified", Operator{TEE: &TEEStatus{Verified: true}}, true},
-		{"populated but not verified", Operator{TEE: &TEEStatus{Verified: false, FailureTag: FailureKeyBindingMismatch}}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.op.IsTEEAttested(); got != tc.want {
-				t.Errorf("got %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // The binding target is the ephemeral sealing recipient, NOT the on-chain
 // signing address. This is the property that makes the attestation say
 // something about where plaintext actually lands: an operator holding a copy
 // of the signing key outside the enclave can sign an advertisement for an
 // ephemeral whose private half lives on the plain host, so evidence bound to
 // the identity key would pass while the prompt is sealed to a key the host
-// can read. Guards against a regression back to op.SigningAddr.
+// can read. Guards against a regression back to the signing address.
 func TestBundleVerifier_BindsEphemeralNotSigningAddr(t *testing.T) {
 	v := &BundleVerifier{AllowStub: true}
 	op, recipient := testOperatorAndPubkey(t, 7)
@@ -629,7 +511,7 @@ func TestBundleVerifier_BindsEphemeralNotSigningAddr(t *testing.T) {
 
 	// Evidence bound to the operator's signing address — what the interim
 	// implementation produced — must now be rejected.
-	signingBound := stubBundleFor(op.SigningAddr, 7)
+	signingBound := stubBundleFor(testSigningAddr, 7)
 	if verdict := v.Verify(context.Background(), advertised, signingBound, op); verdict.Pass {
 		t.Fatalf("evidence bound to SigningAddr was accepted; binding target regressed")
 	}

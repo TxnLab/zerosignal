@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/steering"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // TestChainOperatorSource_EnrichPopulatesToolDetails verifies that the
@@ -477,7 +479,7 @@ func TestEnrich_TEEAdvertisedAndVerified(t *testing.T) {
 	source := &ChainOperatorSource{
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
-		TEEVerifier:    &BundleVerifier{AllowStub: true},
+		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
 		DetailsTimeout: 2 * time.Second,
 		Log:            discardLogger(),
 	}
@@ -494,8 +496,8 @@ func TestEnrich_TEEAdvertisedAndVerified(t *testing.T) {
 	if got.TEE.Mode != inject.TEEModeStub {
 		t.Errorf("Mode = %q, want %q", got.TEE.Mode, inject.TEEModeStub)
 	}
-	if got.TEE.VerifierID != VerifierIDBuiltin {
-		t.Errorf("VerifierID = %q, want %q", got.TEE.VerifierID, VerifierIDBuiltin)
+	if got.TEE.VerifierID != tee.VerifierIDBuiltin {
+		t.Errorf("VerifierID = %q, want %q", got.TEE.VerifierID, tee.VerifierIDBuiltin)
 	}
 	if !got.IsTEEAttested() {
 		t.Errorf("IsTEEAttested should be true after successful verification")
@@ -509,7 +511,7 @@ func TestEnrich_TEEStubRejectedWhenAllowStubFalse(t *testing.T) {
 	source := &ChainOperatorSource{
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
-		TEEVerifier:    &BundleVerifier{AllowStub: false}, // production posture
+		TEEVerifier:    &tee.BundleVerifier{AllowStub: false}, // production posture
 		DetailsTimeout: 2 * time.Second,
 		Log:            discardLogger(),
 	}
@@ -523,8 +525,8 @@ func TestEnrich_TEEStubRejectedWhenAllowStubFalse(t *testing.T) {
 	if got.TEE.Verified {
 		t.Errorf("Verified = true with AllowStub=false")
 	}
-	if got.TEE.FailureTag != FailureStubNotAllowed {
-		t.Errorf("FailureTag = %q, want %q", got.TEE.FailureTag, FailureStubNotAllowed)
+	if got.TEE.FailureTag != tee.FailureStubNotAllowed {
+		t.Errorf("FailureTag = %q, want %q", got.TEE.FailureTag, tee.FailureStubNotAllowed)
 	}
 	if got.IsTEEAttested() {
 		t.Errorf("IsTEEAttested should be false when verification fails")
@@ -538,7 +540,7 @@ func TestEnrich_TEEMissingAdvertisement(t *testing.T) {
 	source := &ChainOperatorSource{
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
-		TEEVerifier:    &BundleVerifier{AllowStub: true},
+		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
 		DetailsTimeout: 2 * time.Second,
 		Log:            discardLogger(),
 	}
@@ -585,7 +587,7 @@ func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 	source := &ChainOperatorSource{
 		Details:        NewDetailsClient(srv.Client(), 500*time.Millisecond),
 		Attestation:    NewAttestationClient(srv.Client(), 500*time.Millisecond),
-		TEEVerifier:    &BundleVerifier{AllowStub: true},
+		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
 		DetailsTimeout: 500 * time.Millisecond,
 		Log:            discardLogger(),
 	}
@@ -599,8 +601,8 @@ func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 	if got.TEE.Verified {
 		t.Errorf("Verified = true on fetch failure")
 	}
-	if got.TEE.FailureTag != FailureFetchFailed {
-		t.Errorf("FailureTag = %q, want %q", got.TEE.FailureTag, FailureFetchFailed)
+	if got.TEE.FailureTag != tee.FailureFetchFailed {
+		t.Errorf("FailureTag = %q, want %q", got.TEE.FailureTag, tee.FailureFetchFailed)
 	}
 	// Reachable should still be true — only attestation failed,
 	// the basic details probe succeeded.
@@ -730,6 +732,55 @@ func TestResolveOperatorRecords_PopulatesMetrics(t *testing.T) {
 	}
 	if got := o0.Metrics; got != (OperatorMetrics{}) {
 		t.Errorf("fresh node metrics non-zero: %+v", got)
+	}
+}
+
+// stubVerifier hands probeAttestation a fixed verdict and keeps the node it was
+// asked about, so the test is about the plumbing on either side of Verify
+// rather than about verification.
+type stubVerifier struct {
+	v   tee.Verdict
+	got *tee.Node
+}
+
+func (s stubVerifier) Verify(_ context.Context, _ inject.TEEAdvertisement, _ inject.TEEEvidenceBundle, node tee.Node) tee.Verdict {
+	*s.got = node
+	return s.v
+}
+
+// Pins the two hand-offs in probeAttestation: the operator's identity into the
+// verifier (the key binding checks against it), and the verified list back onto
+// TEEStatus. Every other test builds a TEEStatus literal by hand, so nulling
+// either line leaves them green.
+func TestProbeAttestation_HandsOffToAndFromTheVerifier(t *testing.T) {
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", inject.AttestationContentType)
+		_ = json.NewEncoder(w).Encode(inject.TEEEvidenceBundle{Mode: inject.TEEModeDstackTDX})
+	}))
+	defer node.Close()
+
+	var asked tee.Node
+	src := &ChainOperatorSource{TEEVerifier: stubVerifier{v: tee.Verdict{
+		Pass:             true,
+		VerifierID:       tee.VerifierIDDstack,
+		AttestedModelIDs: []string{"qwen3-30b"},
+	}, got: &asked}}
+	op := &Operator{ID: 7, NodeID: 3, BaseURL: node.URL, EphemeralRecipientPubkey: "age1recipient"}
+	details := inject.OperatorDetails{TEE: &inject.TEEAdvertisement{
+		Mode: inject.TEEModeDstackTDX, EvidenceURL: "/v1/zs/attestation",
+	}}
+
+	src.probeAttestation(context.Background(), op, details,
+		NewAttestationClient(nil, 0), nil, discardLogger())
+
+	if want := (tee.Node{OperatorID: 7, NodeID: 3, EphemeralRecipientPubkey: "age1recipient"}); asked != want {
+		t.Errorf("the verifier was asked about %+v, want %+v", asked, want)
+	}
+	if op.TEE == nil {
+		t.Fatal("probeAttestation left op.TEE nil on a passing verdict")
+	}
+	if !slices.Equal(op.TEE.AttestedModelIDs, []string{"qwen3-30b"}) {
+		t.Errorf("the verified model list did not reach TEEStatus: %+v", op.TEE.AttestedModelIDs)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
 // BuiltinToolDef is the proxy-local mirror of a node's advertised
@@ -318,8 +319,8 @@ func (m OperatorMetrics) LatencyMeanMs() uint64 {
 // mode attestation. Verified is the routing-relevant bit; everything
 // else exists for observability (dashboards, debug logs, alerting).
 // FailureTag is empty when Verified is true and one of the canonical
-// verifier failure tags otherwise (see proto/TEE.md §4.3 and
-// attestation.go for the full list).
+// verifier failure tags otherwise (see proto/TEE.md §4.3 and the tee
+// package's Failure* constants for the full list).
 type TEEStatus struct {
 	Mode       string    // "stub" | "dstack-tdx" | "nvidia-cc-tdx" | "nvidia-cc-snp"
 	AttestedAt time.Time // bundle.GeneratedAt of the verified evidence
@@ -327,11 +328,16 @@ type TEEStatus struct {
 	Verified   bool      // true when the most recent verdict passed
 	FailureTag string    // empty when Verified; otherwise the verdict tag
 
-	// AttestedModelIDs is Verdict.AttestedModelIDs from the most recent
-	// verdict; nil unless that verdict passed. See Verdict for nil versus
+	// AttestedModelIDs is tee.Verdict.AttestedModelIDs from the most recent
+	// verdict; nil unless that verdict passed. See tee.Verdict for nil versus
 	// empty. Shown on /v1/zs/operators, never used for routing: the list is
 	// the catalog at the node's last mint.
 	AttestedModelIDs []string
+}
+
+// TEENode is what a tee.Verifier checks o's evidence against.
+func (o Operator) TEENode() tee.Node {
+	return tee.Node{OperatorID: o.ID, NodeID: o.NodeID, EphemeralRecipientPubkey: o.EphemeralRecipientPubkey}
 }
 
 // IsTEEAttested reports whether the operator has a current

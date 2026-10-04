@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package zs
+package tee
 
 import (
 	"context"
@@ -12,10 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -114,14 +110,13 @@ func withAuxBinding(t *testing.T, quote []byte, nodeID uint64, entries []inject.
 // chain step reaches Intel's PCS and has its own network-gated test —
 // TestVerifyTDXQuoteChain_RealQuote. A green run here is NOT evidence
 // that a forged quote is rejected.
-func dstackFixture(t *testing.T) (*BundleVerifier, Operator, inject.TEEEvidenceBundle) {
+func dstackFixture(t *testing.T) (*BundleVerifier, Node, inject.TEEEvidenceBundle) {
 	t.Helper()
 	quote, eventLog := loadDstackVectors(t)
 
-	op := Operator{
-		ID:                       capturedOperatorID,
+	op := Node{
+		OperatorID:               capturedOperatorID,
 		NodeID:                   capturedNodeID,
-		SigningAddr:              "SIGNING-ADDR-NOT-THE-BINDING-TARGET",
 		EphemeralRecipientPubkey: capturedKey,
 	}
 	// The capture is a PRE-9.9 quote: its upper 32 bytes are the guest
@@ -188,7 +183,7 @@ func TestDstackVerifier_PassesRealEvidence(t *testing.T) {
 func TestDstackVerifier_FailsClosed(t *testing.T) {
 	cases := []struct {
 		name string
-		mut  func(*BundleVerifier, *Operator, *inject.TEEEvidenceBundle)
+		mut  func(*BundleVerifier, *Node, *inject.TEEEvidenceBundle)
 		want string
 	}{
 		{
@@ -196,7 +191,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// BLINDLY: without the chain check, the quote is just bytes
 			// an operator wrote.
 			name: "vendor chain rejects the quote",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.VerifyChain = func(context.Context, []byte) error { return errors.New("bad chain") }
 			},
 			want: FailureVendorChainInvalid,
@@ -208,7 +203,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// vendor_chain_invalid across the whole fleet, which reads
 			// in a dashboard exactly like an attack.
 			name: "unreachable collateral is not a forged quote",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.VerifyChain = func(context.Context, []byte) error {
 					return fmt.Errorf("%w: dial tcp: i/o timeout", ErrCollateralUnavailable)
 				}
@@ -221,7 +216,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// quote from any CVM running any image while looking
 			// exactly like the feature working.
 			name: "empty compose allowlist verifies nothing",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.TrustedComposeHashes = nil
 			},
 			want: FailureMeasurementMismatch,
@@ -231,7 +226,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// hardening: a quote taken on a dstack DEV image passes
 			// every other check identically.
 			name: "empty OS image allowlist verifies nothing",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.TrustedOSImages = nil
 			},
 			want: FailureMeasurementMismatch,
@@ -242,7 +237,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// with the chain stubbed it reaches the split, which must
 			// refuse rather than treat an unreadable field as a pass.
 			name: "quote truncated inside report_data",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				q, err := base64.StdEncoding.DecodeString(b.CPUReport)
 				if err != nil {
 					panic(err)
@@ -253,14 +248,14 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 		},
 		{
 			name: "compose hash not in the allowlist",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.TrustedComposeHashes = []string{strings.Repeat("aa", 32)}
 			},
 			want: FailureMeasurementMismatch,
 		},
 		{
 			name: "OS image not in the allowlist",
-			mut: func(v *BundleVerifier, _ *Operator, _ *inject.TEEEvidenceBundle) {
+			mut: func(v *BundleVerifier, _ *Node, _ *inject.TEEEvidenceBundle) {
 				v.TrustedOSImages = []string{strings.Repeat("bb", 32)}
 			},
 			want: FailureMeasurementMismatch,
@@ -271,7 +266,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// verify — otherwise the log could carry any compose-hash
 			// the operator liked.
 			name: "event log has an appended event",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				b.EventLog = strings.TrimSuffix(strings.TrimSpace(b.EventLog), "]") +
 					`,{"imr":3,"event_type":134217729,"digest":"","event":"extra","event_payload":"00"}]`
 			},
@@ -279,7 +274,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 		},
 		{
 			name: "event log is absent",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				b.EventLog = ""
 			},
 			want: FailureMeasurementMismatch,
@@ -289,14 +284,14 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// non-runtime replays to 48 zero bytes, which compares
 			// equal to an unmeasured RTMR3.
 			name: "event log extends nothing",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				b.EventLog = `[{"imr":0,"event_type":2147483649,"digest":"","event":"boot","event_payload":"aabb"}]`
 			},
 			want: FailureMeasurementMismatch,
 		},
 		{
 			name: "cpu_report is not base64",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				b.CPUReport = "!!!not base64!!!"
 			},
 			want: FailureVendorChainInvalid,
@@ -306,7 +301,7 @@ func TestDstackVerifier_FailsClosed(t *testing.T) {
 			// must not be judged against the TDX chain just because the
 			// node called itself dstack-tdx.
 			name: "report is not a TDX quote",
-			mut: func(_ *BundleVerifier, _ *Operator, b *inject.TEEEvidenceBundle) {
+			mut: func(_ *BundleVerifier, _ *Node, b *inject.TEEEvidenceBundle) {
 				raw, _ := base64.StdEncoding.DecodeString(b.CPUReport)
 				raw[4] = 0x00 // tee_type: SGX rather than TDX
 				b.CPUReport = base64.StdEncoding.EncodeToString(raw)
@@ -390,7 +385,7 @@ func TestDstackVerifier_BindsToTheVerifiedEphemeralNotTheSelfReport(t *testing.T
 	// through BundleVerifier the two are pre-forced equal, so a mutation
 	// swapping them is invisible there for the same reason.
 	idMoved := op
-	idMoved.ID = 43
+	idMoved.OperatorID = 43
 	if bundle.OperatorID != capturedOperatorID {
 		t.Fatal("fixture drift: the bundle's self-reported id must stay the captured one")
 	}
@@ -565,16 +560,6 @@ func TestDstackVerifier_AuxFailureTagsAreDistinct(t *testing.T) {
 	})
 }
 
-// stubVerifier hands probeAttestation a fixed verdict, so the test is about the
-// plumbing between the verdict and TEEStatus rather than about verification.
-type stubVerifier struct{ v Verdict }
-
-func (s stubVerifier) Verify(context.Context, inject.TEEAdvertisement, inject.TEEEvidenceBundle, Operator) Verdict {
-	return s.v
-}
-
-func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-
 // TestBundleVerifier_CarriesTheVerifiedCatalog pins that the verified catalog
 // reaches callers, and only on a pass: on a refusal the published list is
 // unverified and must not appear.
@@ -639,7 +624,7 @@ func TestBundleVerifier_CarriesTheVerifiedCatalog(t *testing.T) {
 	// would be the node's own claim presented as verified.
 	t.Run("a passing STUB verdict carries no ids", func(t *testing.T) {
 		v := &BundleVerifier{AllowStub: true}
-		op := Operator{ID: capturedOperatorID, NodeID: capturedNodeID, EphemeralRecipientPubkey: capturedKey}
+		op := Node{OperatorID: capturedOperatorID, NodeID: capturedNodeID, EphemeralRecipientPubkey: capturedKey}
 		bundle := inject.TEEEvidenceBundle{
 			Mode:       inject.TEEModeStub,
 			Stub:       true,
@@ -661,37 +646,6 @@ func TestBundleVerifier_CarriesTheVerifiedCatalog(t *testing.T) {
 			t.Errorf("a stub verdict carries AttestedModelIDs = %v; no aux binding was "+
 				"checked, so these are the node's own claim presented as verified",
 				verdict.AttestedModelIDs)
-		}
-	})
-
-	// Pins the line in probeAttestation that copies the verified list onto
-	// TEEStatus. Every other test builds a TEEStatus literal by hand, so
-	// nulling that line leaves them green.
-	t.Run("the verified ids survive the hand-off to TEEStatus", func(t *testing.T) {
-		node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", inject.AttestationContentType)
-			_ = json.NewEncoder(w).Encode(inject.TEEEvidenceBundle{Mode: inject.TEEModeDstackTDX})
-		}))
-		defer node.Close()
-
-		src := &ChainOperatorSource{TEEVerifier: stubVerifier{Verdict{
-			Pass:             true,
-			VerifierID:       VerifierIDDstack,
-			AttestedModelIDs: []string{"qwen3-30b"},
-		}}}
-		op := &Operator{ID: capturedOperatorID, NodeID: capturedNodeID, BaseURL: node.URL}
-		details := inject.OperatorDetails{TEE: &inject.TEEAdvertisement{
-			Mode: inject.TEEModeDstackTDX, EvidenceURL: "/v1/zs/attestation",
-		}}
-
-		src.probeAttestation(context.Background(), op, details,
-			NewAttestationClient(nil, 0), nil, quietLogger())
-
-		if op.TEE == nil {
-			t.Fatal("probeAttestation left op.TEE nil on a passing verdict")
-		}
-		if !slices.Equal(op.TEE.AttestedModelIDs, []string{"qwen3-30b"}) {
-			t.Errorf("the verified model list did not reach TEEStatus: %+v", op.TEE.AttestedModelIDs)
 		}
 	})
 }

@@ -1871,7 +1871,7 @@ The reference proxy and client do not send challenges yet.
 - `refresh_seconds` is **not the re-mint cadence**. A node re-mints on every ephemeral rotation (~20 min), far more often, so this is an upper bound on how long evidence may go unrefreshed.
 - A rule stated purely as "2 × `refresh_seconds`" is one the attested party sets for itself, with two one-field escapes: omitting the field (no cadence, so no check) and advertising a day (a two-day window). A verifier therefore applies its own absolute ceiling as a **minimum against** the advertised window. That ceiling can reject nothing honest: an accepted bundle must attest a live ephemeral, whose signed window is capped at `MaxEphemeralLifetime` + skew, so honest evidence is always far inside it.
 
-Reference: `EvidenceMaxAgeCeiling` (`proto/go/zs/attestation.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
+Reference: `EvidenceMaxAgeCeiling` (`proto/go/zs/tee/verify.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
 
 **`collateral`: carried so a verifier can judge the quote while a PCCS is unreachable, and MUST NOT be preferred over one it can reach.** The field names and encodings mirror Intel's QVL collateral structure verbatim (`pck_crl_issuer_chain`, `root_ca_crl`, `pck_crl`, `tcb_info_issuer_chain`, `tcb_info`, `tcb_info_signature`, `qe_identity_issuer_chain`, `qe_identity`, `qe_identity_signature`). Binary members are hex, and `tcb_info` / `qe_identity` are the signed inner documents **byte-for-byte**: a re-marshal that only reorders keys invalidates Intel's signature, as for `app_compose`. Five rules:
 
@@ -1915,7 +1915,7 @@ This does **not** extend to routes the node picks. An image backend is one the o
 
 ### Verifier responsibilities
 
-A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proto/go/zs/attestation.go::BundleVerifier.Verify`.
+A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proto/go/zs/tee/verify.go::BundleVerifier.Verify`.
 
 **Decoding the bundle.** Two verifiers given the same body MUST read the same values from it:
 
@@ -2121,7 +2121,8 @@ The cost is that a request issued *before* the verifier's next refresh runs agai
 - `node/internal/tee/dstack.go::DstackProvider` — the `dstack-tdx` provider: guest-agent `POST /GetQuote` over the unix socket, plus the runtime event log the verifier replays.
 - `node/internal/server/attestation.go::handleAttestation` — node-side `GET /v1/zs/attestation` handler.
 - `proto/go/attest` + `proto/ts/src/attest` — the shared measurement arithmetic: TDX quote field access, the RTMR3 replay above, and `ReportData`. Golden-vectored against each other; see the note under "Measurement replay".
-- `proto/go/zs/attestation.go` — Go payer SDK `AttestationClient`, `TEEVerifier` interface, and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
+- `proto/go/zs/tee/verify.go` — Go payer SDK `Verifier` interface and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
+- `proto/go/zs/attestation_client.go::AttestationClient` — fetches the evidence bundle, directly or through the relay hop.
 - `proto/go/zs/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
 - `proto/go/zs/dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `Client.dispatch`'s `503 no_tee_capacity`.
 - See [`TEE.md`](./TEE.md) for the threat model, encryption layers, and trust shift.

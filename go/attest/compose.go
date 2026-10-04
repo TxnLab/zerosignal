@@ -633,7 +633,7 @@ func ZeroSignalSecretEnvNames() []string {
 // compose_hash over arbitrary code and passes every rule enabled here.
 //
 // THAT IS A PROPERTY OF THIS FUNCTION, NOT OF THE FLEET. Every shipped
-// consumer supplies the release lists and sets the flag: zs.DefaultComposePolicy
+// consumer supplies the release lists and sets the flag: tee.DefaultComposePolicy
 // (which zs-proxy's config defaults match) from TrustedComposeSkeletons and
 // TrustedNodeImages, and the browser client from a bundled constant. They stay
 // out of this function so a caller can replace them, as zs-proxy's config does

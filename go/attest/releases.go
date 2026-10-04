@@ -11,7 +11,7 @@ package attest
 // pasting values they have no way to derive by hand.
 //
 // THEY LIVE HERE so every payer gets them: zs-proxy seeds its config from them,
-// and an SDK caller that sets no TEEVerifier gets zs.DefaultTEEVerifier, which
+// and an SDK caller that sets no TEEVerifier gets tee.DefaultVerifier, which
 // reads them. A copy in each consumer is how a payer ends up refusing a release
 // the others accept.
 //

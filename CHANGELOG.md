@@ -31,6 +31,24 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-04 — the TEE verifier is its own package, `zs/tee`
+
+The evidence verifier and the Intel collateral cache moved out of `zs` into
+`github.com/TxnLab/zerosignal/go/zs/tee`. Behavior is unchanged; the names moved:
+
+- `zs.TEEVerifier` is `tee.Verifier`. Its `Verify`, and `DstackVerifier.Verify`, take a
+  `tee.Node` (operator id, node id, verified ephemeral recipient) in place of a `zs.Operator`;
+  `Operator.TEENode()` builds it.
+- `zs.DefaultTEEVerifier` is `tee.DefaultVerifier`. `BundleVerifier`, `DstackVerifier`,
+  `Verdict`, the `Failure*` and `VerifierID*` tags, `DefaultComposePolicy`,
+  `EvidenceMaxAgeCeiling`, `PersistCollateral`, `MeasurementTrusted`, `VerifyTDXQuoteChain*`
+  and the collateral errors keep their names under `tee.`.
+- `AttestationClient` stays in `zs`: it rides the relay hop, which is `zs`'s.
+- New exports: `tee.CollateralTimeout`, and `tee.UseCollateralLogger`, which `zs.New` calls
+  with the caller's `Config.Logger`.
+
+`Config.TEEVerifier` keeps its name and its default; only its type is now `tee.Verifier`.
+
 ### 2026-10-03 — a `SpendGuard` hears how a ticket ended on chain
 
 `zs.SpendGuard.Settle` and `Release` were called at most once per reserved ticket, from the
