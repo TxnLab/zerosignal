@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/httpx"
@@ -23,20 +25,23 @@ import (
 )
 
 // RelayHopError marks a details probe that failed at the relay hop itself
-// (transport-privacy mode) rather than at the target operator. Three shapes
+// (transport-privacy mode) rather than at the target operator. Four shapes
 // reach here:
 //
-//   - the proxy couldn't reach the relay at all (transport error);
+//   - the proxy couldn't reach the relay at all (transport error, including
+//     our own deadline expiring before the relay accepted a connection);
 //   - the relay returned a relay-generated error (relay_busy,
 //     relay_unknown_target, relay_bad_*) — see protorelay.IsHopErrorCode;
 //   - the relay's own FRONT DOOR answered a code-less transient status while
 //     the relay advertises wire.RelayHopHeaderMinVersion or newer and did not
 //     stamp wire.RelayHopHeader. A relay that generation would have marked any
-//     response its handler produced, so an unmarked one never reached it.
+//     response its handler produced, so an unmarked one never reached it;
+//   - our deadline or the caller's cancel ended the request after the relay
+//     accepted the connection (CallerAborted).
 //
-// The target was never reached in any of them, so callers MUST NOT treat the
-// target as unreachable on this error; they should instead deprioritize the
-// relay and retry through a different one. That third shape is the one that
+// None of them shows the target down, so callers MUST NOT treat the target as
+// unreachable on this error; they retry through a different relay, and
+// deprioritize this one unless CallerAborted. The front-door shape is the one that
 // used to be missing, and it was expensive: a code-less 504 from a relay's CDN
 // fell through as a target-side failure, so probeOne benched a perfectly
 // healthy node and advertisable() dropped it from /v1/models, while the relay
@@ -50,7 +55,14 @@ type RelayHopError struct {
 	RelayID     uint64
 	RelayNodeID uint64
 	RelayURL    string
-	Err         error
+	// CallerAborted is set when the caller's cancel ended the request, or the
+	// probe's own deadline did after the relay accepted the connection. That
+	// says nothing about either hop (SPEC § 10): a relay is byte-silent while
+	// it waits on a slow target, so charging it would park a working relay for
+	// the target's slowness. A deadline that expires before the connection is
+	// a relay that never answered, and is charged like any connect failure.
+	CallerAborted bool
+	Err           error
 }
 
 func (e *RelayHopError) Error() string {
@@ -58,6 +70,33 @@ func (e *RelayHopError) Error() string {
 }
 
 func (e *RelayHopError) Unwrap() error { return e.Err }
+
+// RelayUpstreamUnreachableError is a relay's claim (relay_upstream_unreachable)
+// that it reached out and the target was down. The relay itself works, but one
+// relay's view of the target proves little: the relay mesh can be partitioned,
+// so another relay may reach the same node. A probe rotates past it, and only
+// when a working relay said so on every rotation is the target down.
+type RelayUpstreamUnreachableError struct {
+	RelayID     uint64
+	RelayNodeID uint64
+	RelayURL    string
+	Status      int
+}
+
+func (e *RelayUpstreamUnreachableError) Error() string {
+	return fmt.Sprintf("relay (operator %d, node %d, %s) could not reach the target: %d %s",
+		e.RelayID, e.RelayNodeID, e.RelayURL, e.Status, protorelay.CodeUpstreamUnreachable)
+}
+
+// DetailsBodyError is a 2xx details response whose body could not be read or
+// decoded. The node answered, so a relay that carried it forwarded correctly.
+type DetailsBodyError struct {
+	Err error
+}
+
+func (e *DetailsBodyError) Error() string { return e.Err.Error() }
+
+func (e *DetailsBodyError) Unwrap() error { return e.Err }
 
 // relayErrorCode best-effort extracts the OpenAI-shaped error "code" from a
 // relay's (>=400) error body. Returns "" when the body isn't that shape — in
@@ -179,7 +218,27 @@ func (c *DetailsClient) fetch(ctx context.Context, baseURL, innerPath string, ho
 		fetchCtx, cancel = context.WithTimeout(ctx, c.Timeout)
 		defer cancel()
 	}
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, endpoint, nil)
+	// The transport's dial and TLS timeouts outlast a probe's deadline, so a
+	// relay that drops our SYNs would otherwise always end at our deadline and
+	// read as "waiting on a slow target". Whether it ever accepted the
+	// connection is what tells the two apart.
+	var connected atomic.Bool
+	traceCtx := httptrace.WithClientTrace(fetchCtx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+	})
+	aborted := func() bool {
+		return ctx.Err() != nil || (fetchCtx.Err() != nil && connected.Load())
+	}
+	callerAbortedHop := func(err error) error {
+		return &RelayHopError{
+			RelayID:       hop.RelayID,
+			RelayNodeID:   hop.RelayNodeID,
+			RelayURL:      hop.BaseURL,
+			CallerAborted: true,
+			Err:           err,
+		}
+	}
+	req, err := http.NewRequestWithContext(traceCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return inject.OperatorDetails{}, fmt.Errorf("build request: %w", err)
 	}
@@ -194,10 +253,11 @@ func (c *DetailsClient) fetch(ctx context.Context, baseURL, innerPath string, ho
 		// failure here means the relay (not the target) was unreachable.
 		if hop != nil {
 			return inject.OperatorDetails{}, &RelayHopError{
-				RelayID:     hop.RelayID,
-				RelayNodeID: hop.RelayNodeID,
-				RelayURL:    hop.BaseURL,
-				Err:         fmt.Errorf("details request: %w", err),
+				RelayID:       hop.RelayID,
+				RelayNodeID:   hop.RelayNodeID,
+				RelayURL:      hop.BaseURL,
+				CallerAborted: aborted(),
+				Err:           fmt.Errorf("details request: %w", err),
 			}
 		}
 		return inject.OperatorDetails{}, fmt.Errorf("details request: %w", err)
@@ -206,19 +266,34 @@ func (c *DetailsClient) fetch(ctx context.Context, baseURL, innerPath string, ho
 	if resp.StatusCode >= 400 {
 		// In relay mode, a relay-generated error code means the relay (outer
 		// hop) failed, not the target — classify it so the caller doesn't
-		// blame the target. relay_upstream_unreachable and any non-relay code
-		// (the target's own error, forwarded verbatim) fall through as a
+		// blame the target. relay_upstream_unreachable is the relay's claim
+		// about the target, returned as its own type; any non-relay code (the
+		// target's own error, forwarded verbatim) falls through as a
 		// target-side failure.
 		if hop != nil {
 			// One read: relayErrorCode CONSUMES the body, so it must not be
 			// called twice.
 			code := relayErrorCode(resp.Body)
+			if code == "" && fetchCtx.Err() != nil {
+				// Ended while reading the body: we can't tell a relay code
+				// from the target's own error, so blame neither.
+				return inject.OperatorDetails{}, callerAbortedHop(
+					fmt.Errorf("read relay error body for %d %s: %w", resp.StatusCode, resp.Status, fetchCtx.Err()))
+			}
 			if protorelay.IsHopErrorCode(code) {
 				return inject.OperatorDetails{}, &RelayHopError{
 					RelayID:     hop.RelayID,
 					RelayNodeID: hop.RelayNodeID,
 					RelayURL:    hop.BaseURL,
 					Err:         fmt.Errorf("relay returned %d %s (code %s)", resp.StatusCode, resp.Status, code),
+				}
+			}
+			if code == protorelay.CodeUpstreamUnreachable {
+				return inject.OperatorDetails{}, &RelayUpstreamUnreachableError{
+					RelayID:     hop.RelayID,
+					RelayNodeID: hop.RelayNodeID,
+					RelayURL:    hop.BaseURL,
+					Status:      resp.StatusCode,
 				}
 			}
 			// The relay's own front door. A transient-shaped status from a relay
@@ -266,11 +341,20 @@ func (c *DetailsClient) fetch(ctx context.Context, baseURL, innerPath string, ho
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxOperatorResponseBytes))
 	if err != nil {
-		return inject.OperatorDetails{}, fmt.Errorf("read details body: %w", err)
+		err = fmt.Errorf("read details body: %w", err)
+		// A deadline or cancel mid-body is a slow or abandoned read, not a
+		// body the target got wrong.
+		if fetchCtx.Err() != nil {
+			if hop != nil {
+				return inject.OperatorDetails{}, callerAbortedHop(err)
+			}
+			return inject.OperatorDetails{}, err
+		}
+		return inject.OperatorDetails{}, &DetailsBodyError{Err: err}
 	}
 	var out inject.OperatorDetails
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return inject.OperatorDetails{}, fmt.Errorf("decode details: %w", err)
+		return inject.OperatorDetails{}, &DetailsBodyError{Err: fmt.Errorf("decode details: %w", err)}
 	}
 	return out, nil
 }

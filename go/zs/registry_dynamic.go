@@ -41,9 +41,11 @@ const DefaultMaxCacheAge = 15 * time.Minute
 
 // DefaultProbeBudget caps how many /v1/zs/details probes one background refresh
 // issues once the fleet exceeds it. Sized so budget/DetailsConcurrency ×
-// DetailsTimeout stays well inside DefaultRefreshTimeout (96/24×2s = 8s ≪ 30s)
-// while the rolling sweep still covers a ~1000-node fleet within a handful of
-// cycles. A fleet at or under the budget is probed in full (the original probe-everything behavior).
+// DetailsTimeout stays inside DefaultRefreshTimeout even when privacy mode
+// rotates every probe through maxDiscoveryRelayAttempts relays
+// (96/24 × 3 × 2s = 24s < 30s), while the rolling sweep still covers a
+// ~1000-node fleet within a handful of cycles. A fleet at or under the budget
+// is probed in full (the original probe-everything behavior).
 const DefaultProbeBudget = 96
 
 // DefaultTargetTopK is how many of a demanded model's fastest known servers a

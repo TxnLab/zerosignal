@@ -2476,9 +2476,19 @@ app pick identically.
     `relay_build_request`), means the **relay** failed. The caller marks the
     relay down (deprioritizing it for the preference above) and retries through
     a different relay. It MUST NOT mark the *target* unreachable: the target was
-    never reached, so its status is unknown this cycle.
+    never reached, so its status is unknown this cycle. The caller's own
+    deadline or cancel after the relay accepted the connection charges neither
+    hop (§ 10); the probe still rotates past that relay.
   - `relay_upstream_unreachable` is the exception: the relay reached out but the
-    target was down, so it is a **target**-side signal.
+    target was down, so it is a claim about the **target**, not a relay
+    transport failure. One relay's view of the target proves little, since the
+    relay mesh can be partitioned, so a discovery probe rotates to another relay,
+    and the target is unreachable this cycle only when every relay that worked
+    said so. The claim still scores the relay, once the probe resolves: another
+    relay reaching the target in the same probe disproves it and counts against
+    the relay; two or more relays agreeing back each other up and are credited;
+    a lone claim is judged by whether the target was last seen reachable
+    (against the relay if so, credited if not).
   - Any other status is the target's own response, forwarded verbatim.
 
   This lets a flaky relay drop out of the candidate set without a healthy target
@@ -3227,7 +3237,7 @@ refines the verdict with it (`transient.NarrowRelayed`):
 
 | Evidence | Charged to | Why |
 |---|---|---|
-| The **caller's own** cancel or deadline fired | **neither** | Says nothing about either hop. Checked first, because it is otherwise indistinguishable from a dial failure and would charge a relay for a socket the caller tore down. |
+| The **caller's own** cancel or deadline fired | **neither** | Says nothing about either hop. Checked first, because it is otherwise indistinguishable from a dial failure and would charge a relay for a socket the caller tore down. A caller that can see the relay never accepted the connection (the Go discovery probe can; a browser cannot) treats its own *deadline* there as a connect timeout and charges the relay, since a probe's deadline is shorter than its transport's dial timeout. |
 | No response at all (transport failure) | **relay** | The socket the caller opened was the relay's; there is no marker to be missing. |
 | `X-Zs-Relay-Hop` absent and the status is *front-door shaped* (`425`, `429`, `500`, `502`, `503`, `520`, `521`, `522`, `523`, `525`–`527`) | **relay** | A relay marks every response its handler produces. This one is unmarked, and the status says the request never reached that handler: the shape a relay's own edge produces when it is down, refusing, or failing ahead of the handler. |
 | `X-Zs-Relay-Hop` absent, but the status means *took too long* (`408`, `504`, `524`) | **neither** | "Relay wedged" and "relay waiting on a slow target" are indistinguishable (note below). |

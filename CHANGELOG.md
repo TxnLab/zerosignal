@@ -31,6 +31,24 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-04 — a discovery probe rotates past `relay_upstream_unreachable`
+
+`DetailsClient.Fetch` returns a relay's `relay_upstream_unreachable` as a new
+`*RelayUpstreamUnreachableError` rather than a plain target-side error, and a 2xx body it
+can't read or decode as a `*DetailsBodyError`. The discovery probe now rotates to another
+relay on the first, scoring the claim with `RecordRelayUpstreamUnreachable`, and marks the
+target down only when every relay that worked said so. A relay that carried a 2xx with a
+bad body is credited. The client's probe already did both; SPEC § 3f says so now.
+A claim is scored once the probe resolves, not as it arrives: disproved by another relay
+in the same probe it counts against the relay, corroborated by another it is credited,
+and alone it is judged by the target's last-seen reachability as before.
+
+A relayed probe ended by the caller's cancel, or by its own deadline after the relay
+accepted the connection, is a `*RelayHopError` with `CallerAborted` set, and charges the
+relay nothing (SPEC § 10); it was recorded unreachable and given a strike. A deadline or
+cancel while reading a body is no longer a `*DetailsBodyError`. A cancelled probe leaves
+the target's reachability as it was, where it used to mark the target down.
+
 ### 2026-10-04 — the TEE verifier is its own package, `zs/tee`
 
 The evidence verifier and the Intel collateral cache moved out of `zs` into

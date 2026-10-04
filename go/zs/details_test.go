@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,8 +80,13 @@ func TestDetails_Fetch500(t *testing.T) {
 	if !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected 500 in error, got %v", err)
 	}
+	if bodyErr := (*DetailsBodyError)(nil); errors.As(err, &bodyErr) {
+		t.Fatalf("a non-2xx is not a body error: %v", err)
+	}
 }
 
+// A 2xx whose body won't decode is a DetailsBodyError: the node answered, so a
+// relay that carried it is credited.
 func TestDetails_FetchMalformedJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`not json`))
@@ -88,8 +94,9 @@ func TestDetails_FetchMalformedJSON(t *testing.T) {
 	defer srv.Close()
 	c := NewDetailsClient(srv.Client(), 500*time.Millisecond)
 	_, err := c.Fetch(context.Background(), srv.URL, nil)
-	if err == nil {
-		t.Fatalf("expected decode error")
+	var bodyErr *DetailsBodyError
+	if !errors.As(err, &bodyErr) {
+		t.Fatalf("err = %v, want a *DetailsBodyError", err)
 	}
 }
 
@@ -131,10 +138,94 @@ func TestDetails_FetchRelayHopTransportError(t *testing.T) {
 	}
 }
 
+// blackholeClient's dial never completes: a relay that drops our SYNs.
+func blackholeClient() *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}}
+}
+
+// The transport's dial timeout outlasts the probe's deadline, so a relay that
+// never accepts the connection ends every probe at our deadline. That is a
+// relay that didn't answer, not one waiting on a slow target, and is charged;
+// only the caller's own cancel excuses it.
+func TestDetails_FetchRelayNeverConnects(t *testing.T) {
+	hop := &RelayHop{BaseURL: "http://relay.example", TargetID: 3, RelayID: 9}
+
+	_, err := NewDetailsClient(blackholeClient(), 50*time.Millisecond).Fetch(context.Background(), "https://target.example:9000", hop)
+	var hopErr *RelayHopError
+	if !errors.As(err, &hopErr) || hopErr.CallerAborted {
+		t.Fatalf("own deadline before connect: err = %v, want a chargeable RelayHopError (CallerAborted false)", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = NewDetailsClient(blackholeClient(), time.Second).Fetch(ctx, "https://target.example:9000", hop)
+	if !errors.As(err, &hopErr) || !hopErr.CallerAborted {
+		t.Fatalf("caller's deadline before connect: err = %v, want CallerAborted", err)
+	}
+}
+
+// stallAfterHeaders sends status and a partial body, then hangs until the
+// test ends.
+func stallAfterHeaders(t *testing.T, status int, partial string) *httptest.Server {
+	t.Helper()
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(partial))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+	return srv
+}
+
+// A deadline mid-body is a slow read, not a body the target got wrong: a
+// DetailsBodyError would credit the relay and show the target as up but
+// broken.
+func TestDetails_FetchDeadlineMidBody(t *testing.T) {
+	srv := stallAfterHeaders(t, http.StatusOK, `{"models":[`)
+	c := NewDetailsClient(nil, 100*time.Millisecond)
+
+	_, err := c.Fetch(context.Background(), srv.URL, nil)
+	var bodyErr *DetailsBodyError
+	if err == nil || errors.As(err, &bodyErr) {
+		t.Fatalf("direct: err = %v, want a plain read error", err)
+	}
+
+	hop := &RelayHop{BaseURL: srv.URL, TargetID: 3, RelayID: 9}
+	_, err = c.Fetch(context.Background(), "https://target.example:9000", hop)
+	var hopErr *RelayHopError
+	if !errors.As(err, &hopErr) || !hopErr.CallerAborted {
+		t.Fatalf("relayed: err = %v, want a RelayHopError marked CallerAborted", err)
+	}
+}
+
+// A deadline while reading a relay's error body leaves the code unknown, so
+// neither hop is blamed: it is not the target's own error status.
+func TestDetails_FetchDeadlineMidRelayErrorBody(t *testing.T) {
+	srv := stallAfterHeaders(t, http.StatusBadGateway, `{"error":`)
+	hop := &RelayHop{BaseURL: srv.URL, TargetID: 3, RelayID: 9}
+
+	_, err := NewDetailsClient(nil, 100*time.Millisecond).Fetch(context.Background(), "https://target.example:9000", hop)
+	var hopErr *RelayHopError
+	if !errors.As(err, &hopErr) || !hopErr.CallerAborted {
+		t.Fatalf("err = %v, want a RelayHopError marked CallerAborted", err)
+	}
+}
+
 // TestDetails_FetchRelayHopErrorCodes verifies that relay-generated error
 // codes that indicate the relay (outer hop) failed are classified as
-// *RelayHopError, while relay_upstream_unreachable (target down) and a target's
-// own forwarded error status are NOT — they stay plain target-side failures.
+// *RelayHopError, relay_upstream_unreachable as the relay's claim about the
+// target, and a target's own forwarded error status as neither.
 func TestDetails_FetchRelayHopErrorCodes(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -148,6 +239,9 @@ func TestDetails_FetchRelayHopErrorCodes(t *testing.T) {
 		{"relay_unknown_target", http.StatusNotFound, protorelay.CodeUnknownTarget, "", false, true},
 		{"relay_bad_method", http.StatusBadRequest, protorelay.CodeBadMethod, "", false, true},
 		{"relay_upstream_unreachable", http.StatusBadGateway, protorelay.CodeUpstreamUnreachable, "", false, false},
+		// The relay's handler wrote the code, so the code wins over a missing
+		// marker: the relay ran and is making a claim about the target.
+		{"relay_upstream_unreachable_unmarked_9_1", http.StatusBadGateway, protorelay.CodeUpstreamUnreachable, "9.1", false, false},
 		{"target_own_500_no_code", http.StatusInternalServerError, "", "", false, false},
 
 		// The amplifier this fix removes. A code-less transient status from a
@@ -223,6 +317,16 @@ func TestDetails_FetchRelayHopErrorCodes(t *testing.T) {
 			// healthy sibling under the same operator.
 			if gotHopErr && (hopErr.RelayID != 9 || hopErr.RelayNodeID != 1) {
 				t.Errorf("hop error names relay (%d, %d), want (9, 1)", hopErr.RelayID, hopErr.RelayNodeID)
+			}
+			// The relay's claim about the target is its own type, so the probe
+			// can rotate past it without reading it as a dead relay.
+			var upErr *RelayUpstreamUnreachableError
+			gotUp := errors.As(err, &upErr)
+			if wantUp := tc.code == protorelay.CodeUpstreamUnreachable; gotUp != wantUp {
+				t.Fatalf("RelayUpstreamUnreachableError = %v, want %v (err: %v)", gotUp, wantUp, err)
+			}
+			if gotUp && (upErr.RelayID != 9 || upErr.RelayNodeID != 1 || upErr.Status != tc.status) {
+				t.Errorf("upstream error = %+v, want relay (9, 1) and status %d", upErr, tc.status)
 			}
 		})
 	}

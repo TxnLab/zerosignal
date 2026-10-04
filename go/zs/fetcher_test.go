@@ -8,10 +8,13 @@ package zs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -382,6 +385,436 @@ func TestProbeDetailsWithRetry_RotatesPastDeadRelay(t *testing.T) {
 	}
 	if len(resp.Models) != 1 || resp.Models[0].ID != "gpt-4o-mini" {
 		t.Fatalf("models = %+v", resp.Models)
+	}
+}
+
+// upstreamUnreachableRelay answers every relayed probe with the relay's claim
+// that the target is down.
+func upstreamUnreachableRelay(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(wire.RelayHopHeader, wire.RelayHopHeaderValue)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"type":"proxy_error","code":"` + protorelay.CodeUpstreamUnreachable + `","message":"down"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// relayProbeFixture is a target only ever probed through the given relays, each
+// eligible and of a distinct owner.
+func relayProbeFixture(relayURLs ...string) (Operator, []selection.Operator) {
+	target := Operator{ID: 1, OwnerAddr: "A", BaseURL: "https://target.example:9000"}
+	selAll := []selection.Operator{
+		{ID: 1, OwnerAddr: "A", BaseURL: target.BaseURL, ProtoVersion: wire.ProtoVersion, Reachable: true},
+	}
+	for i, u := range relayURLs {
+		selAll = append(selAll, selection.Operator{
+			ID: uint64(i + 2), OwnerAddr: string(rune('B' + i)), BaseURL: u,
+			ProtoVersion: wire.ProtoVersion, Reachable: true,
+		})
+	}
+	return target, selAll
+}
+
+// One relay's view of the target is not proof it is down: the probe rotates to
+// a relay that reaches it. The claim, contradicted by the target having been
+// seen up, counts against the relay that made it; the relay is not marked
+// unreachable, since it answered.
+func TestProbeDetailsWithRetry_RotatesPastUpstreamUnreachable(t *testing.T) {
+	upRelay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"id":"m"}]}`))
+	}))
+	defer upRelay.Close()
+	claims := upstreamUnreachableRelay(t)
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(claims.URL, upRelay.URL)
+	source.recordReachable(RefOf(target), true)
+	claimer := NodeRef{Op: 2}
+	source.recordReachable(claimer, true)
+
+	// The pick is weighted-random, so run until the claiming relay was tried
+	// first at least once.
+	for i := 0; i < 50 && source.relayFailStreak[claimer].Count == 0; i++ {
+		resp, hop, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+		if err != nil {
+			t.Fatalf("probe failed with a relay that reaches the target: %v", err)
+		}
+		if hop == nil || hop.RelayID != 3 || len(resp.Models) != 1 {
+			t.Fatalf("hop %+v, models %+v: want the details through relay 3", hop, resp.Models)
+		}
+	}
+	if source.relayFailStreak[claimer].Count == 0 {
+		t.Fatal("a contradicted relay_upstream_unreachable claim left the relay's streak clean")
+	}
+	if !source.recallReachable(claimer) {
+		t.Error("a relay that answered was recorded unreachable")
+	}
+}
+
+// When every relay that worked said the target is down, the target is down:
+// the probe returns the relay's claim as a target-side error, not a hop error,
+// even when a dead relay was tried too.
+func TestProbeDetailsWithRetry_EveryWorkingRelaySaysDown(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	for _, relays := range [][]string{
+		{upstreamUnreachableRelay(t).URL, upstreamUnreachableRelay(t).URL},
+		{upstreamUnreachableRelay(t).URL, deadURL},
+	} {
+		// The pick is weighted-random; enough runs try the dead relay both
+		// first and last, so the claim must win whichever came last.
+		for range 20 {
+			source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+			target, selAll := relayProbeFixture(relays...)
+			_, hop, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+			var upErr *RelayUpstreamUnreachableError
+			if !errors.As(err, &upErr) {
+				t.Fatalf("relays %v: err = %v, want the relay's upstream claim", relays, err)
+			}
+			if hop == nil || hop.RelayID != upErr.RelayID {
+				t.Errorf("hop %+v, want the relay that made the claim (%d)", hop, upErr.RelayID)
+			}
+		}
+
+		source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+		target, selAll := relayProbeFixture(relays...)
+		op := target
+		source.probeOne(context.Background(), NewDetailsClient(nil, time.Second), nil, selAll, &op, time.Now(), discardLogger())
+		if op.Reachable || !op.Probed {
+			t.Errorf("relays %v: Reachable %v Probed %v, want the target recorded down", relays, op.Reachable, op.Probed)
+		}
+	}
+}
+
+// A lone claim no other relay could check is judged by our last view of the
+// target: about a target already seen down it is credited.
+func TestProbeDetailsWithRetry_LoneClaimAboutADownTargetIsCredited(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(upstreamUnreachableRelay(t).URL, deadURL)
+	source.recordReachable(RefOf(target), false)
+	claimer := NodeRef{Op: 2}
+	source.RecordRelayOutcome(claimer, false)
+
+	_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+	if upErr := (*RelayUpstreamUnreachableError)(nil); !errors.As(err, &upErr) {
+		t.Fatalf("err = %v, want the relay's upstream claim", err)
+	}
+	if _, streak := source.relayFailStreak[claimer]; streak {
+		t.Error("a claim about a target already seen down kept the relay's strike")
+	}
+}
+
+// Relays that agree the target is down back each other up, even when our last
+// view had it up: it has just gone down, and none of them lied.
+func TestProbeDetailsWithRetry_AgreeingClaimsAreNotCharged(t *testing.T) {
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(upstreamUnreachableRelay(t).URL, upstreamUnreachableRelay(t).URL)
+	source.recordReachable(RefOf(target), true)
+
+	_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+	if upErr := (*RelayUpstreamUnreachableError)(nil); !errors.As(err, &upErr) {
+		t.Fatalf("err = %v, want the relays' upstream claim", err)
+	}
+	for _, r := range []NodeRef{{Op: 2}, {Op: 3}} {
+		if _, streak := source.relayFailStreak[r]; streak {
+			t.Errorf("relay %v was charged for a claim another relay corroborated", r)
+		}
+	}
+}
+
+// A claim another relay disproves in the same probe is charged, whatever our
+// last view of the target said.
+func TestProbeDetailsWithRetry_ClaimDisprovedInTheProbeIsCharged(t *testing.T) {
+	upRelay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"models":[{"id":"m"}]}`))
+	}))
+	defer upRelay.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(upstreamUnreachableRelay(t).URL, upRelay.URL)
+	claimer := NodeRef{Op: 2}
+
+	for i := 0; i < 50 && source.relayFailStreak[claimer].Count == 0; i++ {
+		source.recordReachable(RefOf(target), false)
+		if _, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger()); err != nil {
+			t.Fatalf("probe failed with a relay that reaches the target: %v", err)
+		}
+	}
+	if source.relayFailStreak[claimer].Count == 0 {
+		t.Fatal("a claim another relay disproved in the same probe was not charged")
+	}
+}
+
+// claimThenCancel answers each request with a relay's upstream claim and
+// cancels the probe's context as it does, or with the context's error once
+// cancelled.
+type claimThenCancel struct{ cancel context.CancelFunc }
+
+func (c claimThenCancel) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	c.cancel()
+	return &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Status:     "502 Bad Gateway",
+		Header:     http.Header{wire.RelayHopHeader: {wire.RelayHopHeaderValue}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"` + protorelay.CodeUpstreamUnreachable + `"}}`)),
+		Request:    req,
+	}, nil
+}
+
+// A probe cancelled after one relay's claim never heard the others, so the
+// claim is not the verdict of every working relay: the target stays as it was.
+func TestProbeOne_CancelAfterAClaimLeavesTheTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := NewDetailsClient(&http.Client{Transport: claimThenCancel{cancel}}, time.Second)
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture("http://relay-b.example", "http://relay-c.example")
+	target.Reachable = true
+	source.recordReachable(RefOf(target), true)
+
+	_, _, err := source.probeDetailsWithRetry(ctx, client, selAll, target, discardLogger())
+	if upErr := (*RelayUpstreamUnreachableError)(nil); errors.As(err, &upErr) {
+		t.Fatalf("a cancelled probe returned a relay's claim as the target's failure: %v", err)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	client = NewDetailsClient(&http.Client{Transport: claimThenCancel{cancel}}, time.Second)
+	op := target
+	source.probeOne(ctx, client, nil, selAll, &op, time.Now(), discardLogger())
+	if !op.Reachable || op.Probed || !source.recallReachable(RefOf(target)) {
+		t.Errorf("Reachable %v Probed %v recall %v: a cancelled probe changed the target",
+			op.Reachable, op.Probed, source.recallReachable(RefOf(target)))
+	}
+}
+
+// Cancelled after the only relay's claim, with no relay left to try: the probe
+// returns the cancel, not the claim and not a hop.
+func TestProbeDetailsWithRetry_CancelAfterTheOnlyClaimReturnsTheCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := NewDetailsClient(&http.Client{Transport: claimThenCancel{cancel}}, time.Second)
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture("http://relay-b.example")
+
+	_, hop, err := source.probeDetailsWithRetry(ctx, client, selAll, target, discardLogger())
+	if !errors.Is(err, context.Canceled) || hop != nil {
+		t.Fatalf("err %v hop %+v, want context.Canceled and no hop", err, hop)
+	}
+}
+
+// A cancelled direct probe learned nothing about the target either.
+func TestProbeOne_CancelledDirectProbeLeavesTheTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	source := &ChainOperatorSource{Log: discardLogger()}
+	op := Operator{ID: 1, OwnerAddr: "A", BaseURL: srv.URL, Reachable: true}
+	source.recordReachable(RefOf(op), true)
+	source.probeOne(ctx, NewDetailsClient(nil, time.Second), nil, nil, &op, time.Now(), discardLogger())
+	if !op.Reachable || op.Probed || !source.recallReachable(RefOf(op)) {
+		t.Errorf("Reachable %v Probed %v: a cancelled direct probe changed the target", op.Reachable, op.Probed)
+	}
+}
+
+// A relay that claimed the target down is not asked again in the same probe:
+// asked again, it would back up its own claim, and could spend every attempt.
+// Alone and about a target last seen up, its claim is charged once.
+func TestProbeDetailsWithRetry_AClaimingRelayIsAskedOnce(t *testing.T) {
+	var hits atomic.Int32
+	claim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set(wire.RelayHopHeader, wire.RelayHopHeaderValue)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":{"code":"` + protorelay.CodeUpstreamUnreachable + `"}}`))
+	}))
+	defer claim.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(claim.URL)
+	source.recordReachable(RefOf(target), true)
+
+	_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+	if upErr := (*RelayUpstreamUnreachableError)(nil); !errors.As(err, &upErr) {
+		t.Fatalf("err = %v, want the relay's claim", err)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("the claiming relay was asked %d times, want 1", hits.Load())
+	}
+	if got := source.relayFailStreak[NodeRef{Op: 2}].Count; got != 1 {
+		t.Errorf("streak = %d, want 1: a lone claim about a target seen up is charged", got)
+	}
+}
+
+// The target's own error status, forwarded by another relay, disproves a claim
+// that it was unreachable, whatever our last view of it.
+func TestProbeDetailsWithRetry_TargetStatusDisprovesAClaim(t *testing.T) {
+	forwards404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(wire.RelayHopHeader, wire.RelayHopHeaderValue)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer forwards404.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(upstreamUnreachableRelay(t).URL, forwards404.URL)
+	claimer := NodeRef{Op: 2}
+	for i := 0; i < 50 && source.relayFailStreak[claimer].Count == 0; i++ {
+		source.recordReachable(RefOf(target), false)
+		_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+		if upErr := (*RelayUpstreamUnreachableError)(nil); errors.As(err, &upErr) {
+			t.Fatalf("a relay reached the target, yet the probe returned the claim: %v", err)
+		}
+	}
+	if source.relayFailStreak[claimer].Count == 0 {
+		t.Fatal("a claim the target's own status disproved was not charged")
+	}
+}
+
+// A 2xx whose body breaks off (not by our deadline) is still a 2xx the relay
+// forwarded: the relay is credited and the target's body is at fault.
+func TestProbeDetailsWithRetry_BrokenBodyCreditsTheRelay(t *testing.T) {
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"models":[`))
+		w.(http.Flusher).Flush()
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer relay.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(relay.URL)
+	ref := NodeRef{Op: 2}
+	source.RecordRelayOutcome(ref, false)
+
+	_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+	if bodyErr := (*DetailsBodyError)(nil); !errors.As(err, &bodyErr) {
+		t.Fatalf("err = %v, want a body error", err)
+	}
+	if _, streak := source.relayFailStreak[ref]; streak {
+		t.Error("the relay that forwarded the 2xx kept its failure streak")
+	}
+	if _, ok := source.RelayLatencyForTarget(ref, RefOf(target)); !ok {
+		t.Error("the relay that forwarded the 2xx got no round-trip sample")
+	}
+}
+
+// cancelThenBusy cancels the probe's context as the relay answers relay_busy.
+type cancelThenBusy struct{ cancel context.CancelFunc }
+
+func (c cancelThenBusy) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.cancel()
+	return &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Status:     "503 Service Unavailable",
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"` + protorelay.CodeBusy + `"}}`)),
+		Request:    req,
+	}, nil
+}
+
+// A relay code read in full outranks a cancel that lands after it: the relay
+// said it failed, so it is charged.
+func TestDetails_ARelayCodeOutranksALateCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hop := &RelayHop{BaseURL: "http://relay.example", TargetID: 3, RelayID: 9}
+	_, err := NewDetailsClient(&http.Client{Transport: cancelThenBusy{cancel}}, time.Second).
+		Fetch(ctx, "https://target.example:9000", hop)
+	var hopErr *RelayHopError
+	if !errors.As(err, &hopErr) || hopErr.CallerAborted {
+		t.Fatalf("err = %v, want a chargeable RelayHopError", err)
+	}
+}
+
+// The probe's own deadline charges no relay (SPEC § 10): a relay is silent
+// while it waits on a slow target, so a timeout says nothing about it. The
+// relay is skipped for this probe, and the target's status is unknown.
+func TestProbeDetailsWithRetry_OwnDeadlineChargesNoRelay(t *testing.T) {
+	release := make(chan struct{})
+	var hits [2]atomic.Int32
+	slow := func(i int) string {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits[i].Add(1)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}))
+		t.Cleanup(srv.Close)
+		return srv.URL
+	}
+	relays := []string{slow(0), slow(1)}
+	defer close(release)
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(relays...)
+	for _, r := range []NodeRef{{Op: 2}, {Op: 3}} {
+		source.recordReachable(r, true)
+	}
+
+	_, _, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, 50*time.Millisecond), selAll, target, discardLogger())
+	var hopErr *RelayHopError
+	if !errors.As(err, &hopErr) || !hopErr.CallerAborted {
+		t.Fatalf("err = %v, want a RelayHopError marked CallerAborted", err)
+	}
+	if hits[0].Load() == 0 || hits[1].Load() == 0 {
+		t.Errorf("hits %d/%d: a timed-out relay must be rotated past, not end the probe", hits[0].Load(), hits[1].Load())
+	}
+	for _, r := range []NodeRef{{Op: 2}, {Op: 3}} {
+		if !source.recallReachable(r) {
+			t.Errorf("the probe's own timeout recorded relay %v unreachable", r)
+		}
+		if _, streak := source.relayFailStreak[r]; streak {
+			t.Errorf("the probe's own timeout charged relay %v a strike", r)
+		}
+	}
+}
+
+// A 2xx the target sent through a relay credits the relay even when the body
+// won't decode: the relay forwarded it.
+func TestProbeDetailsWithRetry_BadBodyCreditsTheRelay(t *testing.T) {
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer relay.Close()
+
+	source := &ChainOperatorSource{Privacy: true, Log: discardLogger()}
+	target, selAll := relayProbeFixture(relay.URL)
+	ref := NodeRef{Op: 2}
+	source.RecordRelayOutcome(ref, false)
+
+	_, hop, err := source.probeDetailsWithRetry(context.Background(), NewDetailsClient(nil, time.Second), selAll, target, discardLogger())
+	var bodyErr *DetailsBodyError
+	if !errors.As(err, &bodyErr) || hop == nil {
+		t.Fatalf("err %v hop %+v, want a body error through the relay", err, hop)
+	}
+	if _, streak := source.relayFailStreak[ref]; streak {
+		t.Error("the relay that forwarded the 2xx kept its failure streak")
+	}
+	if _, ok := source.RelayLatencyForTarget(ref, RefOf(target)); !ok {
+		t.Error("the relay that forwarded the 2xx got no round-trip sample")
 	}
 }
 

@@ -510,17 +510,24 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 			log.Debug("privacy mode: no eligible relay to probe operator; skipping details probe",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID))
+		case ctx.Err() != nil:
+			// Cancelled (the cycle's deadline, or a re-probe's request went
+			// away): nothing was learned about the target. Leave it as-is.
+			log.Debug("operator details probe cancelled",
+				slog.Uint64("operator_id", op.ID),
+				slog.Uint64("node_id", op.NodeID),
+				slog.Any("err", err))
 		case errors.As(err, &hopErr):
 			// Every relay hop tried this cycle failed at the HOP — the relay
-			// was unreachable, returned a relay-generated code, or (>=9.1)
+			// was unreachable, returned a relay-generated code, (>=9.1)
 			// answered a code-less transient status without stamping
-			// wire.RelayHopHeader, proving its own front door ate the probe.
-			// In none of those did we reach the target, so don't flip the
-			// target to unreachable; its status is unknown. The failed relays
-			// were already recorded down inside probeDetailsWithRetry, so
-			// SelectRelay deprioritizes them next cycle. Leave Reachable + the
-			// capability fields as-is for the snapshot-merge to carry
-			// last-known-good forward.
+			// wire.RelayHopHeader, proving its own front door ate the probe,
+			// or timed out waiting. In none of those did we reach the target,
+			// so don't flip the target to unreachable; its status is unknown.
+			// probeDetailsWithRetry already recorded the relays that failed
+			// (not the ones that timed out), so SelectRelay deprioritizes them
+			// next cycle. Leave Reachable + the capability fields as-is for
+			// the snapshot-merge to carry last-known-good forward.
 			op.LastRefreshAt = now
 			log.Warn("operator details probe: all relay hops failed this cycle; target status unknown",
 				slog.Uint64("operator_id", op.ID),
@@ -530,9 +537,9 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 			)
 		default:
 			// The target itself failed: down, an error status the relay
-			// forwarded from the target (incl. relay_upstream_unreachable),
-			// a malformed body, or — direct mode — a transport error to
-			// the target. Keep the operator in the registry so dispatch
+			// forwarded from the target, relay_upstream_unreachable from
+			// every relay that worked, a malformed body, or — direct mode —
+			// a transport error to the target. Keep the operator in the registry so dispatch
 			// can still reach it if its reserve endpoint is alive; don't
 			// clobber the previously-fetched Models list (the caller's
 			// snapshot-merge decides whether to carry last-known-good
@@ -815,11 +822,11 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 }
 
 // maxDiscoveryRelayAttempts bounds how many distinct relays a single privacy-
-// mode details probe will try before giving up for this cycle. Each attempt
-// that fails at the relay hop excludes that relay and re-rotates to another, so
-// a couple of dead relays don't make the target look down — but the cap keeps a
-// fleet-wide relay outage from turning one probe into len(operators) sequential
-// DetailsTimeout waits.
+// mode details probe will try before giving up for this cycle. A relay that
+// fails the hop, times out, or claims the target is down is excluded and the
+// probe rotates to another, so a couple of dead or partitioned relays don't
+// make the target look down — but the cap keeps a fleet-wide relay outage from
+// turning one probe into len(operators) sequential DetailsTimeout waits.
 const maxDiscoveryRelayAttempts = 3
 
 // probeDetailsWithRetry probes target's /v1/zs/details. In direct mode
@@ -827,13 +834,18 @@ const maxDiscoveryRelayAttempts = 3
 // rotating relay and, when a relay *hop* is itself unreachable, marks that
 // relay down (so SelectRelay deprioritizes it next cycle), excludes it, and
 // retries through a different relay — a dead relay must not be mistaken for a
-// dead target. It returns the parsed details and the relay hop that was used
-// (nil in direct mode), or an error the caller classifies:
+// dead target. A relay that reports relay_upstream_unreachable is rotated past
+// too: one relay's view of the target is not proof the target is down. Its
+// claim is scored once the probe resolves (settleClaims). It returns the parsed
+// details and the relay hop that was used (nil in direct mode), or an error the
+// caller classifies:
 //
 //   - selection.ErrNoRelay : privacy on, no (remaining) eligible relay
-//   - *RelayHopError        : every relay tried this cycle was unreachable
+//   - *RelayHopError        : no relay tried this cycle reached the target
 //   - any other error       : the target itself failed (down / error status /
-//     malformed body / direct-mode transport error)
+//     malformed body / direct-mode transport error), including a
+//     *RelayUpstreamUnreachableError when every relay that worked said the
+//     target was down
 //
 // The caller treats the first two as "target reachability unknown — leave
 // as-is" and the last as "target down".
@@ -856,7 +868,43 @@ func (s *ChainOperatorSource) probeDetailsWithRetry(
 
 	excluded := make(map[NodeRef]bool)
 	var lastHop *RelayHop
-	var lastHopErr error
+	var lastHopErr, lastErr error
+	// A working relay's claim that the target is down. It outranks the hop
+	// errors at the give-up, since it is the only evidence about the target.
+	var upstreamHop *RelayHop
+	var upstreamErr error
+	var claimers []*RelayHop
+	// settleClaims scores the relays that said the target was down, using what
+	// this probe saw where it can. Scoring each claim as it came, against the
+	// previous cycle's view of the target, would strike every honest relay the
+	// probe rotates through when a target that was up has just gone down.
+	settleClaims := func(reached bool) {
+		for _, c := range claimers {
+			switch {
+			case reached:
+				// Another relay reached the target: the claim was wrong.
+				s.RecordRelayOutcome(c.RelayRef(), false)
+			case len(claimers) > 1:
+				// Working relays agree the target is down.
+				s.RecordRelayOutcome(c.RelayRef(), true)
+			default:
+				// One uncorroborated claim: judge it by our last view.
+				s.RecordRelayUpstreamUnreachable(c.RelayRef(), c.TargetRef())
+			}
+		}
+	}
+	giveUp := func() (inject.OperatorDetails, *RelayHop, error) {
+		settleClaims(false)
+		// A cancelled probe ended before the other relays were heard, so a
+		// claim it holds is not the verdict that every working relay agreed.
+		if upstreamErr != nil && ctx.Err() == nil {
+			return inject.OperatorDetails{}, upstreamHop, upstreamErr
+		}
+		if lastHopErr == nil {
+			return inject.OperatorDetails{}, nil, ctx.Err()
+		}
+		return inject.OperatorDetails{}, nil, lastHopErr
+	}
 	for attempt := 0; attempt < maxDiscoveryRelayAttempts; attempt++ {
 		hop, relayErr := SelectRelayHopWeighted(
 			CandidatesExcluding(selAll, excluded),
@@ -865,15 +913,14 @@ func (s *ChainOperatorSource) probeDetailsWithRetry(
 			func(relay NodeRef) (float64, bool) { return s.RelayLatencyForTarget(relay, RefOf(target)) },
 		)
 		if relayErr != nil {
-			// No (remaining) eligible relay. If we've already burned a relay
-			// on a hop failure, that's the more informative signal (and keeps
-			// the caller on the "leave target as-is" path); otherwise surface
-			// ErrNoRelay so the caller logs the benign no-relay skip. Either way
-			// we do NOT log a "retrying" line here — there is no different relay
-			// to retry through; the caller's "all relay hops unreachable" warning
-			// records the give-up.
-			if lastHopErr != nil {
-				return inject.OperatorDetails{}, nil, lastHopErr
+			// No (remaining) eligible relay. If we've already tried a relay,
+			// its failure or claim is the more informative signal; otherwise
+			// surface ErrNoRelay so the caller logs the benign no-relay skip.
+			// Either way we do NOT log a "retrying" line here — there is no
+			// different relay to retry through; the caller's warning records
+			// the give-up.
+			if lastHopErr != nil || upstreamErr != nil {
+				return giveUp()
 			}
 			return inject.OperatorDetails{}, nil, relayErr
 		}
@@ -883,13 +930,13 @@ func (s *ChainOperatorSource) probeDetailsWithRetry(
 			// give-up path above. relay_operator_id/relay_node_id name the relay
 			// we're about to retry through; failed_relay_* name the one that just
 			// failed (so the relay ids visibly change across attempts).
-			log.Debug("relay hop unreachable; retrying details probe through a different relay",
+			log.Debug("relay failed the details probe; retrying through a different relay",
 				slog.Uint64("operator_id", target.ID),
 				slog.Uint64("node_id", target.NodeID),
 				slog.Uint64("failed_relay_operator_id", lastHop.RelayID),
 				slog.Uint64("failed_relay_node_id", lastHop.RelayNodeID),
 				relayLogAttr(hop),
-				slog.Any("err", lastHopErr))
+				slog.Any("err", lastErr))
 		}
 		start := time.Now()
 		resp, err := client.Fetch(ctx, target.BaseURL, hop)
@@ -898,12 +945,11 @@ func (s *ChainOperatorSource) probeDetailsWithRetry(
 			// target returned) — clear its forward-failure streak so a recovered
 			// relay returns to the preferred tier, and record the full
 			// browser→relay→target→back RTT for latency-weighted relay selection.
-			// RTT is recorded on any completed round-trip (err==nil), the same point
-			// the forwarding credit fires — a deliberate, minor divergence from the
-			// client, which records probe RTT only on a 2xx; both are valid path
-			// samples and the EWMA + outlier gate absorb the difference.
+			// A 2xx with a bad body earns both too (below); a forwarded error
+			// status earns neither, as in the TypeScript SDK.
 			s.RecordRelayOutcome(hop.RelayRef(), true)
 			s.RecordRelayedRTT(hop.RelayRef(), hop.TargetRef(), time.Since(start))
+			settleClaims(true)
 			return resp, hop, nil
 		}
 		var hopErr *RelayHopError
@@ -914,18 +960,43 @@ func (s *ChainOperatorSource) probeDetailsWithRetry(
 			// then rotate on. All three key by the relay's (operator id, node id):
 			// a dead node never tars a healthy sibling under the same operator, and
 			// a working sibling stays eligible for the very next attempt.
-			s.recordReachable(hop.RelayRef(), false)
-			s.RecordRelayOutcome(hop.RelayRef(), false)
+			//
+			// Our own deadline charges nobody; the relay is only skipped for
+			// this probe. A cancelled caller ends the probe.
+			if !hopErr.CallerAborted {
+				s.recordReachable(hop.RelayRef(), false)
+				s.RecordRelayOutcome(hop.RelayRef(), false)
+			}
 			excluded[hop.RelayRef()] = true
-			lastHop, lastHopErr = hop, err
+			lastHop, lastHopErr, lastErr = hop, err, err
+			if ctx.Err() != nil {
+				return giveUp()
+			}
 			continue
+		}
+		var upErr *RelayUpstreamUnreachableError
+		if errors.As(err, &upErr) {
+			// The relay works but says the target is down. Try a relay that
+			// may reach it. Not a reachability mark: the relay answered us fine.
+			claimers = append(claimers, hop)
+			excluded[hop.RelayRef()] = true
+			lastHop, lastErr = hop, err
+			upstreamHop, upstreamErr = hop, err
+			continue
+		}
+		var bodyErr *DetailsBodyError
+		if errors.As(err, &bodyErr) {
+			// A 2xx the target sent: the relay forwarded it, whatever the body.
+			s.RecordRelayOutcome(hop.RelayRef(), true)
+			s.RecordRelayedRTT(hop.RelayRef(), hop.TargetRef(), time.Since(start))
 		}
 		// Target-side failure. Return it with the hop so the caller can name
 		// the relay the target was (successfully) reached through.
+		settleClaims(true)
 		return resp, hop, err
 	}
-	// Exhausted the attempt budget, every attempt a relay-hop failure.
-	return inject.OperatorDetails{}, nil, lastHopErr
+	// Exhausted the attempt budget, every attempt a relay failure.
+	return giveUp()
 }
 
 // CandidatesExcluding returns ops without the relay nodes whose (operator id,
