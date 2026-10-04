@@ -262,6 +262,18 @@ func TestReconciler_SubmitsTheVerdictsCall(t *testing.T) {
 	}
 }
 
+// A frozen ticket is arbitration's, and no call can touch it, so the sweep
+// drops its row rather than re-reading the box every minute forever.
+func TestReconciler_FrozenBoxIsForgotten(t *testing.T) {
+	j := newMemJournal()
+	put(t, j, openRec())
+	chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": box(escrow.StatusFrozen, 0, -time.Minute)}}
+	testReconciler(j, chain).sweep()
+	if got := ids(t, j); len(got) != 0 || len(chain.seen()) != 0 {
+		t.Errorf("journal %v, calls %v: want the row dropped and nothing submitted", got, chain.seen())
+	}
+}
+
 // A box that cannot be read is retried, never forgotten.
 func TestReconciler_UnreadableBoxIsKept(t *testing.T) {
 	j := newMemJournal()

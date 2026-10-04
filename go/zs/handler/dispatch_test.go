@@ -158,6 +158,7 @@ type fakeNode struct {
 
 	mu        sync.Mutex
 	tickets   map[string][wire.ResponseKeySize]byte // ticket_id → K
+	maxPrices []uint64                              // each issued ticket's MaxPrice, in order
 	callCount int                                   // how many requests of any kind reached this node
 	// lastSealedAlgorandTxID records the envelope's AlgorandTxID on
 	// every sealed request so tests can assert which payment-path
@@ -391,6 +392,9 @@ func (n *fakeNode) issueTicket(t *testing.T, w http.ResponseWriter, pub ed25519.
 	if err := tkt.Sign(context.Background(), rawKeyBytesSigner{addr: n.signingAddr, priv: n.signingKey}, n.signingAddr); err != nil {
 		t.Fatalf("sign ticket: %v", err)
 	}
+	n.mu.Lock()
+	n.maxPrices = append(n.maxPrices, tkt.MaxPrice)
+	n.mu.Unlock()
 	// The operator field on the Operator struct is already set (uses the
 	// server URL), so the returned ticket will point at itself — nothing
 	// to patch up here.

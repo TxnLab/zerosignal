@@ -7,11 +7,13 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
@@ -423,6 +425,14 @@ func TestDispatch_SpendReservedOnSuccess(t *testing.T) {
 	if len(guard.reserved) != 1 {
 		t.Fatalf("Reserve calls = %d, want 1", len(guard.reserved))
 	}
+	// The whole signed ceiling: anything less lets the cap fail open, since
+	// settleLapsed can still claim up to MaxPrice.
+	node.mu.Lock()
+	signed := node.maxPrices
+	node.mu.Unlock()
+	if len(signed) != 1 || signed[0] == 0 || guard.reserved[0] != signed[0] {
+		t.Errorf("reserved %v, want the MaxPrice the node signed (%v)", guard.reserved, signed)
+	}
 	if len(guard.released) != 0 {
 		t.Errorf("a committed open must NOT release its reservation, got releases %v", guard.released)
 	}
@@ -472,6 +482,54 @@ func TestDispatch_SpendSettledOnValidReceipt(t *testing.T) {
 	if got := guard.settled[0]; got.maxPrice != guard.reserved[0] || got.spent != charged {
 		t.Errorf("Settle = {maxPrice:%d spent:%d}, want {maxPrice:%d spent:%d}",
 			got.maxPrice, got.spent, guard.reserved[0], charged)
+	}
+}
+
+// failingJournal refuses every write and counts the attempts.
+type failingJournal struct{ puts atomic.Int32 }
+
+func (j *failingJournal) Put(context.Context, zs.TicketRecord) error {
+	j.puts.Add(1)
+	return errors.New("disk full")
+}
+func (*failingJournal) Delete(context.Context, string) error { return nil }
+func (*failingJournal) List(context.Context, string, uint64) ([]zs.TicketRecord, error) {
+	return nil, nil
+}
+
+// The journal only shortens recovery after a crash. By the time it is written
+// the escrow is open and the payer is paying, so a failed write must not cost
+// them the reply or the settle.
+func TestDispatch_JournalWriteFailureKeepsTheTurn(t *testing.T) {
+	reply := []byte(`{"choices":[{"message":{"content":"hi"}}]}`)
+	node := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamEncrypted,
+		replyPlaintext: reply,
+		buildReceipt: func(plaintext []byte) *ticket.UsageReceipt {
+			r := &ticket.UsageReceipt{ActualInputCount: 8, ActualOutputCount: 3, AmountCharged: 31}
+			r.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
+			return r
+		},
+	})
+	cfg := testConfig()
+	opts := setup(t, cfg, node)
+	guard := &fakeSpendGuard{}
+	opts.SpendGuard = guard
+	journal := &failingJournal{}
+	opts.Journal = journal
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+	if journal.puts.Load() == 0 {
+		t.Fatal("the journal was never written, so this tests nothing")
+	}
+	if w.Result().StatusCode != http.StatusOK || !bytes.Equal(w.Body.Bytes(), reply) {
+		t.Errorf("status = %d body = %s; want the reply", w.Result().StatusCode, w.Body.String())
+	}
+	if len(guard.settled) != 1 || guard.settled[0].spent != 31 {
+		t.Errorf("settled %v, want the receipt's 31", guard.settled)
 	}
 }
 

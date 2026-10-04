@@ -25,6 +25,7 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
 	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
+	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
@@ -115,7 +116,10 @@ func TestNew_FailsWhenTheEscrowConfigCannotBeRead(t *testing.T) {
 // fakeEscrowAlgod answers the escrow config read: mbrForTicket returns mbr,
 // the app predates the free-ticket quota, and the globals carry a USDC id and
 // a treasury. senders lists each simulate's sender.
-func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []string) {
+//
+// submitted returns every transaction posted to /v2/transactions, decoded, so
+// a test can check what was signed rather than that something was.
+func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []string, submitted func() []types.Transaction) {
 	t.Helper()
 	mbrMethod, err := escrow.MethodByName("mbrForTicket")
 	if err != nil {
@@ -123,6 +127,7 @@ func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []str
 	}
 	var mu sync.Mutex
 	var seen []string
+	var posted []types.Transaction
 	writeJSON := func(w http.ResponseWriter, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(v); err != nil {
@@ -156,6 +161,20 @@ func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []str
 			}
 			writeJSON(w, models.SimulateResponse{Version: 2, LastRound: 100, TxnGroups: []models.SimulateTransactionGroupResult{group}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/transactions"):
+			body, _ := io.ReadAll(r.Body)
+			dec := msgpack.NewDecoder(bytes.NewReader(body))
+			for {
+				var st types.SignedTxn
+				if err := dec.Decode(&st); err == io.EOF {
+					break
+				} else if err != nil {
+					http.Error(w, "bad signed transaction: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				mu.Lock()
+				posted = append(posted, st.Txn)
+				mu.Unlock()
+			}
 			writeJSON(w, map[string]string{"txId": "SUBMITTED"})
 		case strings.Contains(r.URL.Path, "/v2/applications/"):
 			writeJSON(w, models.Application{Id: 1, Params: models.ApplicationParams{GlobalState: []models.TealKeyValue{
@@ -168,10 +187,14 @@ func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []str
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL, func() []string {
-		mu.Lock()
-		defer mu.Unlock()
-		return slices.Clone(seen)
-	}
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Clone(seen)
+		}, func() []types.Transaction {
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Clone(posted)
+		}
 }
 
 // The wallet New builds opens against the configured escrow as the Signer,
@@ -179,7 +202,7 @@ func fakeEscrowAlgod(t *testing.T, mbr uint64) (url string, senders func() []str
 // payer holds any ALGO: on a public network the read is simulated from the
 // fee sink, since a simulate from an account not in the ledger fails.
 func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
-	url, senders := fakeEscrowAlgod(t, 123_400)
+	url, senders, _ := fakeEscrowAlgod(t, 123_400)
 	cfg := suppliedParts(t)
 	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
 	cfg.Wallet = nil
@@ -268,13 +291,173 @@ func TestPayerSettleArgs_EveryValueInItsSlot(t *testing.T) {
 	}
 }
 
-// The reconciler's lapse and re-settle reach the chain with the box's owner:
-// without it the call cannot name the account the contract pays, and fails.
+// encodingSigner hands back each transaction encoded but unsigned, so a fake
+// algod can read what would have been signed.
+type encodingSigner struct{ fakeSigner }
+
+func (encodingSigner) SignWithAccount(_ context.Context, tx types.Transaction, _ string) (string, []byte, error) {
+	return "", msgpack.Encode(types.SignedTxn{Txn: tx}), nil
+}
+
+// escrowCalls returns the app-call transactions among txns that invoke the
+// escrow method name.
+func escrowCalls(t *testing.T, txns []types.Transaction, name string) []types.Transaction {
+	t.Helper()
+	m, err := escrow.MethodByName(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []types.Transaction
+	for _, tx := range txns {
+		if tx.Type == types.ApplicationCallTx && len(tx.ApplicationArgs) > 0 && bytes.Equal(tx.ApplicationArgs[0], m.GetSelector()) {
+			out = append(out, tx)
+		}
+	}
+	return out
+}
+
+// settleCallArgs reads the receipt values out of a settle() call, in the ABI's
+// order: ticketId, amountCharged, receiptDigest, ttftMs, decodeMs, inputCount,
+// outputCount, outputUsageType, auxOutputUsageType, auxOutputCount, asOperator.
+func settleCallArgs(t *testing.T, tx types.Transaction) (SettleArgs, bool) {
+	t.Helper()
+	a := tx.ApplicationArgs
+	if len(a) != 12 {
+		t.Fatalf("settle call has %d args, want 12", len(a))
+	}
+	if len(a[3]) != 2+32 {
+		t.Fatalf("settle digest is %d bytes, want 34", len(a[3]))
+	}
+	u := func(i int) uint64 { return binary.BigEndian.Uint64(a[i]) }
+	var got SettleArgs
+	got.AmountCharged = u(2)
+	copy(got.ReceiptDigest[:], a[3][2:])
+	got.TtftMs, got.DecodeMs, got.InputTokens, got.OutputTokens = u(4), u(5), u(6), u(7)
+	got.OutputUsageType, got.AuxOutputUsageType, got.AuxOutputCount = ticket.UsageType(u(8)), ticket.UsageType(u(9)), u(10)
+	return got, a[11][0] != 0
+}
+
+// The payer's ack reaches the chain as settle() carrying the receipt's own
+// values: the contract freezes the ticket on any difference from the
+// operator's half.
+func TestOpenHandle_StandaloneAckSubmitsTheReceipt(t *testing.T) {
+	h, submitted := walletHandle(t)
+	r := &ticket.UsageReceipt{AmountCharged: 11, TtftMs: 12, DecodeMs: 13, ActualInputCount: 14, ActualOutputCount: 15,
+		OutputUsageType: 16, AuxOutputUsageType: 17, AuxOutputCount: 18}
+	_, fee, _, err := h.AckSettle(context.Background(), r, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := escrowCalls(t, submitted(), "settle")
+	if len(calls) != 1 {
+		t.Fatalf("%d settle calls submitted, want 1", len(calls))
+	}
+	got, asOperator := settleCallArgs(t, calls[0])
+	if want := settleArgsOf(r); got != want || asOperator {
+		t.Errorf("settle carried\n  %+v (asOperator %v)\nwant the receipt's\n  %+v as the payer", got, asOperator, want)
+	}
+	if fee == 0 || fee != uint64(calls[0].Fee) {
+		t.Errorf("fee %d, want the submitted settle's own %d", fee, calls[0].Fee)
+	}
+}
+
+// walletHandle is an OpenHandle for a ticket on node 3:4, on a wallet whose
+// algod is fakeEscrowAlgod, plus what that algod received.
+func walletHandle(t *testing.T) (*OpenHandle, func() []types.Transaction) {
+	t.Helper()
+	url, _, submitted := fakeEscrowAlgod(t, 123_400)
+	cfg := suppliedParts(t)
+	cfg.Signer = encodingSigner{fakeSigner{addr: crypto.GenerateAccount().Address.String()}}
+	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
+	cfg.Wallet = nil
+	c, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	rec := TicketRecord{TicketID: "NkImzFiSJz3WK6cx7PFU1Q==", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99}
+	h := walletChain{c.Config().Wallet.(*Wallet)}.handle(rec, &escrow.TicketRecord{OperatorOwnerAddr: crypto.GenerateAccount().Address.String()})
+	return h, submitted
+}
+
+// refsNode3_4 reports whether tx references operator 3's and node 3:4's
+// boxes: with the ids swapped or wrong it names boxes that don't exist, and
+// the call reverts on chain.
+func refsNode3_4(tx types.Transaction) bool {
+	has := func(key []byte) bool {
+		return slices.ContainsFunc(tx.BoxReferences, func(b types.BoxReference) bool { return bytes.Equal(b.Name, key) })
+	}
+	return has(escrow.OperatorBoxKey(3)) && has(escrow.NodeBoxKey(3, 4))
+}
+
+// An operator that sends no settle group has not handed over a bad one: with a
+// signing key on file, "no group" must not read as a rejected group, which
+// would exclude an honest node for the life of the process.
+func TestOpenHandle_NoSettleGroupIsNotARejectedGroup(t *testing.T) {
+	h, submitted := walletHandle(t)
+	h.Operator.SigningAddr = crypto.GenerateAccount().Address.String()
+	_, _, rejected, err := h.AckSettle(context.Background(), &ticket.UsageReceipt{AmountCharged: 11}, nil)
+	if err != nil || rejected {
+		t.Errorf("err %v, groupRejected %v; want a plain standalone settle", err, rejected)
+	}
+	if n := len(escrowCalls(t, submitted(), "settle")); n != 1 {
+		t.Errorf("%d settle calls, want 1", n)
+	}
+}
+
+// The protest reaches the chain naming the ticket's node, and reports the fee
+// the payer paid for it.
+func TestOpenHandle_ProtestSubmitsAndReportsItsFee(t *testing.T) {
+	h, submitted := walletHandle(t)
+	r := &ticket.UsageReceipt{AmountCharged: 11, Sig: base64.StdEncoding.EncodeToString(make([]byte, 64))}
+	_, fee, err := h.Protest(context.Background(), r, []byte("evidence"), escrow.ProtestReasonBodyHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := escrowCalls(t, submitted(), "protest")
+	if len(calls) != 1 {
+		t.Fatalf("%d protest calls, want 1", len(calls))
+	}
+	if fee == 0 || fee != uint64(calls[0].Fee) {
+		t.Errorf("fee %d, want the protest's own %d", fee, calls[0].Fee)
+	}
+	if !refsNode3_4(calls[0]) {
+		t.Errorf("protest box refs %v, want operator 3 and node 3:4", calls[0].BoxReferences)
+	}
+}
+
+// Refund and lapse name the ticket's own operator and node boxes.
+func TestOpenHandle_RefundAndLapseReferenceTheTicketsNode(t *testing.T) {
+	h, submitted := walletHandle(t)
+	for _, step := range []struct {
+		method string
+		call   func() (string, error)
+	}{
+		{"refundInactive", func() (string, error) { return h.RefundInactive(context.Background()) }},
+		{"settleLapsed", func() (string, error) { return h.SettleLapsed(context.Background()) }},
+	} {
+		before := len(submitted())
+		if _, err := step.call(); err != nil {
+			t.Fatalf("%s: %v", step.method, err)
+		}
+		calls := escrowCalls(t, submitted()[before:], step.method)
+		if len(calls) != 1 {
+			t.Fatalf("%d %s calls, want 1", len(calls), step.method)
+		}
+		if !refsNode3_4(calls[0]) {
+			t.Errorf("%s box refs %v, want operator 3 and node 3:4", step.method, calls[0].BoxReferences)
+		}
+	}
+}
+
+// The reconciler's calls reach the chain as the contract methods they name,
+// with the box's owner: without it the call cannot name the account the
+// contract pays, and fails. A re-settle carries the journaled receipt values.
 func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
-	url, _ := fakeEscrowAlgod(t, 123_400)
+	url, _, submitted := fakeEscrowAlgod(t, 123_400)
 	payer := crypto.GenerateAccount().Address.String()
 	cfg := suppliedParts(t)
-	cfg.Signer = fakeSigner{addr: payer}
+	cfg.Signer = encodingSigner{fakeSigner{addr: payer}}
 	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
 	cfg.Wallet = nil
 	c, err := New(context.Background(), cfg)
@@ -285,11 +468,30 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	chain := walletChain{c.Config().Wallet.(*Wallet)}
 	rec := TicketRecord{TicketID: "NkImzFiSJz3WK6cx7PFU1Q==", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99, Settle: &settled}
 	box := &escrow.TicketRecord{OperatorOwnerAddr: crypto.GenerateAccount().Address.String()}
-	if _, err := chain.lapse(context.Background(), rec, box); err != nil {
-		t.Errorf("lapse: %v", err)
+	ctx := context.Background()
+	for _, step := range []struct {
+		method string
+		call   func() (string, error)
+	}{
+		{"settleLapsed", func() (string, error) { return chain.lapse(ctx, rec, box) }},
+		{"refundInactive", func() (string, error) { return chain.refund(ctx, rec) }},
+		{"settle", func() (string, error) { return chain.resettle(ctx, rec, box) }},
+	} {
+		before := len(submitted())
+		if _, err := step.call(); err != nil {
+			t.Errorf("%s: %v", step.method, err)
+			continue
+		}
+		if n := len(escrowCalls(t, submitted()[before:], step.method)); n != 1 {
+			t.Errorf("%d %s calls submitted, want 1", n, step.method)
+		}
 	}
-	if _, err := chain.resettle(context.Background(), rec, box); err != nil {
-		t.Errorf("re-settle: %v", err)
+	calls := escrowCalls(t, submitted(), "settle")
+	if len(calls) != 1 {
+		t.Fatalf("%d settle calls, want the re-settle's 1", len(calls))
+	}
+	if got, asOperator := settleCallArgs(t, calls[0]); got != settled || asOperator {
+		t.Errorf("re-settle carried\n  %+v (asOperator %v)\nwant the journaled\n  %+v as the payer", got, asOperator, settled)
 	}
 }
 

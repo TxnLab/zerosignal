@@ -198,6 +198,42 @@ func admitClient(t *testing.T, ops []Operator, guard SpendGuard) (*Client, *scri
 	return c, rc
 }
 
+// The turn hands Admit every candidate, not just the first or the last: with a
+// cap between the two estimates, a dear node listed or routed first must not
+// refuse a request the cheap one can serve.
+func TestDispatch_AdmitPricesEveryCandidate(t *testing.T) {
+	routedDearFirst := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hello there"}],"max_tokens":100,"provider":{"order":["2:1"]}}`)
+	for _, tc := range []struct {
+		name string
+		body []byte
+		// firstRouted is the node the sweep tries first, which the case
+		// exists to vary.
+		firstRouted uint64
+	}{
+		{"routing puts the cheap node first", admitBody, 1},
+		{"routing puts the dear node first", routedDearFirst, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newPriceTestServer(0, true)
+			cheap, dear := pricedOp(1, 1, 2), pricedOp(2, 10, 20)
+			low, _ := s.admitEstimate([]Operator{cheap}, "gpt-test", tc.body, admitSizing)
+			high, _ := s.admitEstimate([]Operator{dear}, "gpt-test", tc.body, admitSizing)
+			guard := &admitGuard{limit: (low + high) / 2}
+			c, rc := admitClient(t, []Operator{dear, cheap}, guard)
+			turnErr(t, c, string(tc.body))
+			if got := guard.seen(); len(got) != 1 || got[0] != low {
+				t.Errorf("Admit saw %v, want the cheap candidate's %d (dear is %d)", got, low, high)
+			}
+			if rc.calls() == 0 {
+				t.Fatal("no reserve made: Admit refused a request the cheap candidate fits")
+			}
+			if rc.ops[0].ID != tc.firstRouted {
+				t.Errorf("control: node %d routed first, want %d", rc.ops[0].ID, tc.firstRouted)
+			}
+		})
+	}
+}
+
 // A refusal at Admit ends the turn as a spend cap before any node is asked
 // for a reservation.
 func TestDispatch_AdmitRefusalReservesNothing(t *testing.T) {
