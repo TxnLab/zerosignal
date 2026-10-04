@@ -28,6 +28,7 @@ import {
     unwrapResponseKey,
 } from '@txnlab/zs-proto/wire'
 
+import { readLimited } from './http.js'
 import type { Clock, Fetch } from './ports.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import { verifyCommitK } from './verify.js'
@@ -391,9 +392,6 @@ const RESERVE_PATH = '/v1/zs/reserve'
  */
 export const DEFAULT_RESERVE_TIMEOUT_MS = 5_000
 
-// A reserve answer is a ticket or an error body; Go reads at most this much.
-const MAX_RESPONSE_BYTES = 256 << 10
-
 // A Retry-After is read up to a day, because a free-ticket allowance resets
 // on that scale. Go caps one node's hint far lower where it becomes the
 // caller's wait (nodeRetryHint); a caller here decides that for itself.
@@ -602,33 +600,6 @@ function parseNodeTime(msg: string): number | undefined {
     if (!m) return undefined
     const n = Number(m[1])
     return Number.isSafeInteger(n) && n > 0 ? n : undefined
-}
-
-// readLimited reads at most MAX_RESPONSE_BYTES of the body, as Go's
-// LimitReader: a node can't make the payer buffer an unbounded answer.
-async function readLimited(resp: Response): Promise<Uint8Array> {
-    if (!resp.body) return new Uint8Array()
-    const reader = resp.body.getReader()
-    const chunks: Uint8Array[] = []
-    let n = 0
-    try {
-        while (n < MAX_RESPONSE_BYTES) {
-            const { done, value } = await reader.read()
-            if (done) break
-            const take = value.subarray(0, MAX_RESPONSE_BYTES - n)
-            chunks.push(take)
-            n += take.length
-        }
-    } finally {
-        reader.cancel().catch(() => {})
-    }
-    const out = new Uint8Array(n)
-    let off = 0
-    for (const c of chunks) {
-        out.set(c, off)
-        off += c.length
-    }
-    return out
 }
 
 function truncate(s: string, n: number): string {

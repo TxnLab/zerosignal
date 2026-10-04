@@ -9,6 +9,7 @@
 // @txnlab/zerosignal/proto.
 
 export * from './config.js'
+export * from './details.js'
 export * from './errors.js'
 export * from './events.js'
 export * from './hostguard.js'
