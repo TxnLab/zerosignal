@@ -27,11 +27,20 @@ func TestStream_CallerCancelIsNotRetryable(t *testing.T) {
 	if !ok {
 		t.Fatalf("ended in %v, want *Error", err)
 	}
-	if !retryable(ze) {
-		t.Fatalf("%s/%s is not retryable by kind, so this asserts nothing", ze.Kind, ze.Code)
+	if ze.Code != "canceled" || ze.Retryable {
+		t.Errorf("%s/%s (retryable %v) after the caller cancelled, want canceled and not retryable", ze.Kind, ze.Code, ze.Retryable)
 	}
-	if ze.Retryable {
-		t.Errorf("%s/%s after the caller cancelled is Retryable", ze.Kind, ze.Code)
+
+	// The emitter weighs the caller's context over the kind, for a failure
+	// that is retryable by kind and reached the end after a cancel.
+	busy := newError("operators_busy", "m")
+	if !retryable(busy) {
+		t.Fatal("operators_busy is not retryable by kind, so this asserts nothing")
+	}
+	em := &streamEmitter{yield: func(Event, error) bool { return true }, callerCtx: ctx}
+	em.end(busy)
+	if busy.Retryable {
+		t.Error("a kind-retryable error after the caller cancelled is Retryable")
 	}
 }
 

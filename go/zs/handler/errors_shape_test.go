@@ -43,6 +43,7 @@ func TestErrorShapes(t *testing.T) {
 		"operators_busy":                  {503, "service_unavailable"},
 		"operators_unreachable":           {503, "service_unavailable"},
 		"mbr_pool_exhausted":              {429, "rate_limit_exceeded"},
+		"canceled":                        {499, "proxy_error"},
 		"free_quota_exhausted":            {403, "invalid_request_error"},
 		"wallet_unfunded":                 {402, "insufficient_quota"},
 		"mbr_pool_underfunded":            {402, "insufficient_quota"},

@@ -15,6 +15,11 @@
     "retryable": true
   },
   {
+    "kind": "interrupted",
+    "code": "canceled",
+    "retryable": false
+  },
+  {
     "kind": "context_exceeded",
     "code": "context_length_exceeded",
     "retryable": false

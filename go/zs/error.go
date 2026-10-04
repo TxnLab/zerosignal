@@ -42,9 +42,10 @@ const (
 	// charge follows the node's receipt, often zero. Err is a *ProviderError
 	// when the node said why.
 	KindUpstream Kind = "upstream"
-	// KindInterrupted: the turn stopped after payment (caller cancel,
-	// transport loss, the node refusing admission). The SDK settles or
-	// refunds Ticket on its own; nothing is resent.
+	// KindInterrupted: the turn stopped (caller cancel, transport loss, the
+	// node refusing admission). After payment the SDK settles or refunds
+	// Ticket on its own and nothing is resent; Paid says which. A caller
+	// cancel before payment is code canceled, with the context's error as Err.
 	KindInterrupted Kind = "interrupted"
 	// KindInternal: the SDK failed on bytes it authored. Report a bug.
 	KindInternal Kind = "internal"

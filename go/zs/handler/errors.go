@@ -81,6 +81,10 @@ var errorShapes = map[string]errorShape{
 	"operators_busy":         {http.StatusServiceUnavailable, "service_unavailable"},
 	"operators_unreachable":  {http.StatusServiceUnavailable, "service_unavailable"},
 	"mbr_pool_exhausted":     {http.StatusTooManyRequests, "rate_limit_exceeded"},
+	// The client closed the request; nobody reads this. 499 is the de facto
+	// "client closed request" status, and keeps it out of the server-error
+	// counts a 5xx would land in.
+	"canceled": {499, "proxy_error"},
 
 	"free_quota_exhausted":  {http.StatusForbidden, "invalid_request_error"},
 	"wallet_unfunded":       {http.StatusPaymentRequired, "insufficient_quota"},

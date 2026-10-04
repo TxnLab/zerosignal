@@ -42,6 +42,8 @@ var errorKinds = map[string]Kind{
 	"operators_busy":         KindBusy,
 	"operators_unreachable":  KindUnreachable,
 	"mbr_pool_exhausted":     KindBusy,
+	// The caller's context ended during the reserve sweep, before any open.
+	"canceled": KindInterrupted,
 
 	"free_quota_exhausted":  KindFunds,
 	"wallet_unfunded":       KindFunds,

@@ -658,6 +658,9 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		// ends the loop; an unpinned turn has no pin to keep and routes like any
 		// other.
 		for _, op := range candidates {
+			if ctx.Err() != nil {
+				break
+			}
 			// Transport-privacy: pick the relay hop for this target. nil hop =
 			// privacy off (direct send); ErrNoRelay = privacy on but no eligible
 			// relay → skip this candidate, never route direct.
@@ -1088,6 +1091,15 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		}
 	}
 
+	// The caller hung up mid-sweep. What the candidates said so far is half an
+	// answer, and the ladder below would report it as the fleet's: most often
+	// operators_busy, telling the caller to retry a request it abandoned.
+	if err := ctx.Err(); err != nil {
+		e := newError("canceled", "the request ended before any operator was paid")
+		e.Err = err
+		em.fail(e)
+		return
+	}
 	// Everybody said no. Prefer the actionable 400 over the generic
 	// 503: a sizing rejection is a hard client-side problem (the
 	// request as shaped will not succeed against any of these operators

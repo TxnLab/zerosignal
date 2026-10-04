@@ -20,6 +20,10 @@ func retryable(e *Error) bool {
 	case KindBusy, KindUnreachable:
 		return true
 	case KindInterrupted:
+		// The caller stopped the turn; nothing is waiting for a resend.
+		if e.Code == "canceled" {
+			return false
+		}
 		// A node that refused admission said why: a timeout, a rate limit or
 		// a server error passes, as does a refusal a new ticket gets past.
 		// Anything else broke in transit.
