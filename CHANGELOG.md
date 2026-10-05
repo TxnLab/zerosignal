@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-04 — the SDK checks and completes the node's open group
+
+`@txnlab/zerosignal` gains `completeOpenGroup`: it decodes the node's pre-signed open group,
+runs `verifyOpenGroup` (a check-for-check port of Go's `VerifyOpenGroup`), and only then has
+the payer sign the USDC transfer, returning the group bytes for algod. Go's `VerifyOpenGroup`
+and `VerifyOpenAppCall` now return an `*OpenGroupRejectedError` whose `Field` names the check
+that refused (`payer.rekeyTo`, `open.maxPrice`, …); `Error()` is unchanged. Both sides now
+refuse a payer transfer carrying any field outside an asset transfer (`payer.foreignFields`).
+The TS group-id check hashes each member in canonical form, as algod does, so an explicitly
+encoded zero is judged the same way on both sides. `escrow_group_vectors.json` holds Go's
+verdict on a real `ComposeOpenGroup` group and on one variant per guard, and both sides are
+tested against it.
+
 ### 2026-10-04 — the price verifiers agree at the uint64 edge
 
 - `verifyTicketPrice` (`@txnlab/zs-proto/pricing`) recomputes `max_price` exactly, in bigint,

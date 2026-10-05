@@ -63,6 +63,7 @@
         "typecheck": "tsc --noEmit && tsc --noEmit -p test"
     },
     "dependencies": {
+        "@noble/hashes": "2.2.0",
         "@txnlab/zs-proto": "workspace:*",
         "algosdk": "^3.6.0"
     },

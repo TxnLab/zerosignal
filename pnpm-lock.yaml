@@ -10,6 +10,9 @@ importers:
 
   sdk:
     dependencies:
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
       '@txnlab/zs-proto':
         specifier: workspace:*
         version: link:../ts

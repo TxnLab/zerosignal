@@ -11,6 +11,7 @@
 export * from './config.js'
 export * from './details.js'
 export * from './errors.js'
+export * from './escrow/index.js'
 export * from './events.js'
 export * from './hostguard.js'
 export * from './network.js'

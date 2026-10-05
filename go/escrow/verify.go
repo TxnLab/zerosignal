@@ -8,10 +8,10 @@ package escrow
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
+	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
 	"github.com/algorand/go-algorand-sdk/v2/types"
 )
 
@@ -34,6 +34,21 @@ func groupCommitsToMembers(gid types.Digest, group []types.SignedTxn) (bool, err
 		return false, err
 	}
 	return want == gid, nil
+}
+
+// OpenGroupRejectedError is the error VerifyOpenGroup and VerifyOpenAppCall
+// return. Field is a stable slug naming the check that refused (e.g.
+// "payer.rekeyTo"), so callers and the TS mirror can agree on the reason
+// without matching message text; Error() is Detail alone.
+type OpenGroupRejectedError struct {
+	Field  string
+	Detail string
+}
+
+func (e *OpenGroupRejectedError) Error() string { return e.Detail }
+
+func openReject(field, format string, a ...any) error {
+	return &OpenGroupRejectedError{Field: field, Detail: fmt.Sprintf(format, a...)}
 }
 
 // OpenAppCallSpec captures the fields a verifier needs to check JUST
@@ -149,23 +164,23 @@ type OpenGroupSpec struct {
 func VerifyOpenAppCall(stx types.SignedTxn, spec OpenAppCallSpec) error {
 	app := stx.Txn
 	if app.Type != types.ApplicationCallTx {
-		return fmt.Errorf("escrow: open app call type = %q, want %q", app.Type, types.ApplicationCallTx)
+		return openReject("open.type", "escrow: open app call type = %q, want %q", app.Type, types.ApplicationCallTx)
 	}
 	if uint64(app.ApplicationID) != spec.AppID {
-		return fmt.Errorf("escrow: open app call app_id = %d, want %d", app.ApplicationID, spec.AppID)
+		return openReject("open.appId", "escrow: open app call app_id = %d, want %d", app.ApplicationID, spec.AppID)
 	}
 	if app.Sender != spec.NodeSigningAddr {
-		return fmt.Errorf("escrow: open app call sender = %s, want node_signing %s", app.Sender, spec.NodeSigningAddr)
+		return openReject("open.sender", "escrow: open app call sender = %s, want node_signing %s", app.Sender, spec.NodeSigningAddr)
 	}
 	if len(app.ApplicationArgs) < 1 {
-		return errors.New("escrow: open app call missing application args")
+		return openReject("open.args", "escrow: open app call missing application args")
 	}
 	openSelector, err := MethodSelector("open")
 	if err != nil {
 		return fmt.Errorf("escrow: load open selector: %w", err)
 	}
 	if !bytes.Equal(app.ApplicationArgs[0], openSelector) {
-		return fmt.Errorf("escrow: open app call selector = %x, want %x", app.ApplicationArgs[0], openSelector)
+		return openReject("open.selector", "escrow: open app call selector = %x, want %x", app.ApplicationArgs[0], openSelector)
 	}
 
 	// Positions of the non-txn ABI args in ApplicationArgs (the first
@@ -187,7 +202,7 @@ func VerifyOpenAppCall(stx types.SignedTxn, spec OpenAppCallSpec) error {
 		argMaxPrice   = 5
 	)
 	if len(app.ApplicationArgs) <= argMaxPrice {
-		return fmt.Errorf("escrow: open app call has %d args, want ≥ %d", len(app.ApplicationArgs), argMaxPrice+1)
+		return openReject("open.args", "escrow: open app call has %d args, want ≥ %d", len(app.ApplicationArgs), argMaxPrice+1)
 	}
 	if err := checkABIByteSlice(app.ApplicationArgs[argTicketID], spec.TicketIDRaw, "ticketId"); err != nil {
 		return err
@@ -233,26 +248,26 @@ func VerifyOpenAppCall(stx types.SignedTxn, spec OpenAppCallSpec) error {
 // fund-moving fields of the payment side, though not note or lease).
 func VerifyOpenGroup(group []types.SignedTxn, spec OpenGroupSpec) error {
 	if len(group) != 2 {
-		return fmt.Errorf("escrow: open group size = %d, want 2", len(group))
+		return openReject("group.size", "escrow: open group size = %d, want 2", len(group))
 	}
 
 	gid := group[0].Txn.Group
 	if gid == (types.Digest{}) {
-		return errors.New("escrow: open group missing group id")
+		return openReject("group.id", "escrow: open group missing group id")
 	}
 	if group[1].Txn.Group != gid {
-		return errors.New("escrow: open group: group id mismatch across members")
+		return openReject("group.id", "escrow: open group: group id mismatch across members")
 	}
 	if ok, err := groupCommitsToMembers(gid, group); err != nil {
-		return fmt.Errorf("escrow: open group: recompute group id: %w", err)
+		return openReject("group.id", "escrow: open group: recompute group id: %v", err)
 	} else if !ok {
-		return errors.New("escrow: open group id does not commit to its members")
+		return openReject("group.id", "escrow: open group id does not commit to its members")
 	}
 
 	// Member 0: usdcPayment (AssetTransfer), payer-signed, fee=0.
 	axfer := group[0].Txn
 	if axfer.Type != types.AssetTransferTx {
-		return fmt.Errorf("escrow: open[0] type = %q, want %q", axfer.Type, types.AssetTransferTx)
+		return openReject("payer.type", "escrow: open[0] type = %q, want %q", axfer.Type, types.AssetTransferTx)
 	}
 	// Shape guards on the one txn the payer signs. Each one turns the payer's
 	// signature into something other than "move max_price USDC into escrow".
@@ -270,37 +285,46 @@ func VerifyOpenGroup(group []types.SignedTxn, spec OpenGroupSpec) error {
 	// 1KB the payer never saw), so the signed txn is pinned to the transfer and
 	// nothing else. The honest composer (ComposeOpenGroup) sets none of these.
 	if !axfer.RekeyTo.IsZero() {
-		return fmt.Errorf("escrow: open[0] rekey_to = %s, want none (account-takeover attempt)", axfer.RekeyTo)
+		return openReject("payer.rekeyTo", "escrow: open[0] rekey_to = %s, want none (account-takeover attempt)", axfer.RekeyTo)
 	}
 	if !axfer.AssetCloseTo.IsZero() {
-		return fmt.Errorf("escrow: open[0] asset_close_to = %s, want none (balance-sweep attempt)", axfer.AssetCloseTo)
+		return openReject("payer.assetCloseTo", "escrow: open[0] asset_close_to = %s, want none (balance-sweep attempt)", axfer.AssetCloseTo)
 	}
 	if !axfer.AssetSender.IsZero() {
-		return fmt.Errorf("escrow: open[0] asset_sender = %s, want none (clawback form)", axfer.AssetSender)
+		return openReject("payer.assetSender", "escrow: open[0] asset_sender = %s, want none (clawback form)", axfer.AssetSender)
 	}
 	if !axfer.CloseRemainderTo.IsZero() {
-		return fmt.Errorf("escrow: open[0] close_remainder_to = %s, want none", axfer.CloseRemainderTo)
+		return openReject("payer.closeRemainderTo", "escrow: open[0] close_remainder_to = %s, want none", axfer.CloseRemainderTo)
+	}
+	// Any other field outside the header and the transfer is one algod refuses
+	// on an axfer today; pinning them all keeps the payer's signature off
+	// whatever a later protocol might make of one. The comparison is on the
+	// canonical encoding, which omits empty values the way the txid does.
+	rest := axfer
+	rest.Header, rest.AssetTransferTxnFields, rest.Type = types.Header{}, types.AssetTransferTxnFields{}, ""
+	if !bytes.Equal(msgpack.Encode(rest), msgpack.Encode(types.Transaction{})) {
+		return openReject("payer.foreignFields", "escrow: open[0] carries fields outside an asset transfer")
 	}
 	if axfer.Fee != 0 {
-		return fmt.Errorf("escrow: open[0] fee = %d, want 0", axfer.Fee)
+		return openReject("payer.fee", "escrow: open[0] fee = %d, want 0", axfer.Fee)
 	}
 	if len(axfer.Note) != 0 {
-		return fmt.Errorf("escrow: open[0] note = %d bytes, want none", len(axfer.Note))
+		return openReject("payer.note", "escrow: open[0] note = %d bytes, want none", len(axfer.Note))
 	}
 	if axfer.Lease != ([32]byte{}) {
-		return fmt.Errorf("escrow: open[0] lease = %x, want none", axfer.Lease)
+		return openReject("payer.lease", "escrow: open[0] lease = %x, want none", axfer.Lease)
 	}
 	if axfer.Sender != spec.PayerAddr {
-		return fmt.Errorf("escrow: open[0] sender = %s, want payer %s", axfer.Sender, spec.PayerAddr)
+		return openReject("payer.sender", "escrow: open[0] sender = %s, want payer %s", axfer.Sender, spec.PayerAddr)
 	}
 	if axfer.AssetReceiver != spec.AppAddress {
-		return fmt.Errorf("escrow: open[0] asset_receiver = %s, want app %s", axfer.AssetReceiver, spec.AppAddress)
+		return openReject("payer.receiver", "escrow: open[0] asset_receiver = %s, want app %s", axfer.AssetReceiver, spec.AppAddress)
 	}
 	if uint64(axfer.XferAsset) != spec.UsdcAssetID {
-		return fmt.Errorf("escrow: open[0] xfer_asset = %d, want usdc = %d", axfer.XferAsset, spec.UsdcAssetID)
+		return openReject("payer.asset", "escrow: open[0] xfer_asset = %d, want usdc = %d", axfer.XferAsset, spec.UsdcAssetID)
 	}
 	if axfer.AssetAmount != spec.MaxPrice {
-		return fmt.Errorf("escrow: open[0] asset_amount = %d, want max_price = %d", axfer.AssetAmount, spec.MaxPrice)
+		return openReject("payer.amount", "escrow: open[0] asset_amount = %d, want max_price = %d", axfer.AssetAmount, spec.MaxPrice)
 	}
 
 	// Member 1: Application call. Delegate to VerifyOpenAppCall so the
@@ -323,7 +347,7 @@ func VerifyOpenGroup(group []types.SignedTxn, spec OpenGroupSpec) error {
 	// can set this up. Payer-side only: on the node's own admission path the
 	// node authored the call.
 	if oc := group[1].Txn.OnCompletion; oc != types.NoOpOC {
-		return fmt.Errorf("escrow: open[1] on_complete = %d, want NoOp (%d)", oc, types.NoOpOC)
+		return openReject("open.onComplete", "escrow: open[1] on_complete = %d, want NoOp (%d)", oc, types.NoOpOC)
 	}
 
 	// Window args (positions 6/7 after the selector — see the arg layout in
@@ -340,7 +364,7 @@ func VerifyOpenGroup(group []types.SignedTxn, spec OpenGroupSpec) error {
 	)
 	args := group[1].Txn.ApplicationArgs
 	if len(args) <= argSettlementGrace {
-		return fmt.Errorf("escrow: open app call has %d args, want ≥ %d", len(args), argSettlementGrace+1)
+		return openReject("open.args", "escrow: open app call has %d args, want ≥ %d", len(args), argSettlementGrace+1)
 	}
 	if err := checkABIUint64(args[argExpiresAt], spec.ExpiresAt, "expiresAt"); err != nil {
 		return err
@@ -353,17 +377,17 @@ func VerifyOpenGroup(group []types.SignedTxn, spec OpenGroupSpec) error {
 // uint16-big-endian length prefix + bytes.
 func checkABIByteSlice(raw, want []byte, field string) error {
 	if len(raw) < 2 {
-		return fmt.Errorf("escrow: open[1] %s: %d-byte arg, want length-prefixed", field, len(raw))
+		return openReject("open."+field, "escrow: open[1] %s: %d-byte arg, want length-prefixed", field, len(raw))
 	}
 	gotLen := binary.BigEndian.Uint16(raw[:2])
 	if int(gotLen) != len(raw)-2 {
-		return fmt.Errorf("escrow: open[1] %s: length prefix %d, payload %d", field, gotLen, len(raw)-2)
+		return openReject("open."+field, "escrow: open[1] %s: length prefix %d, payload %d", field, gotLen, len(raw)-2)
 	}
 	if int(gotLen) != len(want) {
-		return fmt.Errorf("escrow: open[1] %s: len prefix %d, want %d", field, gotLen, len(want))
+		return openReject("open."+field, "escrow: open[1] %s: len prefix %d, want %d", field, gotLen, len(want))
 	}
 	if !bytes.Equal(raw[2:], want) {
-		return fmt.Errorf("escrow: open[1] %s: value mismatch (got %x want %x)", field, raw[2:], want)
+		return openReject("open."+field, "escrow: open[1] %s: value mismatch (got %x want %x)", field, raw[2:], want)
 	}
 	return nil
 }
@@ -371,11 +395,11 @@ func checkABIByteSlice(raw, want []byte, field string) error {
 // checkABIUint64 verifies an 8-byte big-endian uint64 arg equals want.
 func checkABIUint64(raw []byte, want uint64, field string) error {
 	if len(raw) != 8 {
-		return fmt.Errorf("escrow: open[1] %s: %d-byte uint64, want 8", field, len(raw))
+		return openReject("open."+field, "escrow: open[1] %s: %d-byte uint64, want 8", field, len(raw))
 	}
 	got := binary.BigEndian.Uint64(raw)
 	if got != want {
-		return fmt.Errorf("escrow: open[1] %s: %d, want %d", field, got, want)
+		return openReject("open."+field, "escrow: open[1] %s: %d, want %d", field, got, want)
 	}
 	return nil
 }
@@ -385,12 +409,12 @@ func checkABIUint64(raw []byte, want uint64, field string) error {
 // prefix.
 func checkABIAddress(raw []byte, want types.Address, field string) error {
 	if len(raw) != 32 {
-		return fmt.Errorf("escrow: open[1] %s: %d-byte address, want 32", field, len(raw))
+		return openReject("open."+field, "escrow: open[1] %s: %d-byte address, want 32", field, len(raw))
 	}
 	var got types.Address
 	copy(got[:], raw)
 	if got != want {
-		return fmt.Errorf("escrow: open[1] %s: %s, want %s", field, got, want)
+		return openReject("open."+field, "escrow: open[1] %s: %s, want %s", field, got, want)
 	}
 	return nil
 }
