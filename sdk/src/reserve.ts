@@ -548,29 +548,60 @@ class PayerSigSkew extends Error {
 async function refusal(resp: Response): Promise<Error> {
     const text = new TextDecoder().decode(await readLimited(resp))
     const { code, nodeMessage } = openAIError(text)
-    const retryAfterMs = parseRetryAfter(resp.headers.get('Retry-After'))
-    if (resp.status === 429) return new BusyError(code, retryAfterMs)
-    if (resp.status === 400) {
-        if (sizingErrorCodes.has(code)) return new SizeError(code, nodeMessage)
-        if (code === 'bad_reserve_envelope') return new BadReserveEnvelopeError()
-    }
-    if (resp.status === 403 && payerRefusalCodes.has(code)) {
-        return new PayerRefusalError(code, nodeMessage, retryAfterMs)
-    }
-    const httpErr = new ReserveHTTPError({
+    const err = reserveRefusal({
         status: resp.status,
         code,
         nodeMessage,
         body: truncate(text, 256),
-        retryAfterMs,
+        retryAfterMs: parseRetryAfter(resp.headers.get('Retry-After')),
         // Present and non-empty, as Go's Header.Get(...) != "".
         relayHopMarked: !!resp.headers.get(RELAY_HOP_HEADER),
     })
-    if (resp.status === 401 && code === 'invalid_payer_sig') {
+    if (err instanceof ReserveHTTPError && err.status === 401 && code === 'invalid_payer_sig') {
         const nodeTime = parseNodeTime(nodeMessage)
-        if (nodeTime !== undefined) return new PayerSigSkew(nodeTime, httpErr)
+        if (nodeTime !== undefined) return new PayerSigSkew(nodeTime, err)
     }
-    return httpErr
+    return err
+}
+
+/** The facts of a non-200 reserve answer, as reserveRefusal reads them. */
+export interface ReserveRefusalFields {
+    status: number
+    /** The node's error.code; '' when the body had none. */
+    code: string
+    nodeMessage?: string
+    body?: string
+    retryAfterMs?: number
+    relayHopMarked?: boolean
+}
+
+/**
+ * reserveRefusal is the typed error a non-200 reserve answer means, as reserve
+ * throws it (short of its clock-skew resync): BusyError, SizeError,
+ * BadReserveEnvelopeError, PayerRefusalError or ReserveHTTPError. Exported for
+ * a caller that holds a refusal's facts in some other shape and wants the
+ * SDK's verdict on it (classifyReserveFailure).
+ */
+export function reserveRefusal(f: ReserveRefusalFields): Error {
+    const { status, code } = f
+    const nodeMessage = f.nodeMessage ?? ''
+    const retryAfterMs = f.retryAfterMs ?? 0
+    if (status === 429) return new BusyError(code, retryAfterMs)
+    if (status === 400) {
+        if (sizingErrorCodes.has(code)) return new SizeError(code, nodeMessage)
+        if (code === 'bad_reserve_envelope') return new BadReserveEnvelopeError()
+    }
+    if (status === 403 && payerRefusalCodes.has(code)) {
+        return new PayerRefusalError(code, nodeMessage, retryAfterMs)
+    }
+    return new ReserveHTTPError({
+        status,
+        code,
+        nodeMessage,
+        body: f.body ?? '',
+        retryAfterMs,
+        relayHopMarked: f.relayHopMarked ?? false,
+    })
 }
 
 // openAIError reads an OpenAI-shaped error body; a body that isn't one (a

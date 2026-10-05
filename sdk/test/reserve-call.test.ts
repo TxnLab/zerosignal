@@ -38,6 +38,7 @@ import {
     SizeError,
     parseRetryAfter,
     reserve,
+    reserveRefusal,
 } from '../src/index.js'
 import type { RelayHop } from '../src/routing/index.js'
 
@@ -530,5 +531,53 @@ describe('parseRetryAfter', () => {
         ['99999999999999999999', 0],
     ])('reads %j as %d ms', (v, want) => {
         expect(parseRetryAfter(v)).toBe(want)
+    })
+})
+
+// The mapping reserve applies to every refusal, exported so a caller holding a
+// refusal's facts in another shape gets the same typed error.
+describe('reserveRefusal', () => {
+    it.each([
+        ['a 429, whatever its code', { status: 429, code: 'no_capacity', retryAfterMs: 2000 }, BusyError],
+        ['a 400 sizing code', { status: 400, code: 'context_length_exceeded' }, SizeError],
+        ['a 400 bad_reserve_envelope', { status: 400, code: 'bad_reserve_envelope' }, BadReserveEnvelopeError],
+        ['a 403 payer code', { status: 403, code: 'free_quota_exhausted', retryAfterMs: 5000 }, PayerRefusalError],
+        ['a sizing code on another status', { status: 502, code: 'context_length_exceeded' }, ReserveHTTPError],
+        ['a payer code on another status', { status: 400, code: 'free_quota_exhausted' }, ReserveHTTPError],
+        ['any other refusal', { status: 503, code: '' }, ReserveHTTPError],
+    ])('reads %s as the error reserve throws', (_, fields, want) => {
+        expect(reserveRefusal(fields)).toBeInstanceOf(want)
+    })
+
+    it('carries what the verdict reads off a ReserveHTTPError', () => {
+        expect(
+            reserveRefusal({ status: 502, code: '', retryAfterMs: 20_000, relayHopMarked: true }),
+        ).toMatchObject({ status: 502, code: '', retryAfterMs: 20_000, relayHopMarked: true, aborted: false })
+    })
+
+    it('carries the wait a busy node and a payer refusal name', () => {
+        expect(reserveRefusal({ status: 429, code: 'no_capacity', retryAfterMs: 2000 })).toMatchObject({
+            code: 'no_capacity',
+            retryAfterMs: 2000,
+            retryable: true,
+        })
+        expect(reserveRefusal({ status: 403, code: 'free_quota_exhausted', retryAfterMs: 5000 })).toMatchObject({
+            retryAfterMs: 5000,
+        })
+    })
+
+    it('reads an omitted wait and message as none', () => {
+        expect(reserveRefusal({ status: 429, code: 'no_capacity' })).toMatchObject({ retryAfterMs: 0 })
+        expect(reserveRefusal({ status: 403, code: 'free_quota_exhausted' })).toMatchObject({
+            retryAfterMs: 0,
+            nodeMessage: '',
+        })
+        expect(reserveRefusal({ status: 400, code: 'context_length_exceeded' })).toMatchObject({ nodeMessage: '' })
+        expect(reserveRefusal({ status: 502, code: '' })).toMatchObject({
+            retryAfterMs: 0,
+            nodeMessage: '',
+            body: '',
+            relayHopMarked: false,
+        })
     })
 })
