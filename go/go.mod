@@ -3,7 +3,7 @@ module github.com/TxnLab/zerosignal/go
 go 1.26
 
 require (
-	filippo.io/age v1.3.1
+	filippo.io/age v1.3.2
 	github.com/99designs/keyring v1.2.2
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0

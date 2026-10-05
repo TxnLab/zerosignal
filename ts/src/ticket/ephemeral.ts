@@ -219,7 +219,7 @@ export function verifyEphemeral(
     if (!a.ephemeral_sig) throw new Error('ephemeral signature missing')
     let sig: Uint8Array
     try {
-        sig = base64.decode(a.ephemeral_sig)
+        sig = decodeGoStdBase64(a.ephemeral_sig)
     } catch (err) {
         throw new Error(`decode ephemeral sig: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -251,6 +251,24 @@ export function verifyEphemeral(
     if (nowUnixSec > a.ephemeral_expiry + skewSec) {
         throw new EphemeralExpiredError()
     }
+}
+
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+// decodeGoStdBase64 reads base64 as Go's base64.StdEncoding does, which is not
+// strict: it skips CR and LF wherever they fall, and ignores the unused low
+// bits of the last character before the padding. @scure/base refuses both, so
+// without this a block Go seals to would fail closed here.
+function decodeGoStdBase64(s: string): Uint8Array {
+    let t = s.replace(/[\r\n]/g, '')
+    const pad = t.endsWith('==') ? 2 : t.endsWith('=') ? 1 : 0
+    const last = t.length - pad - 1
+    if (pad > 0 && last >= 0) {
+        const v = BASE64_ALPHABET.indexOf(t.charAt(last))
+        // Before "==" the last character carries 2 bits of data, before "=" 4.
+        if (v >= 0) t = t.slice(0, last) + BASE64_ALPHABET.charAt(v & (pad === 2 ? 0x30 : 0x3c)) + t.slice(last + 1)
+    }
+    return base64.decode(t)
 }
 
 // ephemeralStale is the SOFT relay-attribution signal: true when the block's

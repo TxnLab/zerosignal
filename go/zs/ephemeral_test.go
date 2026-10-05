@@ -6,12 +6,15 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,6 +372,40 @@ func TestApplyEphemeral_RelayStalenessDownranks(t *testing.T) {
 	s.applyEphemeralAdvertisement(&o3, freshResp, hop, discardLogger())
 	if s.RelayDownranked(NodeRef{Op: relayID}) {
 		t.Error("a fresh block over the relay must reset the staleness streak")
+	}
+}
+
+// A genuine signature over a recipient that isn't an age key leaves no seal
+// target, clears the one an earlier cycle stored, and says so in the log.
+func TestApplyEphemeral_UnparseableRecipientClearsAndWarns(t *testing.T) {
+	signingAddr, pub, priv, err := ticket.GenerateAlgorandKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	adv := ticket.EphemeralAdvertisement{AgePubkey: "age1notarecipient", Expiry: now.Add(10 * time.Minute).Unix(), IssuedAt: now.Unix()}
+	if err := adv.Sign(context.Background(), rawKeyBytesSigner{addr: signingAddr, priv: priv}, signingAddr, 42, 0); err != nil {
+		t.Fatal(err)
+	}
+	resp := inject.OperatorDetails{
+		EphemeralAgePubkey: adv.AgePubkey,
+		EphemeralExpiry:    adv.Expiry,
+		EphemeralIssuedAt:  adv.IssuedAt,
+		EphemeralSig:       adv.Sig,
+	}
+	op := Operator{
+		ID: 42, SigningAddr: signingAddr, TicketSigningKey: pub,
+		EphemeralRecipient: mustX25519(t).Recipient(), EphemeralRecipientPubkey: "age1earlier", EphemeralExpiry: 1, EphemeralIssuedAt: 1,
+	}
+	var logs bytes.Buffer
+	s := &ChainOperatorSource{}
+	s.applyEphemeralAdvertisement(&op, resp, nil, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	if op.EphemeralRecipient != nil || op.EphemeralRecipientPubkey != "" || op.EphemeralExpiry != 0 || op.EphemeralIssuedAt != 0 {
+		t.Errorf("an unparseable recipient must leave no seal target, got %+v", op)
+	}
+	if !strings.Contains(logs.String(), "unparseable ephemeral age recipient") {
+		t.Errorf("want the unparseable-recipient warning, got %q", logs.String())
 	}
 }
 

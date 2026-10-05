@@ -31,6 +31,20 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-05 — the ephemeral key verdict is shared
+
+`@txnlab/zerosignal/catalog` gains `checkEphemeralAdvertisement`, a port of the Go SDK's probe
+check: after the signature, binding and window checks it refuses a recipient that is not an
+age X25519 key (outcome `unparseable`), as Go's `age.ParseX25519Recipient` does, and it flags a
+verified block older than the freshness target so the relay that served it can be charged.
+A field of the wrong type is `rejected`, as Go's typed decode refuses it; a string expiry
+would otherwise sign the same bytes and never expire. `@txnlab/zs-proto`'s `verifyEphemeral`
+now reads `ephemeral_sig` as Go's non-strict `base64.StdEncoding` does, skipping CR and LF and
+ignoring the unused bits before the padding, so a block Go accepts no longer fails closed in
+TypeScript. `ephemeral_verdict_vectors.json` holds Go's verdict on each case. The Go module now
+requires `filippo.io/age` v1.3.2, whose bech32 decoder folds ASCII only, matching the build the
+vectors were generated with.
+
 ### 2026-10-04 — the SDK checks and completes the node's settle group
 
 `@txnlab/zerosignal` gains `completeSettleGroup`: it decodes the node's pre-signed atomic

@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -728,8 +729,9 @@ func (s *ChainOperatorSource) ReprobeEphemeral(ctx context.Context, all []Operat
 //   - Verify nil: parse the recipient and store all three. A later
 //     SealRecipient call seals to it (subject to its own expiry re-check).
 //   - ErrEphemeralExpired: signature was genuine but stale — clear the
-//     fields and fall back to the on-chain key SILENTLY (a stale-but-
-//     genuine block is routine near a rotation boundary, not an attack).
+//     fields SILENTLY, leaving no seal target this cycle (there is no
+//     on-chain key to fall back to; a stale-but-genuine block is routine
+//     near a rotation boundary, not an attack).
 //   - Any other error (bad signature / wrong operator id / malformed
 //     recipient): clear the fields and log a substitution-attempt
 //     diagnostic — a relay or substituting node tried to re-point a
@@ -747,43 +749,10 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 	op.EphemeralExpiry = 0
 	op.EphemeralIssuedAt = 0
 
-	if resp.EphemeralAgePubkey == "" {
-		return
-	}
-
-	now := time.Now()
-	adv := ticket.EphemeralAdvertisement{
-		AgePubkey: resp.EphemeralAgePubkey,
-		Expiry:    resp.EphemeralExpiry,
-		// IssuedAt is required to recompute the signed canonical bytes; without
-		// it Verify rejects every block on the lifetime cap (Expiry-0 ≫
-		// MaxEphemeralLifetime). A 3.0 node omits it → IssuedAt 0 → correctly
-		// rejected (it signed an older layout anyway).
-		IssuedAt: resp.EphemeralIssuedAt,
-		Sig:      resp.EphemeralSig,
-	}
-	// (op.ID, op.NodeID) are the chain-resolved pair, passed to Verify rather
-	// than carried on adv — the signed canonical bytes bind both, so a sibling
-	// node's advertisement (possible under a shared operator signing key) can
-	// never validate as this node's.
-	err := adv.Verify(op.TicketSigningKey, now, op.ID, op.NodeID, ticket.DefaultEphemeralSkew)
-	switch {
-	case err == nil:
-		recipient, perr := age.ParseX25519Recipient(resp.EphemeralAgePubkey)
-		if perr != nil {
-			// Signature validated but the recipient string isn't a parseable
-			// age key — the operator signed a malformed pubkey. Treat as a
-			// substitution-grade anomaly; the operator is left with no seal
-			// target (no anchor) so dispatch fails closed for it.
-			log.Warn("operator advertised an unparseable ephemeral age recipient; no seal target (fail closed)",
-				slog.Uint64("operator_id", op.ID),
-				slog.Uint64("node_id", op.NodeID),
-				relayLogAttr(usedHop),
-				slog.Any("err", perr),
-			)
-			return
-		}
-		op.EphemeralRecipient = recipient
+	v := checkEphemeral(resp, op.TicketSigningKey, time.Now(), op.ID, op.NodeID)
+	switch v.Outcome {
+	case ephemeralVerified:
+		op.EphemeralRecipient = v.Recipient
 		op.EphemeralRecipientPubkey = resp.EphemeralAgePubkey
 		op.EphemeralExpiry = resp.EphemeralExpiry
 		op.EphemeralIssuedAt = resp.EphemeralIssuedAt
@@ -802,17 +771,24 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 		// the staleness signal every cycle. A fresh block clears the staleness
 		// streak so a recovered relay isn't penalized.
 		if usedHop != nil {
-			if adv.Stale(now) {
+			if v.Stale {
 				s.RecordRelayStaleEphemeral(usedHop.RelayRef())
 			} else {
 				s.RecordRelayFreshEphemeral(usedHop.RelayRef())
 			}
 		}
-	case errors.Is(err, ticket.ErrEphemeralExpired):
-		// Genuine but stale — no anchor to fall back to; the operator simply has
-		// no seal target this cycle (silent — a stale-but-genuine block is not
-		// an attack).
-	default:
+	case ephemeralUnparseable:
+		// Signature validated but the recipient string isn't a parseable
+		// age key — the operator signed a malformed pubkey. Treat as a
+		// substitution-grade anomaly; the operator is left with no seal
+		// target (no anchor) so dispatch fails closed for it.
+		log.Warn("operator advertised an unparseable ephemeral age recipient; no seal target (fail closed)",
+			slog.Uint64("operator_id", op.ID),
+			slog.Uint64("node_id", op.NodeID),
+			relayLogAttr(usedHop),
+			slog.Any("err", v.Err),
+		)
+	case ephemeralRejected:
 		// Bad signature / wrong operator id / over-long lifetime: someone tried
 		// to substitute or over-extend a sealing recipient for this operator.
 		// Surface it; the operator is left with no seal target (no anchor) so
@@ -821,8 +797,71 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 			slog.Uint64("operator_id", op.ID),
 			slog.Uint64("node_id", op.NodeID),
 			relayLogAttr(usedHop),
-			slog.Any("err", err),
+			slog.Any("err", v.Err),
 		)
+	}
+	// ephemeralAbsent: the node isn't offering one this cycle.
+	// ephemeralExpired: genuine but stale, so no seal target this cycle, and
+	// silent, since a stale-but-genuine block is not an attack.
+}
+
+// ephemeralOutcome is what one probe's ephemeral advertisement leaves a node
+// with. The SDK's checkEphemeralAdvertisement returns the same five, pinned by
+// testdata/ephemeral_verdict_vectors.json.
+type ephemeralOutcome string
+
+const (
+	ephemeralAbsent      ephemeralOutcome = "absent"
+	ephemeralVerified    ephemeralOutcome = "verified"
+	ephemeralExpired     ephemeralOutcome = "expired"
+	ephemeralRejected    ephemeralOutcome = "rejected"
+	ephemeralUnparseable ephemeralOutcome = "unparseable"
+)
+
+type ephemeralVerdict struct {
+	Outcome ephemeralOutcome
+	// Recipient is set only when Outcome is ephemeralVerified.
+	Recipient *age.X25519Recipient
+	// Stale is the soft relay-attribution signal (ticket.FreshnessTarget),
+	// meaningful only for a verified block.
+	Stale bool
+	// Err says why a block was rejected or unparseable.
+	Err error
+}
+
+// checkEphemeral verifies one probe's advertisement against the node's
+// chain-resolved identity: applyEphemeralAdvertisement's decision, without
+// its writes and logs.
+func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, now time.Time, operatorID, nodeID uint64) ephemeralVerdict {
+	if resp.EphemeralAgePubkey == "" {
+		return ephemeralVerdict{Outcome: ephemeralAbsent}
+	}
+	adv := ticket.EphemeralAdvertisement{
+		AgePubkey: resp.EphemeralAgePubkey,
+		Expiry:    resp.EphemeralExpiry,
+		// IssuedAt is required to recompute the signed canonical bytes; without
+		// it Verify rejects every block on the lifetime cap (Expiry-0 ≫
+		// MaxEphemeralLifetime). A 3.0 node omits it → IssuedAt 0 → correctly
+		// rejected (it signed an older layout anyway).
+		IssuedAt: resp.EphemeralIssuedAt,
+		Sig:      resp.EphemeralSig,
+	}
+	// The chain-resolved pair goes to Verify rather than riding on adv: the
+	// signed canonical bytes bind both, so a sibling node's advertisement
+	// (possible under a shared operator signing key) can never validate as
+	// this node's.
+	err := adv.Verify(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew)
+	switch {
+	case err == nil:
+		recipient, perr := age.ParseX25519Recipient(resp.EphemeralAgePubkey)
+		if perr != nil {
+			return ephemeralVerdict{Outcome: ephemeralUnparseable, Err: perr}
+		}
+		return ephemeralVerdict{Outcome: ephemeralVerified, Recipient: recipient, Stale: adv.Stale(now)}
+	case errors.Is(err, ticket.ErrEphemeralExpired):
+		return ephemeralVerdict{Outcome: ephemeralExpired}
+	default:
+		return ephemeralVerdict{Outcome: ephemeralRejected, Err: err}
 	}
 }
 
