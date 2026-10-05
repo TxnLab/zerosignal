@@ -26,7 +26,7 @@ func BodyHasPreviousResponseID(body []byte) bool {
 // inject.BodyDrivesServerSideToolGrowth — call that directly.
 
 // ReserveInputCount sizes the input_count to escrow: the body bound plus a
-// tool-loop headroom term, raised to floor and capped at contextWindow − maxOutput.
+// tool-loop headroom term, floored and capped at contextWindow − maxOutput.
 // See prototokenize.ReserveInputCount.
 func ReserveInputCount(bodyBound uint64, carriesTools bool, maxToolIterations, perIterHeadroom, maxOutput, contextWindow, floor uint64) uint64 {
 	return prototokenize.ReserveInputCount(bodyBound, carriesTools, maxToolIterations, perIterHeadroom, maxOutput, contextWindow, floor)

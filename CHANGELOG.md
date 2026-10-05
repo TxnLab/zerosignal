@@ -74,14 +74,6 @@ tested against it.
   covering every check, every boundary and each overflow guard. Both verifiers are tested
   against it.
 
-### 2026-10-04 — no reserve input floor
-
-A payer's reserve no longer raises `input_count` to 256: dispatch reserves the body bound
-(plus tool headroom), capped at the context window, so a short request escrows less. Nodes
-stopped flooring the count in the same change (SPEC § 3a "Context-window cap"); a node that
-still floors it signs a count past the payer's `input_count_bound` and is refused.
-`tokenize.ReserveInputCount` keeps its `floor` argument, and every caller passes 0.
-
 ### 2026-10-04 — a discovery probe rotates past `relay_upstream_unreachable`
 
 `DetailsClient.Fetch` returns a relay's `relay_upstream_unreachable` as a new

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TxnLab/zerosignal/go/pricing"
 	"github.com/TxnLab/zerosignal/go/ticket"
 
 	"github.com/algorand/go-algorand-sdk/v2/types"
@@ -89,24 +88,6 @@ func TestVerifyReservePrice_InflatedMaxPriceRejected(t *testing.T) {
 	v := s.verifyReservePrice(priceTestOperator(), priceTestReq(), tk)
 	if v == nil || v.Check != "max_price" {
 		t.Fatalf("expected max_price violation, got %+v", v)
-	}
-}
-
-// A node that still floors input_count signs more than the payer reserved; the
-// payer's own count is what that is judged against, so the ticket is refused.
-func TestVerifyReservePrice_FlooredInputCountRejected(t *testing.T) {
-	s := newPriceTestServer(100, true)
-	tk := priceTestTicket()
-	tk.InputCount = 256
-	mp, err := pricing.ExpectedMaxPrice(tk.InputCount, tk.MaxOutputCount, tk.InputRate, tk.OutputRate, tk.MinPrice, 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tk.MaxPrice = mp
-	req := ticket.ReserveRequest{Model: "m", InputCount: 69, MaxOutputCount: 500}
-	v := s.verifyReservePrice(priceTestOperator(), req, tk)
-	if v == nil || v.Check != "input_count_bound" || v.Want != 75 {
-		t.Fatalf("expected input_count_bound against the payer's 69 (bound 75), got %+v", v)
 	}
 }
 

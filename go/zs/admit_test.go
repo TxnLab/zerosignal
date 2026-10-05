@@ -113,6 +113,7 @@ func TestAdmitEstimate_LongContextTier(t *testing.T) {
 	if got, ok := s.admitEstimate([]Operator{op}, "gpt-test", admitBody, admitSizing); !ok || got != 1*input+200 {
 		t.Errorf("sub-threshold estimate %d (ok %v), want %d", got, ok, 1*input+200)
 	}
+	op.ModelCapacities["gpt-test"] = mc
 	// Details carry the two tier rates separately, so either can be missing.
 	for name, set := range map[string]func(*ModelCapacity){
 		"input":  func(m *ModelCapacity) { m.LongContextInputUSDPer1M = nil },

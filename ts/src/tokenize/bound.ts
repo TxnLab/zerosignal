@@ -39,11 +39,10 @@ export function inputTokenBound(body: Uint8Array | string): number {
 
 /**
  * Input-token count to commit to a reserve: the tight body bound plus a
- * tool-loop headroom term (zero unless the request carries tools), raised to
- * `floor` and — when the operator declares a context window — capped at
+ * tool-loop headroom term (zero unless the request carries tools), floored to
+ * a sane minimum and — when the operator declares a context window — capped at
  * context_window − max_output (today's worst case). The cap is applied LAST so
- * the result always satisfies input + max_output ≤ context_window. Every
- * protocol caller passes floor 0 (SPEC §3a).
+ * the result always satisfies input + max_output ≤ context_window.
  *
  * Mirrors proto/go/tokenize.ReserveInputCount. All arithmetic stays within the
  * safe-integer range for any realistic body/headroom (< 2^53), matching Go's

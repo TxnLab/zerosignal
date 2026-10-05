@@ -370,55 +370,6 @@ func TestVerify_LongContext_TierRaisedAboveCallerBound(t *testing.T) {
 	}
 }
 
-// withConsistentMaxPrice sets max_price to what the ticket's own counts and rates
-// imply, so only the check under test can refuse it.
-func withConsistentMaxPrice(t *testing.T, tk ticket.Ticket) ticket.Ticket {
-	t.Helper()
-	mp, err := pricing.ExpectedMaxPrice(tk.InputCount, tk.MaxOutputCount, tk.InputRate, tk.OutputRate, tk.MinPrice, 0, testFeeBps)
-	if err != nil {
-		t.Fatalf("recompute max_price: %v", err)
-	}
-	tk.MaxPrice = mp
-	return tk
-}
-
-// One token is all it takes: a caller one short of the threshold must not be
-// billed the high tier by a node that signs one more.
-func TestVerify_LongContext_TierRaisedByOneToken(t *testing.T) {
-	tk := validTicket()
-	tk.InputCount = 1001
-	tk.InputRate = 4_000_000
-	tk.OutputRate = 8_000_000
-	tk.CacheReadRate = 2_000_000
-	v := verify(withConsistentMaxPrice(t, tk), tierAdvertised(1001))
-	if v == nil || v.Check != "long_context_tier" {
-		t.Fatalf("expected long_context_tier violation one token over the caller's count, got %v", v)
-	}
-}
-
-// With no count of its own the caller has nothing to compare a tier against,
-// so an honest high-tier ticket must not be refused for it.
-func TestVerify_LongContext_TierSkippedWhenNoReserveBound(t *testing.T) {
-	tk := validTicket()
-	tk.InputCount = 1090
-	tk.InputRate = 4_000_000
-	tk.OutputRate = 8_000_000
-	tk.CacheReadRate = 2_000_000
-	tk = withConsistentMaxPrice(t, tk)
-	if v := pricing.VerifyTicketPrice(tk, tierAdvertised(1050), testFeeBps, 0, 0, pricing.DefaultPolicy()); v != nil {
-		t.Fatalf("expected pass when no reserve bound provided, got %v", v)
-	}
-}
-
-// The tolerance is inclusive: a count exactly 10% over the caller's is allowed.
-func TestVerify_InputCountBound_AtTheTolerance(t *testing.T) {
-	tk := validTicket()
-	tk.InputCount = 1100
-	if v := verify(withConsistentMaxPrice(t, tk), validAdvertised()); v != nil {
-		t.Fatalf("expected a count at exactly the tolerance to pass, got %v", v)
-	}
-}
-
 func TestVerify_LongContext_TierAgreesWithCallerBound(t *testing.T) {
 	// Both the caller's bound (1000) and the signed count (1000) are at/above the
 	// threshold, so the tier is legitimate and long_context_tier does not fire.

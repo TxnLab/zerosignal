@@ -4184,7 +4184,16 @@ func verifyCommitK(tkt *ticket.Ticket, key [wire.ResponseKeySize]byte) error {
 
 // defaultToolHeadroomPerIteration mirrors the node's zs.reserve default, used
 // when the operator doesn't advertise one on /v1/zs/details (a pre-field node).
-const defaultToolHeadroomPerIteration uint64 = 4000
+//
+// reserveMinInputCount is not a node default any more: a node never raises
+// input_count. A node built before that floored it at min_input_count
+// (default 256), and VerifyTicketPrice refuses a signed count past ours + 10%,
+// so flooring at 256 here keeps a short request reservable on those nodes.
+// Drop it once they are gone.
+const (
+	defaultToolHeadroomPerIteration uint64 = 4000
+	reserveMinInputCount            uint64 = 256
+)
 
 // boundVersionFor picks the tokenize bound version to size a reserve against
 // this operator with. v2 only when the target advertises >= 9.2 — sizing v2
@@ -4200,8 +4209,8 @@ func boundVersionFor(op Operator) uint8 {
 
 // reserveInputCount sizes the input_count to escrow for a reserve against op:
 // the tight body bound plus a tool-loop headroom term when the request
-// carries tools, capped at contextWindow − maxOutputTokens (SPEC §3a). It
-// returns the bound version used, which the caller MUST put on the
+// carries tools, floored and capped at contextWindow − maxOutputTokens (SPEC
+// §3a). It returns the bound version used, which the caller MUST put on the
 // reserve request so the node re-measures with the same function.
 //
 // A previous_response_id chain hides its accumulated history from the node,
@@ -4242,7 +4251,7 @@ func reserveInputCount(op Operator, model string, body []byte, maxOutputTokens u
 	// re-issues, and that request is measured and paid for on its own.
 	return tokenize.ReserveInputCount(
 		bodyBound, inject.BodyDrivesServerSideToolGrowth(body), iters, perIter,
-		maxOutputTokens, contextWindow, 0), boundVersion
+		maxOutputTokens, contextWindow, reserveMinInputCount), boundVersion
 }
 
 func (s *Client) estimateTokens(model, endpoint string, body []byte) (tokenize.Estimate, error) {
