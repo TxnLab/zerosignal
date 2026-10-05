@@ -468,7 +468,7 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 - The **node prices with the same code the payer verifies with**: `node/internal/server/reserve.go` and `receipt.go::chargeFor` delegate to it.
 - `DefaultPolicy` is `RateMaxMultiple: 2.0`, `InputCountTolerance: 0.10` (the node's `input_budget_tolerance`), `FailOpen: true`.
 - Proxy: `proto/go/zs/dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
-- Client: `client/src/stream/ticket-price-gate.ts`, called from `envelope-fetch.ts`, raises the `ticket_price_exceeded` blocker.
+- Client: `verifyReservePrice` in `client/src/stream/envelope-fetch.ts` raises the `ticket_price_exceeded` blocker.
 
 ### Response (refusal)
 
