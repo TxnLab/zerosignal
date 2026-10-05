@@ -1897,45 +1897,13 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		for _, so := range tr.Operators {
 			res.Operators = append(res.Operators, byNode[NodeRef{Op: so.ID, Node: so.NodeID}])
 		}
-		// Responsiveness post-pass: order by the caller's provider.sort band
-		// (default: combined network RTT + on-chain TTFT + decode; latency:
-		// first-token only; throughput: decode only; price: no reband), price
-		// within band, with the affinity pin kept first — the "responsiveness
-		// bands" policy the TS SDK mirrors (sdk/src/routing/banding.ts). No-op when
-		// no node has a responsiveness signal.
+		// The tool-affinity pin leads the banding and is exempt from the backoff
+		// demotion: it is where this tool loop's KV cache lives.
 		var ranking []rankDetail
-		res.Operators, ranking = bandByResponsiveness(res.Operators, preferredOp, s.relayLatency, prefs.Sort)
-		// Weights post-pass: demote a candidate whose advertised weights digest
-		// contradicts what a majority of distinct owners advertise for this model.
-		// Applied after the responsiveness order because it is a trust signal
-		// rather than a speed one — being contradicted should cost placement no
-		// matter how fast the node looks. Voted over the whole registry, not just
-		// the eligible slice. See weights_trust.go for what this does and does not
-		// catch.
-		//
-		// NO pin exemption, deliberately, and the nil here is the whole decision:
-		// demoteContradictedWeights reserves that parameter for a genuine session
-		// continuation, and NEITHER of the proxy's pins is one at this point.
-		// The real continuation pin (previous_response_id → responseAffinity) has
-		// already returned a single-operator list far above and never reaches this
-		// code. What survives to here is only `preferredOp`, the TOOL-CALL
-		// affinity pin — and under `strict` SelectTargets has already collapsed
-		// the list to that one operator, so the exemption could only ever fire
-		// under `prefer`, where the pin is a KV-cache preference and nothing more.
-		// Exempting a preference would make the demerit inert for the payer
-		// already bound to the contradicted operator across a whole tool loop
-		// (affinity TTL, 10m default) — precisely who is paying for a substituted
-		// model, and precisely the case client/ refuses to exempt. Matching it.
 		var weightsDemoted []NodeRef
-		res.Operators, weightsDemoted = demoteContradictedWeights(res.Operators, nil, registry, model)
+		res.Operators, ranking, weightsDemoted = orderCandidates(
+			res.Operators, preferredOp, preferredOp, s.relayLatency, prefs.Sort, registry, model, s.targetBackoff)
 		s.warnWeightsContradiction(model, weightsDemoted)
-		// Backoff post-pass, applied LAST so it outranks the responsiveness order:
-		// a node that keeps failing us is worth avoiding even when it looks fast
-		// (its RTT sample is stale by definition — we haven't completed a request
-		// against it). Demote, never drop, mirroring the client: a model only one
-		// node serves must stay reachable as a last resort, and the window only
-		// lapses because live traffic re-probes it.
-		res.Operators = demoteBackedOffTargets(res.Operators, preferredOp, s.targetBackoff)
 		s.logRanking(ctx, model, prefs.Sort, res.Operators, ranking)
 	}
 	return res, nil
@@ -1997,6 +1965,61 @@ func (s *Client) logRanking(ctx context.Context, model, sort string, ops []Opera
 		slog.String("sort", cmp.Or(sort, "balanced")),
 		slog.Bool("banded", ranking != nil),
 		slog.Group("candidates", lines...))
+}
+
+// orderCandidates applies the post-passes a price-ordered candidate list goes
+// through, in this order, and returns the banding detail and the refs the
+// weights pass demoted. The TS SDK's orderCandidates (sdk/src/routing/order.ts)
+// mirrors it, pinned by the post_pass cases in testdata/banding_vectors.json.
+//
+//  1. Responsiveness: order by the caller's provider.sort band (default:
+//     combined network RTT + on-chain TTFT + decode; latency: first-token only;
+//     throughput: decode only; price: no reband), price within band, with
+//     bandPin kept first. No-op when no node has a responsiveness signal.
+//  2. Weights: demote a candidate whose advertised weights digest contradicts
+//     what a decisive plurality of distinct owners (at least two) advertise for
+//     this model. After the
+//     responsiveness order because it is a trust signal rather than a speed
+//     one, so being contradicted costs placement no matter how fast the node
+//     looks. Voted over evidence (the whole registry), not the eligible slice;
+//     see weights_trust.go for what this does and does not catch.
+//  3. Backoff: demote nodes in a dispatch-failure window, LAST so it outranks
+//     the responsiveness order: a node that keeps failing us is worth avoiding
+//     even when it looks fast (its RTT sample is stale by definition, since we
+//     haven't completed a request against it). Demote, never drop: a model
+//     only one node serves must stay reachable as a last resort, and the
+//     window only lapses because live traffic re-probes it. backoffPin is
+//     exempt.
+//
+// The weights pass gets NO pin exemption, deliberately: demoteContradictedWeights
+// reserves that parameter for a genuine session continuation, and neither of
+// the proxy's pins is one at this point. The real continuation pin
+// (previous_response_id → responseAffinity) has already returned a
+// single-operator list in pickCandidates and never reaches here. What does is
+// the TOOL-CALL affinity pin, and under `strict` SelectTargets has already
+// collapsed the list to that one operator, so an exemption could only fire
+// under `prefer`, where the pin is a KV-cache preference and nothing more.
+// Exempting it would make the demerit inert for the payer already bound to the
+// contradicted operator across a whole tool loop (affinity TTL, 10m default),
+// who is precisely the one paying for a substituted model. client/ doesn't
+// exempt its pin either.
+//
+// The two pins are separate because the callers differ: the proxy passes its
+// tool-affinity pin as both, while client/ passes its picker selection as
+// bandPin only. That selection is a stickiness seed rather than a cache
+// location, so a node that just failed it yields to its peers.
+func orderCandidates(
+	ops []Operator,
+	bandPin, backoffPin *Operator,
+	lat RelayLatency,
+	mode string,
+	evidence []Operator,
+	model string,
+	bo TargetBackoff,
+) ([]Operator, []rankDetail, []NodeRef) {
+	ops, ranking := bandByResponsiveness(ops, bandPin, lat, mode)
+	ops, weightsDemoted := demoteContradictedWeights(ops, nil, evidence, model)
+	return demoteBackedOffTargets(ops, backoffPin, bo), ranking, weightsDemoted
 }
 
 // demoteBackedOffTargets moves nodes inside an active dispatch-failure window to

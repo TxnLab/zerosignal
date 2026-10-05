@@ -100,11 +100,10 @@ func contradictsWeightsConsensus(op Operator, model, consensus string) bool {
 // `preferred`, when non-nil, is exempt — reserved for a genuine SESSION
 // CONTINUATION pin, where the pinned node is the only correct route (the
 // upstream session lives in that operator's account) and trading it away is a
-// correctness regression rather than a preference. **The dispatch path passes
-// nil**: read the call site in dispatch.go before wiring anything into
-// this parameter, because the proxy's two pins are not alike and neither one
-// belongs here. It is kept as a parameter so this stays the mirror of the
-// client's weights-trust.ts, which reserves it for the same future case.
+// correctness regression rather than a preference. **orderCandidates passes
+// nil**: read its comment in dispatch.go before wiring anything into this
+// parameter, because the proxy's two pins are not alike and neither one belongs
+// here. The TS SDK's orderCandidates has no weights pin at all.
 //
 // A contradicted candidate is reported even when the list is too short to
 // reorder — being routed to the sole operator that contradicts its peers is

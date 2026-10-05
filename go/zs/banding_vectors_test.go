@@ -8,7 +8,9 @@ package zs
 // Generates / verifies proto/testdata/banding_vectors.json: the responsiveness
 // banding a dispatch applies to a price-ordered candidate list, which the TS SDK
 // mirrors in sdk/src/routing/banding.ts. Each case is a candidate list and a
-// sort mode in, the final order and each candidate's band out.
+// sort mode in, the final order and each candidate's band out. The post_pass
+// cases run the whole orderCandidates sequence (banding, then the weights and
+// backoff demotions), which the SDK mirrors in sdk/src/routing/order.ts.
 //
 // Scores are emitted rounded to 1e-6 and compared with a tolerance on the TS
 // side: Go may fuse a multiply-add into one FMA on some architectures, so the
@@ -37,6 +39,26 @@ type bandingVectorFile struct {
 	Medians   []bandingMedianCase  `json:"confidence_weighted_median"`
 	Cases     []bandingVectorCase  `json:"cases"`
 	Catalogs  []bandingCatalogCase `json:"catalog_confidence"`
+	PostPass  []postPassCase       `json:"post_pass"`
+}
+
+// postPassCandidate adds the weights and backoff inputs of orderCandidates to a
+// banding candidate. Contradicts stands in for the weights vote, which steering's
+// own vectors pin: the generator gives such a candidate a digest no other
+// candidate shares, against a consensus two other owners hold.
+type postPassCandidate struct {
+	bandingCandidate
+	Contradicts   bool `json:"contradicts"`
+	BackedOff     bool `json:"backed_off"`
+	BackoffPinned bool `json:"backoff_pinned"`
+}
+
+type postPassCase struct {
+	Name       string              `json:"name"`
+	Mode       string              `json:"mode"`
+	Candidates []postPassCandidate `json:"candidates"`
+	// Order is the input indices in final order.
+	Order []int `json:"order"`
 }
 
 type bandingVectorConsts struct {
@@ -152,6 +174,67 @@ func runBandingCase(c bandingVectorCase) bandingVectorCase {
 			Score:     round6(d.score),
 			Band:      d.band,
 		})
+	}
+	return c
+}
+
+// backedOffSet is a TargetBackoff holding a fixed set of backed-off nodes.
+type backedOffSet map[NodeRef]bool
+
+func (backedOffSet) RecordTargetOutcome(NodeRef, bool) {}
+func (b backedOffSet) TargetBackedOff(t NodeRef) bool  { return b[t] }
+
+const postPassModel = "m0"
+
+func runPostPassCase(c postPassCase) postPassCase {
+	ops := make([]Operator, len(c.Candidates))
+	lat := bandingLatency{}
+	bo := backedOffSet{}
+	var bandPin, backoffPin *Operator
+	for i, cand := range c.Candidates {
+		op := bandingOperator(i, cand.bandingCandidate)
+		op.OwnerAddr = fmt.Sprintf("owner%d", i)
+		if cand.Contradicts {
+			// Writing the digest into a model the catalog lacks would add a model
+			// on the Go side only, changing its catalogConfidence.
+			mc, ok := op.ModelCapacities[postPassModel]
+			if !ok {
+				panic(fmt.Sprintf("%s: a contradicting candidate's catalog must include %s", c.Name, postPassModel))
+			}
+			mc.WeightsDigest = fmt.Sprintf("digest%d", i)
+			op.ModelCapacities[postPassModel] = mc
+		}
+		ops[i] = op
+		if cand.RTTMs != nil {
+			lat[RefOf(op)] = struct {
+				ms float64
+				n  int
+			}{*cand.RTTMs, cand.RTTSamples}
+		}
+		if cand.BackedOff {
+			bo[RefOf(op)] = true
+		}
+		if cand.Pinned {
+			bandPin = &ops[i]
+		}
+		if cand.BackoffPinned {
+			backoffPin = &ops[i]
+		}
+	}
+	// Two owners outside the candidate list agree on a digest, so it is the
+	// consensus and each candidate's unique digest contradicts it.
+	evidence := append([]Operator(nil), ops...)
+	for i, owner := range []string{"peerA", "peerB"} {
+		evidence = append(evidence, Operator{
+			ID:              uint64(1000 + i),
+			OwnerAddr:       owner,
+			ModelCapacities: map[string]ModelCapacity{postPassModel: {WeightsDigest: "consensus"}},
+		})
+	}
+	out, _, _ := orderCandidates(ops, bandPin, backoffPin, lat, c.Mode, evidence, postPassModel, bo)
+	c.Order = make([]int, len(out))
+	for k, op := range out {
+		c.Order[k] = int(op.ID) - 1
 	}
 	return c
 }
@@ -298,6 +381,80 @@ func bandingInputs() []bandingVectorCase {
 	}
 }
 
+func postPassInputs() []postPassCase {
+	one := catalogOf(1)
+	ttft := func(v uint64) bandingCandidate { return bandingCandidate{TTFTEwmaMs: v, Catalog: one} }
+	pinned := func(v uint64) bandingCandidate { return bandingCandidate{TTFTEwmaMs: v, Catalog: one, Pinned: true} }
+	return []postPassCase{
+		{Name: "empty list", Mode: "", Candidates: []postPassCandidate{}},
+		{Name: "a lone candidate stays whatever it is", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(140), Contradicts: true, BackedOff: true},
+		}},
+		{Name: "backed-off nodes band with the rest, then go last", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(2100)},
+			{bandingCandidate: ttft(140), BackedOff: true},
+			{bandingCandidate: ttft(1100)},
+			{bandingCandidate: ttft(3100)},
+		}},
+		{Name: "backed-off nodes count toward the median", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(2100)},
+			{bandingCandidate: ttft(100)},
+			{bandingCandidate: ttft(4100), BackedOff: true},
+			{bandingCandidate: ttft(4600), BackedOff: true},
+		}},
+		{Name: "the backed-off tail keeps its banded order", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(1100)},
+			{bandingCandidate: ttft(9100), BackedOff: true},
+			{bandingCandidate: ttft(2100)},
+			{bandingCandidate: ttft(140), BackedOff: true},
+		}},
+		{Name: "a contradicted node goes behind clean ones and ahead of backed-off ones", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(140), Contradicts: true},
+			{bandingCandidate: ttft(1100)},
+			{bandingCandidate: ttft(2100), BackedOff: true},
+			{bandingCandidate: ttft(1200)},
+		}},
+		{Name: "contradicted nodes keep their banded order", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(2100), Contradicts: true},
+			{bandingCandidate: ttft(140), Contradicts: true},
+			{bandingCandidate: ttft(1100)},
+			{bandingCandidate: ttft(3100)},
+		}},
+		{Name: "a contradicted backed-off node goes last", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(140), Contradicts: true, BackedOff: true},
+			{bandingCandidate: ttft(1100), BackedOff: true},
+			{bandingCandidate: ttft(2100)},
+			{bandingCandidate: ttft(1200), Contradicts: true},
+		}},
+		{Name: "the banding pin yields to backoff", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(140)},
+			{bandingCandidate: pinned(9100), BackedOff: true},
+			{bandingCandidate: ttft(1100)},
+		}},
+		{Name: "the backoff pin keeps its place", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(140)},
+			{bandingCandidate: pinned(9100), BackedOff: true, BackoffPinned: true},
+			{bandingCandidate: ttft(1100)},
+		}},
+		{Name: "no pin is exempt from the weights demotion", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: pinned(9100), Contradicts: true, BackoffPinned: true},
+			{bandingCandidate: ttft(140)},
+			{bandingCandidate: ttft(1100)},
+		}},
+		{Name: "price mode still demotes", Mode: selection.SortPrice, Candidates: []postPassCandidate{
+			{bandingCandidate: ttft(2100), BackedOff: true},
+			{bandingCandidate: ttft(140)},
+			{bandingCandidate: ttft(1100), Contradicts: true},
+			{bandingCandidate: ttft(900)},
+		}},
+		{Name: "nobody has signal: demotions only", Mode: "", Candidates: []postPassCandidate{
+			{bandingCandidate: bandingCandidate{Catalog: one}, BackedOff: true},
+			{bandingCandidate: bandingCandidate{Catalog: one}, Contradicts: true},
+			{bandingCandidate: bandingCandidate{Catalog: one}},
+		}},
+	}
+}
+
 func bandingMedianInputs() []bandingMedianCase {
 	return []bandingMedianCase{
 		{Values: nil, Weights: nil},
@@ -347,6 +504,9 @@ func TestBandingVectors(t *testing.T) {
 	}
 	for _, c := range bandingInputs() {
 		f.Cases = append(f.Cases, runBandingCase(c))
+	}
+	for _, c := range postPassInputs() {
+		f.PostPass = append(f.PostPass, runPostPassCase(c))
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

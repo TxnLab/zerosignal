@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// rankByResponsiveness and its helpers, checked against
-// testdata/banding_vectors.json, which Go's bandByResponsiveness generates.
+// rankByResponsiveness, its helpers and orderCandidates, checked against
+// testdata/banding_vectors.json, which Go's bandByResponsiveness and
+// orderCandidates generate.
 // Order, bands and flags compare exactly. Scores compare within 1e-6 relative
 // (absolute below 1): Go may fuse a multiply-add on some architectures, and the
 // fixture rounds them to 1e-6.
@@ -22,6 +23,7 @@ import {
     bandByResponsiveness,
     catalogConfidence,
     confidenceWeightedMedian,
+    orderCandidates,
     rankByResponsiveness,
 } from '../src/routing/index.js'
 
@@ -56,6 +58,12 @@ interface VectorFile {
     }
     confidence_weighted_median: { values: number[] | null; weights: number[] | null; want: number }[]
     catalog_confidence: { catalog: Catalog; want: number }[]
+    post_pass: {
+        name: string
+        mode: ResponsivenessMode
+        candidates: (VectorCandidate & { contradicts: boolean; backed_off: boolean; backoff_pinned: boolean })[]
+        order: number[]
+    }[]
     cases: {
         name: string
         mode: ResponsivenessMode
@@ -140,6 +148,29 @@ describe('banding vectors', () => {
                     expectNear(g, w)
                 }
             })
+        })
+    }
+})
+
+describe('orderCandidates vectors', () => {
+    it('has cases', () => {
+        expect(vectors.post_pass.length).toBeGreaterThan(0)
+    })
+
+    for (const c of vectors.post_pass) {
+        it(c.name, () => {
+            const items = c.candidates.map((cand, i) => ({ i, cand }))
+            const out = orderCandidates(
+                items,
+                ({ cand }) => ({
+                    ...inputOf(cand),
+                    contradicted: cand.contradicts,
+                    backedOff: cand.backed_off,
+                    backoffPinned: cand.backoff_pinned,
+                }),
+                c.mode,
+            )
+            expect(out.map((x) => x.i)).toEqual(c.order)
         })
     }
 })
