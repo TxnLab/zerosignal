@@ -6,12 +6,12 @@
 package escrow
 
 // Cross-impl vectors for the payer's checks on a node-built group:
-// proto/testdata/escrow_group_vectors.json. Each case is an open group as it
-// arrives on the wire (base64 msgpack of []SignedTxn) and the Field of the
-// OpenGroupRejectedError VerifyOpenGroup returns, or null. The valid group is
-// ComposeOpenGroup's real output; every other case breaks one guard and then
-// re-groups and re-signs, so that guard and no other is what refuses it.
-// @txnlab/zerosignal's verifyOpenGroup reads the same file.
+// proto/testdata/escrow_group_vectors.json. Each case is an open or settle
+// group as it arrives on the wire (base64 msgpack of []SignedTxn) and the
+// Field of the rejection VerifyOpenGroup / VerifySettleGroup returns, or null.
+// The valid group is the composer's real output; every other case breaks one
+// guard and then re-groups and re-signs, so that guard and no other is what
+// refuses it. @txnlab/zerosignal's verifiers read the same file.
 //
 // Regenerate after an intentional change with:
 //
@@ -68,6 +68,26 @@ type groupVectorsFile struct {
 		Spec  openSpecVector    `json:"spec"`
 		Cases []groupCaseVector `json:"cases"`
 	} `json:"open"`
+	Settle struct {
+		Spec  settleSpecVector  `json:"spec"`
+		Cases []groupCaseVector `json:"cases"`
+	} `json:"settle"`
+}
+
+type settleSpecVector struct {
+	AppID               uint64 `json:"app_id"`
+	TicketIDB64         string `json:"ticket_id_b64"`
+	AmountCharged       uint64 `json:"amount_charged"`
+	ReceiptDigestB64    string `json:"receipt_digest_b64"`
+	TtftMs              uint64 `json:"ttft_ms"`
+	DecodeMs            uint64 `json:"decode_ms"`
+	InputCount          uint64 `json:"input_count"`
+	OutputCount         uint64 `json:"output_count"`
+	OutputUsageType     uint64 `json:"output_usage_type"`
+	AuxOutputUsageType  uint64 `json:"aux_output_usage_type"`
+	AuxOutputCount      uint64 `json:"aux_output_count"`
+	PayerAddr           string `json:"payer_addr"`
+	OperatorSigningAddr string `json:"operator_signing_addr"`
 }
 
 func vectorKey(seed byte) (ed25519.PrivateKey, types.Address) {
@@ -195,31 +215,8 @@ func buildGroupVectors(t *testing.T) *groupVectorsFile {
 		NodeSigningAddr: nodeAddr, PayerAddr: payerAddr, ExpiresAt: args.ExpiresAt,
 	}
 
-	type mutation struct {
-		name string
-		// mut edits a copy of the valid group; the result is regrouped unless raw.
-		mut func(g []types.SignedTxn) []types.SignedTxn
-		raw bool
-		// wire edits the encoded members as generic maps, for encodings Go's
-		// struct can't produce (an explicit zero that canonical form omits).
-		wire func(m []map[string]any)
-	}
-	pay := func(f func(*types.Transaction)) func([]types.SignedTxn) []types.SignedTxn {
-		return func(g []types.SignedTxn) []types.SignedTxn { f(&g[0].Txn); return g }
-	}
-	app := func(f func(*types.Transaction)) func([]types.SignedTxn) []types.SignedTxn {
-		return func(g []types.SignedTxn) []types.SignedTxn { f(&g[1].Txn); return g }
-	}
-	u64arg := func(v uint64) []byte {
-		b := make([]byte, 8)
-		for i := 7; i >= 0; i-- {
-			b[i] = byte(v)
-			v >>= 8
-		}
-		return b
-	}
-	keep := func(g []types.SignedTxn) []types.SignedTxn { return g }
-	cases := []mutation{
+	pay, app := onMember(0), onMember(1)
+	cases := []groupMutation{
 		{name: "valid", mut: keep, raw: true},
 		{name: "size_one", mut: func(g []types.SignedTxn) []types.SignedTxn { return g[:1] }, raw: true},
 		{name: "size_three", mut: func(g []types.SignedTxn) []types.SignedTxn { return append(g, g[1]) }, raw: true},
@@ -299,10 +296,10 @@ func buildGroupVectors(t *testing.T) *groupVectorsFile {
 	}
 
 	f := &groupVectorsFile{
-		Version: 1,
+		Version: 2,
 		Comment: "Payer-side checks on a node-built escrow group: the rejecting check's field, or null. " +
 			"Regenerate via: cd proto/go && go test ./escrow -run TestGroupVectors -update. " +
-			"Loaded by proto/go/escrow/group_vectors_test.go and proto/sdk/test/escrow-open.test.ts.",
+			"Loaded by proto/go/escrow/group_vectors_test.go and proto/sdk/test/escrow-{open,settle}.test.ts.",
 		Selectors: map[string]string{},
 	}
 	for _, m := range []string{"open", "settle"} {
@@ -318,10 +315,59 @@ func buildGroupVectors(t *testing.T) *groupVectorsFile {
 		NodeSigningAddr: nodeAddr.String(), PayerAddr: payerAddr.String(),
 		ExpiresAt: spec.ExpiresAt, SettlementGraceSeconds: spec.SettlementGraceSeconds,
 	}
+	f.Open.Cases = emitCases(t, cases, valid, nodeSK, 1, func(g []types.SignedTxn) *string {
+		err := VerifyOpenGroup(g, spec)
+		if err == nil {
+			return nil
+		}
+		var rej *OpenGroupRejectedError
+		if !errors.As(err, &rej) {
+			t.Fatalf("untyped open rejection %v", err)
+		}
+		return &rej.Field
+	})
+	buildSettleVectors(t, f, c, nodeSK, nodeAddr, payerAddr, otherAddr)
+	return f
+}
+
+// groupMutation is one vector case: an edit to a copy of the valid group.
+type groupMutation struct {
+	name string
+	// mut edits a copy of the valid group; the result is regrouped unless raw.
+	mut func(g []types.SignedTxn) []types.SignedTxn
+	raw bool
+	// wire edits the encoded members as generic maps, for encodings Go's
+	// struct can't produce (an explicit zero that canonical form omits).
+	wire func(m []map[string]any)
+}
+
+func keep(g []types.SignedTxn) []types.SignedTxn { return g }
+
+func onMember(i int) func(func(*types.Transaction)) func([]types.SignedTxn) []types.SignedTxn {
+	return func(f func(*types.Transaction)) func([]types.SignedTxn) []types.SignedTxn {
+		return func(g []types.SignedTxn) []types.SignedTxn { f(&g[i].Txn); return g }
+	}
+}
+
+func u64arg(v uint64) []byte {
+	b := make([]byte, 8)
+	for i := 7; i >= 0; i-- {
+		b[i] = byte(v)
+		v >>= 8
+	}
+	return b
+}
+
+// emitCases applies each mutation, re-signing member signed with nodeSK, and
+// records the verdict on the group as it decodes from the wire, the way a
+// payer receives it.
+func emitCases(t *testing.T, cases []groupMutation, valid []types.SignedTxn, nodeSK ed25519.PrivateKey, signed int, verdict func([]types.SignedTxn) *string) []groupCaseVector {
+	t.Helper()
+	var out []groupCaseVector
 	for _, m := range cases {
 		g := m.mut(cloneGroup(valid))
 		if !m.raw {
-			g = regroup(t, g, nodeSK, 1)
+			g = regroup(t, g, nodeSK, signed)
 		}
 		wire := msgpack.Encode(g)
 		if m.wire != nil {
@@ -335,23 +381,131 @@ func buildGroupVectors(t *testing.T) *groupVectorsFile {
 			m.wire(w)
 			wire = msgpack.Encode(w)
 		}
-		// The verdict is on the group as it decodes from the wire, the way a
-		// payer receives it.
 		g = nil
 		if err := msgpack.Decode(wire, &g); err != nil {
 			t.Fatalf("%s: decode: %v", m.name, err)
 		}
-		cv := groupCaseVector{Name: m.name, GroupB64: base64.StdEncoding.EncodeToString(wire)}
-		if err := VerifyOpenGroup(g, spec); err != nil {
-			var rej *OpenGroupRejectedError
-			if !errors.As(err, &rej) {
-				t.Fatalf("%s: untyped rejection %v", m.name, err)
-			}
-			cv.Expected = &rej.Field
-		}
-		f.Open.Cases = append(f.Open.Cases, cv)
+		out = append(out, groupCaseVector{Name: m.name, GroupB64: base64.StdEncoding.EncodeToString(wire), Expected: verdict(g)})
 	}
-	return f
+	return out
+}
+
+// buildSettleVectors adds the settle group: ComposeSettleGroup's real output
+// (operator half signed, payer ack unsigned) and one variant per guard. Each
+// per-member guard runs on both halves, since VerifySettleGroup checks them
+// with the same code and a port could still wire one half wrong.
+func buildSettleVectors(t *testing.T, f *groupVectorsFile, c *Client, nodeSK ed25519.PrivateKey, nodeAddr, payerAddr, otherAddr types.Address) {
+	t.Helper()
+	_, ownerAddr := vectorKey(4)
+	_, treasuryAddr := vectorKey(5)
+	c.Treasury = treasuryAddr.String()
+
+	ticketID := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	var digest [32]byte
+	for i := range digest {
+		digest[i] = byte(0xa0 + i)
+	}
+	args := SettleArgs{
+		TicketIDRaw: ticketID, AmountCharged: 3030, MaxPrice: 4040, ReceiptDigest: digest,
+		TtftMs: 1200, DecodeMs: 300, InputCount: 250, OutputCount: 750,
+		OutputUsageType: 1, AuxOutputUsageType: 2, AuxOutputCount: 1,
+		PayerAddr: payerAddr.String(), OperatorOwnerAddr: ownerAddr.String(), OperatorID: 7, NodeID: 3,
+	}
+	signer := transaction.BasicAccountTransactionSigner{Account: crypto.Account{PrivateKey: nodeSK, Address: nodeAddr}}
+	valid, err := c.ComposeSettleGroup(context.Background(), args, signer, nodeAddr.String())
+	if err != nil {
+		t.Fatalf("ComposeSettleGroup: %v", err)
+	}
+	spec := SettleGroupSpec{
+		AppID: c.AppID, TicketIDRaw: ticketID, AmountCharged: args.AmountCharged, ReceiptDigest: digest,
+		TtftMs: args.TtftMs, DecodeMs: args.DecodeMs, InputCount: args.InputCount, OutputCount: args.OutputCount,
+		OutputUsageType: args.OutputUsageType, AuxOutputUsageType: args.AuxOutputUsageType, AuxOutputCount: args.AuxOutputCount,
+		PayerAddr: payerAddr, OperatorSigningAddr: nodeAddr,
+	}
+
+	op, ack := onMember(0), onMember(1)
+	cases := []groupMutation{
+		{name: "valid", mut: keep, raw: true},
+		{name: "size_one", mut: func(g []types.SignedTxn) []types.SignedTxn { return g[:1] }, raw: true},
+		{name: "size_three", mut: func(g []types.SignedTxn) []types.SignedTxn { return append(g, g[1]) }, raw: true},
+		{name: "group_id_zero", raw: true, mut: func(g []types.SignedTxn) []types.SignedTxn {
+			g[0].Txn.Group, g[1].Txn.Group = types.Digest{}, types.Digest{}
+			return g
+		}},
+		{name: "group_id_differs_across_members", raw: true, mut: ack(func(x *types.Transaction) { x.Group[0] ^= 1 })},
+		{name: "group_id_not_over_members", raw: true, mut: ack(func(x *types.Transaction) { x.ApplicationArgs[2] = u64arg(1) })},
+		{name: "payer_explicit_zero_fee", raw: true, mut: keep, wire: func(m []map[string]any) { wireTxn(m[1])["fee"] = uint64(0) }},
+		{name: "group_id_over_explicit_zero", raw: true, mut: keep, wire: func(m []map[string]any) {
+			wireTxn(m[1])["fee"] = uint64(0)
+			regroupWire(m)
+		}},
+		{name: "payer_fee", mut: ack(func(x *types.Transaction) { x.Fee = 1000 })},
+		{name: "payer_note", mut: ack(func(x *types.Transaction) { x.Note = []byte("hi") })},
+		{name: "payer_lease", mut: ack(func(x *types.Transaction) { x.Lease[0] = 1 })},
+		{name: "payer_payment_fields", mut: ack(func(x *types.Transaction) { x.Receiver, x.Amount = otherAddr, 1 })},
+		{name: "payer_close_remainder_to", mut: ack(func(x *types.Transaction) { x.CloseRemainderTo = otherAddr })},
+		{name: "payer_extra_arg", mut: ack(func(x *types.Transaction) { x.ApplicationArgs = append(x.ApplicationArgs, []byte("tag")) })},
+		// The operator funds its half and its note and spare args are its own:
+		// none is checked.
+		{name: "operator_fee_unchecked", mut: op(func(x *types.Transaction) { x.Fee = 50_000 })},
+		{name: "operator_note_unchecked", mut: op(func(x *types.Transaction) { x.Note = []byte("hi") })},
+		{name: "operator_extra_arg_unchecked", mut: op(func(x *types.Transaction) { x.ApplicationArgs = append(x.ApplicationArgs, []byte("tag")) })},
+	}
+	for _, r := range []struct {
+		role   string
+		member func(func(*types.Transaction)) func([]types.SignedTxn) []types.SignedTxn
+	}{{"operator", op}, {"payer", ack}} {
+		m := r.member
+		arg := func(i int, v []byte) func([]types.SignedTxn) []types.SignedTxn {
+			return m(func(x *types.Transaction) { x.ApplicationArgs[i] = v })
+		}
+		cases = append(cases,
+			groupMutation{name: r.role + "_not_appl", mut: m(func(x *types.Transaction) {
+				*x = types.Transaction{Type: types.PaymentTx, Header: x.Header, PaymentTxnFields: types.PaymentTxnFields{Receiver: otherAddr, Amount: 1}}
+			})},
+			groupMutation{name: r.role + "_app_id", mut: m(func(x *types.Transaction) { x.ApplicationID++ })},
+			groupMutation{name: r.role + "_rekey", mut: m(func(x *types.Transaction) { x.RekeyTo = otherAddr })},
+			groupMutation{name: r.role + "_clear_state", mut: m(func(x *types.Transaction) { x.OnCompletion = types.ClearStateOC })},
+			groupMutation{name: r.role + "_close_out", mut: m(func(x *types.Transaction) { x.OnCompletion = types.CloseOutOC })},
+			groupMutation{name: r.role + "_sender", mut: m(func(x *types.Transaction) { x.Sender = otherAddr })},
+			groupMutation{name: r.role + "_too_few_args", mut: m(func(x *types.Transaction) { x.ApplicationArgs = x.ApplicationArgs[:11] })},
+			groupMutation{name: r.role + "_selector", mut: m(func(x *types.Transaction) { x.ApplicationArgs[0][0] ^= 1 })},
+			groupMutation{name: r.role + "_ticket_id", mut: m(func(x *types.Transaction) { x.ApplicationArgs[1][17] ^= 1 })},
+			groupMutation{name: r.role + "_ticket_id_prefix", mut: m(func(x *types.Transaction) { x.ApplicationArgs[1][1]++ })},
+			groupMutation{name: r.role + "_ticket_id_short", mut: arg(1, []byte{0})},
+			groupMutation{name: r.role + "_amount_charged", mut: arg(2, u64arg(3031))},
+			groupMutation{name: r.role + "_amount_charged_width", mut: arg(2, u64arg(3030)[1:])},
+			groupMutation{name: r.role + "_receipt_digest", mut: m(func(x *types.Transaction) { x.ApplicationArgs[3][2] ^= 1 })},
+			groupMutation{name: r.role + "_ttft_ms", mut: arg(4, u64arg(1201))},
+			groupMutation{name: r.role + "_decode_ms", mut: arg(5, u64arg(301))},
+			groupMutation{name: r.role + "_input_count", mut: arg(6, u64arg(251))},
+			groupMutation{name: r.role + "_output_count", mut: arg(7, u64arg(751))},
+			groupMutation{name: r.role + "_output_usage_type", mut: arg(8, u64arg(2))},
+			groupMutation{name: r.role + "_aux_output_usage_type", mut: arg(9, u64arg(0))},
+			groupMutation{name: r.role + "_aux_output_count", mut: arg(10, u64arg(2))},
+			groupMutation{name: r.role + "_as_operator_flipped", mut: m(func(x *types.Transaction) { x.ApplicationArgs[11][0] ^= 0x80 })},
+			groupMutation{name: r.role + "_as_operator_width", mut: m(func(x *types.Transaction) { x.ApplicationArgs[11] = append(x.ApplicationArgs[11], 0) })},
+		)
+	}
+
+	f.Settle.Spec = settleSpecVector{
+		AppID: spec.AppID, TicketIDB64: base64.StdEncoding.EncodeToString(ticketID),
+		AmountCharged: spec.AmountCharged, ReceiptDigestB64: base64.StdEncoding.EncodeToString(digest[:]),
+		TtftMs: spec.TtftMs, DecodeMs: spec.DecodeMs, InputCount: spec.InputCount, OutputCount: spec.OutputCount,
+		OutputUsageType: spec.OutputUsageType, AuxOutputUsageType: spec.AuxOutputUsageType, AuxOutputCount: spec.AuxOutputCount,
+		PayerAddr: payerAddr.String(), OperatorSigningAddr: nodeAddr.String(),
+	}
+	f.Settle.Cases = emitCases(t, cases, valid, nodeSK, 0, func(g []types.SignedTxn) *string {
+		err := VerifySettleGroup(g, spec)
+		if err == nil {
+			return nil
+		}
+		var rej *SettleGroupRejectedError
+		if !errors.As(err, &rej) {
+			t.Fatalf("untyped settle rejection %v", err)
+		}
+		return &rej.Field
+	})
 }
 
 func TestGroupVectors(t *testing.T) {

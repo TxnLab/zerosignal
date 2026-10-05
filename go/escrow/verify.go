@@ -515,8 +515,8 @@ const (
 //  2. gtxn[0] (operator first-half): appl, our app, no rekey, NoOp,
 //     sender == OperatorSigningAddr, selector == settle, all nine values +
 //     ticket id match spec, asOperator == true.
-//  3. gtxn[1] (payer ack): same, plus fee == 0, sender == PayerAddr,
-//     asOperator == false.
+//  3. gtxn[1] (payer ack): same, plus fee == 0, no note, lease, or
+//     non-app-call field, sender == PayerAddr, asOperator == false.
 //
 // gtxn[0]'s fee is deliberately NOT pinned — the operator funds and sizes
 // it to the disbursement inners its settle fires; a too-low fee just fails
@@ -548,9 +548,10 @@ func VerifySettleGroup(group []types.SignedTxn, spec SettleGroupSpec) error {
 
 // verifySettleMember checks one member of the settle group. sender is the
 // expected txn sender, asOperator the expected value of the asOperator ABI
-// arg (0x80/0x00), and feeMustBeZero pins fee == 0 (payer half only — the
-// operator pools the group fee on gtxn[0]).
-func verifySettleMember(txn types.Transaction, spec SettleGroupSpec, role string, sender types.Address, asOperator byte, feeMustBeZero bool) *SettleGroupRejectedError {
+// arg (0x80/0x00), and payerHalf adds the checks on the txn the payer signs:
+// fee == 0 (the operator pools the group fee on gtxn[0]), and no note, lease,
+// or field outside an app call, as on the open group's transfer.
+func verifySettleMember(txn types.Transaction, spec SettleGroupSpec, role string, sender types.Address, asOperator byte, payerHalf bool) *SettleGroupRejectedError {
 	tag := "settle[" + role + "]"
 	reject := func(field, msg string) *SettleGroupRejectedError {
 		return &SettleGroupRejectedError{Field: role + "." + field, Detail: tag + " " + msg}
@@ -573,12 +574,32 @@ func verifySettleMember(txn types.Transaction, spec SettleGroupSpec, role string
 	if txn.Sender != sender {
 		return reject("sender", fmt.Sprintf("sender = %s, want %s", txn.Sender, sender))
 	}
-	if feeMustBeZero && txn.Fee != 0 {
-		return reject("fee", fmt.Sprintf("fee = %d, want 0", txn.Fee))
+	if payerHalf {
+		if txn.Fee != 0 {
+			return reject("fee", fmt.Sprintf("fee = %d, want 0", txn.Fee))
+		}
+		// Node-chosen bytes published under the payer's signature; the honest
+		// composer sets neither.
+		if len(txn.Note) != 0 {
+			return reject("note", fmt.Sprintf("note = %d bytes, want none", len(txn.Note)))
+		}
+		if txn.Lease != ([32]byte{}) {
+			return reject("lease", fmt.Sprintf("lease = %x, want none", txn.Lease))
+		}
+		rest := txn
+		rest.Header, rest.ApplicationFields, rest.Type = types.Header{}, types.ApplicationFields{}, ""
+		if !bytes.Equal(msgpack.Encode(rest), msgpack.Encode(types.Transaction{})) {
+			return reject("foreignFields", "carries fields outside an app call")
+		}
 	}
 	args := txn.ApplicationArgs
 	if len(args) < settleArgCount {
 		return reject("args", fmt.Sprintf("has %d args, want >= %d", len(args), settleArgCount))
+	}
+	// settle() never reads past its last arg, so an extra one on the ack is
+	// node-chosen bytes published under the payer's signature, like a note.
+	if payerHalf && len(args) != settleArgCount {
+		return reject("args", fmt.Sprintf("has %d args, want %d", len(args), settleArgCount))
 	}
 	settleSelector, err := MethodSelector("settle")
 	if err != nil {

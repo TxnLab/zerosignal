@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-04 — the SDK checks and completes the node's settle group
+
+`@txnlab/zerosignal` gains `completeSettleGroup`: it decodes the node's pre-signed atomic
+settle group, runs `verifySettleGroup` (a port of Go's `VerifySettleGroup`, in Go's order),
+and only then has the payer sign the ack, returning the group bytes for algod. A refusal is a
+`SettleGroupRejectedError` whose `field` matches Go's `Field`; decode and signer failures are
+plain errors, so a caller can tell a node contradicting its own receipt from a transport fault.
+Go's `VerifySettleGroup` now also refuses a payer ack carrying a note (`payer.note`), a lease
+(`payer.lease`), any field outside an app call (`payer.foreignFields`), or an argument past
+`settle()`'s twelve (`payer.args`), as the open check does for the transfer; the honest
+composer sets none of them. `escrow_group_vectors.json`
+(version 2) adds a `settle` section with every per-member guard exercised on both halves.
+
 ### 2026-10-04 — the SDK checks and completes the node's open group
 
 `@txnlab/zerosignal` gains `completeOpenGroup`: it decodes the node's pre-signed open group,

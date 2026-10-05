@@ -5,3 +5,4 @@
 
 export { type GroupMember, decodeSignedGroup } from './group.js'
 export * from './open.js'
+export * from './settle.js'
