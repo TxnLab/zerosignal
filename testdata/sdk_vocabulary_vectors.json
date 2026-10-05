@@ -114,6 +114,7 @@
       "atomic"
     ],
     "tool.status": [
+      "itemId",
       "callId",
       "name",
       "state",

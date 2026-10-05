@@ -30,10 +30,12 @@ const eventVectorsPath = "../../testdata/stream_events_vectors.json"
 type eventVectorCase struct {
 	Name     string `json:"name"`
 	Endpoint string `json:"endpoint"`
-	// Frames is a stream's decrypted frames in order, as text, since some are
-	// deliberately not JSON; Body is a whole reply. Exactly one is set.
-	Frames []string        `json:"frames,omitempty"`
-	Body   json.RawMessage `json:"body,omitempty"`
+	// Frames is a stream's decrypted frames in order; Body is a whole reply.
+	// Exactly one is set. Both are text, since some are deliberately not JSON
+	// and a port must read a number as it was written, not as a JSON parser
+	// re-wrote it.
+	Frames []string `json:"frames,omitempty"`
+	Body   string   `json:"body,omitempty"`
 
 	Events []map[string]any `json:"events"`
 	// End is {"done": {...}} or {"error": {...}}.
@@ -125,14 +127,14 @@ func eventVectorInputs() []eventVectorCase {
 
 		// Responses API, one body.
 		// OpenAI's own bodies carry "error": null.
-		{Name: "responses body", Endpoint: resp, Body: json.RawMessage(`{"id":"resp_2","status":"completed","error":null,"output":[
+		{Name: "responses body", Endpoint: resp, Body: string(`{"id":"resp_2","status":"completed","error":null,"output":[
 			{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"Plan"}],"content":[{"type":"reasoning_text","text":"Detail"}]},
 			{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Answer","annotations":[{"type":"url_citation","url":"https://example.com"}]}]},
 			{"id":"fc_1","type":"function_call","call_id":"call_1","name":"f","arguments":"{}"}
 		],"usage":{"input_tokens":3,"output_tokens":4}}`)},
-		{Name: "responses body incomplete", Endpoint: resp, Body: json.RawMessage(`{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`)},
-		{Name: "responses body error", Endpoint: resp, Body: json.RawMessage(`{"error":{"code":"server_error","message":"boom"}}`)},
-		{Name: "responses body edited image in result is an answer", Endpoint: resp, Body: json.RawMessage(`{"status":"completed","output":[{"id":"ie_1","type":"zs_image_edit_call","result":"` + pngB64 + `"}]}`)},
+		{Name: "responses body incomplete", Endpoint: resp, Body: string(`{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]}`)},
+		{Name: "responses body error", Endpoint: resp, Body: string(`{"error":{"code":"server_error","message":"boom"}}`)},
+		{Name: "responses body edited image in result is an answer", Endpoint: resp, Body: string(`{"status":"completed","output":[{"id":"ie_1","type":"zs_image_edit_call","result":"` + pngB64 + `"}]}`)},
 		{Name: "responses edited image in result is an answer", Endpoint: resp, Frames: f(
 			`{"type":"response.output_item.done","item":{"id":"ie_1","type":"zs_image_edit_call","result":"`+pngB64+`"}}`,
 			`{"type":"response.completed","response":{"status":"completed"}}`,
@@ -141,7 +143,7 @@ func eventVectorInputs() []eventVectorCase {
 			`{"type":"error","code":"first_code","message":"first"}`,
 			`{"type":"error","code":"second_code","message":"second"}`,
 		)},
-		{Name: "a bare string error still fails the reply", Endpoint: chat, Body: json.RawMessage(`{"error":"gateway exploded"}`)},
+		{Name: "a bare string error still fails the reply", Endpoint: chat, Body: string(`{"error":"gateway exploded"}`)},
 		{Name: "a null annotation is dropped", Endpoint: resp, Frames: f(
 			`{"type":"response.output_text.annotation.added","item_id":"msg_1","annotation":null}`,
 			`{"type":"response.completed","response":{"status":"completed"}}`,
@@ -197,8 +199,8 @@ func eventVectorInputs() []eventVectorCase {
 		)},
 
 		// Chat Completions, one body.
-		{Name: "chat body with tool calls", Endpoint: chat, Body: json.RawMessage(`{"choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"Need data","tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{\"q\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":6}}`)},
-		{Name: "chat body error", Endpoint: chat, Body: json.RawMessage(`{"error":{"message":"bad","type":"server_error"}}`)},
+		{Name: "chat body with tool calls", Endpoint: chat, Body: string(`{"choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"Need data","tool_calls":[{"id":"call_1","type":"function","function":{"name":"f","arguments":"{\"q\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":6}}`)},
+		{Name: "chat body error", Endpoint: chat, Body: string(`{"error":{"message":"bad","type":"server_error"}}`)},
 
 		// Image routes.
 		{Name: "image stream", Endpoint: image, Frames: f(
@@ -206,13 +208,13 @@ func eventVectorInputs() []eventVectorCase {
 			`{"type":"response.zs_image.partial","partial_image_b64":"`+pngB64+`"}`,
 			`{"type":"response.zs_image.completed","response":{"data":[{"b64_json":"`+pngB64+`","output_format":"png"}]}}`,
 		)},
-		{Name: "image body", Endpoint: image, Body: json.RawMessage(`{"created":1,"data":[{"b64_json":"` + pngB64 + `"}]}`)},
-		{Name: "image body without images is empty", Endpoint: image, Body: json.RawMessage(`{"created":1,"data":[]}`)},
+		{Name: "image body", Endpoint: image, Body: string(`{"created":1,"data":[{"b64_json":"` + pngB64 + `"}]}`)},
+		{Name: "image body without images is empty", Endpoint: image, Body: string(`{"created":1,"data":[]}`)},
 		{Name: "image edit stream", Endpoint: endpointImageEdits, Frames: f(
 			`{"type":"response.zs_image.progress","value":1,"max":4}`,
 			`{"type":"response.zs_image.completed","response":{"data":[{"b64_json":"`+pngB64+`"}]}}`,
 		)},
-		{Name: "image edit body", Endpoint: endpointImageEdits, Body: json.RawMessage(`{"created":1,"data":[{"b64_json":"` + pngB64 + `"}]}`)},
+		{Name: "image edit body", Endpoint: endpointImageEdits, Body: string(`{"created":1,"data":[{"b64_json":"` + pngB64 + `"}]}`)},
 
 		// The turn's end rests on the node's sealed word alone.
 		{Name: "chat cut before a finish_reason is interrupted", Endpoint: chat, Frames: f(
@@ -230,7 +232,7 @@ func eventVectorInputs() []eventVectorCase {
 			`{"type":"response.refusal.delta","item_id":"msg_1","delta":"I can't help with that."}`,
 			`{"type":"response.completed","response":{"status":"completed"}}`,
 		)},
-		{Name: "responses body refusal is an answer", Endpoint: resp, Body: json.RawMessage(`{"status":"completed","output":[{"id":"msg_1","type":"message","content":[{"type":"refusal","refusal":"No."}]}]}`)},
+		{Name: "responses body refusal is an answer", Endpoint: resp, Body: string(`{"status":"completed","output":[{"id":"msg_1","type":"message","content":[{"type":"refusal","refusal":"No."}]}]}`)},
 		{Name: "chat refusal is an answer", Endpoint: chat, Frames: f(
 			`{"choices":[{"index":0,"delta":{"refusal":"No."},"finish_reason":"stop"}]}`,
 		)},
@@ -246,7 +248,67 @@ func eventVectorInputs() []eventVectorCase {
 			`{"choices":[{"index":"0","delta":{"content":"skipped"}},{"index":0,"delta":{"content":"kept"},"finish_reason":"stop"}]}`,
 		)},
 	}
+	cases = append(cases, edgeVectorInputs()...)
 	return append(cases, iconVectorInputs()...)
+}
+
+// edgeVectorInputs pins how a field of an unexpected value reads, where a port
+// reading parsed JSON could otherwise take a shortcut.
+func edgeVectorInputs() []eventVectorCase {
+	f := func(s ...string) []string { return s }
+	const (
+		resp  = endpointResponses
+		chat  = endpointChatCompletions
+		image = endpointImages
+	)
+	completed := `{"type":"response.completed","response":{"status":"completed"}}`
+	return []eventVectorCase{
+		{Name: "an error without a message gets the default", Endpoint: chat, Body: `{"error":{"code":"x"}}`},
+		{Name: "response.failed without an error object", Endpoint: resp, Frames: f(`{"type":"response.failed","response":{}}`)},
+		{Name: "a null error code is no code", Endpoint: chat, Body: `{"error":{"message":"bad","type":"invalid_request_error","param":null,"code":null}}`},
+		{Name: "a null code on an error event is no code", Endpoint: resp, Frames: f(`{"type":"error","code":null,"message":"x"}`)},
+		{Name: "a negative zero code reads as 0", Endpoint: resp, Frames: f(`{"type":"error","code":-0,"message":"x"}`)},
+		{Name: "a body that is an array still ends the reply", Endpoint: resp, Body: `[]`},
+		{Name: "a body that is a string still ends the reply", Endpoint: chat, Body: `"x"`},
+		{Name: "an error of false still fails the reply", Endpoint: chat, Body: `{"error":false}`},
+		{Name: "an empty-string error still fails the reply", Endpoint: chat, Body: `{"error":""}`},
+		{Name: "a null choices beside an error is not a failure", Endpoint: chat, Frames: f(
+			`{"error":{"message":"x"},"choices":null}`,
+			`{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+		)},
+		{Name: "content after an error still decodes and the error stands", Endpoint: resp, Frames: f(
+			`{"type":"error","code":"server_error","message":"first"}`,
+			`{"type":"error","code":"other","message":"second"}`,
+			`{"type":"response.output_text.delta","item_id":"m","delta":"late"}`,
+			completed,
+		)},
+		{Name: "negative numbers read as zero", Endpoint: resp, Frames: f(
+			`{"type":"response.zs_image.progress","item_id":"i","value":-0,"max":-1e-400}`,
+			`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":-3,"output_tokens":-0,"output_tokens_details":{"reasoning_tokens":-1e-400}}}}`,
+		)},
+		{Name: "a negative zero in a body reads as zero", Endpoint: resp, Body: `{"status":"completed","usage":{"input_tokens":-0,"output_tokens":2}}`},
+		{Name: "an image route's completion without data is empty", Endpoint: image, Frames: f(`{"type":"response.zs_image.completed","response":{}}`)},
+		{Name: "an action holding only icons is no action", Endpoint: resp, Frames: f(
+			`{"type":"response.zs_tool_call.in_progress","item_id":"zs_1","call_id":"c","tool":"zs_web_search","action":{"icons":{"a.example":{"mime":"image/png","data_b64":"`+pngB64+`"}}}}`,
+			completed,
+		)},
+		{Name: "a chat body without choices keeps its usage", Endpoint: chat, Body: `{"usage":{"prompt_tokens":3,"completion_tokens":0}}`},
+		{Name: "a responses body holding only a function call is an answer", Endpoint: resp, Body: `{"status":"completed","output":[{"id":"fc_1","type":"function_call","call_id":"c1","name":"f","arguments":"{}"}]}`},
+		// Blank is Go's unicode.IsSpace: U+0085 is space, U+FEFF is not.
+		{Name: "a next-line character is blank", Endpoint: resp, Frames: f(
+			`{"type":"response.output_text.delta","item_id":"m","delta":"\u0085"}`,
+			completed,
+		)},
+		{Name: "a zero-width no-break space is not blank", Endpoint: resp, Frames: f(
+			// The escape is split so no editor writes the character itself,
+			// which Go refuses in source.
+			`{"type":"response.output_text.delta","item_id":"m","delta":"\u`+`feff"}`,
+			completed,
+		)},
+		{Name: "a blank chat answer is empty", Endpoint: chat, Frames: f(
+			`{"choices":[{"index":0,"delta":{"content":"\u0085\u` + `3000"},"finish_reason":"stop"}]}`,
+		)},
+	}
 }
 
 // iconVectorInputs pins the icon checks a port must apply in the same order:
@@ -291,6 +353,10 @@ func iconVectorInputs() []eventVectorCase {
 			`"d.example":`+icon("image/png", full),
 			`"rest.example":`+icon("image/png", strings.Repeat("A", maxIconsB64Chars-4*maxIconB64Chars)),
 		)},
+		{Name: "icons: a host named __proto__ is an ordinary host", Endpoint: endpointResponses, Frames: frame(
+			`"__proto__":`+icon("image/png", pngB64),
+			`"after.example":`+icon("image/png", pngB64),
+		)},
 		{Name: "icons: a repeated host keeps its last value", Endpoint: endpointResponses, Frames: frame(
 			`"dup.example":`+icon("image/png", pngB64),
 			`"other.example":`+icon("image/png", pngB64),
@@ -309,6 +375,10 @@ func iconVectorInputs() []eventVectorCase {
 			`"webp.example":`+icon("image/webp", pngB64),
 			`"not-an-object.example":"x"`,
 		)},
+		{Name: "icons: a host of at most 253 characters", Endpoint: endpointResponses, Frames: frame(
+			`"`+strings.Repeat("a", 253)+`":`+icon("image/png", pngB64),
+			`"`+strings.Repeat("b", 254)+`":`+icon("image/png", pngB64),
+		)},
 	}
 }
 
@@ -318,8 +388,8 @@ func iconVectorInputs() []eventVectorCase {
 func runEventVector(c eventVectorCase) eventVectorCase {
 	d := newDecoder(c.Endpoint)
 	var evs []Event
-	if c.Body != nil {
-		evs = d.body(c.Body)
+	if c.Body != "" {
+		evs = d.body([]byte(c.Body))
 	} else {
 		for _, fr := range c.Frames {
 			evs = append(evs, d.frame([]byte(fr))...)
@@ -371,7 +441,7 @@ func vectorEvent(ev Event) map[string]any {
 		if icons == nil {
 			icons = map[string]string{}
 		}
-		m["call_id"], m["name"], m["state"], m["action"], m["icons"] = e.CallID, e.Name, string(e.State), raw(e.Action), icons
+		m["item_id"], m["call_id"], m["name"], m["state"], m["action"], m["icons"] = e.ItemID, e.CallID, e.Name, string(e.State), raw(e.Action), icons
 	case ImageProgress:
 		m["item_id"], m["value"], m["max"] = e.ItemID, e.Value, e.Max
 	case ImagePartial:

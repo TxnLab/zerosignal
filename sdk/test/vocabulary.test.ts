@@ -77,7 +77,7 @@ const eventFields = {
     'delta.reasoning': ['itemId', 'delta'],
     'delta.tool_call': ['itemId', 'callId', 'name', 'argumentsDelta'],
     'annotation.added': ['itemId', 'annotation'],
-    'tool.status': ['callId', 'name', 'state', 'action', 'icons'],
+    'tool.status': ['itemId', 'callId', 'name', 'state', 'action', 'icons'],
     'image.progress': ['itemId', 'value', 'max'],
     'image.partial': ['itemId', 'b64', 'mime'],
     usage: ['inputTokens', 'outputTokens', 'reasoningTokens', 'source'],

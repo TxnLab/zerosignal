@@ -163,10 +163,12 @@ export interface AnnotationAdded {
 /**
  * A built-in tool the node runs on the caller's behalf. icons are the
  * sources' favicons by host, as data URLs, limited in number, size and type
- * because the node chooses their bytes.
+ * because the node chooses their bytes. itemId is the output item the call
+ * runs as; both its events carry it.
  */
 export interface ToolStatus {
     type: 'tool.status'
+    itemId: string
     callId: string
     name: string
     state: ToolState

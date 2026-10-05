@@ -187,8 +187,10 @@ const (
 // ToolStatus reports a built-in tool the node runs on the caller's behalf.
 // Action is the node's description of what the tool did, without its icons;
 // Icons are the sources' favicons by host, as data URLs, limited in number,
-// size and type (no SVG) because the node chooses their bytes.
+// size and type (no SVG) because the node chooses their bytes. ItemID is the
+// output item the call runs as; both its events carry it.
 type ToolStatus struct {
+	ItemID string
 	CallID string
 	Name   string
 	State  ToolState

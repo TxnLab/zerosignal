@@ -200,11 +200,12 @@ func (d *decoder) responsesEvent(top map[string]json.RawMessage) []Event {
 		d.zsCalls[id] = fc
 		d.answered = true
 		action, icons := toolAction(top["action"])
-		return []Event{ToolStatus{CallID: fc.id, Name: fc.name, State: ToolInProgress, Action: action, Icons: icons}}
+		return []Event{ToolStatus{ItemID: id, CallID: fc.id, Name: fc.name, State: ToolInProgress, Action: action, Icons: icons}}
 	case "response.zs_tool_call.completed":
-		fc := d.zsCalls[str(top["item_id"])]
+		id := str(top["item_id"])
+		fc := d.zsCalls[id]
 		action, icons := toolAction(top["action"])
-		return []Event{ToolStatus{CallID: fc.id, Name: fc.name, State: ToolCompleted, Action: action, Icons: icons}}
+		return []Event{ToolStatus{ItemID: id, CallID: fc.id, Name: fc.name, State: ToolCompleted, Action: action, Icons: icons}}
 	case "response.zs_image.progress":
 		return []Event{ImageProgress{ItemID: str(top["item_id"]), Value: int(num(top["value"])), Max: int(num(top["max"]))}}
 	case "response.zs_image.partial":
@@ -583,15 +584,21 @@ func isNull(raw json.RawMessage) bool {
 	return len(t) == 0 || string(t) == "null"
 }
 
-// codeString renders an error code the node sent as a string or a number.
+// codeString renders an error code the node sent as a string or a number. A
+// null is no code: OpenAI's error envelope sends one routinely, and decoding
+// it into a number would read as code 0.
 func codeString(raw json.RawMessage) string {
 	if s := str(raw); s != "" {
 		return s
 	}
 	var f float64
-	if json.Unmarshal(raw, &f) == nil {
-		b, _ := json.Marshal(f)
-		return string(b)
+	if isNull(raw) || json.Unmarshal(raw, &f) != nil {
+		return ""
 	}
-	return ""
+	if f == 0 {
+		// -0 too, as JavaScript renders it.
+		return "0"
+	}
+	b, _ := json.Marshal(f)
+	return string(b)
 }

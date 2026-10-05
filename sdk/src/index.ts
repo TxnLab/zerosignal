@@ -10,6 +10,7 @@
 
 export * from './ack.js'
 export * from './config.js'
+export * from './decode.js'
 export * from './details.js'
 export * from './errors.js'
 export * from './escrow/index.js'
