@@ -264,6 +264,20 @@ export class BadReserveEnvelopeError extends Error {
 }
 
 /**
+ * NoEphemeralError is a node with no valid, unexpired signed ephemeral to seal
+ * the reserve to. Forward secrecy is mandatory, so there is nothing to fall back
+ * to: the dispatcher skips the node rather than counting it as a transport
+ * failure, and reports no_ephemeral_capacity when every node is skipped for
+ * this. Go's errNoEphemeral.
+ */
+export class NoEphemeralError extends Error {
+    constructor() {
+        super('operator has no valid forward-secrecy ephemeral recipient')
+        this.name = 'NoEphemeralError'
+    }
+}
+
+/**
  * ReserveHTTPError is any other refusal, or a transport failure (status 0,
  * cause set) that produced no response. It carries the facts
  * zs-proto/transient's classify and narrowRelayed decide a retry from.
