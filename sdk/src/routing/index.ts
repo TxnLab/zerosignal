@@ -10,6 +10,7 @@
 // lastReachable, since a server reaches every node directly.
 
 export * from './backoff.js'
+export * from './banding.js'
 export * from './exclusion.js'
 export * from './health.js'
 export * from './latency.js'

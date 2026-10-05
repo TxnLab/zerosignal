@@ -1901,7 +1901,7 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		// (default: combined network RTT + on-chain TTFT + decode; latency:
 		// first-token only; throughput: decode only; price: no reband), price
 		// within band, with the affinity pin kept first — the "responsiveness
-		// bands" policy mirrored from the client's dispatch-candidates. No-op when
+		// bands" policy the TS SDK mirrors (sdk/src/routing/banding.ts). No-op when
 		// no node has a responsiveness signal.
 		var ranking []rankDetail
 		res.Operators, ranking = bandByResponsiveness(res.Operators, preferredOp, s.relayLatency, prefs.Sort)
@@ -2040,7 +2040,7 @@ func demoteBackedOffTargets(ops []Operator, preferred *Operator, bo TargetBackof
 // bucketed by their responsiveness score; a target only outranks a cheaper peer
 // when it's ~one band faster, so small differences never reorder (price decides
 // within a band) while a slow CPU node lands a band or more back from a fast GPU
-// one. Mirror of the client's TARGET_RESPONSIVENESS_BAND_MS. Tunable.
+// one. Mirror of the TS SDK's TARGET_RESPONSIVENESS_BAND_MS. Tunable.
 const targetResponsivenessBandMS = 500.0
 
 // maxBandsFromMedian bounds how far responsiveness may move a candidate from the
@@ -2049,7 +2049,7 @@ const targetResponsivenessBandMS = 500.0
 // unbounded band spread lets a large apparent speed edge override an arbitrarily
 // large price advantage. Clamping to one band either side leaves three buckets —
 // ahead of / with / behind the pack — and hands every finer distinction back to
-// price. Mirror of the client's MAX_BANDS_FROM_MEDIAN. Tunable.
+// price. Mirror of the TS SDK's MAX_BANDS_FROM_MEDIAN. Tunable.
 const maxBandsFromMedian = 1.0
 
 // decodeNormTokens is the fixed "typical response length" that turns a node's
@@ -2066,7 +2066,7 @@ const maxBandsFromMedian = 1.0
 // produce.
 //
 // NOT the request's max_output_tokens (an inflated upper bound that would swamp
-// the score). Mirror of the client's DECODE_NORM_TOKENS. Tunable.
+// the score). Mirror of the TS SDK's DECODE_NORM_TOKENS. Tunable.
 const decodeNormTokens = 32.0
 
 // catalogConfidence weighs a node's on-chain speed aggregates by how much of its
@@ -2113,7 +2113,7 @@ const decodeNormTokens = 32.0
 // possible dilution. A node whose catalog is declared but entirely image-only
 // lands there too, which is right for a different reason: the chain holds no
 // token-stream evidence about it at all, so "no information, mid-pack" is exactly
-// the verdict. Mirror of the client's catalogConfidence.
+// the verdict. Mirror of the TS SDK's catalogConfidence.
 func catalogConfidence(op Operator) float64 {
 	n := 0
 	for _, mc := range op.ModelCapacities {
@@ -2129,7 +2129,7 @@ func catalogConfidence(op Operator) float64 {
 
 // producesTokens reports whether a model can settle as token output — the only
 // settles that move latencyEwmaMs / tokensPerSecEwma. Undeclared modalities read
-// as yes (see catalogConfidence). Mirror of the client's `producesTokens`.
+// as yes (see catalogConfidence). Mirror of the TS SDK's `producesTokens`.
 func producesTokens(outputModalities []string) bool {
 	if len(outputModalities) == 0 {
 		return true
@@ -2198,7 +2198,7 @@ type responsivenessTerm struct {
 // Residual worth knowing: a discounted or absent term still beats being honestly
 // SLOW, since the median is by construction better than the worst candidate. This
 // bounds the incentive rather than closing it; only stake or attestation could.
-// Mirrored in client/src/operators/dispatch-candidates.ts.
+// Mirrored in sdk/src/routing/banding.ts; testdata/banding_vectors.json pins both.
 func responsivenessTerms(op Operator, lat RelayLatency, mode string) (rtt, ttft, decode responsivenessTerm) {
 	wantFirstToken := mode != selection.SortThroughput // RTT + TTFT
 	wantDecode := mode != selection.SortLatency        // tok/s term
@@ -2283,7 +2283,7 @@ func shrinkToMedian(terms []responsivenessTerm) []float64 {
 // Interpolated rather than "first value past the half-weight point" on purpose:
 // the latter needs an exact float equality on an accumulated sum to recover the
 // even-count average, and that equality is not reliable once the weights are
-// 1/sqrt(n) irrationals. Mirror of the client's confidenceWeightedMedian.
+// 1/sqrt(n) irrationals. Mirror of the TS SDK's confidenceWeightedMedian.
 func confidenceWeightedMedian(values, weights []float64) float64 {
 	if len(values) == 0 {
 		return 0
