@@ -2814,19 +2814,58 @@ func relayEvidence(ctx context.Context, hop *RelayHop, header http.Header) trans
 //   - Anything else (a recognized node code, or a sealed/forwarded target
 //     response) means the relay did its job — credit it.
 //
-// No-op for a direct route (nil hop) or when reputation is disabled.
+// No-op for a direct route (nil hop) or when reputation is disabled. The
+// decision is relayHopAction's; this applies it.
 func (s *Client) attributeRelayHop(ctx context.Context, hop *RelayHop, statusCode int, header http.Header, body []byte) {
 	if hop == nil || s.relayRep == nil {
 		return
 	}
+	// A success body is the answer itself, which only an error status is
+	// worth parsing for a code.
+	code := ""
 	if statusCode == transient.TransportFailureStatus || statusCode >= 400 {
-		raw := transient.Classify(statusCode, openAIErrorCode(body))
-		ev := relayEvidence(ctx, hop, header)
+		code = openAIErrorCode(body)
+	}
+	switch relayHopAction(statusCode, code, relayEvidence(ctx, hop, header)) {
+	case relayActionStrike:
+		s.relayRep.RecordRelayOutcome(hop.RelayRef(), false)
+	case relayActionUpstreamUnreachable:
+		s.relayRep.RecordRelayUpstreamUnreachable(hop.RelayRef(), hop.TargetRef())
+	case relayActionForwardedTargetFault:
+		s.relayRep.RecordRelayForwardedTargetFault(hop.RelayRef(), hop.TargetRef())
+	case relayActionForwardTimeout:
+		s.relayRep.RecordRelayForwardTimeout(hop.RelayRef(), hop.TargetRef())
+	case relayActionCredit:
+		s.relayRep.RecordRelayOutcome(hop.RelayRef(), true)
+	}
+}
+
+// relayAction is what one forward through a relay says about that relay, as
+// the reputation store records it.
+type relayAction string
+
+const (
+	relayActionNone                 relayAction = "none"
+	relayActionCredit               relayAction = "credit"
+	relayActionStrike               relayAction = "strike"
+	relayActionUpstreamUnreachable  relayAction = "upstream_unreachable"
+	relayActionForwardedTargetFault relayAction = "forwarded_target_fault"
+	relayActionForwardTimeout       relayAction = "forward_timeout"
+)
+
+// relayHopAction decides what a relayed forward's outcome records against the
+// relay: statusCode is the response's (transient.TransportFailureStatus when
+// none arrived), code its error.code, ev the route evidence. The TS SDK mirrors
+// it as relayHopAction in sdk/src/routing/attribution.ts, pinned by
+// testdata/relay_attribution_vectors.json. See attributeRelayHop for why each
+// attribution records what it does.
+func relayHopAction(statusCode int, code string, ev transient.RelayEvidence) relayAction {
+	if statusCode == transient.TransportFailureStatus || statusCode >= 400 {
+		raw := transient.Classify(statusCode, code)
 		v := transient.NarrowRelayed(raw, statusCode, ev)
 		switch v.Attribution {
 		case transient.AttrRelay:
-			s.relayRep.RecordRelayOutcome(hop.RelayRef(), false)
-			return
+			return relayActionStrike
 		case transient.AttrTarget:
 			// Two very different strengths of evidence land here, and they get
 			// different differentials. An explicit relay_upstream_unreachable
@@ -2837,11 +2876,9 @@ func (s *Client) attributeRelayHop(ctx context.Context, hop *RelayHop, statusCod
 			// on it would let every target restart wipe a half-broken relay's
 			// streak and hold it under the threshold forever.
 			if raw.Attribution == transient.AttrTarget {
-				s.relayRep.RecordRelayUpstreamUnreachable(hop.RelayRef(), hop.TargetRef())
-			} else {
-				s.relayRep.RecordRelayForwardedTargetFault(hop.RelayRef(), hop.TargetRef())
+				return relayActionUpstreamUnreachable
 			}
-			return
+			return relayActionForwardedTargetFault
 		case transient.AttrUnknown:
 			// Still records nothing about *fault* — the verdict genuinely can't
 			// decide, and both a credit and a penalty would be a guess.
@@ -2870,9 +2907,9 @@ func (s *Client) attributeRelayHop(ctx context.Context, hop *RelayHop, statusCod
 			// before the target's headers arrived feeds it too. The node's
 			// keepalive only starts once those headers exist.
 			if steering.IsForwardTimeoutStatus(statusCode) && !ev.CallerAborted {
-				s.relayRep.RecordRelayForwardTimeout(hop.RelayRef(), hop.TargetRef())
+				return relayActionForwardTimeout
 			}
-			return
+			return relayActionNone
 		}
 		// AttrNone reaches here only from a Classify that recognized an error
 		// code, i.e. a real response the relay carried for us — so falling
@@ -2883,10 +2920,10 @@ func (s *Client) attributeRelayHop(ctx context.Context, hop *RelayHop, statusCod
 		// standing one plausible edit away from crediting a relay we never
 		// reached.
 		if statusCode == transient.TransportFailureStatus {
-			return
+			return relayActionNone
 		}
 	}
-	s.relayRep.RecordRelayOutcome(hop.RelayRef(), true)
+	return relayActionCredit
 }
 
 // opAttr returns the (operator_id, node_id) pair identifying the target node a

@@ -7,11 +7,13 @@
 // stateful, vantage-specific signal stores kept per Client, and the pure
 // candidate selection and ordering over their readings (banding, order), the
 // payer's pick (seed), equivalent model spellings (equivalent) and what a
-// failed reserve means for the rest of the dispatch (verdict). Each store
+// failed reserve means for the rest of the dispatch (verdict), and what a
+// relayed forward records against its relay (attribution). Each store
 // mirrors one of proto/go/zs's routing Stores, except RelayHealthStore: Go
 // keeps that state in its discovery fetcher's per-cycle exclusions and
 // lastReachable, since a server reaches every node directly.
 
+export * from './attribution.js'
 export * from './backoff.js'
 export * from './banding.js'
 export * from './equivalent.js'
