@@ -28,17 +28,21 @@ func TestReserveInputCount(t *testing.T) {
 	}
 	plain := []byte(`{"model":"big","messages":[{"role":"user","content":"a small question"}]}`)
 	plainBound := prototokenize.InputTokenBound(plain)
-	// The floor applies when the body bound is below reserveMinInputCount.
-	wantPlain := plainBound
-	if wantPlain < reserveMinInputCount {
-		wantPlain = reserveMinInputCount
+	// Small enough that any floor a payer once applied (256) would show.
+	if plainBound >= 256 {
+		t.Fatalf("fixture bound %d is too large to tell a floor from the bound", plainBound)
 	}
 
-	// Plain question against a 1M model: no tools → the (floored) body bound,
-	// NOT the full window. This is the headline fix — a few hundred tokens
-	// reserved instead of ~1M.
-	if got, _ := reserveInputCount(op, "big", plain, 4096); got != wantPlain {
-		t.Errorf("plain reserve = %d, want %d (floored body bound, not the full window)", got, wantPlain)
+	// Plain question against a 1M model: no tools → the body bound itself,
+	// NOT the full window and not raised to a floor. A node never raises
+	// input_count either, so the payer's own count is what gets signed.
+	if got, _ := reserveInputCount(op, "big", plain, 4096); got != plainBound {
+		t.Errorf("plain reserve = %d, want %d (the body bound, not the full window)", got, plainBound)
+	}
+	// The smallest body there is, so a floor anywhere above FlatMargin shows.
+	empty := []byte(`{"messages":[]}`)
+	if got, want := func() uint64 { n, _ := reserveInputCount(op, "big", empty, 4096); return n }(), prototokenize.InputTokenBound(empty); got != want {
+		t.Errorf("empty-body reserve = %d, want its bound %d", got, want)
 	}
 
 	// zs_ built-in: the NODE runs the chat→tool→chat loop, so the conversation
@@ -80,12 +84,8 @@ func TestReserveInputCount(t *testing.T) {
 	for _, entry := range callerExecuted {
 		body := []byte(`{"model":"big","messages":[{"role":"user","content":"go"}],"tools":[` + entry + `]}`)
 		bound := prototokenize.InputTokenBound(body)
-		want := bound // these bodies are tiny, so the floor is what actually lands
-		if want < reserveMinInputCount {
-			want = reserveMinInputCount
-		}
-		if got, _ := reserveInputCount(op, "big", body, 4096); got != want {
-			t.Errorf("caller-executed %s reserve = %d, want %d (no headroom)", entry, got, want)
+		if got, _ := reserveInputCount(op, "big", body, 4096); got != bound {
+			t.Errorf("caller-executed %s reserve = %d, want %d (no headroom)", entry, got, bound)
 		}
 	}
 
@@ -110,9 +110,9 @@ func TestReserveInputCount(t *testing.T) {
 		t.Errorf("chain reserve = %d, want %d (full window)", got, uint64(1_000_000-4096))
 	}
 
-	// No declared window: falls through to the (floored) body bound.
-	if got, _ := reserveInputCount(op, "nowin", plain, 4096); got != wantPlain {
-		t.Errorf("no-window reserve = %d, want %d", got, wantPlain)
+	// No declared window: falls through to the body bound.
+	if got, _ := reserveInputCount(op, "nowin", plain, 4096); got != plainBound {
+		t.Errorf("no-window reserve = %d, want %d", got, plainBound)
 	}
 }
 
@@ -153,9 +153,6 @@ func TestReserveInputCountBoundVersionGate(t *testing.T) {
 				t.Fatalf("bound version = %d, want %d", version, tc.want)
 			}
 			wantCount := prototokenize.InputTokenBoundVersion(body, tc.want)
-			if wantCount < reserveMinInputCount {
-				wantCount = reserveMinInputCount
-			}
 			if got != wantCount {
 				t.Errorf("count = %d, want %d (the %d bound)", got, wantCount, tc.want)
 			}

@@ -102,15 +102,16 @@ func InputTokenBound(body []byte) uint64 {
 
 // ReserveInputCount computes the input-token count to commit to a reserve:
 // the tight body bound plus a tool-loop headroom term (zero unless the
-// request carries tools), clamped to a sane floor and — when the operator
-// declares a context window — capped at context_window − max_output_count
-// (today's worst case, so the reserve is always ≤ the old full-window
-// behavior). The cap is applied LAST so the returned value always satisfies
+// request carries tools), raised to floor and — when the operator declares a
+// context window — capped at context_window − max_output_count (today's worst
+// case, so the reserve is always ≤ the old full-window behavior). The cap is
+// applied LAST so the returned value always satisfies
 // input + max_output ≤ context_window (inject.FitsContextWindow).
 //
-// The node caps the caller's already-headroom'd value by calling with
-// carriesTools=false, bodyBound=input_count and floor=0: it must never raise
-// a payer's count past the payer's own input_count_bound.
+// Every protocol caller passes floor=0 (SPEC §3a): a node raising the count
+// would sign one past the payer's input_count_bound, and the payer's reserve
+// is its body bound. The node caps the caller's already-headroom'd value by
+// calling with carriesTools=false and bodyBound=input_count.
 func ReserveInputCount(bodyBound uint64, carriesTools bool, maxToolIterations, perIterHeadroom, maxOutput, contextWindow, floor uint64) uint64 {
 	headroom := uint64(0)
 	if carriesTools {

@@ -800,11 +800,9 @@ func validateTicketShape(t *ticket.Ticket, op Operator, req ticket.ReserveReques
 		return fmt.Errorf("ticket model %q != request model %q", t.Model, req.Model)
 	}
 	// input_count is deliberately not compared: the node caps it at
-	// context_window − max_output_count (SPEC §3a), and an older node also
-	// floored it at min_input_count, so an honest ticket can differ from the
-	// request. VerifyTicketPrice's input_count_bound is what stops a node
-	// inflating it. That bound allows the payer's own count plus 10%, so it
-	// refuses a short request from an older node whose floor was set above 256.
+	// context_window − max_output_count (SPEC §3a), so an honest ticket can
+	// carry less than was asked for. VerifyTicketPrice's input_count_bound is
+	// what stops a node inflating it.
 	if t.MaxOutputCount != req.MaxOutputCount {
 		return fmt.Errorf("ticket max_output_tokens %d != request %d", t.MaxOutputCount, req.MaxOutputCount)
 	}

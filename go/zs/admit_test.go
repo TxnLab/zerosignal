@@ -106,6 +106,13 @@ func TestAdmitEstimate_LongContextTier(t *testing.T) {
 	if got, ok := s.admitEstimate([]Operator{op}, "gpt-test", admitBody, admitSizing); !ok || got != 3*input+400 {
 		t.Errorf("long-context estimate %d (ok %v), want %d", got, ok, 3*input+400)
 	}
+	// One token short of the threshold is still the base tier.
+	below := mc
+	below.LongContextThresholdTokens = input + 1
+	op.ModelCapacities["gpt-test"] = below
+	if got, ok := s.admitEstimate([]Operator{op}, "gpt-test", admitBody, admitSizing); !ok || got != 1*input+200 {
+		t.Errorf("sub-threshold estimate %d (ok %v), want %d", got, ok, 1*input+200)
+	}
 	// Details carry the two tier rates separately, so either can be missing.
 	for name, set := range map[string]func(*ModelCapacity){
 		"input":  func(m *ModelCapacity) { m.LongContextInputUSDPer1M = nil },
@@ -221,11 +228,22 @@ func TestDispatch_AdmitPricesEveryCandidate(t *testing.T) {
 			guard := &admitGuard{limit: (low + high) / 2}
 			c, rc := admitClient(t, []Operator{dear, cheap}, guard)
 			turnErr(t, c, string(tc.body))
-			if got := guard.seen(); len(got) != 1 || got[0] != low {
-				t.Errorf("Admit saw %v, want the cheap candidate's %d (dear is %d)", got, low, high)
-			}
 			if rc.calls() == 0 {
 				t.Fatal("no reserve made: Admit refused a request the cheap candidate fits")
+			}
+			// Priced at the cheap node's $1/$2 on the input count reserved
+			// with it: dispatch sizes the body it sends, not the caller's.
+			var req ticket.ReserveRequest
+			for i, op := range rc.ops {
+				if op.ID == cheap.ID {
+					req = rc.reqs[i]
+				}
+			}
+			if req.Model == "" {
+				t.Fatal("no reserve went to the cheap node")
+			}
+			if want, got := req.InputCount+2*req.MaxOutputCount, guard.seen(); len(got) != 1 || got[0] != want {
+				t.Errorf("Admit saw %v, want the cheap candidate's %d (dear is about %d)", got, want, high)
 			}
 			if rc.ops[0].ID != tc.firstRouted {
 				t.Errorf("control: node %d routed first, want %d", rc.ops[0].ID, tc.firstRouted)

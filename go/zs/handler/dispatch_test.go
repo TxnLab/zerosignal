@@ -1676,7 +1676,12 @@ func (h *healingRegistry) ReprobeEphemeral(_ context.Context, op zs.Operator) (z
 // would otherwise 503 no_ephemeral_capacity (until the next scheduled refresh)
 // into a clean 200.
 func TestDispatch_NoEphemeral_ReprobeSelfHeals(t *testing.T) {
-	op := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
+	var reserves []ticket.ReserveRequest
+	op := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamEncrypted,
+		replyPlaintext: []byte(`{"ok":true}`),
+		onReserve:      func(req ticket.ReserveRequest) { reserves = append(reserves, req) },
+	})
 	// Capture the healthy operator (its ephemeral is the node's own identity, so
 	// the retried reserve + inference open cleanly) BEFORE stripping the cache.
 	healed := op.operator
@@ -1710,6 +1715,24 @@ func TestDispatch_NoEphemeral_ReprobeSelfHeals(t *testing.T) {
 	}
 	if op.callCount == 0 {
 		t.Error("self-heal did not reach the node on the retried reserve")
+	}
+
+	// The re-sized reserve must carry the count a healthy first attempt sends
+	// for the same body: a re-probe is no reason to reserve more.
+	var direct []ticket.ReserveRequest
+	fresh := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamEncrypted,
+		replyPlaintext: []byte(`{"ok":true}`),
+		onReserve:      func(req ticket.ReserveRequest) { direct = append(direct, req) },
+	})
+	freshCfg := testConfig()
+	w = httptest.NewRecorder()
+	testServer(freshCfg, setup(t, freshCfg, fresh)).mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+	if len(reserves) != 1 || len(direct) != 1 {
+		t.Fatalf("reserves reaching the nodes: re-probed %d, direct %d; want 1 each", len(reserves), len(direct))
+	}
+	if reserves[0].InputCount != direct[0].InputCount {
+		t.Errorf("re-probed reserve input_count = %d, want %d (what a healthy first attempt sends)", reserves[0].InputCount, direct[0].InputCount)
 	}
 }
 

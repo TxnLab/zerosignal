@@ -544,9 +544,9 @@ func TestValidateTicketShape_NodeIDMismatch(t *testing.T) {
 	}
 }
 
-// The node caps input_count at the context window (SPEC §3a), and an older node
-// also floored it at its own min_input_count, so an honest ticket can carry a
-// different count than was asked for.
+// input_count is not a shape check: the node caps it (SPEC §3a), so an honest
+// ticket can carry less than was asked for, and VerifyTicketPrice's
+// input_count_bound, not this check, refuses one that carries more.
 func TestValidateTicketShape_AcceptsAClampedInputCount(t *testing.T) {
 	op := Operator{ID: 7, NodeID: 2}
 	req := ticket.ReserveRequest{Model: "gpt-test", InputCount: 300, MaxOutputCount: 50}

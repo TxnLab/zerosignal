@@ -142,11 +142,9 @@ export async function openReserve(
  * different node, a stale ticket) is still no ticket to escrow against.
  *
  * input_count is deliberately not compared: the node caps it at
- * context_window − max_output_count (SPEC §3a), and an older node also floored
- * it at min_input_count, so an honest ticket can differ from the request.
- * verifyTicketPrice's input_count_bound is what stops a node inflating it.
- * That bound allows the payer's own count plus 10%, so it refuses a short
- * request from an older node whose floor was set above the payer's.
+ * context_window − max_output_count (SPEC §3a), so an honest ticket can carry
+ * less than was asked for. verifyTicketPrice's input_count_bound is what stops
+ * a node inflating it.
  *
  * The ticket must have at least minTtlSeconds left at nowMs, default and
  * minimum 1: Go's "not yet expired". A caller with a slow path from here to
