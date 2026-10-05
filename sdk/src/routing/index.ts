@@ -5,14 +5,15 @@
 
 // The payer's own routing layer on top of the shared selection policy: the
 // stateful, vantage-specific signal stores kept per Client, and the pure
-// candidate selection and ordering over their readings (banding, order) and
-// the payer's pick (seed). Each store
+// candidate selection and ordering over their readings (banding, order), the
+// payer's pick (seed) and equivalent model spellings (equivalent). Each store
 // mirrors one of proto/go/zs's routing Stores, except RelayHealthStore: Go
 // keeps that state in its discovery fetcher's per-cycle exclusions and
 // lastReachable, since a server reaches every node directly.
 
 export * from './backoff.js'
 export * from './banding.js'
+export * from './equivalent.js'
 export * from './exclusion.js'
 export * from './health.js'
 export * from './latency.js'
