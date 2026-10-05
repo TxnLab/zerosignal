@@ -208,6 +208,66 @@ func (s *Client) reserveWithTransientRetry(
 	deadline time.Time,
 	resize func(Operator, *ticket.ReserveRequest),
 ) reserveAttempt {
+	return retryReserve(ctx, op, hop, usePrivacy, deadline, retryReserveDeps{
+		attempt: func(op Operator, hop *RelayHop) (*ReservedTicket, error) {
+			return s.reserveClient.Reserve(ctx, op, req, hop)
+		},
+		nextHop: func(op Operator, excluded map[NodeRef]bool) (*RelayHop, error) {
+			return s.relayHopForPool(CandidatesExcluding(relaySel, excluded), op, usePrivacy)
+		},
+		reprobe: func(op Operator) (Operator, bool) {
+			refreshed, ok := s.registryProvider.ReprobeEphemeral(ctx, op)
+			// Re-size against the REFRESHED operator before re-sending. A
+			// re-probe fires exactly when the node restarted, which is the one
+			// moment its advertised proto_version and declared capacities can
+			// legitimately have changed — and the reserve's bound version is
+			// chosen per-operator. Re-issuing the pre-reprobe request would ship
+			// a v2-sized input_count to a node that just downgraded to 9.1 and
+			// measures v1, rejecting after escrow.open. Safe to mutate here:
+			// Reserve signs the payer signature itself, per call, and
+			// input_count is inside that digest, so the retry re-signs the new
+			// values.
+			if ok && resize != nil {
+				resize(refreshed, &req)
+			}
+			return refreshed, ok
+		},
+		recordRelayFailure: func(hop *RelayHop) { s.recordRelayOutcome(hop, false) },
+		note:               noteFrom(ctx),
+		now:                time.Now,
+		sleep:              sleepCtx,
+		log:                s.log,
+	})
+}
+
+// retryReserveDeps is what retryReserve reaches outside itself, as functions
+// so the loop runs the same against shared scenario vectors
+// (testdata/reserve_retry_vectors.json) as against a live client. The TS SDK's
+// reserveWithTransientRetry takes the same set.
+type retryReserveDeps struct {
+	// attempt is one reserve against op through hop.
+	attempt func(op Operator, hop *RelayHop) (*ReservedTicket, error)
+	// nextHop picks the relay to rotate to, excluding the given relays.
+	nextHop func(op Operator, excluded map[NodeRef]bool) (*RelayHop, error)
+	// reprobe re-reads op's ephemeral live; ok=false when there is none.
+	reprobe func(op Operator) (Operator, bool)
+	// recordRelayFailure charges a proven relay fault.
+	recordRelayFailure func(hop *RelayHop)
+	note               func(Event)
+	now                func() time.Time
+	sleep              func(ctx context.Context, d time.Duration) bool
+	log                *slog.Logger
+}
+
+// retryReserve is reserveWithTransientRetry's loop; see there.
+func retryReserve(
+	ctx context.Context,
+	op Operator,
+	hop *RelayHop,
+	usePrivacy bool,
+	deadline time.Time,
+	d retryReserveDeps,
+) reserveAttempt {
 	// Relays already tried for this candidate. Rotation excludes them so a
 	// retry genuinely changes the path — retrying through the same broken
 	// gateway would just burn the budget.
@@ -223,14 +283,14 @@ func (s *Client) reserveWithTransientRetry(
 	// relay, that ambiguity resolves: the target was up, so these were at
 	// fault. If every attempt fails, the slice is discarded untouched.
 	var unattributed []*RelayHop
-	note := noteFrom(ctx)
+	note := d.note
 	// The previous attempt's failure, for the event announcing the retry.
 	var failed error
 	var failedAttr transient.Attribution
 
 	for attempt := 0; attempt < transient.InnerAttempts; attempt++ {
 		if attempt > 0 {
-			d, ok := transient.Wait(transient.InnerDelay(attempt), retryAfter, time.Until(deadline))
+			wait, ok := transient.Wait(transient.InnerDelay(attempt), retryAfter, deadline.Sub(d.now()))
 			if !ok {
 				break
 			}
@@ -246,7 +306,7 @@ func (s *Client) reserveWithTransientRetry(
 				}
 				excluded[hop.RelayRef()] = true
 				var err error
-				next, err = s.relayHopForPool(CandidatesExcluding(relaySel, excluded), op, usePrivacy)
+				next, err = d.nextHop(op, excluded)
 				if err != nil {
 					// Every other relay is excluded or ineligible. Stop rather
 					// than retry the one we just abandoned, and never fall back
@@ -254,26 +314,26 @@ func (s *Client) reserveWithTransientRetry(
 					// for a request the caller asked to be relayed.
 					break
 				}
-				s.log.Debug("reserve: transient failure; rotating relay",
+				d.log.Debug("reserve: transient failure; rotating relay",
 					opAttr(op),
 					slog.Uint64("failed_relay_operator_id", hop.RelayID),
 					slog.Uint64("failed_relay_node_id", hop.RelayNodeID),
 					relayAttr(next),
 					slog.Int("attempt", attempt+1))
 			}
-			note(reserveRetrying(op, failed, failedAttr, d, attempt+1))
+			note(reserveRetrying(op, failed, failedAttr, wait, attempt+1))
 			if next != hop {
 				note(RelayHopChanged{Relay: relayOf(next), Target: RefOf(op), Reason: RelayHopRotated})
 			}
-			if !sleepCtx(ctx, d) {
+			if !d.sleep(ctx, wait) {
 				break
 			}
 			hop = next
 		}
 
-		start := time.Now()
+		start := d.now()
 		note(ReserveStarted{Target: RefOf(op), Relay: relayOf(hop), Attempt: attempt + 1})
-		rt, err := s.reserveClient.Reserve(ctx, op, req, hop)
+		rt, err := d.attempt(op, hop)
 		if !reprobed && (IsNoEphemeral(err) || IsBadReserveEnvelope(err)) {
 			// Self-heal a stale forward-secrecy ephemeral. A node mints its
 			// ephemeral before it serves and fails closed otherwise, so this is
@@ -287,28 +347,15 @@ func (s *Client) reserveWithTransientRetry(
 			// retry once; ok=false (no fresh ephemeral, or a static registry with
 			// nothing to re-probe) falls through to the normal handling.
 			reprobed = true
-			if refreshed, ok := s.registryProvider.ReprobeEphemeral(ctx, op); ok {
+			if refreshed, ok := d.reprobe(op); ok {
 				op = refreshed
-				// Re-size against the REFRESHED operator before re-sending. A
-				// re-probe fires exactly when the node restarted, which is the
-				// one moment its advertised proto_version and declared
-				// capacities can legitimately have changed — and the reserve's
-				// bound version is chosen per-operator. Re-issuing the
-				// pre-reprobe request would ship a v2-sized input_count to a
-				// node that just downgraded to 9.1 and measures v1, rejecting
-				// after escrow.open. Safe to mutate here: Reserve signs the
-				// payer signature itself, per call, and input_count is inside
-				// that digest, so the retry re-signs the new values.
-				if resize != nil {
-					resize(op, &req)
-				}
-				start = time.Now()
+				start = d.now()
 				note(ReserveStarted{Target: RefOf(op), Relay: relayOf(hop), Attempt: attempt + 1})
-				rt, err = s.reserveClient.Reserve(ctx, op, req, hop)
+				rt, err = d.attempt(op, hop)
 			}
 		}
 
-		last = reserveAttempt{Ticket: rt, Op: op, Hop: hop, Elapsed: time.Since(start), Err: err}
+		last = reserveAttempt{Ticket: rt, Op: op, Hop: hop, Elapsed: d.now().Sub(start), Err: err}
 		if err == nil {
 			// Same target, different relay, success — so the target was up all
 			// along and every earlier hop's unattributed failure was its own.
@@ -333,8 +380,8 @@ func (s *Client) reserveWithTransientRetry(
 			// healthy relay's entire budget in a single request.
 			if n := len(unattributed); n > 0 {
 				bad := unattributed[n-1]
-				s.recordRelayOutcome(bad, false)
-				s.log.Info("relay proven at fault by rotation differential",
+				d.recordRelayFailure(bad)
+				d.log.Info("relay proven at fault by rotation differential",
 					opAttr(op),
 					slog.Uint64("failed_relay_operator_id", bad.RelayID),
 					slog.Uint64("failed_relay_node_id", bad.RelayNodeID),
@@ -357,14 +404,14 @@ func (s *Client) reserveWithTransientRetry(
 				// socket, or a missing hop marker from a relay that advertises
 				// it. Penalty only — see this file's header on why the reserve
 				// leg never credits.
-				s.recordRelayOutcome(hop, false)
+				d.recordRelayFailure(hop)
 			case transient.AttrUnknown:
 				// Undecidable on its own. Hold it; a later rotation that
 				// succeeds against this same target settles it above.
 				unattributed = append(unattributed, hop)
 			}
 		}
-		s.log.Info("reserve failed with a transient infrastructure error",
+		d.log.Info("reserve failed with a transient infrastructure error",
 			opAttr(op), relayAttr(hop),
 			slog.Int("attempt", attempt+1),
 			slog.String("attribution", string(v.Attribution)),
