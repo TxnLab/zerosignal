@@ -15,7 +15,6 @@ import (
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/transient"
-	"github.com/TxnLab/zerosignal/go/wire"
 )
 
 // Transient-failure retry for the reserve leg. The failure this exists for is an
@@ -136,16 +135,7 @@ func classifyReserveErr(ctx context.Context, err error, hop *RelayHop) (transien
 	if !ok {
 		return transient.Verdict{}, 0
 	}
-	v := transient.Classify(re.Status, re.Code)
-	if hop != nil {
-		v = transient.NarrowRelayed(v, re.Status, transient.RelayEvidence{
-			Relayed:        true,
-			HopMarker:      re.RelayHopMarked,
-			RelayMarksHops: wire.SetsRelayHopHeader(hop.RelayProtoVersion),
-			CallerAborted:  callerAborted(ctx, re),
-		})
-	}
-	return v, re.RetryAfter
+	return narrowReserveVerdict(re, reserveRouteFor(ctx, err, hop)), re.RetryAfter
 }
 
 // callerAborted reports whether a reserve failure was OUR doing rather than the

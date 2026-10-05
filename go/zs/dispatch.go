@@ -795,12 +795,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			attempt := s.reserveWithTransientRetry(ctx, op, reserveReq, hop, relaySel, usePrivacy, retryDeadline, resize)
 			op, hop = attempt.Op, attempt.Hop
 			rt, err := attempt.Ticket, attempt.Err
-			// Bound once, outside the switch, so the case body works with a value the
-			// compiler knows is non-nil rather than re-deriving it with a discarded
-			// errors.As bool.
-			payerRefusal, isPayerRefusal := AsPayerRefusal(err)
-			switch {
-			case err == nil:
+			if err == nil {
 				// This node served us — clear any dispatch-failure window so it
 				// returns to the preferred tier immediately rather than serving out
 				// a backoff it has just disproved.
@@ -902,40 +897,38 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				}
 				s.runSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
 				return
-			case IsBusy(err):
-				// A considered refusal, so it ends the sweeps — tracked separately
-				// from busyHint because a 429 without a Retry-After header leaves
-				// that at zero while still being an answer, not weather.
-				sweepRefused = true
-				anyBusy = true
+			}
+			// The decision is classifyReserveFailure's (candidate_verdict.go, mirrored
+			// in the TS SDK); what follows is its side effects.
+			f := classifyReserveFailure(err, reserveRouteFor(ctx, err, hop), usePrivacy)
+			if f.Strike && s.targetBackoff != nil {
+				s.targetBackoff.RecordTargetOutcome(RefOf(op), false)
+			}
+			sweepRefused = sweepRefused || f.Refused
+			sweepHardRefusal = sweepHardRefusal || f.HardRefused
+			sweepBusy = sweepBusy || f.BusyResweepable
+			sweepTransient = sweepTransient || f.Transient
+			anyBusy = anyBusy || f.Busy
+			ephemeralMissing = ephemeralMissing || f.EphemeralMissing
+			switch f.Outcome {
+			case outcomeBusy:
+				// Tracked apart from busyHint, since a 429 without a Retry-After
+				// is still an answer, not weather.
+				if f.Hint > busyHint {
+					busyHint = f.Hint
+				}
 				var be *BusyError
-				if !errors.As(err, &be) {
-					// IsBusy matched, so this cannot happen; keep the loop
-					// safe rather than dereferencing a nil below.
-					break
-				}
-				if h := nodeRetryHint(be.RetryAfter); h > busyHint {
-					busyHint = h
-				}
-				// Gate on the code, never the bare 429: re-asking a payer_slot_cap
-				// spends a penalty strike per ask. transient.RetryableBusyCode has
-				// the full set.
-				if be.Retryable() {
-					sweepBusy = true
-				}
+				_ = errors.As(err, &be)
 				s.log.Info("operator busy; trying next",
 					opAttr(op),
 					relayAttr(hop),
 					slog.String("endpoint", endpoint),
 					slog.String("code", be.Code),
-					slog.Bool("resweepable", be.Retryable()),
+					slog.Bool("resweepable", f.BusyResweepable),
 					slog.Duration("retry_after", be.RetryAfter))
-			case IsSize(err):
-				// Node refused on a node-side capacity limit the advertised
-				// metadata didn't expose. Not retryable against the same
-				// operator — but other operators may have larger limits, so
-				// we keep iterating. Logged at Info because it's a client
-				// request shape problem, not operator misbehaviour.
+			case outcomeSize:
+				// Logged at Info because it's a client request shape problem, not
+				// operator misbehaviour.
 				var se *SizeError
 				_ = errors.As(err, &se)
 				reserveSizeRejections = append(reserveSizeRejections, reserveSizeRejection{
@@ -948,14 +941,11 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					relayAttr(hop),
 					slog.String("endpoint", endpoint),
 					slog.String("code", se.Code))
-			case isPayerRefusal:
-				// Payer-scoped refusal: the escrow contract said no about THIS
-				// PAYER, not this operator. Every remaining candidate would refuse
-				// the identical request identically, so stop the loop outright —
-				// unlike every other case here, iterating is not just wasteful, it
-				// actively misreports the condition as congestion. Surface the
-				// node's own code/message: it names the real limit and when it
-				// resets, which "all eligible operators are at capacity" does not.
+			case outcomePayerRefusal:
+				// Iterating would not just waste reserves, it would misreport the
+				// condition as congestion. Surface the node's own code and message:
+				// they name the real limit and when it resets.
+				payerRefusal, _ := AsPayerRefusal(err)
 				s.log.Info("payer-scoped refusal; not trying other operators",
 					opAttr(op),
 					relayAttr(hop),
@@ -967,75 +957,33 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				e := &Error{Kind: KindFunds, Code: payerRefusal.Code, Message: payerRefusal.Message, RetryAfter: payerRefusal.RetryAfter}
 				em.fail(e)
 				return
-			case IsNoEphemeral(err):
-				// This operator has no valid, unexpired forward-secrecy ephemeral
-				// recipient — Reserve refused to seal (mandatory forward secrecy, no
-				// durable-key fallback). Skip the candidate (NOT a transport failure)
-				// and remember why so an all-skip outcome becomes 503
-				// no_ephemeral_capacity. Debug, not Warn: a node whose ephemeral
-				// briefly lapsed (rotation gap) or hasn't been re-probed will trip
-				// this routinely, and it's a posture outcome, not operator
-				// misbehaviour. No key bytes logged — operator_id + relay only.
-				ephemeralMissing = true
+			case outcomeNoEphemeral:
+				// An all-skip outcome becomes 503 no_ephemeral_capacity. Debug, not
+				// Warn: a node whose ephemeral briefly lapsed (rotation gap) or hasn't
+				// been re-probed trips this routinely, and it's a posture outcome, not
+				// operator misbehaviour. No key bytes logged.
 				s.log.Debug("operator has no valid ephemeral recipient; skipping",
 					opAttr(op),
 					relayAttr(hop),
 					slog.String("endpoint", endpoint))
-			default:
-				// Split the old catch-all in two. An infrastructure failure (a
-				// gateway 5xx with no protocol error code, or a transport error) has
-				// already burned its per-candidate rotation inside
-				// reserveWithTransientRetry, so reaching here means that budget is
-				// spent — but it is still weather, not an answer, so it keeps the
-				// outer sweep eligible. Anything else is a genuine refusal by this
-				// operator and ends the sweeps.
-				if v, hint := classifyReserveErr(ctx, err, hop); v.Retryable {
-					sweepTransient = true
-					if hint > transientHint {
-						transientHint = hint
-					}
-					// Record a target strike ONLY for a failure this node is
-					// answerable for. A relay-side fault (AttrRelay) belongs to
-					// relay reputation. An unattributable gateway error
-					// (AttrUnknown) belongs to nobody WHEN A RELAY IS IN THE PATH —
-					// benching a healthy node for someone else's broken CDN is the
-					// exact misattribution this work set out to fix, and during a
-					// fleet-wide restart it would bench most of the pool at once.
-					// But in DIRECT mode there is no relay, so a code-less 5xx /
-					// transport failure IS this node's own ingress — strike it,
-					// exactly as the client does (its isRelayAttributable
-					// short-circuits `!isPrivacyEnabled()`). Without this branch the
-					// proxy and client diverge and a sick direct-mode node is never
-					// demoted.
-					//
-					// The verdict arrives already narrowed by the route evidence
-					// (classifyReserveErr → transient.NarrowRelayed), so the
-					// AttrUnknown that reaches here is the genuinely undecidable
-					// residue — a code-less status from a pre-9.1 relay — rather
-					// than merely an uninspected one. A relayed failure the marker
-					// resolved onto the target arrives as AttrTarget and DOES strike,
-					// through the same path a relay_upstream_unreachable claim
-					// already took.
-					if s.targetBackoff != nil && shouldRecordTargetFailure(v, usePrivacy) {
-						s.targetBackoff.RecordTargetOutcome(RefOf(op), false)
-					}
-					s.log.Warn("operator unreachable through infrastructure; trying next operator",
-						opAttr(op),
-						relayAttr(hop),
-						slog.String("endpoint", endpoint),
-						slog.String("attribution", string(v.Attribution)),
-						slog.Any("err", err))
-				} else {
-					sweepRefused = true
-					// An uncategorized reserve failure is not capacity, so it
-					// disqualifies a busy re-sweep even if another candidate was busy.
-					sweepHardRefusal = true
-					s.log.Warn("reserve failed; trying next operator",
-						opAttr(op),
-						relayAttr(hop),
-						slog.String("endpoint", endpoint),
-						slog.Any("err", err))
+			case outcomeTransient:
+				// The per-candidate rotation inside reserveWithTransientRetry is
+				// spent, but this is still weather, so the outer sweep stays eligible.
+				if f.Hint > transientHint {
+					transientHint = f.Hint
 				}
+				s.log.Warn("operator unreachable through infrastructure; trying next operator",
+					opAttr(op),
+					relayAttr(hop),
+					slog.String("endpoint", endpoint),
+					slog.String("attribution", string(f.Attribution)),
+					slog.Any("err", err))
+			default:
+				s.log.Warn("reserve failed; trying next operator",
+					opAttr(op),
+					relayAttr(hop),
+					slog.String("endpoint", endpoint),
+					slog.Any("err", err))
 			}
 		}
 
@@ -1046,49 +994,41 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		if sweepRefused {
 			anyRefusal = true
 		}
-		// Two independent reasons to sweep again, each with its own budget and its
-		// own disqualifier set.
+		// The decision is nextResweep's (candidate_verdict.go, mirrored in the TS
+		// SDK). The existing accumulators double as the record, so every path votes
+		// without extra bookkeeping.
 		//
-		// weatherBlocked is the ORIGINAL guard, term for term — a size rejection, a
-		// price violation, a relay gap, a missing ephemeral, an uncategorized
-		// reserve failure, or any busy signal. Each is a property of the request or
-		// the fleet that waiting doesn't change. The existing accumulators double as
-		// the record, so those paths vote here without extra bookkeeping.
-		weatherBlocked := sweepHardRefusal ||
-			len(reserveSizeRejections) > 0 || anyBusy ||
-			relayUnavailable || toolFactorMissing || ephemeralMissing || priceRejected
-		// busyBlocked is deliberately NARROWER, and matches the terminal ladder
-		// below: only the branches that outrank busy there may veto a busy
-		// re-sweep. `reserveSizeRejections` (the 400) and `relayUnavailable` have no
-		// busy gate, so they win over busy and must stop the re-sweep.
-		// `toolFactorMissing`, `ephemeralMissing` and `priceRejected` ARE gated on
-		// `!anyBusy`, i.e. the ladder already treats them as subordinate to busy —
-		// so letting them veto here would contradict it. That mattered in practice:
-		// `ephemeralMissing`'s own comment notes a node trips it routinely on a
-		// rotation gap, so one such candidate in a heterogeneous fleet would have
-		// disabled the re-sweep for the whole request. (Those gates read `anyBusy`,
-		// not `busyHint > 0`, precisely so this correspondence holds for a 429 that
-		// carried no Retry-After — otherwise the re-sweep would engage and the
-		// ladder would then contradict it.)
-		busyBlocked := sweepHardRefusal ||
-			len(reserveSizeRejections) > 0 || relayUnavailable
-		switch {
-		case sweepTransient && !sweepRefused && !weatherBlocked:
-			// Pure weather: every candidate failed transiently and nothing refused.
-			// Ride out the fleet restart on the slow schedule.
+		// The busy veto is narrower than the weather one because it matches the
+		// terminal ladder below: only the branches that outrank busy there may veto
+		// a busy re-sweep. That mattered in practice: ephemeralMissing's own comment
+		// notes a node trips it routinely on a rotation gap, so one such candidate
+		// in a heterogeneous fleet would have disabled the re-sweep for the whole
+		// request. (Those ladder gates read anyBusy, not busyHint > 0, precisely so
+		// this correspondence holds for a 429 that carried no Retry-After.)
+		resweep = nextResweep(sweepOutcome{
+			Transient:         sweepTransient,
+			Refused:           sweepRefused,
+			Busy:              sweepBusy,
+			HardRefused:       sweepHardRefusal,
+			SizeRejected:      len(reserveSizeRejections) > 0,
+			AnyBusy:           anyBusy,
+			RelayUnavailable:  relayUnavailable,
+			ToolFactorMissing: toolFactorMissing,
+			EphemeralMissing:  ephemeralMissing,
+			PriceRejected:     priceRejected,
+			BusyBudgetLeft:    busyRetriesLeft > 0 && time.Now().Before(busyDeadline),
+		})
+		switch resweep {
+		case resweepWeather:
+			// Pure weather: ride out the fleet restart on the slow schedule.
 			transientExhausted = true
-			resweep = resweepWeather
-		case sweepBusy && !busyBlocked && busyRetriesLeft > 0 && time.Now().Before(busyDeadline):
-			// Pure capacity: at least one candidate was at capacity, none refused for
-			// a reason waiting can't fix. Come back after the hinted wait — a slot
-			// frees the moment an in-flight ticket settles. Deliberately does NOT set
+		case resweepBusy:
+			// Pure capacity: come back after the hinted wait, since a slot frees the
+			// moment an in-flight ticket settles. Deliberately does NOT set
 			// transientExhausted: the pool is reachable, it is full, and the terminal
 			// error must stay operators_busy (with its Retry-After) rather than
 			// claiming the pool is unreachable.
 			busyRetriesLeft--
-			resweep = resweepBusy
-		default:
-			resweep = resweepNone
 		}
 		if resweep == resweepNone {
 			break
