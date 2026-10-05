@@ -70,7 +70,9 @@ host that routes for itself constructs them.
 `@txnlab/zerosignal/catalog` holds the rules a model picker ranks its rows by:
 `compareUniqueModelRows` and `pickColdStartDefault` (image tools when asked, then general
 models before domain specialists, then price), `rowServesWireId` for a row that merges several
-spellings of one model, and `deriveWeightsConsensus`, the display-only weights summary. Their
+spellings of one model, `rankFamilyCandidates`, the affordability-aware ranking an automatic
+pick takes its head of and a failed pick falls back through, and `deriveWeightsConsensus`, the
+display-only weights summary. Their
 types name only the fields the rules read, so an app's own row type passes. The Go SDK has no
 picker, so these have no Go twin.
 

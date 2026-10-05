@@ -7,4 +7,5 @@
 // has probed. Go's proxy has no picker and no automatic model pick, so nothing
 // here has a Go twin.
 
+export * from './family.js'
 export * from './rows.js'
