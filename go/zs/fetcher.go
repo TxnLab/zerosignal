@@ -581,44 +581,7 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	caps := make(map[string]ModelCapacity, len(resp.Models))
 	for _, m := range resp.Models {
 		models = append(models, m.ID)
-		caps[m.ID] = ModelCapacity{
-			ContextWindow:                m.ContextWindow,
-			MaxOutputTokens:              m.MaxOutputTokens,
-			InputModalities:              m.InputModalities,
-			OutputModalities:             m.OutputModalities,
-			InputUSDPer1M:                m.InputRateUSDPer1M,
-			OutputUSDPer1M:               m.OutputRateUSDPer1M,
-			CacheReadUSDPer1M:            m.CacheReadRateUSDPer1M,
-			LongContextThresholdTokens:   m.LongContextThresholdTokens,
-			LongContextInputUSDPer1M:     m.LongContextInputRateUSDPer1M,
-			LongContextOutputUSDPer1M:    m.LongContextOutputRateUSDPer1M,
-			LongContextCacheReadUSDPer1M: m.LongContextCacheReadRateUSDPer1M,
-			Reasoning:                    m.Reasoning,
-			ToolUse:                      m.ToolUse,
-			Tags:                         m.Tags,
-			Coordinates:                  m.Coordinates,
-			WeightsDigest:                m.WeightsDigest,
-			WeightsUnverifiable:          m.WeightsUnverifiable,
-			Source:                       m.Source,
-			CanonicalID:                  m.CanonicalID,
-			Retention:                    knownRetention(m.Retention),
-			ImageToolRateMicroUSDC:       m.ImageToolRateMicroUSDC,
-			ImageEditToolRateMicroUSDC:   m.ImageEditToolRateMicroUSDC,
-			ImageToolBaseMicroUSDC:       m.ImageToolBaseMicroUSDC,
-			ImageEditToolBaseMicroUSDC:   m.ImageEditToolBaseMicroUSDC,
-			ImageRateMicroUSDC:           m.ImageRateMicroUSDC,
-			ImageEditRateMicroUSDC:       m.ImageEditRateMicroUSDC,
-			ImageDefaultMicroUSDC:        m.ImageDefaultMicroUSDC,
-			ImageEditDefaultMicroUSDC:    m.ImageEditDefaultMicroUSDC,
-			ImageCapMicroUSDC:            m.ImageCapMicroUSDC,
-			ImageEditCapMicroUSDC:        m.ImageEditCapMicroUSDC,
-			AdvertisesImageGen:           m.ServesImageGen,
-			AdvertisesImageEdit:          m.ServesImageEdit,
-			ToolCallRatesMicroUSDC:       m.ToolCallRatesMicroUSDC,
-			VendorToolCatchAllMicroUSDC:  m.VendorToolCatchAllMicroUSDC,
-			VendorToolCallCap:            m.VendorToolCallCap,
-			VendorToolTokensPerCall:      m.VendorToolTokensPerCall,
-		}
+		caps[m.ID] = modelCapacityOf(m)
 	}
 	tools := make([]BuiltinToolDef, len(resp.BuiltinTools))
 	for j, t := range resp.BuiltinTools {
@@ -663,6 +626,48 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	// excluded from TEE-required routing same as if they'd
 	// never advertised.
 	s.probeAttestation(ctx, op, resp, attestation, usedHop, log)
+}
+
+// modelCapacityOf is one advertised model as the registry keeps it.
+func modelCapacityOf(m inject.OperatorDetailsModel) ModelCapacity {
+	return ModelCapacity{
+		ContextWindow:                m.ContextWindow,
+		MaxOutputTokens:              m.MaxOutputTokens,
+		InputModalities:              m.InputModalities,
+		OutputModalities:             m.OutputModalities,
+		InputUSDPer1M:                m.InputRateUSDPer1M,
+		OutputUSDPer1M:               m.OutputRateUSDPer1M,
+		CacheReadUSDPer1M:            m.CacheReadRateUSDPer1M,
+		LongContextThresholdTokens:   m.LongContextThresholdTokens,
+		LongContextInputUSDPer1M:     m.LongContextInputRateUSDPer1M,
+		LongContextOutputUSDPer1M:    m.LongContextOutputRateUSDPer1M,
+		LongContextCacheReadUSDPer1M: m.LongContextCacheReadRateUSDPer1M,
+		Reasoning:                    m.Reasoning,
+		ToolUse:                      m.ToolUse,
+		Tags:                         m.Tags,
+		Coordinates:                  m.Coordinates,
+		WeightsDigest:                m.WeightsDigest,
+		WeightsUnverifiable:          m.WeightsUnverifiable,
+		Source:                       m.Source,
+		CanonicalID:                  m.CanonicalID,
+		Retention:                    knownRetention(m.Retention),
+		ImageToolRateMicroUSDC:       m.ImageToolRateMicroUSDC,
+		ImageEditToolRateMicroUSDC:   m.ImageEditToolRateMicroUSDC,
+		ImageToolBaseMicroUSDC:       m.ImageToolBaseMicroUSDC,
+		ImageEditToolBaseMicroUSDC:   m.ImageEditToolBaseMicroUSDC,
+		ImageRateMicroUSDC:           m.ImageRateMicroUSDC,
+		ImageEditRateMicroUSDC:       m.ImageEditRateMicroUSDC,
+		ImageDefaultMicroUSDC:        m.ImageDefaultMicroUSDC,
+		ImageEditDefaultMicroUSDC:    m.ImageEditDefaultMicroUSDC,
+		ImageCapMicroUSDC:            m.ImageCapMicroUSDC,
+		ImageEditCapMicroUSDC:        m.ImageEditCapMicroUSDC,
+		AdvertisesImageGen:           m.ServesImageGen,
+		AdvertisesImageEdit:          m.ServesImageEdit,
+		ToolCallRatesMicroUSDC:       m.ToolCallRatesMicroUSDC,
+		VendorToolCatchAllMicroUSDC:  m.VendorToolCatchAllMicroUSDC,
+		VendorToolCallCap:            m.VendorToolCallCap,
+		VendorToolTokensPerCall:      m.VendorToolTokensPerCall,
+	}
 }
 
 // knownRetention drops a retention tier this build does not recognise, leaving

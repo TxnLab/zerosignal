@@ -3319,10 +3319,17 @@ func (s *Client) warmFeeRate() {
 // Dedicated image / character / seconds tickets are skipped inside
 // VerifyTicketPrice itself (priced by imageprice/videoprice, not per token).
 func (s *Client) verifyReservePrice(op Operator, req ticket.ReserveRequest, t *ticket.Ticket) *pricing.Violation {
+	return reservePriceViolation(op, req, t, s.feeRateNow)
+}
+
+// reservePriceViolation is verifyReservePrice with the fee read injected, so
+// testdata/reserve_price_vectors.json can pin it for the TypeScript SDK. The
+// fee is read only once the image-tool skip has passed, as before.
+func reservePriceViolation(op Operator, req ticket.ReserveRequest, t *ticket.Ticket, fee func() (uint64, bool)) *pricing.Violation {
 	if req.ImageToolBudget > 0 || req.ImageEditToolBudget > 0 {
 		return nil
 	}
-	feeBps, ok := s.feeRateNow()
+	feeBps, ok := fee()
 	if !ok {
 		return nil
 	}

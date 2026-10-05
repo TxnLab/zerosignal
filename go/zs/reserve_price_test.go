@@ -201,6 +201,23 @@ func TestVerifyReservePrice_FailsOpenOnImageToolBudget(t *testing.T) {
 	}
 }
 
+// The image-tool skip comes before the fee read, so a skipped gate never
+// refreshes the fee cache.
+func TestReservePriceViolation_ImageBudgetReadsNoFee(t *testing.T) {
+	for _, req := range []ticket.ReserveRequest{
+		{Model: "m", InputCount: 1000, ImageToolBudget: 4},
+		{Model: "m", InputCount: 1000, ImageEditToolBudget: 2},
+	} {
+		v := reservePriceViolation(priceTestOperator(), req, priceTestTicket(), func() (uint64, bool) {
+			t.Fatal("fee read with an image-tool budget")
+			return 0, false
+		})
+		if v != nil {
+			t.Fatalf("expected the gate skipped, got %+v", v)
+		}
+	}
+}
+
 // A tool-pricing model's inflated max_price is REPRODUCED (not skipped): the
 // vendor fee headroom (call_cap × rate) is folded into the expected max_price so
 // the max_price recompute reconciles and the ticket passes.
