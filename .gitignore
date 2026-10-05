@@ -6,3 +6,4 @@ sdk/*.tgz
 .idea/
 .claude/
 ts/*.tgz
+/go/zschat
