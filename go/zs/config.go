@@ -101,6 +101,14 @@ type Stores struct {
 	// second Client that finishes rows, but not one with a caller's Wallet,
 	// whose live tickets the first would then race its watchdog to refund.
 	Journal TicketJournal
+	// JournalPath, instead of Journal, is a file New opens as the journal
+	// (OpenFileJournal) and Close closes, after the reconciler has let go of
+	// it. Name one file per escrow app, so a process on one network never
+	// locks out a process on another. Another Client in this process with
+	// the same file fails New. A file another process holds, or one that
+	// will not open, is left untouched and this Client journals in memory,
+	// with a warning logged; JournalDurable then reports false.
+	JournalPath string
 
 	// CollateralDir is a state directory the TEE collateral cache persists
 	// to, so a restart during an Intel PCS outage still has collateral to
@@ -360,6 +368,9 @@ func (c Config) validate() (ac algod.Config, appID uint64, warnings []string, er
 	case AffinityPrefer, AffinityStrict, AffinityNone:
 	default:
 		return ac, 0, nil, configError(fmt.Sprintf("unknown Affinity.Policy %q", c.Affinity.Policy))
+	}
+	if c.Stores.Journal != nil && c.Stores.JournalPath != "" {
+		return ac, 0, nil, configError("set Stores.Journal or Stores.JournalPath, not both")
 	}
 	ac = c.Network.Algod
 	if ac.Network == "" && ac.Endpoint == "" {

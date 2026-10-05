@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
@@ -238,6 +239,27 @@ func claimJournal(j TicketJournal) (release func(), ok bool) {
 	}
 	return sync.OnceFunc(func() { journalsSwept.Delete(j) }), true
 }
+
+// journalPathsOpen holds the Stores.JournalPath files Clients in this process
+// have open, by absolute path. The file lock alone cannot tell another Client
+// here from another process.
+var journalPathsOpen sync.Map
+
+func journalPathKey(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
+}
+
+// claimJournalPath reports false when another Client in this process has path
+// open.
+func claimJournalPath(path string) bool {
+	_, taken := journalPathsOpen.LoadOrStore(journalPathKey(path), struct{}{})
+	return !taken
+}
+
+func releaseJournalPath(path string) { journalPathsOpen.Delete(journalPathKey(path)) }
 
 func (r *reconciler) stopped() bool { return r.ctx.Err() != nil }
 

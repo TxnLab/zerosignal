@@ -161,6 +161,11 @@ type Client struct {
 
 	// stop ends the background work New started; nil when it started none.
 	stop func()
+	// ownJournal is the journal New opened from Stores.JournalPath, which
+	// Close closes; nil when the caller supplied or New defaulted it.
+	ownJournal *FileJournal
+	// durableJournal is what JournalDurable reports.
+	durableJournal bool
 }
 
 // New builds a Client, and each nil Registry, ReserveClient and Wallet from
@@ -221,21 +226,50 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		}
 		tok = tokenize.BuildRegistry(cfg.MaxOutputByModel, fallback)
 	}
+	// stopParts undoes what New has started so far, on a failure from here on.
+	var ownJournal *FileJournal
+	stopParts := func() {
+		if parts.stop != nil {
+			parts.stop()
+		}
+		if ownJournal != nil {
+			_ = ownJournal.Close()
+			releaseJournalPath(st.JournalPath)
+		}
+	}
+	if st.JournalPath != "" {
+		// Another Client in this process holding the file is a wiring
+		// mistake, refused as a shared Stores.Journal is; another process
+		// holding it, or a file that will not open, is not this caller's to
+		// fix at startup, and the file is left as it is either way.
+		if !claimJournalPath(st.JournalPath) {
+			stopParts()
+			return nil, configError("Stores.JournalPath is already open in another Client in this process: each Client needs its own journal file")
+		}
+		j, err := OpenFileJournal(st.JournalPath)
+		if err != nil {
+			releaseJournalPath(st.JournalPath)
+			cfg.Logger.Warn("ticket journal file is not used: a ticket this Client leaves open after a crash is refunded only by hand",
+				slog.String("path", st.JournalPath), slog.Any("err", err))
+		} else {
+			ownJournal, st.Journal = j, j
+		}
+	}
 	// Only the SDK's own wallet runs a reconciler, which is what deletes rows;
 	// with a caller's wallet a default journal would only grow.
 	sdkWallet, _ := cfg.Wallet.(*Wallet)
 	durableJournal := st.Journal != nil
 	if st.Journal == nil && sdkWallet != nil {
 		st.Journal = newMemJournal()
-		cfg.Logger.Info("open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.Journal to keep them")
+		if st.JournalPath == "" {
+			cfg.Logger.Info("open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.JournalPath to keep them")
+		}
 	}
 	var release func()
 	if sdkWallet != nil {
 		var ok bool
 		if release, ok = claimJournal(st.Journal); !ok {
-			if parts.stop != nil {
-				parts.stop()
-			}
+			stopParts()
 			return nil, configError("Stores.Journal is already swept by another Client in this process: each Client that builds or is handed a *Wallet needs its own journal")
 		}
 	}
@@ -261,6 +295,8 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		sweepDelayFn:     cfg.SweepDelay,
 		debugLogBodies:   cfg.DebugLogBodies,
 		stop:             parts.stop,
+		ownJournal:       ownJournal,
+		durableJournal:   durableJournal,
 	}
 	c.refunds.remedy = cfg.Remedies.RecoverTicket
 	if cfg.SpendGuard != nil {
@@ -291,7 +327,8 @@ func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults() }
 // a refund it already sent, and leaves the tickets it watched to the next
 // Client that sweeps that journal, or to the next process. A request still in
 // flight on the closed Client is then not watched here, so WaitSettles before
-// Close when no Client follows. Safe to call more than once.
+// Close when no Client follows. A journal New opened from Stores.JournalPath
+// is closed last. Safe to call more than once.
 func (s *Client) Close() {
 	if s.stop != nil {
 		s.stop()
@@ -303,7 +340,16 @@ func (s *Client) Close() {
 		}
 		s.reconcile.close(handOff)
 	}
+	if s.ownJournal != nil && s.ownJournal.Close() == nil {
+		releaseJournalPath(s.cfg.Stores.JournalPath)
+	}
 }
+
+// JournalDurable reports whether this Client journals open tickets somewhere
+// that outlives the process: a Stores.Journal the caller supplied, or the
+// file Stores.JournalPath names. False is the in-memory default, after which
+// a ticket left open by a crash is refunded only by hand.
+func (s *Client) JournalDurable() bool { return s.durableJournal }
 
 // Config is the Client's configuration with every default applied and the
 // parts New built filled in.

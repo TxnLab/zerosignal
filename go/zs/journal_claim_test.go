@@ -7,6 +7,8 @@ package zs
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
@@ -197,4 +199,132 @@ func TestNew_RefusedNewStopsTheRegistryItBuilt(t *testing.T) {
 	if after := registryLoops(); after > before {
 		t.Errorf("a refused New left %d discovery loop(s) running", after-before)
 	}
+}
+
+// pathConfig is sweepingConfig with the journal named by path.
+func pathConfig(t *testing.T, url, path string) Config {
+	t.Helper()
+	cfg := sweepingConfig(t, url, nil)
+	cfg.Stores.JournalPath = path
+	return cfg
+}
+
+// New holds the file named by Stores.JournalPath for the Client's life, sweeps
+// it, and Close lets it go after the reconciler has.
+func TestJournalPath_HeldUntilClose(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	path := filepath.Join(t.TempDir(), "journal.json")
+	c, err := New(context.Background(), pathConfig(t, url, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.reconcile == nil || !c.reconcile.handOff || !c.JournalDurable() {
+		t.Error("the Client does not sweep the file as a durable journal")
+	}
+	if j, err := OpenFileJournal(path); !errors.Is(err, ErrJournalInUse) {
+		if j != nil {
+			j.Close()
+		}
+		t.Fatalf("while the Client is open, a second open got %v, want ErrJournalInUse", err)
+	}
+
+	release := c.reconcile.release
+	var released bool
+	c.reconcile.release = func() {
+		if !released && c.ownJournal.lock == nil {
+			t.Error("the journal file was closed before the reconciler let go of it")
+		}
+		released = true
+		release()
+	}
+	c.Close()
+	if !released {
+		t.Fatal("Close never released the journal")
+	}
+	j, err := OpenFileJournal(path)
+	if err != nil {
+		t.Fatalf("after Close the file is still held: %v", err)
+	}
+	j.Close()
+	c.Close() // a second Close is still safe
+}
+
+// A file another process holds, or one that will not load, is not this
+// caller's to fix at startup: New journals in memory, says so through
+// JournalDurable, and leaves the file as it found it.
+func TestJournalPath_UnusableFileJournalsInMemory(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	for name, prepare := range map[string]func(t *testing.T, path string){
+		"held elsewhere": func(t *testing.T, path string) {
+			other, err := OpenFileJournal(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { other.Close() })
+		},
+		"unreadable": func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "journal.json")
+			prepare(t, path)
+			before, _ := os.ReadFile(path)
+
+			c, err := New(context.Background(), pathConfig(t, url, path))
+			if err != nil {
+				t.Fatalf("New failed: %v", err)
+			}
+			defer c.Close()
+			if _, ok := c.journal.(*memJournal); !ok || c.ownJournal != nil {
+				t.Errorf("journal is %T (own %v), want the in-memory default", c.journal, c.ownJournal)
+			}
+			if c.JournalDurable() || c.reconcile.handOff {
+				t.Error("an in-memory journal reports itself durable")
+			}
+			if after, _ := os.ReadFile(path); string(after) != string(before) {
+				t.Errorf("the file changed from %q to %q", before, after)
+			}
+		})
+	}
+}
+
+func TestJournalPath_Refusals(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	dir := t.TempDir()
+
+	t.Run("Journal and JournalPath", func(t *testing.T) {
+		both := pathConfig(t, url, filepath.Join(dir, "both.json"))
+		both.Stores.Journal = openTestJournal(t)
+		if c, err := New(context.Background(), both); err == nil {
+			c.Close()
+			t.Fatal("New succeeded")
+		}
+	})
+
+	// A hot swap that builds the new Client before closing the old one must
+	// not quietly lose the journal.
+	t.Run("same file, same process", func(t *testing.T) {
+		path := filepath.Join(dir, "shared.json")
+		first, err := New(context.Background(), pathConfig(t, url, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c, err := New(context.Background(), pathConfig(t, url, path)); err == nil {
+			c.Close()
+			first.Close()
+			t.Fatal("a second Client on the same journal file was admitted")
+		}
+		first.Close()
+		next, err := New(context.Background(), pathConfig(t, url, path))
+		if err != nil {
+			t.Fatalf("after the first Client closed, the file was still claimed: %v", err)
+		}
+		if !next.JournalDurable() {
+			t.Error("the next Client does not journal to the file")
+		}
+		next.Close()
+	})
 }
