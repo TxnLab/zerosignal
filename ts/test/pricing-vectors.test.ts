@@ -23,7 +23,9 @@ import {
   expectedMaxPrice,
   toolFeeReserveMicroUSDC,
   isLongContext,
+  verifyTicketPrice,
 } from '../src/pricing/index.js'
+import { UsageType } from '../src/ticket/index.js'
 
 interface UsdRateCase {
   name: string
@@ -93,6 +95,35 @@ interface LongContextCase {
   threshold: number
   expected: boolean
 }
+interface VerifyCase {
+  name: string
+  ticket: {
+    input_count: number
+    max_output_count: number
+    input_rate: number
+    output_rate: number
+    cache_read_rate: number
+    min_price: number
+    max_price: number
+    output_usage_type: number
+  }
+  advertised: {
+    input_usd_per_1m: number
+    output_usd_per_1m: number
+    cache_read_rate_usd_per_1m?: number
+    min_charge_output_tokens: number
+    min_charge_micro_usdc: number
+    long_context_threshold_tokens: number
+    long_context_input_usd_per_1m?: number
+    long_context_output_usd_per_1m?: number
+    long_context_cache_read_rate_usd_per_1m?: number
+  }
+  fee_bps: number
+  reserve_input_count: number
+  image_tool_budget: number
+  policy: { rate_max_multiple: number; input_count_tolerance: number; fail_open: boolean }
+  expected: { check: string; field: string; want: number; got: number } | null
+}
 interface PricingVectorsFile {
   version: number
   comment: string
@@ -104,6 +135,7 @@ interface PricingVectorsFile {
   max_price: MaxPriceCase[]
   tool_fee_reserve: ToolFeeReserveCase[]
   long_context: LongContextCase[]
+  verify: VerifyCase[]
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -155,6 +187,44 @@ describe('pricing vectors', () => {
   for (const c of vectors.long_context) {
     it(`isLongContext: ${c.name}`, () => {
       expect(isLongContext(c.input_count, c.threshold)).toBe(c.expected)
+    })
+  }
+  it('verify section is present', () => {
+    expect(vectors.verify.length).toBeGreaterThan(0)
+  })
+  for (const c of vectors.verify) {
+    it(`verifyTicketPrice: ${c.name}`, () => {
+      const a = c.advertised
+      const v = verifyTicketPrice(
+        {
+          ticket_id: 't',
+          operator_id: 1,
+          node_id: 1,
+          ...c.ticket,
+          output_usage_type: c.ticket.output_usage_type as UsageType,
+          expires_at: 0,
+          model: 'm',
+          stream: false,
+          commit_k: 'k',
+          input_usage_type: UsageType.Tokens,
+        },
+        {
+          inputUsdPer1m: a.input_usd_per_1m,
+          outputUsdPer1m: a.output_usd_per_1m,
+          cacheReadRateUsdPer1m: a.cache_read_rate_usd_per_1m,
+          minChargeOutputTokens: a.min_charge_output_tokens,
+          minChargeMicroUsdc: a.min_charge_micro_usdc,
+          longContextThresholdTokens: a.long_context_threshold_tokens,
+          longContextInputUsdPer1m: a.long_context_input_usd_per_1m,
+          longContextOutputUsdPer1m: a.long_context_output_usd_per_1m,
+          longContextCacheReadRateUsdPer1m: a.long_context_cache_read_rate_usd_per_1m,
+        },
+        c.fee_bps,
+        c.reserve_input_count,
+        c.image_tool_budget,
+        { rateMaxMultiple: c.policy.rate_max_multiple, inputCountTolerance: c.policy.input_count_tolerance, failOpen: c.policy.fail_open },
+      )
+      expect(v && { check: v.check, field: v.field, want: v.want, got: v.got }).toEqual(c.expected)
     })
   }
 })

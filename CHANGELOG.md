@@ -31,6 +31,23 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-04 — the price verifiers agree at the uint64 edge
+
+- `verifyTicketPrice` (`@txnlab/zs-proto/pricing`) recomputes `max_price` exactly, in bigint,
+  and treats a recompute Go cannot represent in uint64 as Go does: skipped under `failOpen`,
+  a `max_price` violation (want 0) otherwise. It had compared an inexact float and always
+  refused.
+- A non-integer count, rate, `min_price`, `max_price`, fee or image-tool budget is refused as
+  `max_price` under every policy. It had thrown a `RangeError`. Go cannot hold one, and
+  fail-open must not skip it: a budget built from an operator's fractional tool rate would
+  otherwise switch the check off.
+- Go's `ceil(x/d)` in `pricing` (`CeilInputCost`, and the products behind `ExpectedMaxPrice`)
+  and `imageprice` no longer wraps when `x` is within `d` of the uint64 limit. It priced such
+  an amount at about 0; TS, in bigint, never wrapped. No real ticket comes near.
+- `pricing_vectors.json` (version 4) gains a `verify` section: Go's verdict on 56 tickets,
+  covering every check, every boundary and each overflow guard. Both verifiers are tested
+  against it.
+
 ### 2026-10-04 — no reserve input floor
 
 A payer's reserve no longer raises `input_count` to 256: dispatch reserves the body bound

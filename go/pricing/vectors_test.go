@@ -8,7 +8,8 @@ package pricing_test
 // Cross-impl byte-parity test for the shared token-pricing math. Generates /
 // verifies proto/testdata/pricing_vectors.json — a language-neutral fixture that
 // pins USDRateToMicroUSDCPer1M, CeilInputCost, ChargeFor, ReserveMinPrice,
-// MinChargeFloor, ExpectedMaxPrice, and ToolFeeReserveMicroUSDC. proto/ts/src/pricing loads the same file
+// MinChargeFloor, ExpectedMaxPrice, ToolFeeReserveMicroUSDC, IsLongContext and
+// VerifyTicketPrice's decisions. proto/ts/src/pricing loads the same file
 // and asserts equality, so the node's pricer and the payer-side verifier can
 // never silently drift across languages.
 //
@@ -120,6 +121,7 @@ type pricingVectorsFile struct {
 	MaxPrice        []maxPriceVector        `json:"max_price"`
 	ToolFeeReserve  []toolFeeReserveVector  `json:"tool_fee_reserve"`
 	LongContext     []longContextVector     `json:"long_context"`
+	Verify          []verifyVector          `json:"verify"`
 }
 
 func mustU64(t *testing.T, name string, v uint64, err error) uint64 {
@@ -151,6 +153,8 @@ func buildPricingVectors(t *testing.T) *pricingVectorsFile {
 		{Name: "all_cached", NonCached: 0, InputRate: 2_000_000, Cached: 1000, CacheReadRate: 500_000},
 		{Name: "single_token_ceil", NonCached: 1, InputRate: 1, Cached: 0, CacheReadRate: 0},
 		{Name: "bigint_range", NonCached: 10_000_000, InputRate: 1_000_000_000, Cached: 0, CacheReadRate: 0},
+		// (2^32-1)(2^32+1) = 2^64-1: a numerator within the denominator of the limit.
+		{Name: "numerator_at_u64_max", NonCached: 4294967295, InputRate: 4294967297, Cached: 0, CacheReadRate: 0},
 	}
 	for i := range inputCost {
 		c := &inputCost[i]
@@ -240,7 +244,7 @@ func buildPricingVectors(t *testing.T) *pricingVectorsFile {
 	}
 
 	return &pricingVectorsFile{
-		Version: 3,
+		Version: 4,
 		Comment: "Cross-impl byte-parity vectors for shared token pricing. " +
 			"Regenerate via: cd proto/go && go test ./pricing -run TestVectors -update. " +
 			"Loaded by proto/go/pricing/vectors_test.go and proto/ts/test/pricing-vectors.test.ts.",
@@ -252,6 +256,7 @@ func buildPricingVectors(t *testing.T) *pricingVectorsFile {
 		MaxPrice:        maxPrice,
 		ToolFeeReserve:  toolFee,
 		LongContext:     longContext,
+		Verify:          buildVerifyVectors(t),
 	}
 }
 

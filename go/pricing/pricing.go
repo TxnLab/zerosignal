@@ -84,8 +84,7 @@ func ceilMulDiv(a, b, d uint64) (uint64, error) {
 	if a > math.MaxUint64/b {
 		return 0, errors.New("overflow")
 	}
-	prod := a * b
-	return (prod + d - 1) / d, nil
+	return ceilQuo(a*b, d), nil
 }
 
 // USDRateToMicroUSDCPer1M converts a USD-per-1M-tokens rate to microUSDC per 1M
@@ -129,7 +128,17 @@ func CeilInputCost(nonCached, inputRate, cached, cacheReadRate uint64) (uint64, 
 	if num == 0 {
 		return 0, nil
 	}
-	return (num + RateDenominatorTokens - 1) / RateDenominatorTokens, nil
+	return ceilQuo(num, RateDenominatorTokens), nil
+}
+
+// ceilQuo is ceil(x/d) for d > 0. (x + d - 1) / d is the usual form, but the sum
+// wraps once x is within d of MaxUint64 and prices a near-limit amount at ~0.
+func ceilQuo(x, d uint64) uint64 {
+	q := x / d
+	if x%d != 0 {
+		q++
+	}
+	return q
 }
 
 // RateBasedMaxPrice is the reserve-time rate ceiling for a token ticket:
