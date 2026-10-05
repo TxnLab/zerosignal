@@ -20,12 +20,12 @@ GO   ?= go
 PNPM ?= pnpm
 
 .PHONY: test test-go test-ts test-sdk build-ts check-lockstep verify-vectors update-vectors update-sealed-vectors \
-	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt vet typecheck
+	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
 # vector-staleness is caught here too.
-test: check-vector-generators check-no-hayai check-lockstep test-go test-ts test-sdk
+test: check-vector-generators check-no-hayai check-lockstep check-escrow-client test-go test-ts test-sdk
 
 test-go:
 	cd go && $(GO) test ./... -count 1
@@ -59,6 +59,14 @@ verify-vectors:
 # them came to be silently skipped by update-vectors.
 check-vector-generators:
 	./scripts/check-vector-generators.sh
+
+# Fails when sdk/'s committed escrow client is not what the in-repo ARC-56
+# generates, which is how the client's copy came to embed a stale contract.
+check-escrow-client: node_modules
+	@tmp="$$(mktemp -d)" || exit 1; trap 'rm -rf "$$tmp"' EXIT; \
+	sdk/scripts/gen-escrow-client.sh "$$tmp/ZeroSignalEscrowClient.ts" || exit 1; \
+	cmp -s "$$tmp/ZeroSignalEscrowClient.ts" sdk/src/escrow/generated/ZeroSignalEscrowClient.ts || \
+	{ echo "sdk escrow client is stale (run: pnpm -C sdk gen:client)"; exit 1; }
 
 # Fails when the old project name reappears in the published code. The test
 # runs first: on the real tree the guard only ever passes, so the test is what

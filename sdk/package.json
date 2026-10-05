@@ -36,6 +36,10 @@
             "types": "./dist/proto/*.d.ts",
             "import": "./dist/proto/*.js"
         },
+        "./escrow-client": {
+            "types": "./dist/escrow/generated/ZeroSignalEscrowClient.d.ts",
+            "import": "./dist/escrow/generated/ZeroSignalEscrowClient.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [
@@ -57,6 +61,7 @@
     },
     "scripts": {
         "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "gen:client": "./scripts/gen-escrow-client.sh src/escrow/generated/ZeroSignalEscrowClient.ts",
         "prepublishOnly": "pnpm test && pnpm build",
         "test": "vitest --run",
         "test:watch": "vitest",
@@ -67,7 +72,17 @@
         "@txnlab/zs-proto": "workspace:*",
         "algosdk": "^3.6.0"
     },
+    "peerDependencies": {
+        "@algorandfoundation/algokit-utils": "^9.2.0"
+    },
+    "peerDependenciesMeta": {
+        "@algorandfoundation/algokit-utils": {
+            "optional": true
+        }
+    },
     "devDependencies": {
+        "@algorandfoundation/algokit-client-generator": "^6.0.1",
+        "@algorandfoundation/algokit-utils": "9.2.0",
         "@types/node": "^22.10.0",
         "typescript": "5.6.3",
         "vitest": "3.2.6"
