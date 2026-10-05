@@ -469,32 +469,38 @@ func (p *DynamicRegistryProvider) fetchAndProbe(ctx context.Context, prev *regis
 // re-probed and new models get discovered. At least a quarter of the budget is
 // reserved for the sweep so coverage always progresses even under heavy demand.
 func (p *DynamicRegistryProvider) selectProbeSet(ops []Operator) map[NodeRef]bool {
-	if p.probeBudget <= 0 || len(ops) <= p.probeBudget {
-		return nil
+	set, cursor := probeSelection(ops, p.snapshotDemand(), p.probeBudget, p.targetTopK, p.sweepCursor)
+	p.sweepCursor = cursor
+	return set
+}
+
+// probeSelection is selectProbeSet without the provider: ops in (id, node)
+// order, demand most-recent first, and the sweep cursor in and out. The TS SDK
+// mirrors it as selectProbeSet in sdk/src/catalog/probe.ts, pinned by
+// testdata/probe_set_vectors.json.
+func probeSelection(ops []Operator, demand []string, budget, targetTopK, cursor int) (map[NodeRef]bool, int) {
+	if budget <= 0 || len(ops) <= budget {
+		return nil, cursor
 	}
-	budget := p.probeBudget
+	// At least 1 for any budget past the early return above.
 	demandCap := budget - budget/4
-	if demandCap < 1 {
-		demandCap = budget
-	}
 	set := make(map[NodeRef]bool, budget)
-	for _, m := range p.snapshotDemand() {
+	for _, m := range demand {
 		if len(set) >= demandCap {
 			break
 		}
 		servers := serversForModel(ops, m)
 		sortByResponsiveness(servers)
-		for i := 0; i < len(servers) && i < p.targetTopK && len(set) < demandCap; i++ {
+		for i := 0; i < len(servers) && i < targetTopK && len(set) < demandCap; i++ {
 			set[RefOf(servers[i])] = true
 		}
 	}
 	n := len(ops)
 	scanned := 0
 	for ; scanned < n && len(set) < budget; scanned++ {
-		set[RefOf(ops[(p.sweepCursor+scanned)%n])] = true
+		set[RefOf(ops[(cursor+scanned)%n])] = true
 	}
-	p.sweepCursor = (p.sweepCursor + scanned) % n
-	return set
+	return set, (cursor + scanned) % n
 }
 
 // serversForModel returns the ops whose (carried-forward or freshly-probed)
@@ -521,8 +527,9 @@ func sortByResponsiveness(ops []Operator) {
 // responsivenessScore is a probe-priority key (lower = probe first): the node's
 // on-chain co-signed TTFT plus a light decode term. A node with no on-chain
 // latency signal sorts last (the rolling sweep picks it up instead of crowding
-// out a known-fast server). App-side, not golden-vectored — mirrors the
-// dispatch-side responsiveness banding in spirit.
+// out a known-fast server). Mirrors the dispatch-side responsiveness banding in
+// spirit; the TS SDK's probeResponsivenessScore matches it exactly, pinned
+// through probe_set_vectors.json.
 func responsivenessScore(op Operator) uint64 {
 	ttft := op.Metrics.LatencyEwmaMs
 	if ttft == 0 {
