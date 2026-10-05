@@ -613,6 +613,7 @@ func verifyTDXQuoteChainWith(ctx context.Context, quote []byte, cache contextGet
 	getter := &verifyGetter{inner: cache, ctx: ctx}
 
 	opts := tdxverify.DefaultOptions()
+	opts.TrustedRoots = attest.IntelSGXRootCAs()
 	opts.GetCollateral = true
 	opts.CheckRevocations = true
 	opts.Getter = getter
@@ -645,11 +646,12 @@ func verifyTDXQuoteChainWith(ctx context.Context, quote []byte, cache contextGet
 		// as an outage, and then handed to the node's own collateral,
 		// which SPEC §3e rule 1 forbids.
 		//
-		// Unreachable today: the root in go-tdx-guest's trusted_root.pem
-		// carries exactly one CDP. Written down because the fallback made
-		// this load-bearing in a way it was not before, and because the
-		// thing that would change it is an Intel reissue, which nothing
-		// here would notice.
+		// Unreachable today: Intel's SGX Root CA carries exactly one CDP.
+		// Written down because the fallback made this load-bearing in a
+		// way it was not before. The thing that would change it is an
+		// Intel reissue: our trusted copy (attest/intel_sgx_root_ca.pem)
+		// is fingerprint-pinned, so a reissue fails that test, but nothing
+		// checks the CDP count of the issuer root the collateral carries.
 		//
 		// THIS ARM WINS WHEN BOTH SLOTS ARE SET, and the precedence is a
 		// decision rather than an accident of statement order. Both can be
