@@ -122,12 +122,17 @@ type Client struct {
 	journal   TicketJournal
 	reconcile *reconciler
 
-	// settles counts escrow submits still running after their response was
-	// written (submitAfterResponse), so WaitSettles can drain them on
-	// shutdown; settlesInFlight holds their ticket ids for its timeout
-	// report.
-	settles         sync.WaitGroup
+	// settles counts background escrow work: submits still running after
+	// their response was written (submitAfterResponse) and watches on atomic
+	// settles (confirmSettled), so WaitSettles can drain them on shutdown;
+	// settlesInFlight holds their ticket ids for its timeout report.
+	settles         drain
 	settlesInFlight sync.Map
+
+	// life is cancelled by Close, ending background work that would
+	// otherwise outlive the Client; nil for a Client built without New.
+	life    context.Context
+	endLife context.CancelFunc
 
 	// wallet drives the escrow payment path. dispatch calls Open to compose +
 	// sign + submit the Payment + escrow.open atomic group and returns the
@@ -298,6 +303,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		ownJournal:       ownJournal,
 		durableJournal:   durableJournal,
 	}
+	c.life, c.endLife = context.WithCancel(context.Background())
 	c.refunds.remedy = cfg.Remedies.RecoverTicket
 	if cfg.SpendGuard != nil {
 		// A ticket whose request failed after its escrow opened keeps its
@@ -322,14 +328,19 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults() }
 
 // Close stops the discovery refresh and the ticket reconciler New started. It
-// does not wait for settlements; see WaitSettles. When New built the wallet
-// and Stores.Journal is set, Close also stops the refund watchdog, waiting out
+// does not wait for settlements; see WaitSettles. It ends any watch on a
+// settle still unconfirmed, leaving that ticket's journal row in place. When
+// New built the wallet and Stores.Journal is set, Close also stops the refund
+// watchdog, waiting out
 // a refund it already sent, and leaves the tickets it watched to the next
 // Client that sweeps that journal, or to the next process. A request still in
 // flight on the closed Client is then not watched here, so WaitSettles before
 // Close when no Client follows. A journal New opened from Stores.JournalPath
 // is closed last. Safe to call more than once.
 func (s *Client) Close() {
+	if s.endLife != nil {
+		s.endLife()
+	}
 	if s.stop != nil {
 		s.stop()
 	}

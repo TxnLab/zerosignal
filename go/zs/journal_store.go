@@ -68,9 +68,11 @@ func listRecords(recs map[string]TicketRecord, payer string, escrowAppID uint64)
 }
 
 // FileJournal is a TicketJournal kept in one JSON file, rewritten whole and
-// synced on each change, twice per paid request. Rows stay until the reconciler
-// sees their box gone, so the file holds every ticket from roughly the last
-// ticket lifetime; writing it whole keeps it one valid document after a crash.
+// synced on each change, twice per paid request. A row goes when its atomic
+// settle is seen confirmed, or else when the reconciler sees its box gone, so
+// the file holds the tickets still open plus those from roughly the last
+// ticket lifetime that settled another way; writing it whole keeps it one
+// valid document after a crash.
 //
 // One process owns the file: OpenFileJournal takes an exclusive lock on a
 // sibling ".lock" file and Close releases it. Each process rewrites the whole

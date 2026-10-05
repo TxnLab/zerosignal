@@ -74,6 +74,23 @@ func TestClose_ReleasesTheJournalLast(t *testing.T) {
 	}
 }
 
+// A Client from New has a lifetime Close ends, which is what stops the
+// settle watches WaitSettles would otherwise wait out.
+func TestNew_CloseEndsTheClientsLife(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	c, err := New(context.Background(), sweepingConfig(t, url, openTestJournal(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.life == nil || c.life.Err() != nil {
+		t.Fatal("New built a Client with no live lifetime")
+	}
+	c.Close()
+	if c.life.Err() == nil {
+		t.Error("Close left the Client's lifetime running")
+	}
+}
+
 // Close is safe to call more than once, and a late second Close must neither
 // panic nor give back a claim that a newer Client now holds.
 func TestClose_ASecondCloseKeepsTheNextClientsClaim(t *testing.T) {

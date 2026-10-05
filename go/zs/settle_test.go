@@ -13,11 +13,14 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
+	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
@@ -326,4 +329,258 @@ func TestWait_TurnWithoutASubmit(t *testing.T) {
 	if err != nil || r != (Settlement{}) {
 		t.Errorf("Wait = %+v, %v; want SettleNone", r, err)
 	}
+}
+
+// watchStep is one answer to a settle lookup.
+type watchStep struct {
+	out settleOutcome
+	err error
+}
+
+// watchedSettleHandle is a scriptedSettleHandle whose settle lookups follow
+// script, repeating its last step; an empty script is pending forever.
+type watchedSettleHandle struct {
+	scriptedSettleHandle
+	script []watchStep
+	looks  atomic.Int32
+	txid   atomic.Value // the txid last looked up
+}
+
+func (h *watchedSettleHandle) settleOutcome(_ context.Context, txid string) (settleOutcome, error) {
+	h.txid.Store(txid)
+	n := int(h.looks.Add(1))
+	if len(h.script) == 0 {
+		return settlePending, nil
+	}
+	s := h.script[min(n, len(h.script))-1]
+	return s.out, s.err
+}
+
+func shortConfirmWatch(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	prevTimeout, prevPoll := settleConfirmTimeout, settleConfirmPoll
+	settleConfirmTimeout, settleConfirmPoll = timeout, 5*time.Millisecond
+	t.Cleanup(func() { settleConfirmTimeout, settleConfirmPoll = prevTimeout, prevPoll })
+}
+
+// An atomic settle is seen confirmed before WaitSettles returns, and only
+// then does the ticket's journal row go. A ticket that may still be open on
+// chain keeps its row for the reconciler: a settle dropped from the pool, one
+// never confirmed, one whose lookups fail, and every kind but a landed
+// atomic group.
+func TestConfirmSettled_DropsTheRowOnceTheSettleIsConfirmed(t *testing.T) {
+	shortConfirmWatch(t, 300*time.Millisecond)
+	pending, landed, dropped := watchStep{out: settlePending}, watchStep{out: settleLanded}, watchStep{out: settleDropped}
+	failing := watchStep{err: errors.New("algod down")}
+
+	group := []types.SignedTxn{{}, {}}
+	handle := func(s scriptedSettleHandle, script ...watchStep) *watchedSettleHandle {
+		return &watchedSettleHandle{scriptedSettleHandle: s, script: script}
+	}
+	cases := []struct {
+		name      string
+		handle    *watchedSettleHandle
+		group     []types.SignedTxn
+		noJournal bool
+		wantRow   bool
+		wantLooks int // 0: never watched; -1: watched until the deadline
+	}{
+		{"confirmed on the third look", handle(scriptedSettleHandle{txid: "G"}, pending, pending, landed), group, false, false, 3},
+		{"failed lookups, then confirmed", handle(scriptedSettleHandle{txid: "G"}, failing, landed), group, false, false, 2},
+		{"never confirmed", handle(scriptedSettleHandle{txid: "G"}, pending), group, false, true, -1},
+		{"lookups keep failing", handle(scriptedSettleHandle{txid: "G"}, failing), group, false, true, -1},
+		{"dropped from the pool", handle(scriptedSettleHandle{txid: "G"}, pending, dropped), group, false, true, 2},
+		// The operator still has to match a payer-only ack.
+		{"payer ack", handle(scriptedSettleHandle{txid: "A"}, landed), nil, false, true, 0},
+		{"rejected group", handle(scriptedSettleHandle{txid: "A", groupRejected: true}, landed), group, false, true, 0},
+		{"failed submit", handle(scriptedSettleHandle{err: errors.New("algod down")}, landed), group, false, true, 0},
+		// No journal, no row to drop: nothing to wait on algod for.
+		{"no journal", handle(scriptedSettleHandle{txid: "G"}, landed), group, true, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSettleFixture(t)
+			c := settleClient()
+			j := newMemJournal()
+			if !tc.noJournal {
+				c.journal = j
+				_ = j.Put(context.Background(), TicketRecord{TicketID: f.tkt.TicketID, Status: TicketSettlePending})
+			}
+
+			_, _ = f.check(c, newSettleSlot(), tc.handle, true, tc.group)()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := c.WaitSettles(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if _, has := j.recs[f.tkt.TicketID]; has != tc.wantRow {
+				t.Errorf("journal row present = %v, want %v", has, tc.wantRow)
+			}
+			looks := int(tc.handle.looks.Load())
+			switch {
+			case tc.wantLooks == -1 && looks < 2:
+				t.Errorf("gave up after %d look(s) before the deadline", looks)
+			case tc.wantLooks == -1 && looks > int(settleConfirmTimeout/settleConfirmPoll)+2:
+				t.Errorf("looked %d times in %v: not waiting %v between looks", looks, settleConfirmTimeout, settleConfirmPoll)
+			case tc.wantLooks >= 0 && looks != tc.wantLooks:
+				t.Errorf("looked %d time(s), want %d", looks, tc.wantLooks)
+			}
+			if looks > 0 && tc.handle.txid.Load() != tc.handle.scriptedSettleHandle.txid {
+				t.Errorf("looked up %v, want the submitted %s", tc.handle.txid.Load(), tc.handle.scriptedSettleHandle.txid)
+			}
+			// A finished watch is no longer reported as in flight.
+			c.settlesInFlight.Range(func(k, _ any) bool {
+				t.Errorf("still in flight after WaitSettles: %v", k)
+				return true
+			})
+		})
+	}
+}
+
+func TestSettleOutcomeOf(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		info models.PendingTransactionInfoResponse
+		want settleOutcome
+	}{
+		{"in the pool", models.PendingTransactionInfoResponse{}, settlePending},
+		{"confirmed", models.PendingTransactionInfoResponse{ConfirmedRound: 1}, settleLanded},
+		{"dropped", models.PendingTransactionInfoResponse{PoolError: "overspend"}, settleDropped},
+	} {
+		if got := settleOutcomeOf(tc.info); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// pendingAlgod answers PendingTransactionInformation; nothing else is called.
+type pendingAlgod struct {
+	algod.Client
+	info models.PendingTransactionInfoResponse
+	err  error
+	txid string
+}
+
+func (a *pendingAlgod) PendingTransactionInformation(_ context.Context, txid string) (models.PendingTransactionInfoResponse, error) {
+	a.txid = txid
+	return a.info, a.err
+}
+
+// The real handle asks algod about the settle transaction itself, never the
+// box, and an algod error is no outcome.
+func TestOpenHandle_SettleOutcome(t *testing.T) {
+	fail := errors.New("algod down")
+	for _, tc := range []struct {
+		name    string
+		algod   *pendingAlgod
+		want    settleOutcome
+		wantErr bool
+	}{
+		{"confirmed", &pendingAlgod{info: models.PendingTransactionInfoResponse{ConfirmedRound: 9}}, settleLanded, false},
+		{"pending", &pendingAlgod{}, settlePending, false},
+		{"lookup failed", &pendingAlgod{err: fail}, settlePending, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &OpenHandle{TicketID: "T", wallet: &Wallet{escrow: &escrow.Client{Algod: tc.algod}}}
+			got, err := h.settleOutcome(context.Background(), "TX")
+			if got != tc.want || (err != nil) != tc.wantErr {
+				t.Errorf("settleOutcome = %v, %v; want %v (error %v)", got, err, tc.want, tc.wantErr)
+			}
+			if tc.algod.txid != "TX" {
+				t.Errorf("looked up %q, want TX", tc.algod.txid)
+			}
+		})
+	}
+	if _, err := (&OpenHandle{}).settleOutcome(context.Background(), "TX"); err == nil {
+		t.Error("a handle with no wallet reported an outcome")
+	}
+}
+
+// Close ends a watch WaitSettles would otherwise wait out, and the row stays.
+func TestConfirmSettled_CloseEndsTheWatch(t *testing.T) {
+	shortConfirmWatch(t, time.Minute)
+	f := newSettleFixture(t)
+	c := settleClient()
+	c.life, c.endLife = context.WithCancel(context.Background())
+	j := newMemJournal()
+	c.journal = j
+	_ = j.Put(context.Background(), TicketRecord{TicketID: f.tkt.TicketID})
+	_, _ = f.check(c, newSettleSlot(), &watchedSettleHandle{scriptedSettleHandle: scriptedSettleHandle{txid: "G"}}, true, []types.SignedTxn{{}, {}})()
+
+	c.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.WaitSettles(ctx); err != nil {
+		t.Fatalf("the watch outlived Close: %v", err)
+	}
+	if _, has := j.recs[f.tkt.TicketID]; !has {
+		t.Error("an unconfirmed settle lost its journal row")
+	}
+}
+
+// Work may start from none while WaitSettles waits, as a stream's settle
+// does; the drain neither panics nor reports idle while it runs.
+func TestDrain(t *testing.T) {
+	var d drain
+	select {
+	case <-d.done():
+	default:
+		t.Fatal("an empty drain is not done")
+	}
+	release := make(chan struct{})
+	waited := make(chan struct{})
+	go func() { <-d.done(); close(waited) }()
+	d.Go(func() { <-release })
+	select {
+	case <-d.done():
+		t.Fatal("done while work runs")
+	default:
+	}
+	close(release)
+	<-waited
+	select {
+	case <-d.done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("not done once the work returned")
+	}
+
+	// Work started by running work, as a whole reply's submit starts its
+	// settle's watch: a waiter that looked before the inner work began is
+	// released once both are done.
+	started, release := make(chan struct{}), make(chan struct{})
+	d.Go(func() {
+		<-started
+		d.Go(func() { <-release })
+	})
+	w := d.done()
+	close(started)
+	close(release)
+	select {
+	case <-w:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a waiter was not released after nested work finished")
+	}
+}
+
+// A shutdown that cannot wait out a confirmation says the settle was
+// submitted, not that it was abandoned.
+func TestWaitSettles_NamesAConfirmationApart(t *testing.T) {
+	shortConfirmWatch(t, time.Second)
+
+	f := newSettleFixture(t)
+	c := settleClient()
+	c.journal = newMemJournal()
+	h := &watchedSettleHandle{scriptedSettleHandle: scriptedSettleHandle{txid: "G"}}
+	_, _ = f.check(c, newSettleSlot(), h, true, []types.SignedTxn{{}, {}})()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := c.WaitSettles(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitSettles = %v, want a deadline", err)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "not yet seen to land, left journaled: "+f.tkt.TicketID) || strings.Contains(msg, "still settling") {
+		t.Errorf("WaitSettles = %q, want the ticket named as a confirmation only", msg)
+	}
+	_ = c.WaitSettles(context.Background())
 }

@@ -25,6 +25,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
@@ -3438,28 +3439,190 @@ func (s *Client) submitAfterResponse(ticketID string, submit settleSubmit) {
 	})
 }
 
-// WaitSettles blocks until every background escrow submit has returned, or
-// ctx is done. Call it after the HTTP server has stopped accepting
-// requests. On timeout the error names the tickets still being submitted,
-// since a submit that dies with the process is not recovered in-process:
-// the refund watchdog is in-memory too.
-func (s *Client) WaitSettles(ctx context.Context) error {
-	done := make(chan struct{})
+// settleOutcome is where a submitted settle transaction stands.
+type settleOutcome int
+
+const (
+	settlePending settleOutcome = iota
+	settleLanded
+	settleDropped
+)
+
+// settleOutcomeOf reads algod's pending-pool answer for a transaction. The
+// ticket's box being absent is not an answer: an open submitted without
+// waiting for confirmation has no box yet either.
+func settleOutcomeOf(info models.PendingTransactionInfoResponse) settleOutcome {
+	switch {
+	case info.ConfirmedRound > 0:
+		return settleLanded
+	case info.PoolError != "":
+		return settleDropped
+	default:
+		return settlePending
+	}
+}
+
+// settleWatcher is a settlementHandle that can look up a submitted settle.
+type settleWatcher interface {
+	settleOutcome(ctx context.Context, txid string) (settleOutcome, error)
+}
+
+// The real handle must stay a watcher: confirmSettled finds it by type
+// assertion, so a drifted signature would turn the watch off silently.
+var _ settleWatcher = (*OpenHandle)(nil)
+
+func (h *OpenHandle) settleOutcome(ctx context.Context, txid string) (settleOutcome, error) {
+	if h.wallet == nil || h.wallet.escrow == nil || h.wallet.escrow.Algod == nil {
+		return settlePending, errors.New("zs: handle has no algod")
+	}
+	info, err := h.wallet.escrow.Algod.PendingTransactionInformation(ctx, txid)
+	if err != nil {
+		return settlePending, err
+	}
+	return settleOutcomeOf(info), nil
+}
+
+// How long confirmSettled watches a settle, and how often it looks. Algorand
+// confirms in a few seconds; vars so a test can shorten them.
+var (
+	settleConfirmTimeout = 20 * time.Second
+	settleConfirmPoll    = time.Second
+)
+
+// confirmingSuffix marks a settlesInFlight key as a confirmation, not a
+// submit, for WaitSettles' report.
+const confirmingSuffix = " (confirming)"
+
+// confirmSettled watches, in the background WaitSettles drains, for the
+// atomic settle txid just submitted for ticketID to be confirmed, then
+// deletes the ticket's journal row. A settle dropped from the pool, one not
+// confirmed by the deadline, or one whose lookups keep failing keeps its row
+// for the reconciler, which re-settles or refunds it. Close ends the watch.
+func (s *Client) confirmSettled(ticketID, txid string, handle settlementHandle) {
+	sw, ok := handle.(settleWatcher)
+	if !ok || s.journal == nil || txid == "" {
+		return
+	}
+	life := s.life
+	if life == nil {
+		life = context.Background()
+	}
+	key := ticketID + confirmingSuffix
+	s.settlesInFlight.Store(key, struct{}{})
+	s.settles.Go(func() {
+		defer s.settlesInFlight.Delete(key)
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.Error("escrow settle confirmation panicked",
+					slog.String("ticket_id", ticketID), slog.Any("panic", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(life, settleConfirmTimeout)
+		defer cancel()
+		var lastErr error
+		for {
+			out, err := sw.settleOutcome(ctx, txid)
+			switch {
+			case err != nil:
+				lastErr = err
+			case out == settleLanded:
+				dctx, dcancel := context.WithTimeout(context.Background(), journalTimeout)
+				defer dcancel()
+				if err := s.journal.Delete(dctx, ticketID); err != nil {
+					s.log.Warn("ticket journal delete failed", slog.String("ticket_id", ticketID), slog.Any("err", err))
+				}
+				s.log.Debug("ack-settle confirmed", slog.String("ticket_id", ticketID), slog.String("txid", txid))
+				return
+			case out == settleDropped:
+				s.log.Info("ack-settle dropped from the pool; the ticket reconciler finishes it",
+					slog.String("ticket_id", ticketID), slog.String("txid", txid))
+				return
+			}
+			select {
+			case <-ctx.Done():
+				s.log.Info("ack-settle not confirmed in time; the ticket reconciler finishes it",
+					slog.String("ticket_id", ticketID), slog.String("txid", txid), slog.Any("last_err", lastErr))
+				return
+			case <-time.After(settleConfirmPoll):
+			}
+		}
+	})
+}
+
+// drain counts background escrow work so WaitSettles can wait for it. Not a
+// sync.WaitGroup: a stream submits its settle on its own goroutine, so work
+// can start from none while WaitSettles is already waiting, which a
+// WaitGroup forbids.
+type drain struct {
+	mu   sync.Mutex
+	n    int
+	idle chan struct{} // closed when n falls back to 0
+}
+
+func (d *drain) Go(f func()) {
+	d.mu.Lock()
+	if d.n == 0 {
+		d.idle = make(chan struct{})
+	}
+	d.n++
+	d.mu.Unlock()
 	go func() {
-		s.settles.Wait()
-		close(done)
+		defer func() {
+			d.mu.Lock()
+			if d.n--; d.n == 0 {
+				close(d.idle)
+			}
+			d.mu.Unlock()
+		}()
+		f()
 	}()
+}
+
+// done is closed once no work is running.
+func (d *drain) done() <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.n == 0 {
+		c := make(chan struct{})
+		close(c)
+		return c
+	}
+	return d.idle
+}
+
+// WaitSettles blocks until no background escrow work is running, or ctx is
+// done: the submits made after a whole reply, and the watches on atomic
+// settles until each is seen to land, is dropped, or times out. Work that
+// starts once it has seen none running is not waited for. Call it after the
+// HTTP server has stopped accepting requests and before Close. On timeout
+// the error names the tickets still being submitted, since a submit that
+// dies with the process is not recovered in-process (the refund watchdog is
+// in-memory too), apart from settles submitted but not yet seen to land,
+// whose journal rows stay for the reconciler.
+func (s *Client) WaitSettles(ctx context.Context) error {
 	select {
-	case <-done:
+	case <-s.settles.done():
 		return nil
 	case <-ctx.Done():
-		var ids []string
+		var submitting, confirming []string
 		s.settlesInFlight.Range(func(k, _ any) bool {
-			ids = append(ids, k.(string))
+			if id, ok := strings.CutSuffix(k.(string), confirmingSuffix); ok {
+				confirming = append(confirming, id)
+			} else {
+				submitting = append(submitting, k.(string))
+			}
 			return true
 		})
-		slices.Sort(ids)
-		return fmt.Errorf("%w; tickets still settling: %s", ctx.Err(), strings.Join(ids, ", "))
+		slices.Sort(submitting)
+		slices.Sort(confirming)
+		var detail string
+		if len(submitting) > 0 {
+			detail += "; tickets still settling: " + strings.Join(submitting, ", ")
+		}
+		if len(confirming) > 0 {
+			detail += "; settles submitted but not yet seen to land, left journaled: " + strings.Join(confirming, ", ")
+		}
+		return fmt.Errorf("%w%s", ctx.Err(), detail)
 	}
 }
 
@@ -3732,6 +3895,7 @@ func (s *Client) checkReceipt(
 					// the operator must still match, and refundInactive is exactly
 					// the deadline path when the operator never acks it.
 					s.refunds.Resolve(ticket.TicketID)
+					s.confirmSettled(ticket.TicketID, txid, handle)
 				}
 				return Settlement{Kind: kind, TxID: txid, FeesMicroAlgos: fee}, nil
 			}

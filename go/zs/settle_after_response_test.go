@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,6 +144,8 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 	defer cancel()
 	if err := s.WaitSettles(shortCtx); err == nil {
 		t.Error("WaitSettles returned nil while AckSettle was still blocked")
+	} else if msg := err.Error(); !strings.Contains(msg, "tickets still settling: "+tkt.TicketID) || strings.Contains(msg, "not yet seen to land") {
+		t.Errorf("WaitSettles = %q, want the blocked ticket named as a submit", msg)
 	}
 	close(handle.release)
 	if err := s.WaitSettles(context.Background()); err != nil {
