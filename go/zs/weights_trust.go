@@ -55,12 +55,12 @@ import (
 // converts "publish nothing and pay nothing" into "publish a claim your peers
 // can contradict", and makes being contradicted cost placement.
 //
-// The vote itself — owners not nodes, a tie undecided, case-folded digests —
+// The vote itself — owners not nodes, a tie undecided, ASCII-folded digests —
 // is steering.WeightsConsensus, golden-vectored against its TS twin in
-// proto/ts/src/steering. The client's src/operators/weights-trust.ts still
-// carries its own copy until it adopts that module. What can't be shared at all
-// is the input: the details envelopes THIS process managed to probe differ from
-// the client's by reachability, probe rotation, and cache age.
+// proto/ts/src/steering, which the client's src/operators/weights-trust.ts
+// wraps. What can't be shared at all is the input: the details envelopes THIS
+// process managed to probe differ from the client's by reachability, probe
+// rotation, and cache age.
 
 // weightsConsensus returns the digest a decisive plurality of distinct owners
 // advertise for model across ops, or "" when there is none. Operators with no
