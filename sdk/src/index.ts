@@ -8,6 +8,7 @@
 // signatures are idiomatic to each language. The protocol primitives are under
 // @txnlab/zerosignal/proto.
 
+export * from './ack.js'
 export * from './config.js'
 export * from './details.js'
 export * from './errors.js'

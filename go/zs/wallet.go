@@ -458,23 +458,46 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 		return "", 0, false, errors.New("wallet: ack-settle on detached OpenHandle (test-only or misconstructed)")
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
+	return ackSettle(len(presignedSettleGroup) > 0, ackSettleDeps{
+		spec: func() (escrow.SettleGroupSpec, error) { return h.settleGroupSpec(receipt) },
+		submitGroup: func(spec escrow.SettleGroupSpec) (escrow.CallResult, error) {
+			return h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+		},
+		standalone: func() (escrow.CallResult, error) { return h.settleStandalone(ctx, settleArgsOf(receipt)) },
+		log:        h.wallet.logger().With("operator_id", h.Operator.ID, "node_id", h.Operator.NodeID),
+	})
+}
 
+// ackSettleDeps is the open handle's three ways of putting the ack on chain,
+// injected so ackSettle is the decision alone: the code
+// testdata/ack_settle_vectors.json pins and the TS SDK mirrors as ackSettle in
+// sdk/src/ack.ts.
+type ackSettleDeps struct {
+	spec        func() (escrow.SettleGroupSpec, error)
+	submitGroup func(escrow.SettleGroupSpec) (escrow.CallResult, error)
+	standalone  func() (escrow.CallResult, error)
+	log         *slog.Logger
+}
+
+// ackSettle is AckSettle's decision between the node's pre-signed group and
+// the payer's standalone ack. atomic is whether the node sent a group that
+// decoded.
+func ackSettle(atomic bool, d ackSettleDeps) (txid string, feeMicroalgos uint64, groupRejected bool, err error) {
 	// Atomic settle path: the operator's pre-signed gtxn[0] arrived
 	// in the response's X-Zs-Settle-Group header. We VERIFY the
 	// node-composed group against the receipt-derived spec, sign the
 	// payer-ack member, and submit the 2-tx group; payer's outer fee
 	// is 0 (operator's gtxn[0] over-fee covers the entire group).
-	if len(presignedSettleGroup) > 0 {
-		spec, specErr := h.settleGroupSpec(receipt)
+	if atomic {
+		spec, specErr := d.spec()
 		if specErr != nil {
 			// Spec build failed (address / ticket-id decode) — shouldn't happen
 			// for a signature-verified ticket. Log and fall through to the
 			// standalone receipt-sourced ack rather than block settlement. NOT a
 			// node fault, so groupRejected stays false.
-			h.wallet.logger().Warn("ack-settle: settle-group spec build failed; falling back to standalone",
-				"operator_id", h.Operator.ID, "node_id", h.Operator.NodeID, "err", specErr)
+			d.log.Warn("ack-settle: settle-group spec build failed; falling back to standalone", "err", specErr)
 		} else {
-			res, subErr := h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+			res, subErr := d.submitGroup(spec)
 			if subErr == nil {
 				return res.TxID, res.PayerFeeMicroalgos, false, nil
 			}
@@ -490,8 +513,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 				// claim (pendingBy=PAYER → refundInactive-eligible), preserving the
 				// clean-refund guarantee — while surfacing groupRejected so the
 				// dispatcher hard-excludes this (operatorId,nodeId) from selection.
-				h.wallet.logger().Warn("ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack",
-					"operator_id", h.Operator.ID, "node_id", h.Operator.NodeID,
+				d.log.Warn("ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack",
 					"field", rejected.Field, "detail", rejected.Detail)
 				groupRejected = true
 				// fall through to the standalone ack below
@@ -508,7 +530,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 	// settle-group header, or atomic path failed somewhere upstream. Here the
 	// PAYER funds the call — 1 outer + finalize's op-up + the disbursement
 	// inners this settle actually fires (sized from AmountCharged/MaxPrice).
-	res, settleErr := h.settleStandalone(ctx, settleArgsOf(receipt))
+	res, settleErr := d.standalone()
 	if settleErr != nil {
 		return "", 0, groupRejected, fmt.Errorf("wallet: ack-settle: %w", settleErr)
 	}
