@@ -20,7 +20,7 @@ GO   ?= go
 PNPM ?= pnpm
 
 .PHONY: test test-go test-ts test-sdk build-ts check-lockstep verify-vectors update-vectors update-sealed-vectors \
-	update-ts-sealed-vectors check-vector-generators check-no-hayai vet typecheck
+	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
@@ -113,8 +113,16 @@ update-ts-sealed-vectors: node_modules
 	cd ts && ZS_UPDATE_TS_SEALED_VECTORS=1 $(PNPM) vitest --run test/ts-sealed-vectors.test.ts
 	cd go && $(GO) test ./wire       -run TestOpensTSSealedArtifacts -count 1
 
-vet:
+vet: check-gofmt
 	cd go && $(GO) vet ./...
+
+# gofmt -l exits 0 even when it lists files, so a non-empty listing is the
+# failure; it exits non-zero only on a file it can't parse, which vet misses
+# under testdata/ or a build tag. Lives under vet because CI runs vet; nothing
+# else checked formatting.
+check-gofmt:
+	@out="$$(cd go && gofmt -l .)" || exit 1; \
+	if [ -n "$$out" ]; then echo "gofmt needed (run: cd go && gofmt -w .):"; echo "$$out"; exit 1; fi
 
 typecheck: build-ts
 	cd ts && $(PNPM) typecheck
