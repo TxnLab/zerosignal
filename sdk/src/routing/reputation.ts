@@ -166,10 +166,8 @@ export class RelayReputationStore {
     }
 
     /**
-     * standing returns the relay's raw counts without aging them. A threshold
-     * check can't show that one response charged the relay: on the inference
-     * leg the reserve's success just cleared the failure streak, so a proven
-     * fault there never passes 1.
+     * standing returns the relay's raw counts without aging them, so a caller
+     * can see that one response charged the relay before any threshold does.
      */
     standing(relay: NodeRef): RelayStanding {
         const key = nodeRefString(relay)
