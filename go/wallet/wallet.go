@@ -238,37 +238,45 @@ func normalizePhrase(m string) string {
 // that can raise an OS access prompt. The caller confirms the reveal and never
 // logs the result.
 func (w *Wallet) Export() (string, error) {
-	return w.readPhrase()
+	m, _, err := w.readPhrase()
+	return m, err
 }
 
 // readPhrase reads the phrase and checks it against the descriptor. With no
 // descriptor there is no wallet, whatever the store holds: a phrase is served
 // only under an address the user can be shown. A descriptor with no phrase
 // behind it, or with another address, means two programs disagree about the
-// store, and the error says so.
-func (w *Wallet) readPhrase() (string, error) {
+// store, and the error says so. legacy reports a phrase stored before import
+// normalized it whose descriptor names the address of its own spacing (see
+// keystore.MnemonicEntry.LegacySpacing).
+func (w *Wallet) readPhrase() (m string, legacy bool, err error) {
 	meta, merr := readMeta(w.dir)
 	if errors.Is(merr, fs.ErrNotExist) {
-		return "", fmt.Errorf("no wallet in %s: %w", w.dir, ErrNotFound)
+		return "", false, fmt.Errorf("no wallet in %s: %w", w.dir, ErrNotFound)
 	}
 	if merr != nil {
-		return "", merr
+		return "", false, merr
 	}
-	m, err := w.store.Get(w.key)
+	m, err = w.store.Get(w.key)
 	if errors.Is(err, ErrNotFound) {
-		return "", fmt.Errorf("%w: %s names %s, but the %s store holds no phrase", ErrNotFound, metaFile, meta.Address, w.storeName())
+		return "", false, fmt.Errorf("%w: %s names %s, but the %s store holds no phrase", ErrNotFound, metaFile, meta.Address, w.storeName())
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	// The stored text as it is, which is what a keystore signs with: a phrase
-	// stored before import normalized it has the address of its own spacing.
 	addr, _, err := keystore.DeriveAddress(m)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if addr != meta.Address {
-		return "", fmt.Errorf("wallet: the %s store holds the phrase for %s, but %s names %s", w.storeName(), addr, metaFile, meta.Address)
+		// Imported between 2026-06-15 and 2026-10-03, a phrase was stored as
+		// given and its descriptor named the address its spacing derived;
+		// the keystore now rejoins the words. That address still holds the
+		// wallet's funds, so the wallet keeps paying as it.
+		if old, ok := keystore.LegacySpacingAddress(m); !ok || old != meta.Address {
+			return "", false, fmt.Errorf("wallet: the %s store holds the phrase for %s, but %s names %s", w.storeName(), addr, metaFile, meta.Address)
+		}
+		legacy = true
 	}
 	if meta.Backend == "" && w.backend != "" {
 		// A wallet from before backends were recorded gets one the first
@@ -276,7 +284,7 @@ func (w *Wallet) readPhrase() (string, error) {
 		meta.Backend = w.backend
 		_ = w.writeMeta(meta)
 	}
-	return m, nil
+	return m, legacy, nil
 }
 
 func (w *Wallet) storeName() string {
@@ -306,11 +314,11 @@ func (p walletProvider) Mnemonics(context.Context) ([]keystore.MnemonicEntry, er
 	if !p.w.Exists() {
 		return nil, nil
 	}
-	m, err := p.w.readPhrase()
+	m, legacy, err := p.w.readPhrase()
 	if err != nil {
 		return nil, err
 	}
-	return []keystore.MnemonicEntry{{Name: "zerosignal-wallet", Mnemonic: m}}, nil
+	return []keystore.MnemonicEntry{{Name: "zerosignal-wallet", Mnemonic: m, LegacySpacing: legacy}}, nil
 }
 
 func readMeta(dir string) (Metadata, error) {

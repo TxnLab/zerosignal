@@ -35,6 +35,14 @@ if (!mode) {
     for (const target of Object.values(entry)) {
         if (!existsSync(new URL(`../${target}`, import.meta.url))) fail(`${target} is missing: run pnpm build`)
     }
+    // Every named subpath points at a built file; a new src directory the
+    // build config leaves out would otherwise publish an export that 404s.
+    for (const [key, sub] of Object.entries(pkg.exports)) {
+        if (typeof sub !== 'object' || key.includes('*')) continue
+        for (const target of Object.values(sub)) {
+            if (!existsSync(new URL(`../${target}`, import.meta.url))) fail(`export ${key}: ${target} is missing`)
+        }
+    }
     const runs = [
         [process.execPath, [self, 'guarded']],
         [process.execPath, ['--conditions=bun', self, 'plain']],
@@ -59,6 +67,12 @@ const where = `${typeof Bun === 'undefined' ? 'node' : 'bun'} ${process.execArgv
 // refusal must carry.
 const nodeEntry = mode === 'guarded' ? await import(`${pkg.name}/node`) : undefined
 if (nodeEntry && typeof nodeEntry.nodeFetch !== 'function') fail(`${pkg.name}/node exports no nodeFetch`)
+
+// The account subpaths load by name under every runtime's conditions.
+for (const [sub, fn] of [['accounts/algosdk', 'algosdkSigner'], ['accounts/mnemonic', 'mnemonicSigner']]) {
+    const m = await import(`${pkg.name}/${sub}`)
+    if (typeof m[fn] !== 'function') fail(`${pkg.name}/${sub} exports no ${fn}`)
+}
 
 try {
     const outcome = await resolveConfig({ signer, network: testnet() })

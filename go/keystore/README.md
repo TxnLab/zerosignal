@@ -22,7 +22,9 @@ Any var whose name ends in `_MNEMONIC` is picked up. Empty values are skipped. T
 
 ## Mnemonic forms (25-word Algorand or 24-word xHD)
 
-Each loaded mnemonic is one of two forms, dispatched on word count — no extra config:
+Each loaded mnemonic is one of two forms, dispatched on word count — no extra config. Any
+whitespace separates words, so a phrase pasted with line breaks loads the same account; case
+is significant.
 
 - **25 words** — a standard Algorand mnemonic, decoded straight to its ed25519 private key.
 - **24 words** — a BIP-39 / ARC-52 xHD recovery phrase, the form the `client/` chat app exports from its passkey-derived wallet. The keystore validates the BIP-39 checksum, then derives the **first indexed account** `m/44'/283'/0'/0/0` with the Peikert variant. This is exactly the client's `keyGen(KeyContext.Address, 0, 0)`, so pasting the phrase a user exported loads the **same Algorand address** they see in the client. The address is logged at load (`kind=xhd-24`).

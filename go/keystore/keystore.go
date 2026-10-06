@@ -42,6 +42,10 @@ import (
 // vault and don't change while the binary is running.
 type KeyStore struct {
 	keys map[string]accountKey
+	// unlisted holds keys loaded only as the legacy twin of another entry's
+	// phrase (see add): signable, but not offered by Addresses, so one
+	// phrase doesn't read as two payers.
+	unlisted map[string]bool
 }
 
 // accountKey is one loaded signing identity. Two concrete forms back it:
@@ -119,7 +123,7 @@ func (k hdKey) signBytesRaw(msg []byte) ([]byte, error) {
 // "feature-disabled" mode for binaries that may run without signing
 // (the proxy with admission disabled, for example).
 func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
-	ks := &KeyStore{keys: map[string]accountKey{}}
+	ks := &KeyStore{keys: map[string]accountKey{}, unlisted: map[string]bool{}}
 	for i, p := range providers {
 		if p == nil {
 			continue
@@ -142,11 +146,36 @@ func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 }
 
 func (k *KeyStore) add(ctx context.Context, entry MnemonicEntry) error {
-	addr, signer, kind, err := decodeMnemonic(strings.TrimSpace(entry.Mnemonic), fmt.Sprintf("mnemonic %q", entry.Name))
+	m := strings.TrimSpace(entry.Mnemonic)
+	addr, signer, kind, err := decodeMnemonic(m, fmt.Sprintf("mnemonic %q", entry.Name))
 	if err != nil {
 		return err
 	}
+	// A 24-word phrase whose spacing isn't canonical loaded another account
+	// before decodeMnemonic rejoined the words, and funds may sit there. Load
+	// that key too, so nothing that named it breaks, and say where to move
+	// them. Addresses lists only the entry's own address of the pair.
+	if legacyAddr, legacyKey, ok := legacySpacingKey(m); ok && legacyAddr != addr {
+		slog.WarnContext(ctx, "keystore: this phrase's spacing derives a second, legacy address; both are loaded. Move any funds at the legacy address to the canonical one",
+			slog.String("canonical_address", addr),
+			slog.String("legacy_address", legacyAddr),
+			slog.String("name", entry.Name))
+		other, otherKey := legacyAddr, legacyKey
+		if entry.LegacySpacing {
+			other, otherKey = addr, signer
+			addr, signer = legacyAddr, legacyKey
+		}
+		if _, taken := k.keys[other]; !taken {
+			k.keys[other] = otherKey
+			k.unlisted[other] = true
+		}
+	}
 	if _, exists := k.keys[addr]; exists {
+		if k.unlisted[addr] {
+			// Loaded as another entry's legacy twin; this entry names it.
+			delete(k.unlisted, addr)
+			return nil
+		}
 		// Two providers handed us the same key. Not fatal — log and skip
 		// the duplicate so a fallback chain (env → cloud) doesn't blow up
 		// when both are populated for the same address.
@@ -177,7 +206,13 @@ func (k *KeyStore) add(ctx context.Context, entry MnemonicEntry) error {
 // Any other word count is a configuration error. kind is a short label for
 // logs ("algorand-25" / "xhd-24"). what names the phrase in errors.
 func decodeMnemonic(m, what string) (addr string, key accountKey, kind string, err error) {
-	switch n := len(strings.Fields(m)); n {
+	words := strings.Fields(m)
+	// BIP-39 seeds PBKDF2 with the sentence string itself, words joined by
+	// single spaces, and go-bip39 hashes whatever it is given. A phrase with
+	// a double space or line breaks would validate word by word and then
+	// load a different account. Rejoin the words first, for both forms.
+	m = strings.Join(words, " ")
+	switch n := len(words); n {
 	case 25:
 		priv, err := mnemonic.ToPrivateKey(m)
 		if err != nil {
@@ -217,6 +252,35 @@ func DeriveAddress(mnemonic string) (addr, kind string, err error) {
 	return addr, kind, err
 }
 
+// LegacySpacingAddress returns the address a valid 24-word phrase loaded as
+// before its words were rejoined, when its spacing makes that differ from
+// DeriveAddress's.
+func LegacySpacingAddress(mnemonic string) (string, bool) {
+	addr, _, ok := legacySpacingKey(strings.TrimSpace(mnemonic))
+	return addr, ok
+}
+
+// legacySpacingKey derives a 24-word phrase from its text as given, which is
+// what decodeMnemonic did before it rejoined the words: BIP-39 seeds PBKDF2
+// with the sentence, so other separators gave another account. ok is false
+// for a phrase already single-spaced, or one that isn't a valid 24 words.
+func legacySpacingKey(m string) (string, accountKey, bool) {
+	words := strings.Fields(m)
+	if len(words) != 24 || strings.Join(words, " ") == m || !bip39.IsMnemonicValid(m) {
+		return "", nil, false
+	}
+	w, err := xhd.NewWallet(bip39.NewSeed(m, ""))
+	if err != nil {
+		return "", nil, false
+	}
+	path := w.Path00(0)
+	account, err := path.AlgorandAddress()
+	if err != nil {
+		return "", nil, false
+	}
+	return account.String(), hdKey{path: path}, true
+}
+
 // HasAccount reports whether the keystore holds a private key for addr.
 func (k *KeyStore) HasAccount(addr string) bool {
 	_, ok := k.keys[addr]
@@ -226,10 +290,17 @@ func (k *KeyStore) HasAccount(addr string) bool {
 // Addresses returns the loaded addresses in deterministic order. Useful
 // for startup logs and validation ("does the configured signing address
 // match anything we loaded?").
+//
+// A phrase whose spacing also derives a legacy address contributes one entry:
+// its canonical address, or for an entry marked LegacySpacing the legacy one.
+// The other is signable (HasAccount) but not listed, so one phrase never
+// reads as two payers.
 func (k *KeyStore) Addresses() []string {
 	out := make([]string, 0, len(k.keys))
 	for a := range k.keys {
-		out = append(out, a)
+		if !k.unlisted[a] {
+			out = append(out, a)
+		}
 	}
 	sort.Strings(out)
 	return out

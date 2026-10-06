@@ -43,6 +43,12 @@ import "context"
 type MnemonicEntry struct {
 	Name     string
 	Mnemonic string
+	// LegacySpacing makes the address a 24-word phrase's own spacing derives
+	// the entry's address, as every phrase loaded before 2026-10-06 did. A
+	// wallet imported with irregular spacing recorded that address and holds
+	// its funds there. The other address of the pair is loaded alongside it
+	// either way, signable but not listed (see KeyStore.Addresses).
+	LegacySpacing bool
 }
 
 // SecretProvider is the seam between the keystore and an arbitrary

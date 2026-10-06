@@ -330,6 +330,81 @@ func TestReadPhrase_AddressMismatchIsAnError(t *testing.T) {
 	}
 }
 
+// Imported before phrases were normalized, a wallet stored the phrase as typed
+// and named the address its spacing derived, where its funds are. It still
+// opens, and pays as that address; the canonical one is signable alongside.
+func TestReadPhrase_LegacySpacingWalletKeepsItsAddress(t *testing.T) {
+	w := newTestWallet(t)
+	if _, err := w.Generate("testnet", false); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := w.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := strings.Join(strings.Fields(canonical), "\n")
+	legacyAddr, ok := keystore.LegacySpacingAddress(stored)
+	if !ok {
+		t.Fatal("a newline-separated phrase derived no legacy address")
+	}
+	canonicalAddr, _, err := keystore.DeriveAddress(stored)
+	if err != nil || canonicalAddr == legacyAddr {
+		t.Fatalf("canonical %s, legacy %s, %v: the two must differ", canonicalAddr, legacyAddr, err)
+	}
+	if err := w.store.Set(secretKey, stored); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := w.Metadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Address = legacyAddr
+	if err := w.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := w.Export(); err != nil || got != stored {
+		t.Fatalf("Export = %q, %v; want the stored phrase", got, err)
+	}
+	ks, err := keystore.New(context.Background(), w.Provider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ks.Addresses(); !slices.Equal(got, []string{legacyAddr}) {
+		t.Errorf("Addresses = %v, want only the recorded %s", got, legacyAddr)
+	}
+	if !ks.HasAccount(canonicalAddr) {
+		t.Errorf("canonical %s not signable", canonicalAddr)
+	}
+
+	// A descriptor naming the canonical address loads that one as the payer.
+	meta.Address = canonicalAddr
+	if err := w.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	ks, err = keystore.New(context.Background(), w.Provider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ks.Addresses(); !slices.Equal(got, []string{canonicalAddr}) || !ks.HasAccount(legacyAddr) {
+		t.Errorf("Addresses = %v (legacy signable %v), want only %s", got, ks.HasAccount(legacyAddr), canonicalAddr)
+	}
+
+	// Irregular spacing excuses only the old address it derives, never an
+	// unrelated one.
+	other, _, err := keystore.DeriveAddress(mustPhrase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Address = other
+	if err := w.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Export(); err == nil || !strings.Contains(err.Error(), "holds the phrase for") {
+		t.Errorf("Export = %v, want the address-mismatch error", err)
+	}
+}
+
 // A wrong passphrase is typed, and the next read asks again instead of
 // failing on the cached one.
 func TestFileStore_WrongPassphraseAsksAgain(t *testing.T) {

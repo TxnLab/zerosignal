@@ -31,6 +31,24 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-06 — a recovery phrase's separators no longer pick the account
+
+Go's keystore (`DeriveAddress`, `New`) now rejoins a phrase's words with single spaces before
+deriving it. A 24-word xHD phrase with a double space, a tab or line breaks between words used
+to pass the word-by-word check and then load a different account, because BIP-39 seeds PBKDF2
+with the sentence string itself; it now loads the account its words name, the one the client
+derives. Funds may sit at the old address, so the keystore also loads the key the phrase's own
+spacing derives, logs a warning naming both addresses, and lists only one of them in
+`Addresses`: the canonical one, or, for an entry marked `MnemonicEntry.LegacySpacing`, the old
+one. A wallet imported between 2026-06-15 and 2026-10-03 stored the phrase as typed and
+recorded the old address; it marks its entry so, opens as before and keeps paying as the
+address it recorded (`keystore.LegacySpacingAddress`). A key from the environment lists the
+canonical address, so a deployment that auto-picks its only key moves to it, while one naming
+the old address (a node's signing address) still finds it. A 25-word phrase separated by tabs
+or line breaks, refused before, now loads. `@txnlab/zerosignal/accounts/algosdk` and `/accounts/mnemonic` load a
+25-word phrase as Go does, splitting on Go's `unicode.IsSpace` set; `account_vectors.json`
+holds Go's outcome, signatures and a signed transaction for each case.
+
 ### 2026-10-05 — the ephemeral key verdict is shared
 
 `@txnlab/zerosignal/catalog` gains `checkEphemeralAdvertisement`, a port of the Go SDK's probe

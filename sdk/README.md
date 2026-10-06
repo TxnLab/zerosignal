@@ -55,6 +55,20 @@ The guard is Node's only. Bun and Deno get their own `fetch`, as a browser does,
 literal-host check: Bun's `undici` ignores the connection hook the guard rests on, and Deno
 is untested. `nodeFetch` throws there rather than hand back a guard that checks nothing.
 
+### Accounts
+
+Two subpaths build a `Signer` from a key held in memory, each the twin of Go's keystore and
+pinned to it by `testdata/account_vectors.json`:
+
+- `@txnlab/zerosignal/accounts/algosdk`: `algosdkSigner(account)` over an algosdk `Account`.
+- `@txnlab/zerosignal/accounts/mnemonic`: `mnemonicSigner(phrase)` for a 25-word Algorand
+  mnemonic. Any whitespace separates words; case is significant, as in Go's keystore (the
+  `zs-proxy wallet import` command lowercases a phrase before storing it; this does not). A
+  24-word phrase is an xHD account and is refused here.
+
+Each signs only as its own address: `signBytes` for any other rejects with
+`SignerAddressError`.
+
 ### `signBytes` is raw Ed25519
 
 The SDK signs a 32-byte sha256 digest of a domain-tagged canonical body, verbatim. This is
