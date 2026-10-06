@@ -578,6 +578,36 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	// still unexpired is stored. Anything else leaves the operator with
 	// no seal target (there is no anchor) so dispatch fails closed.
 	s.applyEphemeralAdvertisement(op, resp, usedHop, log)
+	applyDetailsFields(op, resp)
+	op.Reachable = true
+	op.Probed = true
+	op.LastRefreshAt = now
+	// Advance the carry-window clock: this is the last moment we confirmed the
+	// node's capabilities live, so the registry keeps advertising/routing it
+	// (via carry-forward) until now-ReachableAsOf passes max_carry_age. Set only
+	// on success — a failed probe leaves it pinned at the previous good time so
+	// the node ages out of the window on schedule rather than resetting.
+	op.ReachableAsOf = now
+	// A successful (relayed) probe is unambiguous: the target responded,
+	// so it's up. Remember it so SelectRelay prefers it as a relay.
+	s.recordReachable(RefOf(*op), true)
+
+	// TEE attestation. Operators that don't advertise TEE
+	// (resp.TEE == nil) keep Operator.TEE == nil and are
+	// treated as not-attested by the routing filter.
+	// Operators that do advertise but fail verification
+	// also keep TEE populated (with Verified=false) so the
+	// dashboard can surface the failure tag — but they're
+	// excluded from TEE-required routing same as if they'd
+	// never advertised.
+	s.probeAttestation(ctx, op, resp, attestation, usedHop, log)
+}
+
+// applyDetailsFields copies what a details advertisement says onto op, short
+// of the ephemeral recipient and the TEE verdict, which each need a check
+// first. The TS SDK mirrors it as detailsFieldsOf, pinned by
+// testdata/operator_vectors.json.
+func applyDetailsFields(op *Operator, resp inject.OperatorDetails) {
 	models := make([]string, 0, len(resp.Models))
 	caps := make(map[string]ModelCapacity, len(resp.Models))
 	for _, m := range resp.Models {
@@ -595,38 +625,12 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	op.ToolHeadroomPerIteration = resp.ToolHeadroomPerIteration
 	op.NodeVersion = resp.Version
 	op.ProtoVersion = resp.ProtoVersion
-	op.Reachable = true
-	op.Probed = true
-	op.LastRefreshAt = now
-	// Advance the carry-window clock: this is the last moment we confirmed the
-	// node's capabilities live, so the registry keeps advertising/routing it
-	// (via carry-forward) until now-ReachableAsOf passes max_carry_age. Set only
-	// on success — a failed probe leaves it pinned at the previous good time so
-	// the node ages out of the window on schedule rather than resetting.
-	op.ReachableAsOf = now
-	// A successful (relayed) probe is unambiguous: the target responded,
-	// so it's up. Remember it so SelectRelay prefers it as a relay.
-	s.recordReachable(RefOf(*op), true)
-	// Advertised per-request minimum charge (SPEC.md §3a "Minimum
-	// charge"): the reference token count, the µALGO-component
-	// count, and the µALGO component's current USD value. The
-	// µALGO fields are 0 when the operator hasn't enabled it or
-	// its oracle is unhealthy. Authoritative per-request value is
-	// the signed ticket's min_price at reserve; these are the
-	// pre-reserve advertising surface for /v1/zs/operators.
+	// The advertised minimum charge (SPEC.md §3a "Minimum charge"). The µALGO
+	// fields are 0 when the operator hasn't enabled it or its oracle is
+	// unhealthy; the authoritative value is the signed ticket's min_price.
 	op.MinChargeOutputTokens = resp.MinChargeOutputTokens
 	op.MinChargeAlgoTxns = resp.MinChargeAlgoTxns
 	op.MinChargeMicroUSDC = resp.MinChargeMicroUSDC
-
-	// TEE attestation. Operators that don't advertise TEE
-	// (resp.TEE == nil) keep Operator.TEE == nil and are
-	// treated as not-attested by the routing filter.
-	// Operators that do advertise but fail verification
-	// also keep TEE populated (with Verified=false) so the
-	// dashboard can surface the failure tag — but they're
-	// excluded from TEE-required routing same as if they'd
-	// never advertised.
-	s.probeAttestation(ctx, op, resp, attestation, usedHop, log)
 }
 
 // modelCapacityOf is one advertised model as the registry keeps it.

@@ -12,6 +12,7 @@ import { defaultFetch } from '#default-fetch'
 import { configError } from './errors.js'
 import type { Network, ResolvedNetwork } from './network.js'
 import { resolveNetwork } from './network.js'
+import type { RegistryProvider, ReserveClient, Stores, WalletOpener } from './parts.js'
 import {
     type CacheAdapter,
     type Clock,
@@ -127,6 +128,12 @@ export interface Config {
     reserveTimeout?: number
     /** Bounds one request's retrying of transient failures, all before payment. */
     retryBudget?: number
+    /**
+     * The wait in ms before the given retry sweep over the candidate list.
+     * Set, it also replaces the wait before a busy re-sweep, the node's
+     * Retry-After included.
+     */
+    sweepDelay?: (sweep: number) => number
 
     /** Development only. */
     allowStaging?: boolean
@@ -138,6 +145,18 @@ export interface Config {
 
     spendGuard?: SpendGuard
     remedies?: Partial<Remedies>
+    stores?: Stores
+
+    /**
+     * The network-facing parts: operator discovery, the reserve call, and
+     * escrow. The Client builds each absent one; a supplied one is used as
+     * is, so the settings only a built part reads (discovery, reserveTimeout,
+     * allowPrivateHosts) do not reach it. A supplied registry must apply the
+     * same staging gate as allowStaging.
+     */
+    registry?: RegistryProvider
+    reserveClient?: ReserveClient
+    wallet?: WalletOpener
 
     storage?: StorageAdapter
     cache?: CacheAdapter
@@ -168,10 +187,16 @@ export interface ResolvedConfig {
     discovery: Discovery
     reserveTimeout: number
     retryBudget: number
+    sweepDelay: ((sweep: number) => number) | undefined
     allowStaging: boolean
     allowPrivateHosts: boolean
     spendGuard: SpendGuard | undefined
     remedies: Remedies
+    /** As given: the defaults depend on which parts the Client builds. */
+    stores: Stores
+    registry: RegistryProvider | undefined
+    reserveClient: ReserveClient | undefined
+    wallet: WalletOpener | undefined
     storage: StorageAdapter
     cache: CacheAdapter
     logger: Logger
@@ -293,9 +318,14 @@ export function resolveConfig(c: Config): ResolvedConfig {
         discovery,
         reserveTimeout: orDefault(c.reserveTimeout, defaults.reserveTimeout),
         retryBudget: orDefault(c.retryBudget, defaults.retryBudget),
+        sweepDelay: c.sweepDelay,
         allowStaging: c.allowStaging ?? false,
         allowPrivateHosts,
         spendGuard: c.spendGuard,
+        stores: { ...c.stores },
+        registry: c.registry,
+        reserveClient: c.reserveClient,
+        wallet: c.wallet,
         remedies: {
             fund: r.fund || defaultRemedies.fund,
             raiseSlots: r.raiseSlots || defaultRemedies.raiseSlots,

@@ -7,17 +7,23 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
     type Config,
+    type RegistryProvider,
+    type ReserveClient,
     type Signer,
     type SpendGuard,
+    type Stores,
+    type WalletOpener,
     ZsError,
     consoleLogger,
     defaults,
     discardLogger,
     memoryCache,
+    memoryJournal,
     memoryStorage,
     resolveConfig,
     testnet,
 } from '../src/index.js'
+import { TargetBackoffStore } from '../src/routing/backoff.js'
 import { defaultFetch as browserDefaultFetch } from '../src/default-fetch.js'
 
 const signer: Signer = {
@@ -46,6 +52,9 @@ describe('resolveConfig', () => {
         expect(c.logger).toBe(discardLogger)
         expect(c.warnings).toEqual([])
         expect(c.remedies.fund).not.toBe('')
+        // The Client builds these, so they stay unset here.
+        expect(c.stores).toEqual({})
+        expect([c.sweepDelay, c.registry, c.reserveClient, c.wallet]).toEqual([undefined, undefined, undefined, undefined])
         // Each of these widens what the SDK will do when on.
         expect([c.allowPrivacyOverride, c.allowStaging, c.allowPrivateHosts, c.disableTee, c.requireMaxOutput]).toEqual(
             [false, false, false, false, false],
@@ -128,6 +137,11 @@ describe('resolveConfig', () => {
             operatorIds: [3, 5],
         }
         const remedies = { fund: 'f', raiseSlots: 's', raiseSpendCap: 'c', recoverTicket: 'r' }
+        const sweepDelay = () => 16
+        const stores: Stores = { journal: memoryJournal(), targetBackoff: new TargetBackoffStore(clock) }
+        const registry = {} as RegistryProvider
+        const reserveClient = {} as ReserveClient
+        const wallet = {} as WalletOpener
         const c = resolveConfig({
             signer,
             network: testnet(),
@@ -142,10 +156,15 @@ describe('resolveConfig', () => {
             discovery,
             reserveTimeout: 14,
             retryBudget: 15,
+            sweepDelay,
             allowStaging: true,
             allowPrivateHosts: true,
             spendGuard,
             remedies,
+            stores,
+            registry,
+            reserveClient,
+            wallet,
             storage,
             cache,
             logger,
@@ -172,6 +191,15 @@ describe('resolveConfig', () => {
         expect(c.signer).toBe(signer)
         expect(c.spendGuard).toBe(spendGuard)
         expect([c.storage, c.cache, c.logger, c.clock, c.fetch]).toEqual([storage, cache, logger, clock, fetch])
+        expect(c.sweepDelay).toBe(sweepDelay)
+        expect(c.registry).toBe(registry)
+        expect(c.reserveClient).toBe(reserveClient)
+        expect(c.wallet).toBe(wallet)
+        expect(c.stores).toEqual(stores)
+        expect(c.stores.journal).toBe(stores.journal)
+        expect(c.stores.targetBackoff).toBe(stores.targetBackoff)
+        // A copy: the Client fills defaults in without touching the caller's.
+        expect(c.stores).not.toBe(stores)
         expect(c.network.network).toBe('testnet')
     })
 
