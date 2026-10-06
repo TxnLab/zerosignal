@@ -76,6 +76,13 @@ display-only weights summary. Their
 types name only the fields the rules read, so an app's own row type passes. The Go SDK has no
 picker, so these have no Go twin.
 
+`buildUniqueModelRows` derives the picker's rows themselves from per-node catalog rows: one row
+per model, its default node ranked by the same `selectTargets` call dispatch makes (a default
+whose weights digest contradicts its peers is demoted), and, with `unifyEquivalent`, the
+spellings of one model merged by `rowIdentityKey`. `uniqueModelRowVariants` adds the same rows
+restricted to attested nodes. The app supplies its selection projection, its attestation
+predicate, its candidate filter, and any per-node fields to carry.
+
 It also holds what a payer does with its nodes' discovery probes, each matching the Go SDK's
 registry under shared vectors: `selectProbeSet` bounds which nodes a cycle probes, steered by
 the recently requested models in `ModelDemand`; `checkEphemeralAdvertisement` verifies a
