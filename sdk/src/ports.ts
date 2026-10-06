@@ -101,7 +101,11 @@ export interface Logger {
 /** Clock returns the current time in Unix milliseconds. */
 export type Clock = () => number
 
-/** Fetch is the WHATWG fetch the SDK sends node and chain traffic through. */
+/**
+ * Fetch is the WHATWG fetch the SDK sends node traffic through. Chain reads
+ * keep their own transport, as in Go: a self-hosted algod may sit on a private
+ * address the node guard refuses.
+ */
 export type Fetch = typeof globalThis.fetch
 
 export const discardLogger: Logger = {

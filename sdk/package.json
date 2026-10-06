@@ -44,7 +44,20 @@
             "types": "./dist/escrow/generated/ZeroSignalEscrowClient.d.ts",
             "import": "./dist/escrow/generated/ZeroSignalEscrowClient.js"
         },
+        "./node": {
+            "types": "./dist/node/index.d.ts",
+            "node": "./dist/node/index.js"
+        },
         "./package.json": "./package.json"
+    },
+    "imports": {
+        "#default-fetch": {
+            "types": "./dist/default-fetch.d.ts",
+            "bun": "./dist/default-fetch.js",
+            "deno": "./dist/default-fetch.js",
+            "node": "./dist/node/default-fetch.js",
+            "default": "./dist/default-fetch.js"
+        }
     },
     "files": [
         "dist",
@@ -64,18 +77,20 @@
         "access": "public"
     },
     "scripts": {
-        "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build.node.json",
         "gen:client": "./scripts/gen-escrow-client.sh src/escrow/generated/ZeroSignalEscrowClient.ts",
-        "prepublishOnly": "pnpm test && pnpm build",
+        "prepublishOnly": "pnpm test && pnpm build && pnpm test:dist",
         "test": "vitest --run",
+        "test:dist": "node scripts/check-dist.mjs",
         "test:watch": "vitest",
-        "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+        "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p test"
     },
     "dependencies": {
         "@noble/hashes": "2.2.0",
         "@scure/base": "2.2.0",
         "@txnlab/zs-proto": "workspace:*",
-        "algosdk": "^3.6.0"
+        "algosdk": "^3.6.0",
+        "undici": "^7.30.0"
     },
     "peerDependencies": {
         "@algorandfoundation/algokit-utils": "^9.2.0"

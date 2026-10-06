@@ -1,0 +1,9 @@
+{
+    "//": "Emits src/node; see tsconfig.node.json.",
+    "extends": "./tsconfig.build.json",
+    "compilerOptions": {
+        "types": ["node"]
+    },
+    "include": ["src/node"],
+    "exclude": ["test", "dist", "node_modules"]
+}

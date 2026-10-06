@@ -34,9 +34,10 @@ test-ts: node_modules
 	cd ts && $(PNPM) test
 
 # The typecheck runs here too: sdk/'s vocabulary test checks its lists against
-# their types at compile time, which vitest alone does not.
+# their types at compile time, which vitest alone does not. test:dist checks the
+# built package as a consumer resolves it, which only a build can show.
 test-sdk: build-ts
-	cd sdk && $(PNPM) typecheck && $(PNPM) test
+	cd sdk && $(PNPM) typecheck && $(PNPM) test && $(PNPM) build && $(PNPM) test:dist
 
 # ts/ and sdk/ release as a matching pair; see the script. The test runs first,
 # for the same reason as check-no-hayai's.
@@ -89,6 +90,7 @@ update-vectors:
 	cd go && $(GO) test ./ticket     -run TestVectors               -update
 	cd go && $(GO) test ./imageprice -run TestVectors               -update
 	cd go && $(GO) test ./pricing    -run TestVectors               -update
+	cd go && $(GO) test ./httpx      -run TestPrivateTargetVectors  -update
 	cd go && $(GO) test ./tokenize   -run TestVectors               -update
 	cd go && $(GO) test ./selection  -run TestSelectionVectors      -update
 	cd go && $(GO) test ./transient  -run TestTransientVectors      -update

@@ -13,9 +13,9 @@
 // localhost and *.localhost, mDNS *.local, literal private IPv4 and IPv6, and
 // the unspecified address, which are the shapes an attacker can register. A
 // name that resolves to a private address gets past it. In a browser that
-// residue is the price of having no resolver; in Node it is a gap against Go,
-// whose httpx dial guard checks the resolved address behind the same setting.
-// A Node dial guard is still to be built.
+// residue is the price of having no resolver. In Node the default fetch closes
+// it as Go's httpx dial guard does, judging every address it is about to dial
+// behind the same setting (node/fetch.ts, privateip.ts).
 //
 // It classifies URL.hostname, the WHATWG parser's canonical form, never the
 // registered string. The parser rewrites an embedded IPv4 in hex

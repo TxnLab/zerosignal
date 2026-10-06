@@ -7,6 +7,8 @@
 // milliseconds; the defaults are pinned against Go's by
 // testdata/sdk_vocabulary_vectors.json.
 
+import { defaultFetch } from '#default-fetch'
+
 import { configError } from './errors.js'
 import type { Network, ResolvedNetwork } from './network.js'
 import { resolveNetwork } from './network.js'
@@ -128,7 +130,10 @@ export interface Config {
 
     /** Development only. */
     allowStaging?: boolean
-    /** Development only. */
+    /**
+     * Route to operators whose URL names a private host, and, in Node, let the
+     * default fetch dial a private address. Development only.
+     */
     allowPrivateHosts?: boolean
 
     spendGuard?: SpendGuard
@@ -138,6 +143,12 @@ export interface Config {
     cache?: CacheAdapter
     logger?: Logger
     clock?: Clock
+    /**
+     * Carries every request to a node. Unset in Node, a fetch that refuses
+     * private addresses unless allowPrivateHosts (nodeFetch from
+     * `@txnlab/zerosignal/node`); elsewhere the runtime's own. One supplied
+     * here is used as is, guard or none.
+     */
     fetch?: Fetch
 }
 
@@ -256,7 +267,8 @@ export function resolveConfig(c: Config): ResolvedConfig {
     // Empty is no limit, as in Go, not a limit to no operators.
     if (d.operatorIds?.length) discovery.operatorIds = d.operatorIds
 
-    const fetch = c.fetch ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined)
+    const allowPrivateHosts = c.allowPrivateHosts ?? false
+    const fetch = c.fetch ?? defaultFetch(allowPrivateHosts)
     if (!fetch) {
         throw configError('this runtime has no global fetch: set Config.fetch')
     }
@@ -282,7 +294,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         reserveTimeout: orDefault(c.reserveTimeout, defaults.reserveTimeout),
         retryBudget: orDefault(c.retryBudget, defaults.retryBudget),
         allowStaging: c.allowStaging ?? false,
-        allowPrivateHosts: c.allowPrivateHosts ?? false,
+        allowPrivateHosts,
         spendGuard: c.spendGuard,
         remedies: {
             fund: r.fund || defaultRemedies.fund,

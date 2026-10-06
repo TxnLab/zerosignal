@@ -18,6 +18,7 @@ import {
     resolveConfig,
     testnet,
 } from '../src/index.js'
+import { defaultFetch as browserDefaultFetch } from '../src/default-fetch.js'
 
 const signer: Signer = {
     address: 'PAYER',
@@ -51,28 +52,48 @@ describe('resolveConfig', () => {
         )
     })
 
-    it('binds the global fetch, which a browser refuses to call unbound', async () => {
-        const f = vi.fn(function (this: unknown) {
-            expect(this).toBe(globalThis)
-            return Promise.resolve(new Response())
+    // The build of #default-fetch outside Node; these tests run the Node one,
+    // whose behaviour node-fetch.test.ts covers.
+    describe('outside Node', () => {
+        it('binds the global fetch, which a browser refuses to call unbound', async () => {
+            const f = vi.fn(function (this: unknown) {
+                expect(this).toBe(globalThis)
+                return Promise.resolve(new Response())
+            })
+            vi.stubGlobal('fetch', f)
+            try {
+                await browserDefaultFetch(false)!('http://x.example')
+                expect(f).toHaveBeenCalledOnce()
+            } finally {
+                vi.unstubAllGlobals()
+            }
         })
-        vi.stubGlobal('fetch', f)
-        try {
-            await resolveConfig(base).fetch('http://x.example')
-            expect(f).toHaveBeenCalledOnce()
-        } finally {
-            vi.unstubAllGlobals()
-        }
+
+        it('has none in a runtime with no fetch', () => {
+            vi.stubGlobal('fetch', undefined)
+            try {
+                expect(browserDefaultFetch(false)).toBeUndefined()
+            } finally {
+                vi.unstubAllGlobals()
+            }
+        })
     })
 
-    it('refuses a runtime with no fetch unless one is given', () => {
-        vi.stubGlobal('fetch', undefined)
+    it('refuses a runtime with no default fetch unless one is given', async () => {
+        vi.resetModules()
+        vi.doMock('#default-fetch', () => ({ defaultFetch: () => undefined }))
         try {
-            expect(() => resolveConfig(base)).toThrow(ZsError)
+            // Fresh modules, so the error class is the one this config throws.
+            const [{ resolveConfig: resolve }, { ZsError: Err }] = await Promise.all([
+                import('../src/config.js'),
+                import('../src/errors.js'),
+            ])
+            expect(() => resolve(base)).toThrow(Err)
             const mine = vi.fn()
-            expect(resolveConfig({ ...base, fetch: mine }).fetch).toBe(mine)
+            expect(resolve({ ...base, fetch: mine }).fetch).toBe(mine)
         } finally {
-            vi.unstubAllGlobals()
+            vi.doUnmock('#default-fetch')
+            vi.resetModules()
         }
     })
 
