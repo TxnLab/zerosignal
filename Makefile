@@ -61,12 +61,15 @@ verify-vectors:
 check-vector-generators:
 	./scripts/check-vector-generators.sh
 
-# Fails when sdk/'s committed escrow client is not what the in-repo ARC-56
-# generates, which is how the client's copy came to embed a stale contract.
+# Fails when sdk/'s committed escrow client, or its ABI table, is not what the
+# in-repo ARC-56 generates, which is how the client's copy came to embed a
+# stale contract.
 check-escrow-client: node_modules
 	@tmp="$$(mktemp -d)" || exit 1; trap 'rm -rf "$$tmp"' EXIT; \
 	sdk/scripts/gen-escrow-client.sh "$$tmp/ZeroSignalEscrowClient.ts" || exit 1; \
-	cmp -s "$$tmp/ZeroSignalEscrowClient.ts" sdk/src/escrow/generated/ZeroSignalEscrowClient.ts || \
+	node sdk/scripts/gen-escrow-abi.mjs "$$tmp/abi.ts" || exit 1; \
+	{ cmp -s "$$tmp/ZeroSignalEscrowClient.ts" sdk/src/escrow/generated/ZeroSignalEscrowClient.ts && \
+	  cmp -s "$$tmp/abi.ts" sdk/src/escrow/generated/abi.ts; } || \
 	{ echo "sdk escrow client is stale (run: pnpm -C sdk gen:client)"; exit 1; }
 
 # Fails when the old project name reappears in the published code. The test

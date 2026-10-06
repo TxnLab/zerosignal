@@ -90,7 +90,7 @@
     },
     "scripts": {
         "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build.node.json",
-        "gen:client": "./scripts/gen-escrow-client.sh src/escrow/generated/ZeroSignalEscrowClient.ts",
+        "gen:client": "./scripts/gen-escrow-client.sh src/escrow/generated/ZeroSignalEscrowClient.ts && node scripts/gen-escrow-abi.mjs src/escrow/generated/abi.ts",
         "prepublishOnly": "pnpm test && pnpm build && pnpm test:dist",
         "test": "vitest --run",
         "test:dist": "node scripts/check-dist.mjs",

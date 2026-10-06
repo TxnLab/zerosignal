@@ -1,0 +1,632 @@
+/*
+ * Copyright (c) 2026. TxnLab Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// The default EscrowChain: the escrow app over algod, as go/escrow's Client
+// reaches it. Calls are composed with algosdk's composer, carry their box,
+// account and asset references explicitly, pool their inner-txn fees on the
+// outer call, and are submitted without waiting for confirmation. A revert
+// comes back as an ApprovalError naming the assert.
+
+import algosdk, { ABIMethod, Address, AtomicTransactionComposer, OnApplicationComplete, type SuggestedParams } from 'algosdk'
+import {
+    SECONDS_PER_DAY,
+    decodeNodeRecord,
+    decodeOperatorRecord,
+    decodeTicketRecord,
+    freeQuotaBoxKey,
+    gapOpUpsForIters,
+    nodeBoxKey,
+    operatorBoxKey,
+    ringGapIters,
+    settleInnerCount,
+    ticketBoxKey,
+} from '@txnlab/zs-proto/escrow'
+
+import type { SettleSubmission } from '../ack.js'
+import type { PayerDeposit } from '../mbr.js'
+import type { EscrowCall } from '../parts.js'
+import { type Clock, type Logger, type Signer, SignerAddressError, discardLogger } from '../ports.js'
+import type {
+    EscrowChain,
+    EscrowChainConfig,
+    PayerSettleCall,
+    ProtestCall,
+    RefundInactiveCall,
+    SettleLapsedCall,
+} from '../wallet.js'
+import { ESCROW_METHOD_SIGNATURES } from './generated/abi.js'
+import { enrichSubmitError } from './revert.js'
+
+export interface AlgodEscrowChainOptions {
+    algod: algosdk.Algodv2
+    appId: bigint
+    /** The payer's signer; every call that acts as the payer signs with it. */
+    signer: Signer
+    /**
+     * The most one algod request may take; absent, zero or negative is 30 s.
+     * The pool calls take no signal and run under the wallet's deposit lock,
+     * so this is what keeps a stalled algod from holding every open behind it.
+     */
+    requestTimeoutMs?: number
+    logger?: Logger
+    /** Wall clock, Unix ms: the day a settle's revenue-ring gap is counted to. */
+    clock?: Clock
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+
+/** The contract globals the chain composes with, read once (Go's RefreshConfig). */
+interface Globals extends EscrowChainConfig {
+    treasury: string
+}
+
+/** Thrown by freeQuotaMbrDue's read when the deployed app predates the free-ticket quota. */
+class FreeQuotaUnsupportedError extends Error {}
+
+// settleInnerCount's ceiling: a settle that refunds the payer, pays the
+// operator and pays the treasury (Go's settleLapsedMaxInners).
+const SETTLE_MAX_INNERS = 3n
+const TICKET_ID_LEN = 16
+const RECEIPT_DIGEST_LEN = 32
+const RECEIPT_SIG_LEN = 64
+
+const methods = new Map<string, ABIMethod>()
+function method(name: string): ABIMethod {
+    let m = methods.get(name)
+    if (m === undefined) {
+        const sig = ESCROW_METHOD_SIGNATURES[name]
+        if (sig === undefined) throw new Error(`escrow: unknown method "${name}"`)
+        m = ABIMethod.fromSignature(sig)
+        methods.set(name, m)
+    }
+    return m
+}
+
+interface SingleCall {
+    method: string
+    args?: algosdk.ABIArgument[]
+    boxes?: Uint8Array[]
+    accounts?: string[]
+    assets?: bigint[]
+    /** Inner txns the outer call's fee pools for. */
+    inners: bigint
+    onComplete?: OnApplicationComplete
+}
+
+/** What algosdk passes on to fetch for one request. */
+type RequestOptions = { signal: AbortSignal }
+
+/**
+ * AlgodEscrowChain is the EscrowChain over an algod client. The escrow
+ * config and the pool's ticket MBR and free-quota term are read once and
+ * kept for the life of the instance, as Go's RefreshConfig keeps them; a
+ * redeploy or treasury rotation needs a new instance. The protocol fee rate is
+ * read live.
+ *
+ * Readonly calls simulate as the application account, which exists and
+ * carries ALGO on any live deployment, so they answer for a payer that holds
+ * none yet. Every algod request carries the call's signal, as Go's carry its
+ * ctx, and the request timeout; a submit cut short after it went out leaves
+ * its outcome unknown, as a cancelled ctx does in Go.
+ */
+export class AlgodEscrowChain implements EscrowChain {
+    readonly #algod: algosdk.Algodv2
+    readonly #appId: bigint
+    readonly #appAddress: string
+    readonly #signer: Signer
+    readonly #timeoutMs: number
+    readonly #log: Logger
+    readonly #clock: Clock
+    #globals: Promise<Globals> | undefined
+    #ticketMbr: Promise<bigint> | undefined
+    #freeQuotaMbr: Promise<bigint> | undefined
+
+    constructor(o: AlgodEscrowChainOptions) {
+        if (o.appId <= 0n) throw new Error('escrow: app id must be > 0')
+        if (!algosdk.isValidAddress(o.signer.address)) throw new Error(`escrow: signer address ${o.signer.address} is not an address`)
+        this.#algod = o.algod
+        this.#appId = o.appId
+        this.#appAddress = algosdk.getApplicationAddress(o.appId).toString()
+        this.#signer = o.signer
+        const t = o.requestTimeoutMs
+        this.#timeoutMs = t !== undefined && Number.isFinite(t) && t > 0 ? t : DEFAULT_REQUEST_TIMEOUT_MS
+        this.#log = o.logger ?? discardLogger
+        this.#clock = o.clock ?? Date.now
+    }
+
+    // ---- config ----
+
+    async config(signal?: AbortSignal): Promise<EscrowChainConfig> {
+        const g = await this.#readGlobalsOnce(signal)
+        return { appId: g.appId, appAddress: g.appAddress, usdcAssetId: g.usdcAssetId }
+    }
+
+    async protocolFeeBps(signal?: AbortSignal): Promise<number> {
+        signal?.throwIfAborted()
+        const kv = await this.#globalState(signal)
+        const v = kv.get('pfee')
+        if (v === undefined) return 0
+        if (v.type !== 2) throw new Error(`escrow: protocolFeeBps global has type ${v.type}, want 2 (uint)`)
+        return Number(v.uint)
+    }
+
+    // One read serves every caller, so it runs under the timeout alone and
+    // each caller stops waiting on its own signal. A failed read is not kept.
+    #readGlobalsOnce(signal?: AbortSignal): Promise<Globals> {
+        signal?.throwIfAborted()
+        this.#globals ??= this.#readGlobals().catch((err: unknown) => {
+            this.#globals = undefined
+            throw err
+        })
+        return untilAborted(this.#globals, signal)
+    }
+
+    async #globalState(signal?: AbortSignal): Promise<Map<string, algosdk.modelsv2.TealValue>> {
+        let app: algosdk.modelsv2.Application
+        try {
+            app = await this.#algod.getApplicationByID(this.#appId).do(undefined, this.#opts(signal))
+        } catch (err) {
+            throw new Error(`escrow: get application ${this.#appId}: ${message(err)}`, { cause: err })
+        }
+        const out = new Map<string, algosdk.modelsv2.TealValue>()
+        for (const kv of app.params?.globalState ?? []) out.set(new TextDecoder().decode(kv.key), kv.value)
+        return out
+    }
+
+    // Go's readGlobals: usdc and treasury are required, a contract missing
+    // either is misconfigured.
+    async #readGlobals(): Promise<Globals> {
+        const kv = await this.#globalState()
+        const usdc = kv.get('usdc')
+        if (usdc === undefined) throw new Error(`escrow: usdcAssetId global not found on app ${this.#appId}`)
+        if (usdc.type !== 2) throw new Error(`escrow: usdcAssetId global has type ${usdc.type}, want 2 (uint)`)
+        if (usdc.uint === 0n) throw new Error('escrow: usdcAssetId global is 0 (contract misconfigured?)')
+        const trea = kv.get('trea')
+        if (trea === undefined) throw new Error(`escrow: treasury global not found on app ${this.#appId}`)
+        if (trea.type !== 1) throw new Error(`escrow: treasury global has type ${trea.type}, want 1 (bytes)`)
+        if (trea.bytes.length !== 32) throw new Error(`escrow: treasury raw bytes len = ${trea.bytes.length}, want 32`)
+        return {
+            appId: this.#appId,
+            appAddress: this.#appAddress,
+            usdcAssetId: BigInt(usdc.uint),
+            treasury: new Address(trea.bytes).toString(),
+        }
+    }
+
+    // ---- the prepaid pool ----
+
+    ticketMbr(): Promise<bigint> {
+        this.#ticketMbr ??= this.#readonly('mbrForTicket', [])
+            .then((v) => {
+                if (typeof v !== 'bigint') throw new Error(`escrow: mbrForTicket returned ${typeof v}, want uint64`)
+                if (v === 0n) throw new Error('escrow: mbrForTicket returned 0 (contract misconfigured?)')
+                return v
+            })
+            .catch((err: unknown) => {
+                this.#ticketMbr = undefined
+                throw err
+            })
+        return this.#ticketMbr
+    }
+
+    /**
+     * The free-quota box MBR still owed (Go's FreeQuotaMbrDueFor). An app
+     * that predates the quota owes nothing; any other failure to read the
+     * term rejects, so a transient fault never reads as "no quota". An
+     * unreadable box fails open to the full term.
+     */
+    async freeQuotaMbrDue(payer: string): Promise<bigint> {
+        const mbr = await this.#readFreeQuotaMbrOnce()
+        if (mbr === 0n) return 0n
+        try {
+            await this.#algod.getApplicationBoxByName(this.#appId, freeQuotaBoxKey(payer)).do(undefined, this.#opts())
+            return 0n
+        } catch (err) {
+            if (!isNotFound(err)) this.#log.warn('escrow: free-quota box read failed; sizing as if absent', { err: message(err) })
+            return mbr
+        }
+    }
+
+    #readFreeQuotaMbrOnce(): Promise<bigint> {
+        this.#freeQuotaMbr ??= this.#readonly('mbrForFreeQuota', [])
+            .then((v) => {
+                if (typeof v !== 'bigint') throw new Error(`escrow: mbrForFreeQuota returned ${typeof v}, want uint64`)
+                return v
+            })
+            .catch((err: unknown) => {
+                if (err instanceof FreeQuotaUnsupportedError) return 0n
+                this.#freeQuotaMbr = undefined
+                throw err
+            })
+        return this.#freeQuotaMbr
+    }
+
+    async readPayerDeposit(payer: string): Promise<PayerDeposit> {
+        const v = await this.#readonly('payerDeposit', [payer], [payer])
+        if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'bigint' || typeof v[1] !== 'bigint') {
+            throw new Error('escrow: payerDeposit returned a value that is not a (uint64,uint64) tuple')
+        }
+        return { algoBalance: v[0], openTickets: v[1] }
+    }
+
+    async isPayerOptedIn(payer: string): Promise<boolean> {
+        const acct = await this.#account(payer, 'opt-in check')
+        return (acct.appsLocalState ?? []).some((ls) => BigInt(ls.id) === this.#appId)
+    }
+
+    async spendableMicroAlgos(payer: string): Promise<bigint> {
+        const acct = await this.#account(payer, 'spendable balance')
+        const amount = BigInt(acct.amount)
+        const min = BigInt(acct.minBalance)
+        return amount > min ? amount - min : 0n
+    }
+
+    async minTxnFee(): Promise<bigint> {
+        return BigInt((await this.#params()).minFee)
+    }
+
+    /** The two-txn deposit group: a fee-0 payment and the depositMbr call pooling both fees. */
+    async depositMbr(payer: string, amount: bigint, optIn: boolean): Promise<string> {
+        if (amount <= 0n) throw new Error('escrow: depositMbr amount must be > 0')
+        this.#asPayer(payer)
+        const sp = await this.#params()
+        const pay = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+            sender: payer,
+            receiver: this.#appAddress,
+            amount,
+            suggestedParams: { ...sp, flatFee: true, fee: 0n },
+        })
+        const signer = this.#txnSigner()
+        const atc = new AtomicTransactionComposer()
+        atc.addMethodCall({
+            appID: this.#appId,
+            method: method('depositMbr'),
+            methodArgs: [{ txn: pay, signer }],
+            sender: payer,
+            suggestedParams: { ...sp, flatFee: true, fee: BigInt(sp.minFee) * 2n },
+            onComplete: optIn ? OnApplicationComplete.OptInOC : OnApplicationComplete.NoOpOC,
+            signer,
+        })
+        const txids = await this.#submit('depositMbr', atc, 2)
+        // The payment comes first; the call is the deposit.
+        return txids[1]!
+    }
+
+    async withdrawMbr(payer: string, amount: bigint, signal?: AbortSignal): Promise<string> {
+        if (amount <= 0n) throw new Error('escrow: withdrawMbr amount must be > 0')
+        // 1 inner: the ALGO refund to the sender.
+        return (await this.#single(payer, { method: 'withdrawMbr', args: [amount], inners: 1n }, signal)).txid
+    }
+
+    async closeDeposit(payer: string, signal?: AbortSignal): Promise<string> {
+        // Up to 1 inner: the balance refund. The CloseOut returns the local-schema MBR.
+        const call = { method: 'closeDeposit', inners: 1n, onComplete: OnApplicationComplete.CloseOutOC }
+        return (await this.#single(payer, call, signal)).txid
+    }
+
+    // ---- groups and the payer's single calls ----
+
+    async sendGroup(signed: Uint8Array, method: 'open' | 'settle', signal?: AbortSignal): Promise<void> {
+        signal?.throwIfAborted()
+        try {
+            await this.#algod.sendRawTransaction(signed).do(undefined, this.#opts(signal))
+        } catch (err) {
+            throw enrichSubmitError(method, err)
+        }
+    }
+
+    /**
+     * The payer's standalone settle (Go's ComposeSettleStandalone). The fee
+     * pools the disbursements this settle fires if it finalizes, finalize's
+     * base op-up, and an op-up per revenue-ring catch-up a long-idle node or
+     * operator box runs.
+     */
+    async settleStandalone(c: PayerSettleCall, signal?: AbortSignal): Promise<SettleSubmission> {
+        checkLen('settle ticket id', c.ticketIdRaw, TICKET_ID_LEN)
+        checkLen('settle receipt digest', c.args.receiptDigest, RECEIPT_DIGEST_LEN)
+        checkAddr('settle payer addr', c.payer)
+        checkAddr('settle operator owner addr', c.operatorOwnerAddr)
+        const g = await this.#readGlobalsOnce(signal)
+        const gap = await this.#gapSettleOpUps(c.operatorId, c.nodeId, signal)
+        const a = c.args
+        const r = await this.#single(
+            c.payer,
+            {
+                method: 'settle',
+                args: [
+                    c.ticketIdRaw,
+                    a.amountCharged,
+                    a.receiptDigest,
+                    a.ttftMs,
+                    a.decodeMs,
+                    a.inputTokens,
+                    a.outputTokens,
+                    BigInt(a.outputUsageType),
+                    BigInt(a.auxOutputUsageType),
+                    a.auxOutputCount,
+                    false,
+                ],
+                boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
+                accounts: [c.payer, c.operatorOwnerAddr, g.treasury],
+                assets: [g.usdcAssetId],
+                inners: settleInnerCount(a.amountCharged, c.maxPrice) + 1n + gap,
+            },
+            signal,
+        )
+        return { txid: r.txid, payerFeeMicroalgos: r.fee }
+    }
+
+    /** protest() freezes the ticket: no inner transfers, three for its ed25519 check's budget (Go's ComposeProtest). */
+    async protest(c: ProtestCall, signal?: AbortSignal): Promise<EscrowCall> {
+        checkLen('protest ticket id', c.ticketIdRaw, TICKET_ID_LEN)
+        checkLen('protest receipt digest', c.receiptDigest, RECEIPT_DIGEST_LEN)
+        checkLen('protest receipt sig', c.receiptSig, RECEIPT_SIG_LEN)
+        if (c.reason === 0) throw new Error('escrow: protest reason code must be non-zero')
+        const r = await this.#single(
+            c.payer,
+            {
+                method: 'protest',
+                args: [c.ticketIdRaw, c.amountCharged, c.receiptDigest, c.receiptSig, c.disputeExcerpt, BigInt(c.reason)],
+                boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
+                inners: 3n,
+            },
+            signal,
+        )
+        return { txId: r.txid, feeMicroalgos: Number(r.fee) }
+    }
+
+    /** refundInactive() fires at most the USDC refund (Go's ComposeRefundInactive). */
+    async refundInactive(c: RefundInactiveCall, signal?: AbortSignal): Promise<string> {
+        checkLen('refundInactive ticket id', c.ticketIdRaw, TICKET_ID_LEN)
+        checkAddr('refundInactive payer addr', c.payer)
+        const g = await this.#readGlobalsOnce(signal)
+        const r = await this.#single(
+            c.payer,
+            {
+                method: 'refundInactive',
+                args: [c.ticketIdRaw],
+                boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
+                accounts: [c.payer],
+                assets: [g.usdcAssetId],
+                inners: 1n,
+            },
+            signal,
+        )
+        return r.txid
+    }
+
+    /**
+     * settleLapsed() (Go's ComposeSettleLapsed). The fee and the payout
+     * account come from the ticket box, which is what the contract reads:
+     * the operator's owner can rotate after open() while the box keeps the
+     * one in force then, and a payout to an unreferenced account reverts.
+     * An unreadable box takes the caller's owner and the most inners a
+     * settle fires, since a short fee reverts every retry.
+     */
+    async settleLapsed(c: SettleLapsedCall, signal?: AbortSignal): Promise<string> {
+        checkLen('settleLapsed ticket id', c.ticketIdRaw, TICKET_ID_LEN)
+        checkAddr('settleLapsed operator owner addr', c.operatorOwnerAddr)
+        checkAddr('settleLapsed payer addr', c.payer)
+        const g = await this.#readGlobalsOnce(signal)
+        let owner = c.operatorOwnerAddr
+        let inners = SETTLE_MAX_INNERS
+        try {
+            const box = await this.#algod
+                .getApplicationBoxByName(this.#appId, ticketBoxKey(c.ticketIdRaw))
+                .do(undefined, this.#opts(signal))
+            const rec = decodeTicketRecord(box.value)
+            inners = settleInnerCount(rec.pendingAmount, rec.maxPrice)
+            owner = rec.operatorOwnerAddr
+        } catch {
+            // Worst case, as above.
+        }
+        const gap = await this.#gapSettleOpUps(c.operatorId, c.nodeId, signal)
+        const r = await this.#single(
+            c.payer,
+            {
+                method: 'settleLapsed',
+                args: [c.ticketIdRaw],
+                boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
+                accounts: [owner, c.payer, g.treasury],
+                assets: [g.usdcAssetId],
+                inners: inners + 1n + gap,
+            },
+            signal,
+        )
+        return r.txid
+    }
+
+    // ---- plumbing ----
+
+    /**
+     * The extra finalize op-ups a single-call settle funds for the revenue
+     * ring's catch-up on the node and operator boxes (Go's gapSettleOpUps).
+     * Best effort: an unreadable or absent box adds none.
+     */
+    async #gapSettleOpUps(operatorId: bigint, nodeId: bigint, signal?: AbortSignal): Promise<bigint> {
+        const today = BigInt(Math.floor(this.#clock() / 1000)) / SECONDS_PER_DAY
+        let iters = 0n
+        try {
+            const box = await this.#algod.getApplicationBoxByName(this.#appId, nodeBoxKey(operatorId, nodeId)).do(undefined, this.#opts(signal))
+            iters += ringGapIters(decodeNodeRecord(operatorId, nodeId, box.value).bucketsLastDay, today)
+        } catch {
+            // None.
+        }
+        try {
+            const box = await this.#algod.getApplicationBoxByName(this.#appId, operatorBoxKey(operatorId)).do(undefined, this.#opts(signal))
+            iters += ringGapIters(decodeOperatorRecord(operatorId, box.value).bucketsLastDay, today)
+        } catch {
+            // None.
+        }
+        return gapOpUpsForIters(iters)
+    }
+
+    /** One app call signed by the payer, its fee pooling c.inners (Go's submitSingleOC). */
+    async #single(payer: string, c: SingleCall, signal?: AbortSignal): Promise<{ txid: string; fee: bigint }> {
+        this.#asPayer(payer)
+        signal?.throwIfAborted()
+        const sp = await this.#params(signal)
+        const fee = BigInt(sp.minFee) * (1n + c.inners)
+        const atc = new AtomicTransactionComposer()
+        atc.addMethodCall({
+            appID: this.#appId,
+            method: method(c.method),
+            methodArgs: c.args ?? [],
+            sender: payer,
+            suggestedParams: { ...sp, flatFee: true, fee },
+            onComplete: c.onComplete ?? OnApplicationComplete.NoOpOC,
+            appAccounts: c.accounts ?? [],
+            // Asset 0 is no asset, and the AVM refuses it as a reference.
+            appForeignAssets: (c.assets ?? []).filter((a) => a !== 0n),
+            boxes: (c.boxes ?? []).map((name) => ({ appIndex: 0, name })),
+            signer: this.#txnSigner(),
+        })
+        const [txid] = await this.#submit(c.method, atc, 1, signal)
+        return { txid: txid!, fee }
+    }
+
+    // Signing and sending are separate steps, as in Go: a signer's refusal
+    // is not a submit failure, and only the send carries the signal.
+    async #submit(name: string, atc: AtomicTransactionComposer, want: number, signal?: AbortSignal): Promise<string[]> {
+        const txids = atc.buildGroup().map((t) => t.txn.txID())
+        if (txids.length !== want) throw new Error(`escrow: ${name} built ${txids.length} txns, want ${want}`)
+        let signed: Uint8Array[]
+        try {
+            signed = await atc.gatherSignatures()
+        } catch (err) {
+            throw new Error(`escrow: gather signatures for ${name}: ${message(err)}`, { cause: err })
+        }
+        signal?.throwIfAborted()
+        try {
+            await this.#algod.sendRawTransaction(signed).do(undefined, this.#opts(signal))
+        } catch (err) {
+            throw enrichSubmitError(name, err)
+        }
+        return txids
+    }
+
+    /** A readonly method simulated from the application account (see the class doc). */
+    async #readonly(name: string, args: algosdk.ABIArgument[], accounts: string[] = []): Promise<algosdk.ABIValue | undefined> {
+        const sp = await this.#params()
+        const m = method(name)
+        const atc = new AtomicTransactionComposer()
+        atc.addMethodCall({
+            appID: this.#appId,
+            method: m,
+            methodArgs: args,
+            sender: this.#appAddress,
+            suggestedParams: sp,
+            appAccounts: accounts,
+            signer: algosdk.makeEmptyTransactionSigner(),
+        })
+        const [built] = atc.buildGroup()
+        const txns = (await atc.gatherSignatures()).map((b) => algosdk.decodeSignedTransaction(b))
+        const req = new algosdk.modelsv2.SimulateRequest({
+            txnGroups: [new algosdk.modelsv2.SimulateRequestTransactionGroup({ txns })],
+            allowEmptySignatures: true,
+        })
+        let res: algosdk.modelsv2.SimulateResponse
+        try {
+            res = await this.#algod.simulateTransactions(req).do(undefined, this.#opts())
+        } catch (err) {
+            throw new Error(`escrow: simulate ${name}: ${message(err)}`, { cause: err })
+        }
+        // An eval failure is reported in the group, not as a transport error.
+        const group = res.txnGroups[0]
+        if (group?.failureMessage) {
+            // An app without the method falls through its ABI router to a reject,
+            // a logic eval failure. Only that means the quota is unsupported; a
+            // transient fault read as unsupported would drop the term for good.
+            if (name === 'mbrForFreeQuota' && group.failureMessage.includes('logic eval error')) {
+                throw new FreeQuotaUnsupportedError(
+                    `escrow: deployed app has no freeTicketAllowance method (app=${this.#appId}): ${group.failureMessage}`,
+                )
+            }
+            throw new Error(`escrow: simulate ${name} failed (app=${this.#appId} sender=${this.#appAddress}): ${group.failureMessage}`)
+        }
+        const result = group?.txnResults[0]?.txnResult
+        if (group?.txnResults.length !== 1 || result === undefined) {
+            throw new Error(`escrow: simulate ${name} returned ${group?.txnResults.length ?? 0} results, want 1`)
+        }
+        const mr = AtomicTransactionComposer.parseMethodResponse(
+            m,
+            { txID: built!.txn.txID(), rawReturnValue: new Uint8Array(), method: m },
+            result,
+        )
+        if (mr.decodeError) throw new Error(`escrow: decode ${name} return: ${mr.decodeError.message}`, { cause: mr.decodeError })
+        return mr.returnValue
+    }
+
+    async #params(signal?: AbortSignal): Promise<SuggestedParams> {
+        try {
+            return await this.#algod.getTransactionParams().do(undefined, this.#opts(signal))
+        } catch (err) {
+            throw new Error(`escrow: suggested params: ${message(err)}`, { cause: err })
+        }
+    }
+
+    async #account(addr: string, why: string): Promise<algosdk.modelsv2.Account> {
+        try {
+            return await this.#algod.accountInformation(addr).do(undefined, this.#opts())
+        } catch (err) {
+            throw new Error(`escrow: account info for ${why}: ${message(err)}`, { cause: err })
+        }
+    }
+
+    // The request's deadline, and the caller's signal when there is one.
+    #opts(signal?: AbortSignal): RequestOptions {
+        const timeout = AbortSignal.timeout(this.#timeoutMs)
+        return { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }
+    }
+
+    // The chain signs only as its own payer: a call naming another account
+    // would be one the signer can't make.
+    #asPayer(payer: string): void {
+        if (payer !== this.#signer.address) throw new SignerAddressError(this.#signer.address, payer)
+    }
+
+    #txnSigner(): algosdk.TransactionSigner {
+        return (txns, idx) => this.#signer.signTransactions(txns, idx)
+    }
+}
+
+// Waits for p, or rejects with the signal's reason once it aborts.
+function untilAborted<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    if (signal === undefined) return p
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+        p.then(
+            (v) => {
+                signal.removeEventListener('abort', onAbort)
+                resolve(v)
+            },
+            (e: unknown) => {
+                signal.removeEventListener('abort', onAbort)
+                reject(e)
+            },
+        )
+    })
+}
+
+function checkLen(what: string, b: Uint8Array, want: number): void {
+    if (b.length !== want) throw new Error(`escrow: ${what} must be ${want} bytes (got ${b.length})`)
+}
+
+function checkAddr(what: string, addr: string): void {
+    if (!algosdk.isValidAddress(addr)) throw new Error(`escrow: ${what}: ${addr} is not an address`)
+}
+
+// Go's isNotFound: algod reports a missing box as a 404.
+function isNotFound(err: unknown): boolean {
+    const status = (err as { response?: { status?: unknown } } | null)?.response?.status
+    if (status === 404) return true
+    const text = message(err)
+    return text.includes('404') || text.toLowerCase().includes('box not found')
+}
+
+function message(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
+}

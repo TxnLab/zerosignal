@@ -145,8 +145,10 @@ class FakeChain implements EscrowChain {
         this.spendable -= amount
         return 'DEPOSIT'
     }
-    sendGroup = async (signed: Uint8Array, signal?: AbortSignal) => {
+    sendMethods: string[] = []
+    sendGroup = async (signed: Uint8Array, method: string, signal?: AbortSignal) => {
         this.signals.sendGroup = signal
+        this.sendMethods.push(method)
         this.sent.push(signed)
         const e = this.sendOutcomes.shift()
         if (e) throw e
@@ -686,6 +688,8 @@ describe('OpenHandle', () => {
         chain.signals = {}
         await atomic.ackSettle(receipt, 'GROUP', signal)
         for (const name of ['config', 'sendGroup']) expect(chain.signals[name], `atomic ack ${name}`).toBe(signal)
+        // Each group names its call, so a revert resolves against the right method.
+        expect(chain.sendMethods).toEqual(['open', 'open', 'settle'])
 
         const h = await open()
         await h.ackSettle(receipt, null, signal)

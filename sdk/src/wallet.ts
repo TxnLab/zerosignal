@@ -87,11 +87,11 @@ export interface EscrowChain extends MbrPoolChain {
     /** The contract's protocolFeeBps global. */
     protocolFeeBps(signal?: AbortSignal): Promise<number>
     /**
-     * Submits a signed group, concatenated in group order. Rejects with
-     * algod's refusal; a revert commits nothing, so the same group can be
-     * sent again.
+     * Submits a signed group, concatenated in group order; method names the
+     * escrow call it carries, for the revert's name. Rejects with algod's
+     * refusal; a revert commits nothing, so the same group can be sent again.
      */
-    sendGroup(signed: Uint8Array, signal?: AbortSignal): Promise<void>
+    sendGroup(signed: Uint8Array, method: 'open' | 'settle', signal?: AbortSignal): Promise<void>
     settleStandalone(c: PayerSettleCall, signal?: AbortSignal): Promise<SettleSubmission>
     protest(c: ProtestCall, signal?: AbortSignal): Promise<EscrowCall>
     refundInactive(c: RefundInactiveCall, signal?: AbortSignal): Promise<string>
@@ -240,7 +240,7 @@ export class Wallet implements WalletOpener {
         // takes the pool re-check below as it does in Go.
         const submit = async (): Promise<CompletedOpenGroup> => {
             const g = await completeOpenGroup(presignedOpenGroup, spec, this.#signer)
-            await this.#chain.sendGroup(g.signedGroup, signal)
+            await this.#chain.sendGroup(g.signedGroup, 'open', signal)
             return g
         }
         let group: CompletedOpenGroup
@@ -413,7 +413,7 @@ export class Wallet implements WalletOpener {
                     },
                     submitGroup: async (spec) => {
                         const g = await completeSettleGroup(group, spec, signer)
-                        await chain.sendGroup(g.signedGroup, signal)
+                        await chain.sendGroup(g.signedGroup, 'settle', signal)
                         return { txid: g.txid, payerFeeMicroalgos: g.payerFeeMicroalgos }
                     },
                     standalone: () =>
