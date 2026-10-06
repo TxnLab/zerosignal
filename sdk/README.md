@@ -88,8 +88,15 @@ registry under shared vectors: `selectProbeSet` bounds which nodes a cycle probe
 the recently requested models in `ModelDemand`; `checkEphemeralAdvertisement` verifies a
 node's signed ephemeral seal key and says why one is unusable (`EphemeralVerifyCache` reuses
 the verdict for an app that rebuilds its rows often, and `recordEphemeralStaleness` charges a
-relay that served a stale key); `probeReachability` reads a probe's outcome as the row's
-reachability.
+relay that served a stale key).
+
+`CatalogEngine` folds each node's probe results as the Go registry does. A node keeps its last
+answer for `maxCarryAge` after it, through a failed probe, an unreachable relay, or a cycle that
+skipped it. A probe that reached the node and failed reads `failing` but keeps the models. One
+that learned nothing (every relay hop failed) changes nothing. Two readings are more cautious
+than Go's, which starts each cycle with every node unprobed: a node's own failure stays `failing`,
+and a privacy-mode probe with no relay reads `no-relay`, until the node is next probed. The app runs the probes and hands
+each result over; `restoredProtoVersion` floors a version read back from storage to its major.
 
 ## Escrow app client
 
