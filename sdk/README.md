@@ -57,14 +57,26 @@ is untested. `nodeFetch` throws there rather than hand back a guard that checks 
 
 ### Accounts
 
-Two subpaths build a `Signer` from a key held in memory, each the twin of Go's keystore and
-pinned to it by `testdata/account_vectors.json`:
+Three subpaths build a `Signer` from a key held in memory, each the twin of Go's keystore and
+pinned to it by `testdata/account_vectors.json`. Passkeys are not one of them: derive 32 secret
+bytes from the passkey (a WebAuthn PRF output) and hand them to `xhdRootFromEntropy`.
 
 - `@txnlab/zerosignal/accounts/algosdk`: `algosdkSigner(account)` over an algosdk `Account`.
 - `@txnlab/zerosignal/accounts/mnemonic`: `mnemonicSigner(phrase)` for a 25-word Algorand
   mnemonic. Any whitespace separates words; case is significant, as in Go's keystore (the
   `zs-proxy wallet import` command lowercases a phrase before storing it; this does not). A
   24-word phrase is an xHD account and is refused here.
+- `@txnlab/zerosignal/accounts/xhd`: a BIP-39 / ARC-52 xHD account, the form the ZeroSignal
+  chat app derives and exports as a 24-word recovery phrase. `xhdRootFromPhrase(phrase)` loads
+  the phrase; `xhdRootFromEntropy(bytes)` derives the account from 32 secret, uniformly random
+  bytes, such as a WebAuthn PRF output and never a credential id or public key. Those bytes are
+  the phrase's entropy, so `entropyToMnemonic(bytes)` is the recovery phrase. `xhdSigner(root)`
+  signs as the account. Both derive the first address key, m/44'/283'/0'/0/0. It needs the
+  optional peer dependencies `@algorandfoundation/xhd-wallet-api` and `@scure/bip39`; the first
+  imports Node's `crypto` and `util` and reads the global `Buffer`, so a browser bundle must
+  polyfill all three (e.g. vite-plugin-node-polyfills). The signer holds a copy of the root key,
+  the whole tree's secret, for as long as it lives, and under Node the library leaves copies of
+  key bytes in Buffer's shared pool after it signs.
 
 Each signs only as its own address: `signBytes` for any other rejects with
 `SignerAddressError`.

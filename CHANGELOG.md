@@ -45,7 +45,10 @@ recorded the old address; it marks its entry so, opens as before and keeps payin
 address it recorded (`keystore.LegacySpacingAddress`). A key from the environment lists the
 canonical address, so a deployment that auto-picks its only key moves to it, while one naming
 the old address (a node's signing address) still finds it. A 25-word phrase separated by tabs
-or line breaks, refused before, now loads. `@txnlab/zerosignal/accounts/algosdk` and `/accounts/mnemonic` load a
+or line breaks, refused before, now loads. `@txnlab/zerosignal/accounts/xhd` loads a 24-word
+phrase as Go does, or derives the same account from the phrase's 32 bytes of entropy; it
+refuses a full-width word that NFKD normalization would turn into a BIP-39 word, as Go's exact
+lookup does. `@txnlab/zerosignal/accounts/algosdk` and `/accounts/mnemonic` load a
 25-word phrase as Go does, splitting on Go's `unicode.IsSpace` set; `account_vectors.json`
 holds Go's outcome, signatures and a signed transaction for each case.
 

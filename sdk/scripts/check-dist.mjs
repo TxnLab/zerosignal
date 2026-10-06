@@ -69,7 +69,11 @@ const nodeEntry = mode === 'guarded' ? await import(`${pkg.name}/node`) : undefi
 if (nodeEntry && typeof nodeEntry.nodeFetch !== 'function') fail(`${pkg.name}/node exports no nodeFetch`)
 
 // The account subpaths load by name under every runtime's conditions.
-for (const [sub, fn] of [['accounts/algosdk', 'algosdkSigner'], ['accounts/mnemonic', 'mnemonicSigner']]) {
+for (const [sub, fn] of [
+    ['accounts/algosdk', 'algosdkSigner'],
+    ['accounts/mnemonic', 'mnemonicSigner'],
+    ['accounts/xhd', 'xhdSigner'],
+]) {
     const m = await import(`${pkg.name}/${sub}`)
     if (typeof m[fn] !== 'function') fail(`${pkg.name}/${sub} exports no ${fn}`)
 }

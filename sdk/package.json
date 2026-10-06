@@ -52,6 +52,10 @@
             "types": "./dist/accounts/mnemonic.d.ts",
             "import": "./dist/accounts/mnemonic.js"
         },
+        "./accounts/xhd": {
+            "types": "./dist/accounts/xhd.d.ts",
+            "import": "./dist/accounts/xhd.js"
+        },
         "./node": {
             "types": "./dist/node/index.d.ts",
             "node": "./dist/node/index.js"
@@ -102,16 +106,26 @@
         "undici": "^7.30.0"
     },
     "peerDependencies": {
-        "@algorandfoundation/algokit-utils": "^9.2.0"
+        "@algorandfoundation/algokit-utils": "^9.2.0",
+        "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
+        "@scure/bip39": "^2.2.0"
     },
     "peerDependenciesMeta": {
         "@algorandfoundation/algokit-utils": {
+            "optional": true
+        },
+        "@algorandfoundation/xhd-wallet-api": {
+            "optional": true
+        },
+        "@scure/bip39": {
             "optional": true
         }
     },
     "devDependencies": {
         "@algorandfoundation/algokit-client-generator": "^6.0.1",
         "@algorandfoundation/algokit-utils": "9.2.0",
+        "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
+        "@scure/bip39": "2.2.0",
         "@types/node": "^22.10.0",
         "typescript": "5.6.3",
         "vitest": "3.2.6"

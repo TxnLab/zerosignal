@@ -185,6 +185,11 @@
       "refused": true
     },
     {
+      "name": "bip39-12 valid phrase",
+      "phrase": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "refused": true
+    },
+    {
       "name": "empty",
       "phrase": "",
       "refused": true
@@ -484,6 +489,26 @@
         "signed": "gqNzaWfEQPDqr/PAH9ggqgggqo/DJlpn8Ol9cutJaTFkVJJ9MEr21GnWk/gR0PdjC8smpdetsQPdnGJBTOQPd/oLgi+tyg2jdHhuiqNhbXTOAAHiQKNmZWXNA+iiZnbNA+ijZ2VuqnpzLXZlY3RvcnOiZ2jEIDG7vcPs0p8F6Gdpv2vnqbYl28MZhZ9kJK6KNVpEVmmyomx2zQfQpG5vdGXEDmFjY291bnQgdmVjdG9yo3JjdsQgRiJjk+3E8xw8xStq8/51FmsFwKrSE9/bqXNmefA5Jg+jc25kxCADoQe/884Qvh1w3RjnS8CZZ+TWMJulDV8d3IZkElUxuKR0eXBlo3BheQ==",
         "txid": "6X37AZRF6KIMSOH3CF5EZ5N4KLZXJU2LKT4YH5ENDXMQRZXMPOEQ"
       }
+    },
+    {
+      "name": "xhd-24 full-width letters",
+      "phrase": "ａｂａｎｄｏｎ ａｍｏｕｎｔ ｌｉａｒ ａｍｏｕｎｔ ｅｘｐｉｒｅ ａｄｊｕｓｔ ｃａｇｅ ｃａｎｄｙ ａｒｃｈ ｇａｔｈｅｒ ｄｒｕｍ ｂｕｌｌｅｔ ａｂｓｕｒｄ ｍａｔｈ ｅｒａ ｌｉｖｅ ｂｉｄ ｒｈｙｔｈｍ ａｌｉｅｎ ｃｒｏｕｃｈ ｒａｎｇｅ ａｔｔｅｎｄ ｊｏｕｒｎｅｙ ｕｎａｗａｒｅ",
+      "refused": true
+    },
+    {
+      "name": "algorand-25 full-width letters",
+      "phrase": "ｃａｃｔｕｓ ａｍｏｕｎｔ ａｃｃｏｕｎｔ ｅｘｐｅｃｔ ａｒｍｙ ａｃｈｉｅｖｅ ｅｍｂａｒｋ ａｎｘｉｅｔｙ ｌｉｆｔ ｃｒｏｕｃｈ ｍａｎｄａｔｅ ａｂｓｔｒａｃｔ ｃａｐｔａｉｎ ｓｅｔｕｐ ｐａｒｔｙ ｂｅｎｃｈ ｔｉｓｓｕｅ ｇａｔｅ ａｒｒｉｖｅ ｒａｎｄｏｍ ｄｅａｌ ｍａｎｓｉｏｎ ｗｅｄｄｉｎｇ ａｂａｎｄｏｎ ｃｕｒｔａｉｎ",
+      "refused": true
+    },
+    {
+      "name": "xhd-24 one full-width word",
+      "phrase": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey ｕｎａｗａｒｅ",
+      "refused": true
+    },
+    {
+      "name": "algorand-25 one full-width word",
+      "phrase": "cactus amount account expect army achieve embark anxiety lift crouch mandate abstract captain setup party bench tissue gate arrive random deal mansion wedding abandon ｃｕｒｔａｉｎ",
+      "refused": true
     },
     {
       "name": "algorand-25 upper case",

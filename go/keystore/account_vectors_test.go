@@ -92,6 +92,14 @@ func TestAccountVectors(t *testing.T) {
 	}
 	spaced := func(m, sep string) string { return strings.Join(strings.Fields(m), sep) }
 	r := func(c rune) string { return string(c) }
+	fullWidth := func(m string) string {
+		return strings.Map(func(c rune) rune {
+			if c >= 'a' && c <= 'z' {
+				return c - 'a' + 0xff41
+			}
+			return c
+		}, m)
+	}
 
 	a1, a2 := algo25(seq(0)), algo25(bytes.Repeat([]byte{0xff}, 32))
 	x1, x2 := bip24(seq(1)), bip24(bytes.Repeat([]byte{0xa5}, 32))
@@ -109,6 +117,9 @@ func TestAccountVectors(t *testing.T) {
 		{Name: "algorand-25 unknown word", Phrase: swapLast(a1, "zzzz")},
 		{Name: "23 words", Phrase: strings.Join(strings.Fields(hdPhraseZero)[:23], " ")},
 		{Name: "26 words", Phrase: a1 + " abandon"},
+		// A valid BIP-39 phrase of another length: its checksum passes, so
+		// only the word count refuses it.
+		{Name: "bip39-12 valid phrase", Phrase: strings.Repeat("abandon ", 11) + "about"},
 		{Name: "empty", Phrase: ""},
 
 		// Separators are not part of a phrase: every variant loads the
@@ -128,6 +139,13 @@ func TestAccountVectors(t *testing.T) {
 		{Name: "xhd-24 byte-order mark", Phrase: r(0xfeff) + hdPhraseSeq},
 		{Name: "algorand-25 byte-order mark", Phrase: r(0xfeff) + a1},
 		{Name: "algorand-25 no-break spaces", Phrase: spaced(a1, r(0xa0))},
+		// Full-width letters NFKD-normalize to the ASCII words. Neither Go
+		// form normalizes, so both refuse them.
+		{Name: "xhd-24 full-width letters", Phrase: fullWidth(hdPhraseSeq)},
+		{Name: "algorand-25 full-width letters", Phrase: fullWidth(a1)},
+		// One look-alike word among ASCII ones is refused all the same.
+		{Name: "xhd-24 one full-width word", Phrase: swapLast(hdPhraseSeq, fullWidth(strings.Fields(hdPhraseSeq)[23]))},
+		{Name: "algorand-25 one full-width word", Phrase: swapLast(a1, fullWidth(strings.Fields(a1)[24]))},
 		{Name: "algorand-25 upper case", Phrase: strings.ToUpper(a1)},
 		{Name: "xhd-24 upper case", Phrase: strings.ToUpper(hdPhraseSeq)},
 	}
