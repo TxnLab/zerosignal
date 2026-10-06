@@ -522,7 +522,7 @@ The box is created on the payer's **first** free open. Its MBR is charged **once
   - Against an app that predates the quota, the method is absent and the term is `0`.
 - **It gives the free tier a real cost per identity.** Farming fresh payer addresses burns this amount *irrecoverably* per address. An attacker can still mint addresses, but each one now costs something.
 
-Enforcement is on chain (`open()` reverts with `daily free ticket limit reached`), so it holds across every node. That revert only comes after the node has signed the open group and handed it to the caller, killing the turn at submit time and stranding a reserve slot until the open watchdog reaps it. So the node also **pre-checks** the payer's allowance at reserve with the contract's read-only `freeTicketAllowance(payer)`, and refuses up front with `403 free_quota_exhausted`. (A reverted group fails in evaluation and is never committed, so no network fee is burned.) The pre-check is advisory: the contract stays the authority, and a node with a stale reading just lets through an open that then reverts. Paid reserves never consult it.
+Enforcement is on chain (`open()` reverts with `daily free ticket limit reached`), so it holds across every node. That revert only comes after the node has signed the open group and handed it to the caller, killing the turn at submit time and stranding a reserve slot until the ticket expires and is swept. So the node also **pre-checks** the payer's allowance at reserve with the contract's read-only `freeTicketAllowance(payer)`, and refuses up front with `403 free_quota_exhausted`. (A reverted group fails in evaluation and is never committed, so no network fee is burned.) The pre-check is advisory: the contract stays the authority, and a node with a stale reading just lets through an open that then reverts. Paid reserves never consult it.
 
 `freeTicketAllowance` returns `[remaining, windowEndsAt, capPerDay]` with window expiry already applied, so callers need no clock arithmetic. `windowEndsAt` is **always a real future timestamp**. With no window running, it reports the end of the window that would start now, never `0`, because a `0` would read as the epoch and look like "retry immediately". Callers must pass the payer's quota box as a box reference. A free `open()` (`max_price == 0`) must reference it too, or it fails on chain. A paid `open()` must not: the contract never touches the box there, and the reference would put the payer-derived box name (`q:` + payer public key, a stable payer pseudonym) on chain for nothing. The node composes `open()`, so it applies this split when it builds `presigned_open_txn`.
 
@@ -3319,7 +3319,7 @@ puts it in the same differential path rather than a new one.
 | Sealed request with unknown/expired/consumed `ticket_id` | 402 `invalid_request_error`, `ticket_invalid` | Ticket expired before payment arrived, or replay detected — obtain a fresh ticket. |
 | Sealed request whose inner-header `reply_to_public_key` is not the ticket's reserve-time `proxy_recipient` | 402 `invalid_request_error`, `reply_to_mismatch` | Caller must reuse the reserve-time ephemeral identity as the envelope's reply-to (§ 4). Checked before `Consume`, so the ticket survives — re-send with the correct identity. |
 | Sealed request whose body `model` differs from the ticket's reserved model | 400 `invalid_request_error`, `model_mismatch` | Sealed, with a zero-cost receipt, so the escrow settles at zero. Reserve for the model you intend to call — the ticket's model, not the body's, determines the rates and limits. |
-| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. |
+| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. |
 | Second `escrow.settle` call from the same side as the pending claim, with args that differ from it | On-chain revert `same side cannot re-claim with different args` | Caller-logic bug: only the counterparty of the pending claim can answer it with different args. A same-side re-claim with byte-for-byte matching args is a no-op (§ 3a "Settlement windows"). See "Settle outcomes" below. |
 | Second `escrow.settle` call from the counterparty, with args that differ from the pending claim | No revert; the ticket transitions to `STATUS_FROZEN` | The counterparty disagreed with the first side's claim. It proceeds to off-chain arbitration, and the first claim stays on-chain as the disputed reference. |
 | `escrow.settle` broadcast after `ticket.expires_at + ticket.settlement_grace_seconds` (both unix seconds) | On-chain revert `settle after refund deadline` | Neither party acked in time. The operator force-finalizes a pending operator claim via `escrow.settleLapsed`; the payer recovers funds via `escrow.refundInactive` when no operator claim is pending. |
@@ -3338,12 +3338,13 @@ puts it in the same differential path rather than a new one.
 | `GET /v1/zs/attestation` on a node whose attestation refresh has not yet succeeded | `503 service_unavailable`, `attestation_unavailable` | Cold start; node-authored. The proxy treats this the same as a non-attested operator for routing. |
 | `GET /v1/zs/attestation` on a node whose evidence is older than `2 × refresh_interval` | `503 service_unavailable`, `stale_attestation` | Refresh wedged on the node side; same routing consequence as `attestation_unavailable`. |
 | `GET /v1/zs/attestation` on a node that does not run in TEE mode | `404 invalid_request_error`, `attestation_disabled` | Defensive — should not happen if the proxy reads `tee.mode` from `/v1/zs/details` first. |
-| Payer's `open()` app-call was seen in the mempool (admission proceeded speculatively) but never confirmed on-chain (see "`open_unconfirmed`" below) | Streaming: node cancels inference and emits a sealed OpenAI error frame with `code=payment_verification_failed`, message prefixed `open_unconfirmed:`. Settle-side (non-streaming, or any case the watchdog didn't catch): the operator's settlement driver marks the ledger entry terminally `failed` immediately (no retry budget burned); no client-visible signal, since the response was already returned. | Streaming clients see `payment_verification_failed` with the `open_unconfirmed` reason and know they will not be billed: no settle was made, and the `open()` never moved any funds, so no refund is needed either. On the non-streaming path the proxy never gets a receipt; since the `open()` never confirmed, the payer's funds were never escrowed and no `refundInactive` is needed. |
+| Payer's `open()` app-call was seen in the mempool (admission proceeded speculatively) but never confirmed on-chain (see "`open_unconfirmed`" below) | The node cancels inference on every ticket-gated request kind (chat, responses, image generation and edit) and sends no receipt. Streaming: a sealed OpenAI error frame with `code=payment_verification_failed`, message prefixed `open_unconfirmed:`. Non-streaming: a sealed `402 invalid_request_error`, `payment_verification_failed`, same message, in place of the response. The node checks for the cancel after the upstream call returns, whatever it returned, so a reply finishing in the same instant is withheld. Settle-side (any case the watchdog didn't catch): the operator's settlement driver marks the ledger entry terminally `failed` immediately (no retry budget burned); no client-visible signal, since the response was already returned. | The client sees `payment_verification_failed` with the `open_unconfirmed` reason and knows it will not be billed: no receipt was sent, so no settle can be made. The `open()` normally never moved funds; if it confirms anyway (another algod's pool can still hold the group), the payer recovers `max_price` with `refundInactive` after `expires_at + grace`, as for any unsettled ticket. **Re-reserve**; the ticket is consumed. Content already streamed before the cancel stays with the client. In the settle-side case the payer's own settle also reverts; nothing was escrowed, so nothing is billed. |
 
 **Settle outcomes are not client errors.** The four settle rows above are
 on-chain outcomes of settlement, which runs after admission. None is surfaced to
-the HTTP client as an error code; the `402 payment_verification_failed` refusal
-is admission-time only. A reverted settle is logged by its sender, and the ticket
+the HTTP client as an error code. A `402 payment_verification_failed` comes from
+admission or, on a buffered reply, from the open-confirmation watchdog
+(`open_unconfirmed` below), never from settlement. A reverted settle is logged by its sender, and the ticket
 then resolves via `settleLapsed` or `refundInactive`. A frozen ticket has no
 on-chain resolution: its funds stay locked pending off-chain arbitration. The only client-visible
 effect is on the reported ALGO fee total, which does not include the payer's
@@ -3370,13 +3371,24 @@ choose, so a paid failure, its passed-through node error included, is always
 
 **`open_unconfirmed`.** Typically a balance shift between mempool admission and
 block production drops the group. It is detected in one of two ways:
-- Mid-inference, for streaming requests, by the node's open-confirmation
-  watchdog. Algod returns "transaction not found" for a txid this same algod
-  node previously had in its pool. Algod keeps recently committed txns in cache
-  for tens of rounds, so a 404 is unambiguous evidence that the txn dropped
-  without confirming.
+- Mid-inference, on every ticket-gated request kind, by the node's
+  open-confirmation watchdog. After each block, algod re-checks every pending
+  group against the new ledger state and drops those that now fail. The pending
+  lookup then keeps answering 200 with the rejection in `pool-error` for as long
+  as algod remembers it; that is the drop signal. That memory holds a fixed
+  number of recent rejections, not a fixed time, and an algod restart or
+  catchup clears it. Once it is gone the lookup returns "transaction not found"
+  instead, the fallback signal: this algod had the txn in its pool (assuming
+  the node polls one algod instance), and algod's lookup still finds a
+  committed transaction for `MaxTxnLife` (1,000) rounds after it commits, so a
+  404 during inference means the open did not commit there. An open that
+  already carries `pool-error` at admission is refused there (402
+  `payment_verification_failed`) before inference starts.
+  Both signals describe one algod's pool, not the network, which is why a
+  payer still holds the `refundInactive` recourse above.
 - Operator-side at settle time, when `escrow.settle` reverts with
-  `ticket not found` because the ticket box was never created.
+  `ticket not found` because the ticket box was never created. This is the
+  backstop for whatever the watchdog misses.
 
 ## 11. Versioning
 
