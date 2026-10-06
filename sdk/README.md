@@ -127,11 +127,29 @@ the box record types. It needs `@algorandfoundation/algokit-utils` ^9.2.0, an op
 dependency that the rest of the SDK does not use. CI regenerates the client and fails if the
 committed copy differs.
 
+## Prepaid MBR pool
+
+Each open ticket's box is paid for out of the payer's prepaid ALGO pool in escrow, so a request
+carries no ALGO. `ensureMbrDeposit(chain, payer, slots)` funds the pool toward a working set of
+`slots` concurrent tickets (`Config.concurrentSlots` by default), opting in on the first
+deposit. The working set is an ideal rather than a requirement: a wallet that can't reach it
+funds as many whole slots as it affords and reports `belowTarget`, and one that can't afford a
+single slot throws `MbrDepositUnaffordableError` before anything is signed. `backedSlots` on
+the error tells a pool that can still serve from one that can't, and `need` is what the next
+deposit costs: the free-quota box term when that is what a serving pool lacks, else a slot. `planMbrDeposit` is the
+sizing on its own, Go's `planDeposit`, and `readMbrPool` / `mbrPoolState` report what is
+deposited, reserved by live tickets, and withdrawable.
+
+The chain arrives as an `MbrPoolChain`: the escrow app's readonly calls, the payer's spendable
+balance, and the deposit group. Calls aren't single-flight, so a host that can run two at once
+for one payer serializes them, or both may deposit.
+
 ## Errors and events
 
 The SDK's own failures are `ZsError`s. Branch on `kind`, the stable contract; `code` is
-diagnostic and may gain values. The one exception is `SignerAddressError`, which
-`payerBytesSigner` rejects with when asked to sign for another address. A turn's events are a discriminated union on `type`
+diagnostic and may gain values. Two exceptions carry fields a caller acts on:
+`SignerAddressError`, which `payerBytesSigner` rejects with when asked to sign for another
+address, and `MbrDepositUnaffordableError` from `ensureMbrDeposit`. A turn's events are a discriminated union on `type`
 (`payment.committed`, `delta.text`, `receipt.verified`, `done`, …). The set grows, so a
 consumer must ignore types it does not handle.
 

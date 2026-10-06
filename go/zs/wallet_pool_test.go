@@ -244,17 +244,69 @@ func TestEnsureDeposit(t *testing.T) {
 			wantErrSubstr: "ticket MBR not loaded",
 		},
 		{
-			name: "unaffordable shortfall returns sentinel",
+			name: "unaffordable slot returns sentinel",
 			pool: &fakePool{
 				ticketMbr: testTicketMbr,
 				dep:       escrow.PayerDeposit{},
 				optedIn:   false,
 				minFee:    minFee,
-				spendable: 500_000, // far below 10*115_000 + fees + opt-in MBR
+				spendable: 380_000, // short of one 115_000 slot + 2_000 fee + 271_000 opt-in MBR
 			},
 			slots:        10,
 			wantErrIs:    ErrDepositUnaffordable,
 			wantDeposits: 0,
+		},
+		{
+			// A pool with no slot needs a slot before the box term is any use,
+			// so that is the cost the message names, even with the term owed.
+			name: "unaffordable empty pool owing the quota asks for a slot",
+			pool: &fakePool{
+				ticketMbr:    testTicketMbr,
+				freeQuotaMbr: 22_500,
+				dep:          escrow.PayerDeposit{},
+				optedIn:      false,
+				minFee:       minFee,
+				spendable:    380_000,
+			},
+			slots:         10,
+			wantErrSubstr: "one more slot needs 388000 µALGO",
+		},
+		{
+			// A pool at exactly the working set in whole slots still owes the box
+			// term until the first free open; the early "covered" return must count it.
+			name: "full slots still fund the owed quota term",
+			pool: &fakePool{
+				ticketMbr:    testTicketMbr,
+				freeQuotaMbr: 22_500,
+				dep:          escrow.PayerDeposit{AlgoBalance: 10 * testTicketMbr},
+				optedIn:      true,
+				minFee:       minFee,
+				spendable:    100_000_000,
+				depositTxID:  "QUOTATX",
+			},
+			slots:         10,
+			wantTxID:      "QUOTATX",
+			wantDeposited: 22_500,
+			wantDeposits:  1,
+		},
+		{
+			// The working set is an ideal, not a requirement: a wallet that can't
+			// reach it funds the whole slots it can, and says it fell short.
+			name: "thin wallet funds the slots it affords",
+			pool: &fakePool{
+				ticketMbr:   testTicketMbr,
+				dep:         escrow.PayerDeposit{},
+				optedIn:     false,
+				minFee:      minFee,
+				spendable:   2*testTicketMbr + 2*minFee + depositOptInMBR + 1_000,
+				depositTxID: "PARTIALTX",
+			},
+			slots:         10,
+			wantTxID:      "PARTIALTX",
+			wantDeposited: 2 * testTicketMbr,
+			wantDeposits:  1,
+			wantOptIn:     true,
+			wantErrIs:     ErrDepositBelowTarget,
 		},
 		{
 			name: "zero slots falls back to default",
@@ -283,18 +335,19 @@ func TestEnsureDeposit(t *testing.T) {
 				if !errors.Is(err, tc.wantErrIs) {
 					t.Fatalf("err = %v, want errors.Is %v", err, tc.wantErrIs)
 				}
-				if tc.pool.depositCalls != tc.wantDeposits {
-					t.Errorf("deposit calls = %d, want %d (no submit on unaffordable)", tc.pool.depositCalls, tc.wantDeposits)
+				if tc.wantDeposits == 0 {
+					if tc.pool.depositCalls != 0 {
+						t.Errorf("deposit calls = %d, want 0 (no submit on unaffordable)", tc.pool.depositCalls)
+					}
+					return
 				}
-				return
-			}
-			if tc.wantErrSubstr != "" {
+				// A partial deposit: the error rides with a real one, checked below.
+			} else if tc.wantErrSubstr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Fatalf("err = %v, want substring %q", err, tc.wantErrSubstr)
 				}
 				return
-			}
-			if err != nil {
+			} else if err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
 			if txid != tc.wantTxID {
@@ -302,6 +355,9 @@ func TestEnsureDeposit(t *testing.T) {
 			}
 			if deposited != tc.wantDeposited {
 				t.Errorf("deposited = %d, want %d", deposited, tc.wantDeposited)
+			}
+			if tc.wantDeposits > 0 && tc.pool.depositedAmt != tc.wantDeposited {
+				t.Errorf("ComposeDepositMbr amount = %d, want %d (what was sent must be what is reported)", tc.pool.depositedAmt, tc.wantDeposited)
 			}
 			if tc.pool.depositCalls != tc.wantDeposits {
 				t.Errorf("deposit calls = %d, want %d", tc.pool.depositCalls, tc.wantDeposits)
@@ -1000,11 +1056,17 @@ func TestEnsureDeposit_QuotaOnlyStillUnaffordable(t *testing.T) {
 		spendable:    5_000, // < 22_500 + 2_000 fee
 	}
 	w := newPoolWallet(p)
-	if _, _, err := w.EnsureDeposit(context.Background(), 10); !errors.Is(err, ErrDepositUnaffordable) {
+	_, _, err := w.EnsureDeposit(context.Background(), 10)
+	if !errors.Is(err, ErrDepositUnaffordable) {
 		t.Fatalf("err = %v, want ErrDepositUnaffordable", err)
 	}
 	if p.depositCalls != 0 {
 		t.Fatalf("deposit calls = %d, want 0", p.depositCalls)
+	}
+	// The pool lacks the box term before another slot, so that is what the
+	// message asks for: 22_500 + 2_000 fee, not a whole slot.
+	if !strings.Contains(err.Error(), "the free-quota box needs 24500 µALGO") {
+		t.Fatalf("err = %v, want it to name the box term's need", err)
 	}
 }
 
@@ -1098,9 +1160,9 @@ func TestEnsureDeposit_QuotaOnlyRefusedWithNoTicketSlot(t *testing.T) {
 		dep:          escrow.PayerDeposit{}, // empty pool, no slots
 		optedIn:      false,
 		minFee:       1_000,
-		// Comfortably covers 22_500 + 2_000 fee + the 271_000 opt-in MBR, but
-		// nowhere near a single 115_000 ticket slot.
-		spendable:   400_000,
+		// Covers 22_500 + 2_000 fee + the 271_000 opt-in MBR, but not a single
+		// 115_000 ticket slot on top of the fee and opt-in.
+		spendable:   380_000,
 		depositTxID: "SHOULDNOTFIRE",
 	}
 	w := newPoolWallet(p)

@@ -388,12 +388,12 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 			w.depositReady = true
 			w.depositMu.Unlock()
 		case errors.Is(derr, ErrDepositBelowTarget):
-			// Partial success: the free-quota box is now funded — which is
-			// precisely the guard a payer's FIRST free open trips ('insufficient
-			// MBR deposit for free-quota box') — but the pool is still short of
-			// the working set. Retry below, since the failing guard may now be
-			// satisfied, but leave depositReady false so the next request
-			// re-attempts the remaining slots.
+			// Partial success: some slots, or the free-quota box the payer's
+			// FIRST free open trips on ('insufficient MBR deposit for free-quota
+			// box'), are now funded, but the pool is still short of the working
+			// set. Retry below, since the failing guard may now be satisfied,
+			// but leave depositReady false so the next request re-attempts the
+			// rest.
 		default:
 			deposited = 0 // nothing landed; the guard is unchanged, so don't retry
 		}
@@ -799,8 +799,9 @@ const DefaultDepositSlots = 10
 const depositOptInMBR = 100_000 + 6*28_500
 
 // ErrDepositUnaffordable is the sentinel EnsureDeposit returns when the payer's
-// spendable ALGO can't cover the shortfall + the deposit group fee (+ the
-// opt-in MBR on a first deposit). Distinct from a deposit that fails at algod:
+// spendable ALGO can't cover another whole slot + the deposit group fee (+ the
+// opt-in MBR on a first deposit), and nothing smaller is worth depositing.
+// Distinct from a deposit that fails at algod:
 // this is caught BEFORE submit so callers (the CLI, the dispatch 402 path) can
 // name the µALGO needed instead of surfacing an opaque "overspend". Its message
 // already contains the actionable detail; callers can errors.Is to branch.
@@ -808,10 +809,9 @@ var ErrDepositUnaffordable = errors.New("wallet: insufficient ALGO to fund the p
 
 // ErrDepositBelowTarget is the sentinel EnsureDeposit returns when it DID
 // deposit — the returned txid and `deposited` are real and the funds are in the
-// pool — but the pool is still short of the requested working set. Today the
-// only such partial success is the free-quota-box-only fallback: the wallet
-// couldn't afford another whole ticket slot, so it funded just the sub-slot
-// quota term.
+// pool — but the pool is still short of the requested working set: the wallet
+// afforded only some of the slots, or only the sub-slot quota term
+// (planDeposit).
 //
 // It exists so a partial success can't be mistaken for a complete one.
 // ensureDepositForServe latches depositReady on a nil error and then skips the
@@ -855,10 +855,11 @@ func (w *Wallet) ensureDepositForServe(ctx context.Context) error {
 	// other failure (chain read error, unrelated) stays fatal.
 	//
 	// ErrDepositBelowTarget takes the same branch, and that is the whole reason
-	// it isn't a nil error: a partial (free-quota-box-only) deposit leaves the
-	// pool under target exactly like an unaffordable one, so it must reach the
-	// serving path the same way — usable now, re-attempted next request — rather
-	// than latching depositReady and freezing the pool where it stands.
+	// it isn't a nil error: a partial deposit (some slots, or the quota term
+	// alone) leaves the pool under target exactly like an unaffordable one, so
+	// it must reach the serving path the same way — usable now, re-attempted
+	// next request — rather than latching depositReady and freezing the pool
+	// where it stands.
 	if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
 		if free, ferr := w.freeDepositSlots(ctx); ferr == nil && free >= 1 {
 			return nil
@@ -934,8 +935,8 @@ func (w *Wallet) DepositShortfall(ctx context.Context, slots uint64) (shortfall 
 // and the ALGO it just parked is still not "free" the next time N tickets are
 // in flight. The pool would climb with concurrency, never with need.
 //
-// This also matches the client (`ensureMbrDepositOnce` sizes `currentSlots =
-// algoBalance / ticketMbr` off gross balance). The proxy is the payer's own
+// The TS SDK's planMbrDeposit, which the client funds through, sizes off gross
+// balance too (vectored with planDeposit). The proxy is the payer's own
 // localhost twin of the client, so the two must not disagree about how much
 // ALGO the same wallet needs.
 //
@@ -1007,8 +1008,8 @@ func DepositExcess(slots, ticketMbr, freeQuotaMbr uint64, dep escrow.PayerDeposi
 
 // quotaOnlyShortfall is the µALGO needed to cover the free-quota box term ALONE,
 // on top of whatever whole ticket slots the pool already backs — i.e. ignoring
-// any slot shortfall. It's the degraded target EnsureDeposit falls back to when
-// the full working set is unaffordable: the box term is sub-slot, so it is
+// any slot shortfall. It's the degraded target planDeposit falls back to when
+// no whole slot is affordable: the box term is sub-slot, so it is
 // reachable for a wallet that can't add another slot, and without it the payer's
 // first free open reverts forever.
 //
@@ -1027,6 +1028,81 @@ func quotaOnlyShortfall(ticketMbr, freeQuotaMbr uint64, dep escrow.PayerDeposit)
 		return 0
 	}
 	return freeQuotaMbr - remainder
+}
+
+// depositPlan is what one funding pass does to the pool. Amount > 0 deposits
+// that much, and BelowTarget says the pool is still short of the working set
+// after it. Amount == 0 below target means the wallet can't afford the next
+// useful deposit: Unaffordable when the pool backs no slot (it can't serve),
+// BelowTarget when it backs one (it serves on what it has). EnsureDeposit
+// returns ErrDepositUnaffordable for both; Unaffordable records which, for the
+// vectors.
+type depositPlan struct {
+	Amount       uint64
+	BelowTarget  bool
+	Unaffordable bool
+	// Need is what the next useful deposit costs the wallet: the free-quota
+	// term a pool backing a slot still lacks, else one more slot; plus the
+	// 2-txn group fee and, on a first deposit, the opt-in MBR. Set when nothing
+	// is deposited for want of ALGO.
+	Need uint64
+}
+
+// planDeposit sizes a funding pass, the rule the chat app had before it moved
+// to the SDK: the working set is an ideal, not a requirement, so a wallet that can't reach
+// it funds as many whole slots as it can afford. A sponsored trial account is
+// seeded with exactly enough for two; an all-or-nothing rule would leave it
+// with none.
+//
+//   - Whole slots first, counted out of spendable ALGO less the group fee and,
+//     on a first deposit, the opt-in MBR, up to `slots`.
+//   - The free-quota term rides on top only if the wallet still covers it.
+//     Slots serve requests and the box alone serves none, so the term is the
+//     one dropped at the boundary; the next pass funds it on its own, below.
+//   - No whole slot affordable: fund just the sub-slot quota term if that is
+//     what the pool lacks and the pool already backs a slot. A box with no slot
+//     is useless, and such a pool needs the actionable "add ALGO" error.
+//
+// Sized on gross AlgoBalance throughout; see DepositShortfall. Pinned by
+// testdata/deposit_plan_vectors.json, which the TS SDK's planMbrDeposit
+// replays.
+func planDeposit(slots, ticketMbr, quotaDue uint64, dep escrow.PayerDeposit, optedIn bool, spendable, minFee uint64) depositPlan {
+	target := poolTarget(slots, ticketMbr, quotaDue)
+	if dep.AlgoBalance >= target {
+		return depositPlan{}
+	}
+	overhead := 2 * minFee
+	if !optedIn {
+		overhead += depositOptInMBR
+	}
+	var net uint64 // spendable past the overhead; 0 when the overhead isn't covered
+	if spendable > overhead {
+		net = spendable - overhead
+	}
+	need := ticketMbr + overhead
+
+	current := dep.AlgoBalance / ticketMbr
+	targetSlots := min(current+net/ticketMbr, slots)
+	if targetSlots <= current {
+		quota := quotaOnlyShortfall(ticketMbr, quotaDue, dep)
+		if current >= 1 && quota > 0 {
+			if net >= quota {
+				return depositPlan{Amount: quota, BelowTarget: dep.AlgoBalance+quota < target}
+			}
+			// The box term is what this pool lacks first, and it is far
+			// cheaper than a slot; asking for a slot would overstate it.
+			return depositPlan{BelowTarget: true, Need: quota + overhead}
+		}
+		if current >= 1 {
+			return depositPlan{BelowTarget: true, Need: need}
+		}
+		return depositPlan{Unaffordable: true, Need: need}
+	}
+	amount := targetSlots*ticketMbr - dep.AlgoBalance
+	if net >= amount+quotaDue {
+		amount += quotaDue
+	}
+	return depositPlan{Amount: amount, BelowTarget: dep.AlgoBalance+amount < target}
 }
 
 // FreePoolHeadroom is the payer's UNCOMMITTED pool balance: the deposit less
@@ -1057,12 +1133,12 @@ func FreePoolHeadroom(ticketMbr uint64, dep escrow.PayerDeposit) uint64 {
 // much. Utilization is not part of the target — tickets in flight have borrowed
 // slots and return them at settle (see DepositShortfall).
 //
-// Before submitting, it checks the payer's spendable ALGO covers the shortfall
-// + the deposit group fee (+ the opt-in MBR on a first deposit) and returns
-// ErrDepositUnaffordable — naming the µALGO needed — if not, so the failure is
-// actionable instead of an opaque "overspend" at algod admission. Returns the
-// deposit txid and the µALGO deposited. Callers gate this on account.Funded()
-// the same way they gate the USDC opt-in.
+// A wallet that can't reach the working set funds as many whole slots as it
+// affords (planDeposit), returning ErrDepositBelowTarget with the real txid and
+// amount. One that can't afford even a slot gets ErrDepositUnaffordable, naming
+// the µALGO needed, before anything is signed. Returns the deposit txid and the
+// µALGO deposited. Callers gate this on account.Funded() the same way they gate
+// the USDC opt-in.
 func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, deposited uint64, err error) {
 	if slots == 0 {
 		slots = DefaultDepositSlots
@@ -1086,81 +1162,46 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 		return "", 0, fmt.Errorf("wallet: ensure-deposit opt-in check: %w", err)
 	}
 
-	// Affordability pre-check: the deposit Payment moves `shortfall` µALGO into
-	// the pool and the 2-tx group costs 2 × minTxnFee (pooled on the AppCall).
-	// A first deposit also raises the payer's OWN account min-balance by the
-	// local-schema opt-in MBR. Confirm spendable ALGO covers all three before
-	// signing so we surface the exact µALGO needed rather than an opaque algod
-	// "overspend".
 	minFee, err := w.pool.MinTxnFee(ctx)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit min fee: %w", err)
-	}
-	need := shortfall + 2*minFee
-	if !optedIn {
-		need += depositOptInMBR
 	}
 	spendable, err := w.pool.SpendableMicroAlgos(ctx, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit balance check: %w", err)
 	}
-	if spendable < need {
-		// Can't reach the full working set. Before giving up, try funding just
-		// the free-quota box term if that's what the pool is missing: it is
-		// SUB-SLOT (~0.0225 vs ~0.115 ALGO), so a wallet too thin for another
-		// whole slot can still very plausibly afford it. Without this, a pool
-		// sitting at N whole slots (notably one that predates the quota) fails
-		// here, the caller's ≥1-free-slot fallback lets the request through, and
-		// then every FIRST free open reverts with `insufficient MBR deposit for
-		// free-quota box` — permanently, with nothing ever attempting the tiny
-		// top-up that would fix it.
-		//
-		// Gated on the pool ALREADY backing at least one ticket slot. The box
-		// term alone backs no ticket, so funding it for a pool that backs none
-		// would leave the payer unable to open anything — free or paid — while
-		// this returns nil, which latches depositReady in ensureDepositForServe
-		// and makes `zs-proxy fund` report success. Such a pool needs the
-		// actionable ErrDepositUnaffordable below instead.
-		//
-		// Gross balance, matching DepositShortfall: the question is whether the
-		// pool is PROVISIONED for a ticket, not whether one is free this
-		// instant. A fully-utilized pool (every slot on loan to a live ticket)
-		// is correctly provisioned and gets its slots back at settle — refusing
-		// to fund its quota box would strand it on the error path for the
-		// duration of ordinary load.
-		backedSlots := dep.AlgoBalance / ticketMbr
-		if quotaOnly := quotaOnlyShortfall(ticketMbr, quotaDue, dep); backedSlots >= 1 && quotaOnly > 0 && quotaOnly < shortfall {
-			quotaNeed := quotaOnly + 2*minFee
-			if !optedIn {
-				quotaNeed += depositOptInMBR
-			}
-			if spendable >= quotaNeed {
-				signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
-				res, cerr := w.pool.ComposeDepositMbr(ctx, quotaOnly, !optedIn, signer, w.payerAddr)
-				if cerr != nil {
-					return "", 0, fmt.Errorf("wallet: ensure-deposit (free-quota only): %w", cerr)
-				}
-				// Deposited, but NOT to target — the slot shortfall is still
-				// outstanding. Report that as ErrDepositBelowTarget alongside the
-				// real txid/amount so callers can use the deposit (retry a
-				// reverted open) without treating the pool as provisioned. A bare
-				// nil here would latch depositReady and strand the pool below
-				// target for the process lifetime.
-				return res.TxID, quotaOnly, fmt.Errorf(
-					"%w: deposited %d µALGO for the free-quota box, still %d µALGO short of %d slot(s) — add ALGO and deposit again",
-					ErrDepositBelowTarget, quotaOnly, shortfall-quotaOnly, slots)
-			}
-		}
-		return "", 0, fmt.Errorf("%w: need %d µALGO (%d shortfall + %d fee%s), have %d µALGO spendable — fund the wallet with more ALGO",
-			ErrDepositUnaffordable, need, shortfall, 2*minFee, optInNote(!optedIn), spendable)
-	}
 
+	// Sized before signing, so a wallet that can't afford a slot gets the µALGO
+	// it needs rather than an opaque algod "overspend".
+	plan := planDeposit(slots, ticketMbr, quotaDue, dep, optedIn, spendable, minFee)
+	if plan.Amount == 0 {
+		// Nothing deposited for want of ALGO. A pool that backs a slot can still
+		// serve (ensureDepositForServe checks for a free one); one that backs
+		// none can't.
+		backed := dep.AlgoBalance / ticketMbr
+		what, part := "one more slot", ticketMbr
+		if q := quotaOnlyShortfall(ticketMbr, quotaDue, dep); backed >= 1 && q > 0 {
+			what, part = "the free-quota box", q
+		}
+		return "", 0, fmt.Errorf("%w: the pool backs %d of %d slot(s); %s needs %d µALGO (%d + %d fee%s), have %d µALGO spendable — fund the wallet with more ALGO",
+			ErrDepositUnaffordable, backed, slots, what, plan.Need, part, 2*minFee, optInNote(!optedIn), spendable)
+	}
 	signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
-	res, err := w.pool.ComposeDepositMbr(ctx, shortfall, !optedIn, signer, w.payerAddr)
+	res, err := w.pool.ComposeDepositMbr(ctx, plan.Amount, !optedIn, signer, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit: %w", err)
 	}
-	return res.TxID, shortfall, nil
+	if plan.BelowTarget {
+		// Deposited, but not to target. Report that as ErrDepositBelowTarget
+		// alongside the real txid and amount, so callers can use the deposit
+		// (retry a reverted open) without treating the pool as provisioned: a
+		// bare nil would latch depositReady and strand the pool below target
+		// for the process lifetime.
+		return res.TxID, plan.Amount, fmt.Errorf(
+			"%w: deposited %d µALGO, still %d µALGO short of %d slot(s) — add ALGO and deposit again",
+			ErrDepositBelowTarget, plan.Amount, shortfall-min(plan.Amount, shortfall), slots)
+	}
+	return res.TxID, plan.Amount, nil
 }
 
 // optInNote annotates the affordability error when a first deposit also pays

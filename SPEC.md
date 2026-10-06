@@ -518,6 +518,7 @@ The box is created on the payer's **first** free open. Its MBR is charged **once
   - Cache only a positive answer: once created the box stays, but absence changes the moment the first free ticket opens.
   - Adding the term unconditionally also works, but leaves every payer holding an idle, withdrawable copy forever.
   - The term is smaller than one slot. Funding logic must be able to deposit a partial slot, or a pool at exactly N whole slots can never get its box.
+  - A wallet that can't afford the whole target funds whole slots first and drops the term for that pass; a later pass deposits it alone. With two or more slots the first free open still passes, since the term fits inside a spare slot.
   - Against an app that predates the quota, the method is absent and the term is `0`.
 - **It gives the free tier a real cost per identity.** Farming fresh payer addresses burns this amount *irrecoverably* per address. An attacker can still mint addresses, but each one now costs something.
 

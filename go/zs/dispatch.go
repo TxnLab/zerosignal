@@ -2472,10 +2472,11 @@ func (s *Client) runSealed(
 		// wallet_unfunded (which reads as the USDC/onboarding case) and from the
 		// transient 429 mbr_pool_exhausted. Checked before isUnderfundedOpenError
 		// so the actionable detail isn't swallowed by the generic branch.
-		// ErrDepositBelowTarget lands here too: a partial (free-quota-box-only)
-		// deposit that left the pool short of the working set AND with no free
-		// slot to serve on is the same actionable condition — the wallet needs
-		// more ALGO — and its message names the remaining shortfall the same way.
+		// ErrDepositBelowTarget lands here too: a partial deposit (some slots,
+		// or the quota term alone) that left the pool short of the working set
+		// AND with no free slot to serve on is the same actionable condition —
+		// the wallet needs more ALGO — and its message names the remaining
+		// shortfall the same way.
 		//
 		// Checked before exhaustion: Wallet.Open wraps the pool revert with the
 		// top-up that failed, and that revert alone reads as exhaustion.
