@@ -140,7 +140,12 @@ export function mbrPoolState(ticketMbr: bigint, deposit: PayerDeposit): MbrPoolS
 export interface MbrPoolChain {
     /** Box MBR per ticket (mbrForTicket). */
     ticketMbr(): Promise<bigint>
-    /** The free-quota box MBR this payer still owes; 0 once the box exists, or against an app without the quota. */
+    /**
+     * The free-quota box MBR this payer still owes; 0 once the box exists, or
+     * against an app without the quota. Fails open as Go's does: an unreadable
+     * box resolves to the full term rather than rejecting, so a flaky read
+     * over-funds the pool instead of failing the open.
+     */
     freeQuotaMbrDue(payer: string): Promise<bigint>
     readPayerDeposit(payer: string): Promise<PayerDeposit>
     /** Tells "no pool yet" (the deposit opts in) from a drained one. */

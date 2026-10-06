@@ -110,6 +110,9 @@ describe('completeOpenGroup', () => {
         const decoded = decodeOpenGroup(validB64).map((m) => m.stxn.txn)
         expect(out.txids).toEqual(decoded.map((t) => t.txID()))
         expect(out.groupId).toMatch(/^[A-Z2-7]{52}$/)
+        // The payer's transfer, never the node's pooled app-call fee.
+        expect(out.payerFeeMicroalgos).toBe(0n)
+        expect(decoded[1]!.fee).toBeGreaterThan(0n)
     })
 
     it('signs the canonical transfer when the node sent explicit zeros', async () => {

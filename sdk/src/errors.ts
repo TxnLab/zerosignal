@@ -99,6 +99,27 @@ export function isZsError(err: unknown): err is ZsError {
     return err instanceof ZsError
 }
 
+/**
+ * findError is Go's errors.As: the first error of type T in err's tree,
+ * walking each cause and every error an AggregateError holds, in Go's order:
+ * depth first, an AggregateError's errors left to right as a multi-%w wrap's,
+ * so the first wrapped error's whole chain comes before the second. Bounded,
+ * so a cyclic cause chain ends.
+ */
+export function findError<T extends Error>(err: unknown, type: abstract new (...args: never[]) => T): T | undefined {
+    const seen = new Set<unknown>()
+    const stack: unknown[] = [err]
+    while (stack.length > 0 && seen.size < 64) {
+        const e = stack.pop()
+        if (!(e instanceof Error) || seen.has(e)) continue
+        seen.add(e)
+        if (e instanceof type) return e
+        const next = e instanceof AggregateError ? [...(e.errors as unknown[]), e.cause] : [e.cause]
+        for (let i = next.length - 1; i >= 0; i--) stack.push(next[i])
+    }
+    return undefined
+}
+
 /** configError is a ZsError for a Config the SDK cannot run with. */
 export function configError(message: string): ZsError {
     return new ZsError({ kind: 'invalid_request', code: 'invalid_config', message })

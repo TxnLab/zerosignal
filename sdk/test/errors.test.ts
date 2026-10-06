@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { type ZsErrorInit, ZsError, configError, isZsError } from '../src/index.js'
+import { type ZsErrorInit, ZsError, configError, findError, isZsError } from '../src/index.js'
 
 describe('ZsError', () => {
     it('carries every init field under its own name', () => {
@@ -48,5 +48,44 @@ describe('ZsError', () => {
     it('reports a bad Config as invalid_config, nothing paid', () => {
         const e = configError('no')
         expect([e.kind, e.code, e.message, e.paid, e.retryable]).toEqual(['invalid_request', 'invalid_config', 'no', false, false])
+    })
+})
+
+describe('findError', () => {
+    class A extends Error {}
+    class B extends Error {}
+
+    it('finds a type through the cause chain', () => {
+        const a = new A('a')
+        expect(findError(new Error('x', { cause: new Error('y', { cause: a }) }), A)).toBe(a)
+        expect(findError(new Error('x', { cause: a }), B)).toBeUndefined()
+        expect(findError(a, A)).toBe(a)
+    })
+
+    // Go's errors.As walks every %w of a multi-wrap.
+    it('finds a type in any error an AggregateError holds, and under it', () => {
+        const a = new A('a')
+        const b = new B('b')
+        const agg = new AggregateError([a, new Error('z', { cause: b })], 'both', { cause: a })
+        const top = new Error('top', { cause: agg })
+        expect(findError(top, A)).toBe(a)
+        expect(findError(top, B)).toBe(b)
+        expect(findError(top, AggregateError)).toBe(agg)
+    })
+
+    // Go's errors.As finishes the first %w's chain before the second's.
+    it("walks depth first, the first held error's chain before the next", () => {
+        const deep = new A('deep')
+        const shallow = new A('shallow')
+        expect(findError(new AggregateError([new Error('x', { cause: deep }), shallow], ''), A)).toBe(deep)
+    })
+
+    it('ends on a cyclic chain and ignores non-errors', () => {
+        const x = new Error('x')
+        const y = new Error('y', { cause: x })
+        Object.defineProperty(x, 'cause', { value: y })
+        expect(findError(x, A)).toBeUndefined()
+        expect(findError('a string', Error)).toBeUndefined()
+        expect(findError(undefined, Error)).toBeUndefined()
     })
 })

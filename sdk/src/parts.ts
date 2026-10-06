@@ -156,12 +156,12 @@ export interface OpenHandle {
     maxPrice: number
     /** The payer's own share of the open group's fees; 0 when the operator pays the group. */
     openFeesMicroalgos: number
-    /** The submitted group's signed transactions, kept as dispute evidence. */
-    signedGroup: Uint8Array[]
+    /** The submitted group's signed transactions, concatenated in group order: dispute evidence. */
+    signedGroup: Uint8Array
     /**
      * Settles on the receipt: through the node's presigned settle group when
      * settleGroup carries one (base64), else standalone at the payer's fee.
-     * settleGroup is null when the node sent none or it doesn't decode
+     * settleGroup is null (or '') when the node sent none or it doesn't decode
      * (decodeSettleGroup), as Go's caller passes only a decoded group.
      *
      * It never rejects: a failed ack is result.err, so that groupRejected,

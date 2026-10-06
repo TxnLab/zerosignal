@@ -206,6 +206,8 @@ export interface CompletedOpenGroup {
     txids: string[]
     /** The group id in base32, as Go logs it. */
     groupId: string
+    /** The payer transfer's own fee: 0 when the operator's app call pools the group's. */
+    payerFeeMicroalgos: bigint
 }
 
 /**
@@ -230,5 +232,10 @@ export async function completeOpenGroup(presignedOpenTxn: string, spec: OpenGrou
     const out = new Uint8Array(payerSigned.length + nodeSigned.length)
     out.set(payerSigned)
     out.set(nodeSigned, payerSigned.length)
-    return { signedGroup: out, txids: txns.map((t) => t.txID()), groupId: base32NoPad(txns[0]!.group!) }
+    return {
+        signedGroup: out,
+        txids: txns.map((t) => t.txID()),
+        groupId: base32NoPad(txns[0]!.group!),
+        payerFeeMicroalgos: txns[0]!.fee,
+    }
 }
