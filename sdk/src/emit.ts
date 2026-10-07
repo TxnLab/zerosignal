@@ -136,10 +136,9 @@ export class StreamEmitter implements Emitter {
     reply(status: number, header: Headers, body: Uint8Array, usage: UsageReport | null): void {
         const h = nodeHeader(header)
         if (!this.#emit({ type: 'response.started', status, header: h, streaming: false })) return
-        const data = text.decode(body)
-        if (!this.#emit({ type: 'frame', event: '', id: '', data, comment: '', retry: 0, sealed: true })) return
+        if (!this.#emit({ type: 'frame', event: '', id: '', data: body, comment: '', retry: 0, sealed: true })) return
         const dec = this.#dec
-        if (dec !== null && !this.#emitAll(dec.body(data))) return
+        if (dec !== null && !this.#emitAll(dec.body(text.decode(body)))) return
         if (usage !== null && !this.#emitAll(usageEvents(usage))) return
         if (dec !== null && status >= 400) {
             dec.replyStatus(new NodeReply(status, { header: h, body }), nodeRetryAfter(header))
@@ -183,8 +182,7 @@ export class StreamEmitter implements Emitter {
         const f = out.frame
         if (f === undefined) return 0
         const n = frameSSE(f).length
-        const data = text.decode(f.data)
-        if (this.#emit(frameEvent(f, data)) && f.sealed && this.#dec !== null) this.#emitAll(this.#dec.frame(data))
+        if (this.#emit(frameEvent(f)) && f.sealed && this.#dec !== null) this.#emitAll(this.#dec.frame(text.decode(f.data)))
         return n
     }
 
@@ -195,6 +193,6 @@ export class StreamEmitter implements Emitter {
     }
 }
 
-function frameEvent(f: StreamFrame, data: string): Event {
-    return { type: 'frame', event: f.event, id: f.id, data, comment: f.comment, retry: f.retry, sealed: f.sealed }
+function frameEvent(f: StreamFrame): Event {
+    return { type: 'frame', event: f.event, id: f.id, data: f.data, comment: f.comment, retry: f.retry, sealed: f.sealed }
 }

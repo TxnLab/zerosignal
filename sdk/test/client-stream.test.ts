@@ -348,7 +348,7 @@ describe('Client.stream', () => {
     it('settles after a reader who left once generation finished', async () => {
         const h = await harness({ stream: true, lateTail: true })
         const st = h.c.stream({ endpoint: CHAT, body: h.body })
-        for await (const ev of st.events()) if (ev.type === 'frame' && ev.data.includes('finish_reason')) break
+        for await (const ev of st.events()) if (ev.type === 'frame' && new TextDecoder().decode(ev.data).includes('finish_reason')) break
         expect(h.upstreamAborted).toBe(false)
         expect(h.handle.acks).toHaveLength(1)
         expect(await st.wait()).toMatchObject({ settlement: { ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK' } })

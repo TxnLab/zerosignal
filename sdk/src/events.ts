@@ -108,13 +108,15 @@ export interface ResponseStarted {
  * One Server-Sent Event of the node's response, as an OpenAI-compatible
  * endpoint would have written it, so an adapter can re-emit it. sealed frames
  * were decrypted; the rest (the [DONE] sentinel, keepalive comments) pass
- * through as the node sent them.
+ * through as the node sent them. data is bytes, as the node sent them: text
+ * decoded here would replace invalid UTF-8 and drop a leading byte-order mark,
+ * and an adapter re-emitting it would then write bytes the node never sent.
  */
 export interface Frame {
     type: 'frame'
     event: string
     id: string
-    data: string
+    data: Uint8Array
     comment: string
     retry: number
     sealed: boolean

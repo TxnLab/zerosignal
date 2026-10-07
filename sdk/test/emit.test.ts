@@ -221,9 +221,21 @@ describe('StreamEmitter', () => {
         const r = recording()
         r.em.frame({ frame: answerFrame })
         expect(r.events).toEqual([
-            { type: 'frame', event: '', id: '', data: '{"choices":[{"index":0,"delta":{"content":"hi"}}]}', comment: '', retry: 0, sealed: true },
+            { type: 'frame', event: '', id: '', data: answerFrame.data, comment: '', retry: 0, sealed: true },
             expect.objectContaining({ type: 'delta.text', delta: 'hi' }),
         ])
+    })
+
+    // An adapter re-emits a frame's data, so it must be the node's bytes:
+    // decoded text would put U+FFFD for an invalid byte and drop a leading BOM.
+    it('passes a frame’s bytes on as the node sent them', () => {
+        const raw = Uint8Array.of(0xef, 0xbb, 0xbf, 0x22, 0xff, 0xc3, 0x22)
+        const r = recording()
+        r.em.frame({ frame: { ...emptyFrame(), data: raw, sealed: true } })
+        r.em.reply(200, new Headers(), raw, null)
+        const frames = r.events.filter((e) => e.type === 'frame')
+        expect(frames).toHaveLength(2)
+        for (const f of frames) expect(f.data).toEqual(raw)
     })
 
     // A stream that broke keeps the node's own account of why, when it gave one.
@@ -260,7 +272,7 @@ describe('StreamEmitter', () => {
         r.em.reply(200, new Headers({ 'X-Request-Id': 'r' }), enc.encode(body), usageOf())
         expect(r.events.map((e) => e.type)).toEqual(['response.started', 'frame', 'delta.text', 'receipt.verified', 'done'])
         expect(r.events[0]).toMatchObject({ type: 'response.started', status: 200, streaming: false })
-        expect(r.events[1]).toEqual({ type: 'frame', event: '', id: '', data: body, comment: '', retry: 0, sealed: true })
+        expect(r.events[1]).toEqual({ type: 'frame', event: '', id: '', data: enc.encode(body), comment: '', retry: 0, sealed: true })
     })
 
     it('stops a reply once the caller leaves', () => {
@@ -411,7 +423,7 @@ describe('StreamEmitter', () => {
         expect(r.em.frame({ usage: usageOf() })).toBe(0)
         expect(r.em.frame({})).toBe(0)
         expect(r.events.map((e) => e.type)).toEqual(['frame', 'receipt.verified'])
-        expect(r.events[0]).toMatchObject({ event: 'message', data: '{"x":1}' })
+        expect(r.events[0]).toMatchObject({ event: 'message', data: enc.encode('{"x":1}') })
     })
 
     // response.started hands the caller the node's headers, never its
