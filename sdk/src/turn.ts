@@ -12,6 +12,7 @@ import type { ZsError } from './errors.js'
 import type { Event } from './events.js'
 import type { Operator } from './operator.js'
 import type { Reserved } from './parts.js'
+import type { UsageReport } from './responder.js'
 import type { Endpoint } from './types.js'
 
 /**
@@ -61,10 +62,10 @@ export function turnOf(r: Request): Turn {
 }
 
 /**
- * Emitter receives what the reserve phase produces: dispatch decides what
- * happened, and the emitter turns it into the caller's view. A request ends in
- * fail or in the sealed run; note, clamped, reserved and committed may precede
- * either. The sealed run's reply and stream calls join this with it.
+ * Emitter receives what a turn produces: dispatch and the sealed run decide
+ * what happened, and the emitter turns it into the caller's view. A request
+ * ends in fail or reply (or, streamed, the calls the streamed run adds); note,
+ * clamped, reserved and committed may precede either.
  */
 export interface Emitter {
     /** A routing milestone. It never ends the request. */
@@ -77,4 +78,11 @@ export interface Emitter {
     committed(ticketId: string, openTxId: string, feesMicroAlgos: number): void
     /** Ends the request with err before any response has started. */
     fail(err: ZsError): void
+    /**
+     * Delivers a whole response: header is the node's own, X-Zs-* fields
+     * included, for the emitter to strip; body is opened; usage is null when
+     * the node sent no readable receipt. It must not throw: the forwarder
+     * reads a throw as the response failing and would end the turn twice.
+     */
+    reply(status: number, header: Headers, body: Uint8Array, usage: UsageReport | null): void
 }

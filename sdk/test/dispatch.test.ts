@@ -196,6 +196,9 @@ class Recorder {
         if (this.failed) throw new Error(`failed twice: ${this.failed.code}, then ${err.code}`)
         this.failed = err
     }
+    reply() {
+        throw new Error('the reserve phase never replies')
+    }
 }
 
 interface Harness {
@@ -1337,7 +1340,22 @@ describe('the Client’s parts', () => {
 
     it('stay out of the package exports', async () => {
         const sdk = await import('../src/index.js')
-        for (const name of ['dispatchDepsOf', 'partsOf', 'sleep', 'dispatch', 'runSealed', 'forwardBuffered', 'openAIError']) {
+        for (const name of [
+            'dispatchDepsOf',
+            'partsOf',
+            'sleep',
+            'dispatch',
+            'runSealed',
+            'forwardBuffered',
+            'openAIError',
+            'checkTurnReceipt',
+            'SettleSlot',
+            'Settles',
+            'bufferedResponder',
+            'usageEvents',
+            'openAIErrorBody',
+            'truncateForLog',
+        ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }
     })

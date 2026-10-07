@@ -147,12 +147,23 @@ export class ProviderError extends Error {
     }
 }
 
-/** NodeReply is a failed reply from the node, as the cause of a ZsError. */
+/**
+ * NodeReply is a failed reply from the node, as the cause of a ZsError, so an
+ * adapter can answer its caller with the node's status and body rather than
+ * one of its own. header omits the node's X-Zs-* fields.
+ */
 export class NodeReply extends Error {
     readonly status: number
-    constructor(status: number) {
+    readonly header: Headers
+    readonly body: Uint8Array
+    /** Replaces the node's when body is one the SDK wrote in place of one it could not parse; else ''. */
+    readonly contentType: string
+    constructor(status: number, reply: { header?: Headers; body?: Uint8Array; contentType?: string } = {}) {
         super(`operator returned HTTP ${status}`)
         this.name = 'NodeReply'
         this.status = status
+        this.header = reply.header ?? new Headers()
+        this.body = reply.body ?? new Uint8Array()
+        this.contentType = reply.contentType ?? ''
     }
 }

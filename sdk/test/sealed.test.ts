@@ -242,6 +242,9 @@ class Recorder {
         this.order.push(`fail ${err.code}`)
         this.failed = err
     }
+    reply() {
+        throw new Error('a test responder records its own reply')
+    }
 }
 
 describe('relayEvidence and attributeRelayHop', () => {
