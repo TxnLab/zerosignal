@@ -75,10 +75,11 @@ export interface SealedDeps {
     logger: Logger
     /**
      * Runs once escrow has opened, before anything is sent: Go arms the refund
-     * watchdog and journals the open ticket here. Synchronous; a throw is
-     * logged and the turn goes on.
+     * watchdog and journals the open ticket here. The turn waits for it, so the
+     * open row is written before a receipt row can follow it; the hook bounds
+     * its own write. A throw is logged and the turn goes on.
      */
-    opened?(handle: OpenHandle, ticket: Ticket): void
+    opened?(handle: OpenHandle, ticket: Ticket): Promise<void> | void
     /** Builds the responder for a buffered answer. */
     buffered(call: SealedCall): BufferedResponder
     /**
@@ -127,7 +128,7 @@ export async function runSealed(deps: SealedDeps, em: Emitter, run: SealedRun, s
     // and the cap counts the ceiling on purpose. The hook can't stop the turn:
     // escrow is open, so the caller must still hear that it paid.
     try {
-        deps.opened?.(handle, ticket)
+        await deps.opened?.(handle, ticket)
     } catch (err) {
         log.warn('open hook failed', { ticket_id: ticket.ticket_id, err: errText(err) })
     }

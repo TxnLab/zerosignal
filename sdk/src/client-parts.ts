@@ -12,6 +12,7 @@ import type { DispatchDeps, RunSealed } from './dispatch.js'
 import type { EstimatePolicy } from './estimate.js'
 import type { RegistryProvider, ReserveClient, TicketJournal, WalletOpener } from './parts.js'
 import type { PickDeps } from './pick.js'
+import type { Reconciler } from './reconciler.js'
 import type { Watchdog } from './refund-watchdog.js'
 
 /**
@@ -30,6 +31,8 @@ export interface Parts {
     journal: TicketJournal | undefined
     durableJournal: boolean
     refunds: Watchdog
+    /** The journal sweep; set only with the SDK's Wallet. */
+    reconciler: Reconciler | undefined
 }
 
 /** Each Client's parts, set by its constructor. */

@@ -25,3 +25,40 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<bool
         signal?.addEventListener('abort', onAbort, { once: true })
     })
 }
+
+// setTimeout fires at once past this delay, so a longer wait is taken in steps.
+const MAX_TIMER_MS = 2 ** 31 - 1
+
+/**
+ * idle is the background loops' sleep: the refund watchdog's and the
+ * journal sweep's. It resolves true after ms, or false at once when signal
+ * aborts first, and never wakes early, as Go's timers don't: a box read
+ * before a deadline that fails would send a refund the contract must revert.
+ * Its timers never hold a Node process open, as a goroutine never holds Go's
+ * main: a process that exits first leaves its tickets to the next sweep.
+ */
+export async function idle(ms: number, signal: AbortSignal): Promise<boolean> {
+    let left = Math.max(ms, 0)
+    do {
+        const step = Math.min(left, MAX_TIMER_MS)
+        if (!(await unrefTimer(step, signal))) return false
+        left -= step
+    } while (left > 0)
+    return true
+}
+
+function unrefTimer(ms: number, signal: AbortSignal): Promise<boolean> {
+    if (signal.aborted) return Promise.resolve(false)
+    return new Promise((resolve) => {
+        const onAbort = () => {
+            clearTimeout(timer)
+            resolve(false)
+        }
+        const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort)
+            resolve(true)
+        }, ms)
+        ;(timer as { unref?: () => void }).unref?.()
+        signal.addEventListener('abort', onAbort, { once: true })
+    })
+}

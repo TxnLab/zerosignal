@@ -25,6 +25,7 @@ import type { EscrowCall, OpenHandle, ProtestReasonCode, WalletOpener } from './
 import { type Logger, type Signer, discardLogger } from './ports.js'
 import type { SettleArgs } from './reconcile.js'
 import { refundSources } from './refund-watchdog.js'
+import { walletParts } from './wallet-parts.js'
 
 /** The escrow deployment the payer's groups must name. */
 export interface EscrowChainConfig {
@@ -170,6 +171,7 @@ export class Wallet implements WalletOpener {
         this.#signer = o.signer
         this.#slots = slotCount(o.depositSlots)
         this.#log = o.logger ?? discardLogger
+        walletParts.set(this, { chain: o.chain, payer: o.signer.address })
         this.#pool = {
             ticketMbr: () => o.chain.ticketMbr(),
             freeQuotaMbrDue: async (payer) => {

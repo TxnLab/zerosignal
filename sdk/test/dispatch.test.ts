@@ -1377,6 +1377,12 @@ describe('the Client’s parts', () => {
             'streamApiFor',
             'Watchdog',
             'refundSources',
+            'Reconciler',
+            'walletChain',
+            'walletParts',
+            'journalOpen',
+            'journalReceipt',
+            'idle',
         ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }

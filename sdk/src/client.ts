@@ -26,6 +26,7 @@ import {
 } from './parts.js'
 import type { PickDeps } from './pick.js'
 import { payerBytesSigner } from './ports.js'
+import { Reconciler, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { Wallet } from './wallet.js'
 
@@ -40,12 +41,10 @@ const journalsSwept = new WeakSet<TicketJournal>()
 export class Client {
     readonly #p: Parts
     readonly #feeRate = new FeeRateCache()
-    /** Whether this Client holds #p.journal against a second sweeper. */
-    #claimedJournal: boolean
+    #closing: Promise<void> | undefined
 
-    private constructor(p: Parts, claimedJournal: boolean) {
+    private constructor(p: Parts) {
         this.#p = p
-        this.#claimedJournal = claimedJournal
         partsOf.set(this, p)
     }
 
@@ -89,15 +88,10 @@ export class Client {
                 'open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.journal to keep them',
             )
         }
-        let claimedJournal = false
-        if (sdkWallet && journal !== undefined) {
-            if (journalsSwept.has(journal)) {
-                throw configError(
-                    'Stores.journal is already swept by another Client in this process: each Client that builds or is handed a Wallet needs its own journal',
-                )
-            }
-            journalsSwept.add(journal)
-            claimedJournal = true
+        if (sdkWallet && journal !== undefined && journalsSwept.has(journal)) {
+            throw configError(
+                'Stores.journal is already swept by another Client in this process: each Client that builds or is handed a Wallet needs its own journal',
+            )
         }
 
         const estimatePolicy: EstimatePolicy = {
@@ -122,31 +116,77 @@ export class Client {
             weightsWarned: new Set(),
         }
         const guard = cfg.spendGuard
+        // The watchdog and the sweep time contract deadlines, so they read the
+        // wall clock, as Go's do: Config.clock drives affinity and the cache,
+        // and a clock running ahead there would send calls the chain reverts.
         const refunds = new Watchdog({
             logger: cfg.logger,
-            clock: cfg.clock,
             remedy: cfg.remedies.recoverTicket,
             // A ticket whose request failed after its escrow opened keeps its
             // reservation in dispatch; its refund is what frees it.
             refunded: guard ? (ticketId) => guard.release(ticketId) : undefined,
         })
-        const c = new Client(
-            { cfg: filled, registry, reserveClient, wallet, pick, estimatePolicy, journal, durableJournal, refunds },
-            claimedJournal,
-        )
+        // Only the SDK's own wallet runs the sweep, which is what deletes rows.
+        const chain = walletChain(wallet)
+        let reconciler: Reconciler | undefined
+        if (chain !== undefined && journal !== undefined) {
+            journalsSwept.add(journal)
+            reconciler = new Reconciler({
+                journal,
+                chain,
+                payer: wallet.payerAddr(),
+                escrowAppId: cfg.network.escrowAppId,
+                watching: (ticketId) => refunds.watching(ticketId),
+                spend: guard,
+                logger: cfg.logger,
+            })
+            reconciler.remedy = cfg.remedies.recoverTicket
+            let held = true
+            reconciler.release = () => {
+                if (held) journalsSwept.delete(journal)
+                held = false
+            }
+            // The default journal dies with this Client, so its watchdog stays
+            // the only thing that finishes its tickets. A journal the caller
+            // supplied, a memoryJournal too, can pass to the next Client, so its
+            // tickets go with it (Go's durableJournal, which can't be handed a
+            // memory journal).
+            reconciler.handOff = st.journal !== undefined
+        }
+        const c = new Client({
+            cfg: filled,
+            registry,
+            reserveClient,
+            wallet,
+            pick,
+            estimatePolicy,
+            journal,
+            durableJournal,
+            refunds,
+            reconciler,
+        })
+        reconciler?.start()
         c.#warmFeeRate()
         return c
     }
 
     /**
-     * Releases this Client's hold on its journal, so another Client may sweep
-     * it. Safe to call more than once.
+     * Stops the ticket sweep create started and releases this Client's hold
+     * on its journal, so another Client may sweep it. When the Client runs the
+     * SDK's Wallet over a journal the caller supplied, it also stops the refund watchdog,
+     * waiting out a refund it already sent, and leaves the tickets it watched
+     * to the next Client that sweeps that journal, or to the next process; a
+     * request still in flight here is then not watched. Safe to call more than
+     * once.
      */
-    close(): void {
-        if (this.#claimedJournal && this.#p.journal !== undefined) {
-            journalsSwept.delete(this.#p.journal)
-            this.#claimedJournal = false
-        }
+    close(): Promise<void> {
+        this.#closing ??= (async () => {
+            const r = this.#p.reconciler
+            if (r === undefined) return
+            const refunds = this.#p.refunds
+            await r.close(r.handOff ? () => refunds.handOff() : undefined)
+        })()
+        return this.#closing
     }
 
     /**

@@ -26,10 +26,12 @@ import {
     findError,
     isMemoryJournal,
     memoryJournal,
+    resolveConfig,
     testnet,
 } from '../src/index.js'
 import { FeeRateCache } from '../src/fee-rate.js'
 import type { Watchdog } from '../src/refund-watchdog.js'
+import { partsOf } from '../src/client-parts.js'
 import { turnOf } from '../src/turn.js'
 
 const signer: Signer = {
@@ -329,16 +331,18 @@ describe('Client.create', () => {
 
     // Go's New: the watchdog logs the Remedies.RecoverTicket in force, and its
     // refunds free the SpendGuard's reservation.
-    it('runs a refund watchdog on the configured clock, logger, remedy and spend guard', async () => {
+    // Go's New: the watchdog times deadlines on the wall clock, whatever
+    // Config.clock says, logs the Remedies.RecoverTicket in force, and its
+    // refunds free the SpendGuard's reservation.
+    it('runs a refund watchdog on the wall clock, with the configured logger, remedy and spend guard', async () => {
         const released: string[] = []
         const logged: { msg: string; attrs: Record<string, unknown> | undefined }[] = []
         const at = (msg: string, attrs?: Record<string, unknown>) => void logged.push({ msg, attrs })
-        // Decades ahead of the wall, so a deadline read off it never comes.
-        const now = 4_000_000_000_000
         const make = (over: Partial<Config>) =>
             Client.create({
                 ...base,
-                clock: () => now,
+                // Decades ahead: read off it, an hour-away deadline is long past.
+                clock: () => 4_000_000_000_000,
                 logger: { debug: at, info: at, warn: at, error: at },
                 spendGuard: { admit() {}, reserve() {}, settle() {}, release: (id) => void released.push(id) },
                 ...over,
@@ -349,15 +353,19 @@ describe('Client.create', () => {
         const c = await make({ remedies: { recoverTicket: 'ask the operator' } })
         const rw = c.refunds as Watchdog
         rw.retryDelayMs = 1
-        rw.arm('T1', now, due, async () => 'TX', async () => '')
-        rw.arm('T2', now, due, () => Promise.reject(new Error('algod down')), async () => '')
+        let early = 0
+        rw.arm('EARLY', Date.now() + 3_600_000, due, async () => (early++, 'TX'), async () => '')
+        rw.arm('T1', Date.now(), due, async () => 'TX', async () => '')
+        rw.arm('T2', Date.now(), due, () => Promise.reject(new Error('algod down')), async () => '')
         await vi.waitFor(() => expect(giveUps()).toEqual(['ask the operator']))
         expect(released).toEqual(['T1'])
+        expect(early).toBe(0)
+        rw.resolve('EARLY')
         c.close()
 
         const d = await make({})
         ;(d.refunds as Watchdog).retryDelayMs = 1
-        ;(d.refunds as Watchdog).arm('T3', now, due, () => Promise.reject(new Error('algod down')), async () => '')
+        ;(d.refunds as Watchdog).arm('T3', Date.now(), due, () => Promise.reject(new Error('algod down')), async () => '')
         await vi.waitFor(() => expect(giveUps()).toHaveLength(2))
         expect(giveUps()[1]).toEqual(expect.stringContaining('call refundInactive on an open ticket'))
         d.close()
@@ -375,6 +383,8 @@ describe('Client.create', () => {
         const e = await Client.create({ ...base, stores: { journal: durable } })
         expect(e.journalDurable).toBe(true)
         expect(e.config.stores.journal).toBe(durable)
+        // Only the SDK's own wallet runs the sweep.
+        expect(partsOf.get(e)!.reconciler).toBeUndefined()
         e.close()
     })
 
@@ -398,16 +408,194 @@ describe('Client.create', () => {
                 code: 'invalid_config',
                 message: expect.stringContaining('already swept by another Client'),
             })
-            a.close()
-            a.close()
-            const b = await Client.create({ ...base, wallet: sdkWallet(), stores: { journal } })
-            expect(b.config.stores.journal).toBe(journal)
-            // A's late second close must not free the claim b now holds.
-            a.close()
+            // The claim is held until the sweep has stopped.
+            const closing = a.close()
             await expect(Client.create({ ...base, wallet: sdkWallet(), stores: { journal } })).rejects.toMatchObject({
                 code: 'invalid_config',
             })
-            b.close()
+            await closing
+            await a.close()
+            const b = await Client.create({ ...base, wallet: sdkWallet(), stores: { journal } })
+            expect(b.config.stores.journal).toBe(journal)
+            // A's late second close must not free the claim b now holds.
+            await a.close()
+            await expect(Client.create({ ...base, wallet: sdkWallet(), stores: { journal } })).rejects.toMatchObject({
+                code: 'invalid_config',
+            })
+            await b.close()
+        })
+
+        // A restart's leftovers are found by the first sweep, which create
+        // starts at once, acting as this payer on this deployment.
+        it('sweeps its journal from create', async () => {
+            const refunds: unknown[] = []
+            const sweepChain = {
+                protocolFeeBps: async () => 0,
+                readTicketBox: async () => ({ status: 1, pendingBy: 0, expiresAt: 1n, settlementGraceSeconds: 0n }),
+                refundInactive: async (c: unknown) => (refunds.push(c), 'TX'),
+            } as unknown as EscrowChain
+            const journal = memoryJournal()
+            const row = {
+                ticketId: 'NkImzFiSJz3WK6cx7PFU1Q==',
+                openTxId: '',
+                escrowAppId: resolveConfig(base).network.escrowAppId,
+                target: { op: 3, node: 4 },
+                payer: 'PAYER',
+                maxPrice: 1n,
+                expiresAt: 0,
+                status: 'open' as const,
+                createdAt: 0,
+                updatedAt: 0,
+            }
+            await journal.put(row)
+            await journal.put({ ...row, ticketId: 'AAAAAAAAAAAAAAAAAAAAAA==', escrowAppId: 1n })
+            const c = await Client.create({ ...base, wallet: new Wallet({ chain: sweepChain, signer }), stores: { journal } })
+            await vi.waitFor(() => expect(refunds).toHaveLength(1))
+            expect(refunds[0]).toMatchObject({ operatorId: 3n, nodeId: 4n, payer: 'PAYER' })
+            await c.close()
+        })
+
+        // Go's TestNew_WiresTheSpendGuardToTheTicketOutcomes: the first sweep
+        // already tells the guard, it decides deadlines on the wall clock, and
+        // it gives up naming the configured remedy.
+        it('sweeps with the spend guard, the remedy and the wall clock', async () => {
+            const CLOSED = 'NkImzFiSJz3WK6cx7PFU1Q=='
+            const released: string[] = []
+            const refunds: unknown[] = []
+            const inAnHour = BigInt(Math.floor(Date.now() / 1000) + 3600)
+            const sweepChain = {
+                protocolFeeBps: async () => 0,
+                // CLOSED's box is gone; the other's deadline is an hour off.
+                readTicketBox: async (raw: Uint8Array) =>
+                    raw[0] === 0x36 ? null : { status: 1, pendingBy: 0, expiresAt: inAnHour, settlementGraceSeconds: 0n },
+                refundInactive: async (c: unknown) => (refunds.push(c), 'TX'),
+            } as unknown as EscrowChain
+            const journal = memoryJournal()
+            const row = {
+                openTxId: '',
+                escrowAppId: resolveConfig(base).network.escrowAppId,
+                target: { op: 3, node: 4 },
+                payer: 'PAYER',
+                maxPrice: 1n,
+                expiresAt: 0,
+                createdAt: 0,
+                updatedAt: 0,
+            }
+            const settle = {
+                amountCharged: 1n,
+                receiptDigest: new Uint8Array(32),
+                ttftMs: 0n,
+                decodeMs: 0n,
+                inputTokens: 0n,
+                outputTokens: 0n,
+                outputUsageType: 0,
+                auxOutputUsageType: 0,
+                auxOutputCount: 0n,
+            }
+            await journal.put({ ...row, ticketId: CLOSED, status: 'settle_pending', settle })
+            await journal.put({ ...row, ticketId: 'AAAAAAAAAAAAAAAAAAAAAA==', status: 'open' })
+            const c = await Client.create({
+                ...base,
+                clock: () => 4_000_000_000_000,
+                wallet: new Wallet({ chain: sweepChain, signer }),
+                stores: { journal },
+                remedies: { recoverTicket: 'ask the operator' },
+                spendGuard: { admit() {}, reserve() {}, settle() {}, release: (id) => void released.push(id) },
+            })
+            await vi.waitFor(() => expect(released).toEqual([CLOSED]))
+            expect(refunds).toEqual([])
+            expect(partsOf.get(c)!.reconciler!.remedy).toBe('ask the operator')
+            await c.close()
+        })
+
+        // A live ticket has one driver: the sweep leaves the ones this
+        // Client's watchdog holds, or both would send the same refund.
+        it("leaves the tickets its own watchdog drives to it", async () => {
+            const WATCHED = 'NkImzFiSJz3WK6cx7PFU1Q=='
+            const refunded: number[] = []
+            const sweepChain = {
+                protocolFeeBps: async () => 0,
+                readTicketBox: async () => ({ status: 1, pendingBy: 0, expiresAt: 1n, settlementGraceSeconds: 0n }),
+                refundInactive: async (c: { ticketIdRaw: Uint8Array }) => (refunded.push(c.ticketIdRaw[0]!), 'TX'),
+            } as unknown as EscrowChain
+            const row = {
+                openTxId: '',
+                escrowAppId: resolveConfig(base).network.escrowAppId,
+                target: { op: 3, node: 4 },
+                payer: 'PAYER',
+                maxPrice: 1n,
+                expiresAt: 0,
+                status: 'open' as const,
+                createdAt: 0,
+                updatedAt: 0,
+            }
+            const journal = memoryJournal()
+            await journal.put({ ...row, ticketId: WATCHED })
+            await journal.put({ ...row, ticketId: 'AAAAAAAAAAAAAAAAAAAAAA==' })
+            // Held until the watchdog is armed, as a live turn arms it.
+            let open!: () => void
+            const gate = new Promise<void>((r) => (open = r))
+            const list = journal.list.bind(journal)
+            journal.list = async (...a) => (await gate, list(...a))
+            const c = await Client.create({ ...base, wallet: new Wallet({ chain: sweepChain, signer }), stores: { journal } })
+            const p = partsOf.get(c)!
+            const never = async () => ''
+            p.refunds.arm(WATCHED, Date.now() + 3_600_000, async () => ({ exists: false, verdict: 'unknown', deadlineMs: 0 }), never, never)
+            open()
+            await vi.waitFor(() => expect(refunded).toEqual([0]))
+            p.refunds.resolve(WATCHED)
+            await c.close()
+        })
+
+        // The claim goes back last: once released, the next Client may sweep
+        // the same rows, and anything of this one's still driving them would
+        // submit the same refund or lapse. A journal the caller supplied, a
+        // memoryJournal too, can pass to the next Client, and a refund already
+        // sent is waited for.
+        for (const [kind, journal] of [
+            ['durable', (): TicketJournal => ({ put: async () => {}, delete: async () => {}, list: async () => [] })],
+            ['memoryJournal', () => memoryJournal()],
+        ] as const) {
+            it(`hands the watchdog off, waiting out a sent refund, before releasing a supplied ${kind} journal`, async () => {
+                const j = journal()
+                const c = await Client.create({ ...base, wallet: sdkWallet(), stores: { journal: j } })
+                const p = partsOf.get(c)!
+                const never = async () => ''
+                const due = async () => ({ exists: true, verdict: 'refundInactive' as const, deadlineMs: 0 })
+                p.refunds.arm('LIVE', Date.now() + 3_600_000, due, never, never)
+                let sending!: () => void
+                const sent = new Promise<void>((r) => (sending = r))
+                let finish!: () => void
+                const gate = new Promise<void>((r) => (finish = r))
+                p.refunds.arm('SENDING', Date.now(), due, async () => (sending(), await gate, 'TX'), never)
+                await sent
+                const release = p.reconciler!.release!
+                const atRelease: boolean[] = []
+                p.reconciler!.release = () => {
+                    atRelease.push(p.refunds.watching('LIVE'))
+                    release()
+                }
+                const closed = c.close()
+                await new Promise((r) => setTimeout(r, 20))
+                expect(atRelease, 'released while a refund was in flight').toEqual([])
+                finish()
+                await closed
+                expect(atRelease).toEqual([false])
+                const next = await Client.create({ ...base, wallet: sdkWallet(), stores: { journal: j } })
+                await next.close()
+            })
+        }
+
+        // The default journal dies with the Client, so its watchdog stays the
+        // only thing that finishes its tickets.
+        it('keeps the watchdog running past close over its own memory journal', async () => {
+            const c = await Client.create({ ...base, wallet: sdkWallet() })
+            const p = partsOf.get(c)!
+            const never = async () => ''
+            p.refunds.arm('LIVE', Date.now() + 3_600_000, async () => ({ exists: false, verdict: 'unknown', deadlineMs: 0 }), never, never)
+            await c.close()
+            expect(p.refunds.watching('LIVE')).toBe(true)
+            p.refunds.resolve('LIVE')
         })
 
         it("reads the fee rate through the SDK's Wallet", async () => {

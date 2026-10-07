@@ -612,6 +612,22 @@ describe('runSealed', () => {
         expect(s.em.failed).toBeUndefined()
     })
 
+    // Go journals the open before the request goes out, so the open row is
+    // written before a receipt row can follow and overwrite it.
+    it('waits for the open hook before reporting the payment and sending', async () => {
+        for (const outcome of ['resolves', 'rejects'] as const) {
+            const s = await setup()
+            s.deps.opened = async () => {
+                await new Promise((r) => setTimeout(r, 10))
+                s.em.order.push(`opened ${s.sent.length}`)
+                if (outcome === 'rejects') throw new Error('journal down')
+            }
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.em.order, outcome).toEqual(['reserved TKT1 9', 'opened 0', 'committed'])
+            expect(s.sent).toHaveLength(1)
+        }
+    })
+
     it('seals a byte body as it came', async () => {
         const bytes = new TextEncoder().encode(`{"model":"${MODEL}","x":1}`)
         const s = await setup({ body: bytes })

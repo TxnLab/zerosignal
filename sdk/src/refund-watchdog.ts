@@ -10,6 +10,7 @@ import { type TicketRecord, type Verdict, classify, settlementDeadline } from '@
 
 import type { OpenHandle } from './parts.js'
 import { type Clock, type Logger, discardLogger } from './ports.js'
+import { idle } from './sleep.js'
 
 /**
  * RefundWatchdog recovers escrowed USDC for tickets whose settlement never
@@ -366,45 +367,6 @@ export class Watchdog implements RefundWatchdog {
 function probeState(p: ProbeResult): Record<string, unknown> {
     if (!p.ok) return { err: message(p.err) }
     return { verdict: p.res.verdict, deadline: new Date(p.res.deadlineMs) }
-}
-
-// setTimeout fires at once past this delay, so a longer wait is taken in steps.
-const MAX_TIMER_MS = 2 ** 31 - 1
-
-/**
- * Waits ms, resolving false at once when signal aborts first. It never wakes
- * early, as Go's timers don't: a read before the deadline that fails would
- * send a refund the contract must revert. The timers never hold a Node
- * process open, as a goroutine never holds Go's main: a process that exits
- * first leaves the ticket to the journal's sweep.
- */
-async function idle(ms: number, signal: AbortSignal): Promise<boolean> {
-    let left = Math.max(ms, 0)
-    do {
-        const step = Math.min(left, MAX_TIMER_MS)
-        if (!(await timer(step, signal))) return false
-        left -= step
-    } while (left > 0)
-    return true
-}
-
-function timer(ms: number, signal: AbortSignal): Promise<boolean> {
-    if (signal.aborted) return Promise.resolve(false)
-    return new Promise((resolve) => {
-        const onAbort = () => {
-            clearTimeout(timer)
-            resolve(false)
-        }
-        const timer = setTimeout(
-            () => {
-                signal.removeEventListener('abort', onAbort)
-                resolve(true)
-            },
-            ms,
-        )
-        ;(timer as { unref?: () => void }).unref?.()
-        signal.addEventListener('abort', onAbort, { once: true })
-    })
 }
 
 function message(err: unknown): string {
