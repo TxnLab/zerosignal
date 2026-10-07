@@ -148,6 +148,34 @@ func ExtractResponseToolCallIDs(body []byte) []string {
 	return out
 }
 
+// ExtractStreamToolCallIDs is ExtractResponseToolCallIDs for one decrypted
+// chat-completions stream chunk: the tool_calls[].id values in its choices'
+// deltas. A tool call's id rides only its first chunk; later chunks carry
+// argument fragments without one.
+func ExtractStreamToolCallIDs(frameData []byte) []string {
+	var peek struct {
+		Choices []struct {
+			Delta struct {
+				ToolCalls []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(frameData, &peek); err != nil {
+		return nil
+	}
+	var out []string
+	for _, ch := range peek.Choices {
+		for _, tc := range ch.Delta.ToolCalls {
+			if tc.ID != "" {
+				out = append(out, tc.ID)
+			}
+		}
+	}
+	return out
+}
+
 // ExtractPreviousResponseID pulls "previous_response_id" from a /v1/responses
 // request body. Empty when absent or on parse failure. This is the Responses
 // API's stateful-continuation reference: the request must route back to the

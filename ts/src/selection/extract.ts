@@ -111,6 +111,51 @@ export function extractResponseToolCallIDs(body: string): string[] {
     return out
 }
 
+/**
+ * extractStreamToolCallIDs is extractResponseToolCallIDs for one decrypted
+ * chat-completions stream chunk: the tool_calls[].id values in its choices'
+ * deltas. A tool call's id rides only its first chunk. As in Go, a field of
+ * the wrong type yields no ids at all, and null reads as absent. Mirror of
+ * proto/go/selection ExtractStreamToolCallIDs, short of Go's decoder on a
+ * duplicate key, nesting past 10000 and an escaped lone surrogate, where
+ * JSON.parse differs.
+ */
+export function extractStreamToolCallIDs(frameData: string): string[] {
+    const o = parse(frameData)
+    if (!objectOrNull(o)) return []
+    const choices = (o as { choices?: unknown } | null)?.choices
+    if (!arrayOrUnset(choices)) return []
+    const out: string[] = []
+    for (const ch of choices ?? []) {
+        if (!objectOrNull(ch)) return []
+        const delta = (ch as { delta?: unknown } | null)?.delta
+        if (!objectOrUnset(delta)) return []
+        const calls = (delta as { tool_calls?: unknown } | null | undefined)?.tool_calls
+        if (!arrayOrUnset(calls)) return []
+        for (const tc of calls ?? []) {
+            if (!objectOrNull(tc)) return []
+            const id = (tc as { id?: unknown } | null)?.id
+            if (id !== undefined && id !== null && typeof id !== 'string') return []
+            if (typeof id === 'string' && id !== '') out.push(id)
+        }
+    }
+    return out
+}
+
+// What Go unmarshals into a struct: an object, or null.
+function objectOrNull(v: unknown): boolean {
+    return v === null || (typeof v === 'object' && !Array.isArray(v))
+}
+
+function objectOrUnset(v: unknown): boolean {
+    return v === undefined || objectOrNull(v)
+}
+
+// What Go unmarshals into a slice: an array, or null.
+function arrayOrUnset(v: unknown): v is unknown[] | null | undefined {
+    return v === undefined || v === null || Array.isArray(v)
+}
+
 /** Pulls "previous_response_id" from a /v1/responses request body. */
 export function extractPreviousResponseID(body: string): string {
     const o = parse(body) as { previous_response_id?: unknown } | undefined

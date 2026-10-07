@@ -16,7 +16,7 @@
 // frame arms the drain).
 
 import { parseReceiptJSON } from '@txnlab/zs-proto/ticket'
-import { extractResponseIDFromFrame } from '@txnlab/zs-proto/selection'
+import { extractResponseIDFromFrame, extractStreamToolCallIDs } from '@txnlab/zs-proto/selection'
 import { TRANSPORT_FAILURE_STATUS } from '@txnlab/zs-proto/transient'
 import {
     RESPONSE_KEY_HEADER,
@@ -31,6 +31,7 @@ import {
 } from '@txnlab/zs-proto/wire'
 
 import { newError } from './codes.js'
+import { goDecodeUTF8 } from './gotext.js'
 import { type Operator, refOf } from './operator.js'
 import type { Clock, LogAttrs } from './ports.js'
 import { type ReceiptCheckDeps, type SettleSlot, checkTurnReceipt } from './receipt-check.js'
@@ -476,7 +477,7 @@ export async function forwardStream(
 }
 
 /** What the frame hook reads off the Client. */
-export type FrameDeps = ReceiptCheckDeps & Pick<ResponderDeps, 'responseAffinity' | 'feeRate'>
+export type FrameDeps = ReceiptCheckDeps & Pick<ResponderDeps, 'toolAffinity' | 'responseAffinity' | 'feeRate'>
 
 /** streamApiFor is the event vocabulary an endpoint's frames use, for classifyStreamFrame. */
 export function streamApiFor(endpoint: Endpoint): StreamApi {
@@ -541,8 +542,19 @@ export function frameFactory(deps: FrameDeps, call: SealedCall, genComplete: Gen
                     // tail drained. On an error frame that protects the payer,
                     // whose zero-cost receipt and ack come after it.
                     if (verdict.terminal && !genComplete.value) genComplete.value = true
+                    // So the next turn of a tool-calling conversation routes back
+                    // here, as a buffered reply's tool calls do. Each id rides its
+                    // call's first chunk only, so ids are recorded as they arrive.
+                    // Decoded as Go reads bytes, each invalid byte its own
+                    // U+FFFD, which is how the next turn's ids are read too.
+                    let text: string | undefined
+                    const textOf = () => (text ??= goDecodeUTF8(pt))
+                    if (deps.toolAffinity) {
+                        const ids = extractStreamToolCallIDs(textOf())
+                        if (ids.length > 0) deps.toolAffinity.record(refOf(op), ids)
+                    }
                     if (recordResponseId && !recordedResponseId) {
-                        const id = extractResponseIDFromFrame(dec.decode(pt))
+                        const id = extractResponseIDFromFrame(textOf())
                         if (id !== '') {
                             deps.responseAffinity!.record(refOf(op), [id])
                             recordedResponseId = true

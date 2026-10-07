@@ -1982,6 +1982,10 @@ func TestDispatch_Affinity_PrefersRecordedOperator(t *testing.T) {
 	if !bytes.Equal(w.Body.Bytes(), opAReply) {
 		t.Fatalf("turn 1 body = %s", w.Body.String())
 	}
+	// Read the pin itself: routing alone lands on A without it.
+	if opID, nodeID, ok := opts.ToolAffinity.Lookup("call-1"); !ok || opID != opA.operator.ID || nodeID != opA.operator.NodeID {
+		t.Fatalf("call-1 pin = (%d, %d, %v), want opA (%d, %d)", opID, nodeID, ok, opA.operator.ID, opA.operator.NodeID)
+	}
 	aCalls := opA.callCount
 	bCalls := opB.callCount
 
@@ -2004,6 +2008,54 @@ func TestDispatch_Affinity_PrefersRecordedOperator(t *testing.T) {
 	}
 	if opB.callCount != bCalls {
 		t.Errorf("opB.callCount changed (%d → %d); affinity should have skipped B", bCalls, opB.callCount)
+	}
+}
+
+// A streamed reply's tool calls pin the continuation as a buffered reply's
+// do: agent clients stream, so without this the pin never fires for them.
+func TestDispatch_Affinity_Stream_RecordsToolCallIDs(t *testing.T) {
+	opA := newFakeNode(t, &nodeConfig{
+		mode: modeStreamEncrypted,
+		streamFrames: [][]byte{
+			[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-S","function":{"name":"f","arguments":""}}]}}]}`),
+			[]byte(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}`),
+			[]byte(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`),
+		},
+	})
+	opB := newFakeNode(t, &nodeConfig{
+		mode:         modeStreamEncrypted,
+		streamFrames: [][]byte{[]byte(`{"choices":[{"delta":{"content":"B"}}]}`)},
+	})
+
+	cfg := testConfig()
+	opts := setup(t, cfg, opA, opB)
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","stream":true}`))
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("turn 1 status = %d body=%s", w.Result().StatusCode, w.Body.String())
+	}
+	// Read the pin itself: routing alone can land on A without it.
+	opID, nodeID, ok := opts.ToolAffinity.Lookup("call-S")
+	if !ok || opID != opA.operator.ID || nodeID != opA.operator.NodeID {
+		t.Fatalf("call-S pin = (%d, %d, %v), want opA (%d, %d)", opID, nodeID, ok, opA.operator.ID, opA.operator.NodeID)
+	}
+	aCalls, bCalls := opA.callCount, opB.callCount
+
+	// B is preferred now; the call-S pin must still send turn 2 to A.
+	setFleet(t, opts, opB.operator, opA.operator)
+	turn2 := `{"model":"gpt-test","stream":true,"messages":[{"role":"tool","tool_call_id":"call-S","content":"result"}]}`
+	w2 := httptest.NewRecorder()
+	s.mux.ServeHTTP(w2, clientReq(http.MethodPost, "/v1/chat/completions", turn2))
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("turn 2 status = %d body=%s", w2.Result().StatusCode, w2.Body.String())
+	}
+	if opA.callCount <= aCalls {
+		t.Errorf("opA.callCount did not increase (%d → %d)", aCalls, opA.callCount)
+	}
+	if opB.callCount != bCalls {
+		t.Errorf("opB called despite the tool-call pin (%d → %d)", bCalls, opB.callCount)
 	}
 }
 

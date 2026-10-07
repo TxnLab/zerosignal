@@ -4194,6 +4194,14 @@ func (s *Client) buildFrameFactory(
 				if genComplete != nil && verdict.Terminal && !genComplete.Load() {
 					genComplete.Store(true)
 				}
+				// So the next turn of a tool-calling conversation routes back
+				// here, as a buffered reply's tool calls do. Each id rides its
+				// call's first chunk only, so ids are recorded as they arrive.
+				if s.toolAffinity != nil {
+					if ids := selection.ExtractStreamToolCallIDs(plaintext); len(ids) > 0 {
+						s.toolAffinity.Record(op.ID, op.NodeID, ids)
+					}
+				}
 				// Record response_id once per stream. ExtractResponseIDFromFrame
 				// matches both response.created (first frame per the Responses
 				// API spec) and response.completed (last frame, kept as a

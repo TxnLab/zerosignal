@@ -71,6 +71,45 @@ func TestExtractResponseID(t *testing.T) {
 	}
 }
 
+// TestExtractStreamToolCallIDs mirrors proto/ts/test/extract.test.ts
+// (extractStreamToolCallIDs): the same chunks must yield the same ids, so the
+// proxy and the SDK pin the same continuations.
+func TestExtractStreamToolCallIDs(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"f","arguments":""}}]}}]}`, []string{"call_a"}},
+		{`{"choices":[{"delta":{"tool_calls":[{"id":"a"},{"id":"b"}]}},{"delta":{"tool_calls":[{"id":"c"}]}}]}`, []string{"a", "b", "c"}},
+		// A later chunk of the same call carries arguments and no id.
+		{`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"x\""}}]}}]}`, nil},
+		{`{"choices":[{"delta":{"tool_calls":[{"id":""},{"id":null},{"id":"d"}]}}]}`, []string{"d"}},
+		{`{"choices":[{"delta":{"content":"hi"}}]}`, nil},
+		{`{"choices":[null,{"delta":null},{"delta":{"tool_calls":null}},{"delta":{"tool_calls":[null,{"id":"e"}]}}]}`, []string{"e"}},
+		// The buffered shape is not a delta.
+		{`{"choices":[{"message":{"tool_calls":[{"id":"m"}]}}]}`, nil},
+		// A field of the wrong type fails the whole unmarshal.
+		{`{"choices":[{"delta":{"tool_calls":[{"id":"ok"},{"id":5}]}}]}`, nil},
+		{`{"choices":[{"delta":{"tool_calls":{"id":"x"}}}]}`, nil},
+		{`{"choices":{"delta":{}}}`, nil},
+		{`{"choices":["x"]}`, nil},
+		// Each wrong type beside a good id: it fails the decode, not just the item.
+		{`{"choices":["x",{"delta":{"tool_calls":[{"id":"a"}]}}]}`, nil},
+		{`{"choices":[{"delta":5},{"delta":{"tool_calls":[{"id":"a"}]}}]}`, nil},
+		{`{"choices":[{"delta":{"tool_calls":"x"}},{"delta":{"tool_calls":[{"id":"a"}]}}]}`, nil},
+		{`{"choices":[{"delta":{"tool_calls":[5,{"id":"a"}]}}]}`, nil},
+		{`{"type":"response.function_call_arguments.delta","item_id":"fc_1"}`, nil},
+		{`null`, nil},
+		{`[]`, nil},
+		{`[DONE]`, nil},
+	}
+	for _, c := range cases {
+		if got := selection.ExtractStreamToolCallIDs([]byte(c.body)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ExtractStreamToolCallIDs(%s) = %q, want %q", c.body, got, c.want)
+		}
+	}
+}
+
 // TestParseOperatorRef mirrors proto/ts/test/extract.test.ts (parseOperatorRef)
 // so the proxy and client/ resolve a caller ref string identically. Both forms
 // and every malformed shape must agree.

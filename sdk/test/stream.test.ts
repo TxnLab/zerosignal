@@ -826,6 +826,40 @@ describe('frameFactory', () => {
         }
     })
 
+    // A streamed tool call pins the continuation as a buffered one does.
+    it('records each tool call’s id as its first chunk arrives, on any endpoint', async () => {
+        const frames = [
+            '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"f","arguments":""}}]}}]}',
+            '{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
+            '{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"g","arguments":""}}]}}]}',
+            '{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}',
+        ]
+        const s = await setup({ frames })
+        const toolAffinity = new IDAffinity(16, 60_000)
+        const record = vi.spyOn(toolAffinity, 'record')
+        s.deps.toolAffinity = toolAffinity
+        const fn = await transform(s)
+        for (const pt of s.frames) await fn(zs(s, pt))
+        expect(record.mock.calls).toEqual([
+            [{ op: 7, node: 3 }, ['call_1']],
+            [{ op: 7, node: 3 }, ['call_2']],
+        ])
+        expect(toolAffinity.lookup('call_2')).toEqual({ op: 7, node: 3 })
+    })
+
+    // Go replaces each invalid byte, as the next turn's request is read.
+    it('reads an id’s invalid bytes as Go does', async () => {
+        const head = enc.encode('{"choices":[{"delta":{"tool_calls":[{"id":"call_')
+        const frame = new Uint8Array([...head, 0xe2, 0x82, ...enc.encode('"}]}}]}')])
+        const s = await setup({ frames: [] })
+        s.frames.push(frame)
+        const toolAffinity = new IDAffinity(16, 60_000)
+        s.deps.toolAffinity = toolAffinity
+        const fn = await transform(s)
+        await fn(zs(s, frame))
+        expect(toolAffinity.lookup('call_��')).toEqual({ op: 7, node: 3 })
+    })
+
     it('passes an unsealed frame on as sent', async () => {
         const s = await setup()
         const fn = await transform(s)

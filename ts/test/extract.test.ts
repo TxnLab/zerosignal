@@ -13,6 +13,7 @@ import {
     extractRequestedBuiltinTools,
     extractResponseID,
     extractRoutingPreferences,
+    extractStreamToolCallIDs,
     normalizeRelay,
     type Operator,
     type OperatorRef,
@@ -42,6 +43,33 @@ describe('extractResponseID', () => {
         ['not json', ''],
     ])('reads %s as %j', (body, want) => {
         expect(extractResponseID(body)).toBe(want)
+    })
+})
+
+// The same table as Go's TestExtractStreamToolCallIDs.
+describe('extractStreamToolCallIDs', () => {
+    it.each([
+        ['{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"f","arguments":""}}]}}]}', ['call_a']],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":"a"},{"id":"b"}]}},{"delta":{"tool_calls":[{"id":"c"}]}}]}', ['a', 'b', 'c']],
+        ['{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"x\\""}}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":""},{"id":null},{"id":"d"}]}}]}', ['d']],
+        ['{"choices":[{"delta":{"content":"hi"}}]}', []],
+        ['{"choices":[null,{"delta":null},{"delta":{"tool_calls":null}},{"delta":{"tool_calls":[null,{"id":"e"}]}}]}', ['e']],
+        ['{"choices":[{"message":{"tool_calls":[{"id":"m"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":"ok"},{"id":5}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":{"id":"x"}}}]}', []],
+        ['{"choices":{"delta":{}}}', []],
+        ['{"choices":["x"]}', []],
+        ['{"choices":["x",{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":5},{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":"x"}},{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[5,{"id":"a"}]}}]}', []],
+        ['{"type":"response.function_call_arguments.delta","item_id":"fc_1"}', []],
+        ['null', []],
+        ['[]', []],
+        ['[DONE]', []],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractStreamToolCallIDs(body)).toEqual(want)
     })
 })
 
