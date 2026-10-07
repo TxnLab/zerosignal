@@ -21,6 +21,7 @@ import type { Event, ReserveRetrying } from './events.js'
 import { BadReserveEnvelopeError, NoEphemeralError, ReserveHTTPError } from './reserve.js'
 import { type RelayHop, relayRef } from './routing/relay.js'
 import { narrowReserveVerdict, reserveRouteFor } from './routing/verdict.js'
+import { sleep } from './sleep.js'
 import { type NodeRef, nodeRefString } from './types.js'
 
 /** What reserveWithTransientRetry needs from its caller. T is the candidate. */
@@ -79,25 +80,6 @@ export interface TransientReserveAttempt<T, R> {
 
 function relayOf(hop: RelayHop | null): NodeRef | null {
     return hop === null ? null : relayRef(hop)
-}
-
-// Resolves after ms, or false at once when signal aborts first. A non-positive
-// ms still checks the signal, so a caller gone during a zero wait is noticed
-// before another round trip. Go's sleepCtx.
-function sleep(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
-    if (signal?.aborted) return Promise.resolve(false)
-    if (ms <= 0) return Promise.resolve(true)
-    return new Promise((resolve) => {
-        const onAbort = () => {
-            clearTimeout(timer)
-            resolve(false)
-        }
-        const timer = setTimeout(() => {
-            signal?.removeEventListener('abort', onAbort)
-            resolve(true)
-        }, ms)
-        signal?.addEventListener('abort', onAbort, { once: true })
-    })
 }
 
 /**

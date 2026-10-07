@@ -10,6 +10,7 @@
 import algosdk from 'algosdk'
 
 import { IDAffinity } from './affinity.js'
+import { type Parts, partsOf } from './client-parts.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
 import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
@@ -17,10 +18,8 @@ import type { EstimatePolicy } from './estimate.js'
 import { FeeRateCache } from './fee-rate.js'
 import {
     type RegistryProvider,
-    type ReserveClient,
     type Stores,
     type TicketJournal,
-    type WalletOpener,
     httpReserveClient,
     isMemoryJournal,
     memoryJournal,
@@ -37,23 +36,6 @@ export const ESCROW_CONFIG_TIMEOUT_MS = 10_000
 // submit the same refund or lapse.
 const journalsSwept = new WeakSet<TicketJournal>()
 
-/**
- * The parts a Client runs on. Routing stores, the spend guard and the logger
- * are read off cfg, where an absent store is no signal.
- */
-interface Parts {
-    cfg: ResolvedConfig
-    registry: RegistryProvider
-    reserveClient: ReserveClient
-    wallet: WalletOpener
-    /** Candidate selection's view of the Client, the affinity stores always set. */
-    pick: PickDeps
-    estimatePolicy: EstimatePolicy
-    /** Undefined only with a caller's wallet and no Stores.journal. */
-    journal: TicketJournal | undefined
-    durableJournal: boolean
-}
-
 export class Client {
     readonly #p: Parts
     readonly #feeRate = new FeeRateCache()
@@ -63,6 +45,7 @@ export class Client {
     private constructor(p: Parts, claimedJournal: boolean) {
         this.#p = p
         this.#claimedJournal = claimedJournal
+        partsOf.set(this, p)
     }
 
     /**

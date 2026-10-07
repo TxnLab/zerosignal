@@ -118,12 +118,12 @@ function emptyResult(registryCount: number): PickResult {
 
 // The body as Go's selection extractors read it: invalid UTF-8 byte by byte,
 // a lone surrogate as U+FFFD.
-function bodyText(body: string | Uint8Array): string {
+export function bodyText(body: string | Uint8Array): string {
     return typeof body === 'string' ? wellFormed(body) : goDecodeUTF8(body)
 }
 
 // Go's %q of an id or model that came from the request body.
-const quoted = (s: string): string => goQuote(binaryOf(new TextEncoder().encode(s)))
+export const quoted = (s: string): string => goQuote(binaryOf(new TextEncoder().encode(s)))
 
 const minSignerAlgo = MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000
 
