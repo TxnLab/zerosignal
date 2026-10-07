@@ -143,6 +143,19 @@ export class AlgodEscrowChain implements EscrowChain {
         return { appId: g.appId, appAddress: g.appAddress, usdcAssetId: g.usdcAssetId }
     }
 
+    /**
+     * Reads and keeps what the first open would otherwise read: the ticket
+     * MBR, the globals and the free-quota term (Go's RefreshConfig). A
+     * Client runs it at startup so a misconfigured app refuses there, not
+     * after a node has signed a ticket. signal stops the wait, not the reads.
+     */
+    async refreshConfig(signal?: AbortSignal): Promise<void> {
+        signal?.throwIfAborted()
+        await untilAborted(this.ticketMbr(), signal)
+        await this.#readGlobalsOnce(signal)
+        await untilAborted(this.#readFreeQuotaMbrOnce(), signal)
+    }
+
     async protocolFeeBps(signal?: AbortSignal): Promise<number> {
         signal?.throwIfAborted()
         const kv = await this.#globalState(signal)

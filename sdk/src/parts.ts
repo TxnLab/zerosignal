@@ -11,6 +11,7 @@
 import type { BytesSigner, Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
 import type { AckSettleResult } from './ack.js'
+import type { AffinityStore } from './affinity.js'
 import { decodeOpenGroup } from './escrow/open.js'
 import { type Operator, refOf, sealRecipientOf } from './operator.js'
 import type { Clock, Fetch } from './ports.js'
@@ -226,7 +227,7 @@ function cloneRecord(r: TicketRecord): TicketRecord {
  */
 export function memoryJournal(): TicketJournal {
     const recs = new Map<string, TicketRecord>()
-    return {
+    const j: TicketJournal = {
         put(rec) {
             recs.set(rec.ticketId, cloneRecord(rec))
             return Promise.resolve()
@@ -247,6 +248,15 @@ export function memoryJournal(): TicketJournal {
             return Promise.resolve(out)
         },
     }
+    memoryJournals.add(j)
+    return j
+}
+
+const memoryJournals = new WeakSet<TicketJournal>()
+
+/** Whether j came from memoryJournal, and so dies with the process. */
+export function isMemoryJournal(j: TicketJournal): boolean {
+    return memoryJournals.has(j)
 }
 
 /**
@@ -261,6 +271,17 @@ export interface Stores {
      * rows, so a supplied journal is the host's to drain.
      */
     journal?: TicketJournal
+    /**
+     * Pins tool-call continuations to the node that issued the call ids.
+     * Absent is a new IDAffinity from Config.affinity, unlike the routing
+     * stores: a continuation sent elsewhere loses its node's KV cache.
+     */
+    toolAffinity?: AffinityStore
+    /**
+     * Pins previous_response_id continuations to the node that issued the
+     * response. Absent is a new IDAffinity from Config.affinity.
+     */
+    responseAffinity?: AffinityStore
     relayReputation?: RelayReputationStore
     relayLatency?: RelayLatencyStore
     targetBackoff?: TargetBackoffStore

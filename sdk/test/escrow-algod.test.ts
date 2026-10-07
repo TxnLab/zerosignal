@@ -342,6 +342,55 @@ describe('AlgodEscrowChain config', () => {
         expect((await chain.config()).usdcAssetId).toBe(USDC)
     })
 
+    // Go's RefreshConfig: each read is fatal but a quota-less app's, and kept.
+    it('refreshConfig reads the ticket MBR, the globals and the quota term, and keeps them', async () => {
+        fake.simAnswers.mbrForTicket = { value: 0n }
+        fake.simAnswers.mbrForFreeQuota = { value: 22_500n }
+        await expect(chain.refreshConfig()).rejects.toThrow('escrow: mbrForTicket returned 0')
+        fake.simAnswers.mbrForTicket = { value: 115_300n }
+        fake.globals.delete('usdc')
+        await expect(chain.refreshConfig()).rejects.toThrow('usdcAssetId global not found')
+        fake.globals.set('usdc', { type: 2, uint: USDC })
+        fake.simAnswers.mbrForFreeQuota = { failure: 'txn dead' }
+        await expect(chain.refreshConfig()).rejects.toThrow('txn dead')
+        fake.simAnswers.mbrForFreeQuota = { value: 22_500n }
+        await chain.refreshConfig()
+        const before = fake.simulated.length
+        await chain.ticketMbr()
+        expect(await chain.freeQuotaMbrDue(PAYER)).toBe(22_500n)
+        await chain.config()
+        expect(fake.simulated.length).toBe(before)
+
+        const c = newChain()
+        fake.simAnswers.mbrForFreeQuota = { failure: 'logic eval error: err opcode executed. Details: app=1234, pc=512' }
+        await c.refreshConfig()
+        await expect(c.refreshConfig(AbortSignal.abort(new Error('stop')))).rejects.toThrow('stop')
+    })
+
+    // The MBR reads take no signal of their own, so only the wait can stop.
+    it('refreshConfig stops waiting on its signal while a read is in flight', async () => {
+        fake.simAnswers.mbrForTicket = { value: 115_300n }
+        fake.simAnswers.mbrForFreeQuota = { value: 22_500n }
+        const stalled = deferred()
+        // First stalled in the ticket MBR read; then, with it and the globals
+        // already kept, in the free-quota read.
+        for (const warm of [false, true]) {
+            const c = newChain()
+            if (warm) {
+                await c.ticketMbr()
+                await c.config()
+            }
+            fake.gate = stalled.promise
+            const ctrl = new AbortController()
+            const p = c.refreshConfig(ctrl.signal)
+            await new Promise((r) => setTimeout(r, 0))
+            ctrl.abort(new Error('stop'))
+            await expect(p).rejects.toThrow('stop')
+            fake.gate = undefined
+        }
+        stalled.resolve()
+    })
+
     // A fee rotation reaches the next read; zero or absent is no fee.
     it('reads the protocol fee live', async () => {
         expect(await chain.protocolFeeBps()).toBe(250)

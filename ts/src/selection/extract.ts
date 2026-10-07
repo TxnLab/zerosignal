@@ -245,7 +245,13 @@ function normalizeSort(s: unknown): string {
     }
 }
 
-function normalizeRelay(s: unknown): string {
+/**
+ * normalizeRelay maps a relay preference to RELAY_AUTO, RELAY_OFF or
+ * RELAY_REQUIRED, case- and space-insensitively, and anything else to "".
+ * Exported, as Go's NormalizeRelay, so a preference passed beside the body
+ * reads as the body's `provider.relay` does.
+ */
+export function normalizeRelay(s: unknown): string {
     if (typeof s !== 'string') return ''
     switch (s.trim().toLowerCase()) {
         case RELAY_AUTO:

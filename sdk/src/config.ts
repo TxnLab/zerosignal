@@ -82,11 +82,26 @@ export interface SpendGuard {
     /**
      * After a node signs a ticket and before escrow opens, with its maxPrice.
      * Throwing moves on to the next candidate; returning records the exposure.
+     * Throwing a DuplicateTicketError, or an error whose cause chain holds
+     * one, instead ends the request with kind operator_fault.
      */
     reserve(ticketId: string, maxPrice: number): void
     settle(ticketId: string, charged: number): void
     /** Drops a reservation that never became a charge. */
     release(ticketId: string): void
+}
+
+/**
+ * DuplicateTicketError is a SpendGuard reserve refusal for a ticket id that
+ * already has an open reservation. Nodes mint ticket ids, so a repeat is the
+ * node's misbehaviour, not the payer's cap. Go's ErrDuplicateTicket: matched
+ * by class, so an error that merely reads the same is a spend_cap refusal.
+ */
+export class DuplicateTicketError extends Error {
+    constructor(message = 'ticket id already has an open reservation', options?: ErrorOptions) {
+        super(message, options)
+        this.name = 'DuplicateTicketError'
+    }
 }
 
 /** Config configures a Client. signer is required. */

@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import {
     extractRequestedBuiltinTools,
     extractRoutingPreferences,
+    normalizeRelay,
     type Operator,
     type OperatorRef,
     parseOperatorRef,
@@ -21,6 +22,20 @@ import {
     routingPreferencesAllowOperator,
     SORT_THROUGHPUT,
 } from '../src/selection/index.js'
+
+describe('normalizeRelay', () => {
+    it.each([
+        ['auto', 'auto'],
+        [' OFF\t', 'off'],
+        ['Required', 'required'],
+        ['', ''],
+        ['maybe', ''],
+        [undefined, ''],
+        [1, ''],
+    ])('reads %j as %j', (v, want) => {
+        expect(normalizeRelay(v)).toBe(want)
+    })
+})
 
 describe('extractRequestedBuiltinTools', () => {
     const cases: Array<{ name: string; body: string; want: string[] }> = [

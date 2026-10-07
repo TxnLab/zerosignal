@@ -187,6 +187,9 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"maxOutputCeiling":      int64(selection.DefaultMaxOutputCeiling),
 			"settlePendingGraceMs":  settlePendingGrace.Milliseconds(),
 			"lapseFallbackMs":       defaultLapseFallback.Milliseconds(),
+			"feeRateCacheTtlMs":     feeRateCacheTTL.Milliseconds(),
+			"feeRateRefreshMs":      feeRateRefreshTimeout.Milliseconds(),
+			"escrowConfigTimeoutMs": escrowConfigTimeout.Milliseconds(),
 		},
 	}
 	for _, c := range eventTypeCases {

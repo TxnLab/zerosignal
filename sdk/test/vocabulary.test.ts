@@ -34,6 +34,9 @@ import {
     type ToolState,
     type ZsErrorInit,
     DEFAULT_LAPSE_FALLBACK_MS,
+    ESCROW_CONFIG_TIMEOUT_MS,
+    FEE_RATE_CACHE_TTL_MS,
+    FEE_RATE_REFRESH_TIMEOUT_MS,
     SETTLE_PENDING_GRACE_MS,
     defaults,
     kinds,
@@ -271,6 +274,9 @@ describe('vocabulary shared with the Go SDK', () => {
             targetTopK: d.targetTopK,
             settlePendingGraceMs: SETTLE_PENDING_GRACE_MS,
             lapseFallbackMs: DEFAULT_LAPSE_FALLBACK_MS,
+            feeRateCacheTtlMs: FEE_RATE_CACHE_TTL_MS,
+            feeRateRefreshMs: FEE_RATE_REFRESH_TIMEOUT_MS,
+            escrowConfigTimeoutMs: ESCROW_CONFIG_TIMEOUT_MS,
         }).toEqual(vocab.defaults)
     })
 })
