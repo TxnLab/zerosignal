@@ -22,6 +22,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -190,6 +191,9 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"feeRateCacheTtlMs":     feeRateCacheTTL.Milliseconds(),
 			"feeRateRefreshMs":      feeRateRefreshTimeout.Milliseconds(),
 			"escrowConfigTimeoutMs": escrowConfigTimeout.Milliseconds(),
+			// The default inference client's wait for a node's response
+			// headers, read off the client so a change there moves it.
+			"responseHeaderBackstopMs": Config{}.defaultHTTPClient().Transport.(*http.Transport).ResponseHeaderTimeout.Milliseconds(),
 		},
 	}
 	for _, c := range eventTypeCases {

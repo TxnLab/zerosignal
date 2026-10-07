@@ -23,13 +23,15 @@ vi.mock('undici', async (importOriginal) => {
 const { nodeFetch } = await import('../src/node/index.js')
 
 describe('nodeFetch’s pool', () => {
-    // A streamed answer's silences are Config.streamIdle's to bound.
-    it('sets no body timeout of its own, guarded or not', () => {
+    // A streamed answer's silences are Config.streamIdle's to bound, and the
+    // wait for headers is bounded per request: Go's backstop on inference,
+    // their own deadlines on the reserve and the probes.
+    it('sets no timeout of its own, guarded or not', () => {
         for (const allowPrivateHosts of [false, true]) {
             built.length = 0
             nodeFetch({ allowPrivateHosts })
             expect(built).toHaveLength(1)
-            expect(built[0]).toMatchObject({ bodyTimeout: 0 })
+            expect(built[0]).toMatchObject({ bodyTimeout: 0, headersTimeout: 0 })
         }
     })
 })

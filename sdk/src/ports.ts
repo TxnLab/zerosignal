@@ -108,6 +108,16 @@ export type Clock = () => number
  */
 export type Fetch = typeof globalThis.fetch
 
+/**
+ * How long an inference request on the default fetch waits for the node's
+ * response headers, Go's httpx.ForwardHeaderBackstop. A sealed image call's
+ * headers come only once the image is done, so it outlasts the slowest of
+ * those. The reserve and the probes keep their own deadlines, and a fetch
+ * you supply keeps its own rules, as in Go. The clock starts at the call,
+ * where Go's starts once the request is written.
+ */
+export const RESPONSE_HEADER_BACKSTOP_MS = 5 * 60_000
+
 export const discardLogger: Logger = {
     debug() {},
     info() {},

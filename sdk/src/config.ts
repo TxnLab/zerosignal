@@ -10,6 +10,7 @@
 import { defaultFetch } from '#default-fetch'
 
 import { configError } from './errors.js'
+import { withHeaderBackstop } from './header-backstop.js'
 import { DEFAULT_STREAM_IDLE, type StreamIdle } from './idle.js'
 import type { Network, ResolvedNetwork } from './network.js'
 import { resolveNetwork } from './network.js'
@@ -19,6 +20,7 @@ import {
     type Clock,
     type Fetch,
     type Logger,
+    RESPONSE_HEADER_BACKSTOP_MS,
     type Signer,
     type StorageAdapter,
     discardLogger,
@@ -192,8 +194,10 @@ export interface Config {
     /**
      * Carries every request to a node. Unset in Node, a fetch that refuses
      * private addresses unless allowPrivateHosts (nodeFetch from
-     * `@txnlab/zerosignal/node`); elsewhere the runtime's own. One supplied
-     * here is used as is, guard or none.
+     * `@txnlab/zerosignal/node`); elsewhere the runtime's own. On either, an
+     * inference request gives up on a node whose response headers take
+     * RESPONSE_HEADER_BACKSTOP_MS. One supplied here is used as is, guard,
+     * backstop or none.
      */
     fetch?: Fetch
 }
@@ -231,6 +235,11 @@ export interface ResolvedConfig {
     logger: Logger
     clock: Clock
     fetch: Fetch
+    /**
+     * Carries inference, Go's Config.HTTPClient: fetch, with the header
+     * backstop when fetch is the default.
+     */
+    inferenceFetch: Fetch
     /** Settings that work but are probably mistakes; the Client logs them. */
     warnings: string[]
 }
@@ -332,6 +341,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
     if (!fetch) {
         throw configError('this runtime has no global fetch: set Config.fetch')
     }
+    const inferenceFetch = c.fetch ?? withHeaderBackstop(fetch, RESPONSE_HEADER_BACKSTOP_MS)
 
     const r = c.remedies ?? {}
     return {
@@ -380,6 +390,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         logger: c.logger ?? discardLogger,
         clock,
         fetch,
+        inferenceFetch,
         warnings,
     }
 }

@@ -42,7 +42,42 @@ import { RelayReputationStore } from '../src/routing/reputation.js'
 import type { Request } from '../src/turn.js'
 import { partsOf } from '../src/client-parts.js'
 import type { OpenHandle, Reserved, SettleOutcome } from '../src/parts.js'
+import type { Fetch } from '../src/ports.js'
 import { TICKET_ID, VALID_GROUP, fixture, handleOf } from './turn-fixtures.js'
+
+// The default fetch reaches the harness's node, and the header backstop
+// counts the requests it carries, so a test can see which ones get it.
+const defaultFetchHook = vi.hoisted(() => ({
+    fetch: undefined as Fetch | undefined,
+    backstopped: [] as string[],
+    // The fetch each SDK-built reserve client was handed.
+    reserveFetches: [] as unknown[],
+}))
+vi.mock('../src/parts.js', async (importOriginal) => {
+    const m = await importOriginal<typeof import('../src/parts.js')>()
+    return {
+        ...m,
+        httpReserveClient: (o: Parameters<typeof m.httpReserveClient>[0]) => {
+            defaultFetchHook.reserveFetches.push(o.fetch)
+            return m.httpReserveClient(o)
+        },
+    }
+})
+vi.mock('#default-fetch', () => ({
+    defaultFetch: (): Fetch => (url, init) => defaultFetchHook.fetch!(url, init),
+}))
+vi.mock('../src/header-backstop.js', async (importOriginal) => {
+    const m = await importOriginal<typeof import('../src/header-backstop.js')>()
+    return {
+        withHeaderBackstop: (f: Fetch, ms: number): Fetch => {
+            const inner = m.withHeaderBackstop(f, ms)
+            return (url, init) => {
+                defaultFetchHook.backstopped.push(String(url))
+                return inner(url, init)
+            }
+        },
+    }
+})
 
 const enc = new TextEncoder()
 const MODEL = 'gpt-test'
@@ -78,6 +113,10 @@ interface HarnessOptions {
     relay?: boolean
     openErr?: unknown
     feeBps?: number
+    /** Leave Config.fetch unset, so the Client builds its default. */
+    defaultFetch?: boolean
+    /** Leave Config.reserveClient unset, so the reserve rides Config.fetch. */
+    sdkReserve?: boolean
     config?: Partial<Config>
 }
 
@@ -196,23 +235,34 @@ async function harness(o: HarnessOptions = {}) {
         },
         list: (payer, appId) => mem.list(payer, appId),
     }
+    const nodeFetch: Fetch = async (url, init) => {
+        urls.push(String(url))
+        sent.push(init!)
+        return node.answer(sealer, init!)
+    }
+    // A Config with no fetch gets the default, which here reaches this node.
+    defaultFetchHook.fetch = nodeFetch
     const c = await Client.create({
         signer,
         network: testnet(),
         registry,
         privacy: o.relay ? 'relay_required' : 'direct',
         sweepDelay: () => 0,
-        reserveClient: {
-            reserve: async () =>
-                ({
-                    ticket,
-                    responseKey: f.responseKey,
-                    identity,
-                    presignedOpenTxn: '',
-                    sealRecipient: nodeKey.recipient,
-                    algoUsdPrice: 0.2,
-                }) as unknown as Reserved,
-        },
+        ...(o.sdkReserve
+            ? {}
+            : {
+                  reserveClient: {
+                      reserve: async () =>
+                          ({
+                              ticket,
+                              responseKey: f.responseKey,
+                              identity,
+                              presignedOpenTxn: '',
+                              sealRecipient: nodeKey.recipient,
+                              algoUsdPrice: 0.2,
+                          }) as unknown as Reserved,
+                  },
+              }),
         wallet: {
             payerAddr: () => 'PAYER',
             open: async () => {
@@ -221,11 +271,7 @@ async function harness(o: HarnessOptions = {}) {
             },
             ...(o.feeBps !== undefined ? { protocolFeeBps: async () => o.feeBps! } : {}),
         },
-        fetch: async (url, init) => {
-            urls.push(String(url))
-            sent.push(init!)
-            return node.answer(sealer, init!)
-        },
+        ...(o.defaultFetch ? {} : { fetch: nodeFetch }),
         ...o.config,
         stores: { journal, ...o.config?.stores },
     })
@@ -592,5 +638,32 @@ describe('Client.stream’s wiring', () => {
         expect(row!.createdAt).toBeGreaterThanOrEqual(before)
         expect(row!.updatedAt).toBeGreaterThanOrEqual(row!.createdAt)
         await h.c.close()
+    })
+
+    // Go's default HTTPClient carries inference with the header backstop; a
+    // client the caller supplies keeps its own rules.
+    it('sends inference through the header backstop on the default fetch only', async () => {
+        defaultFetchHook.backstopped.length = 0
+        const d = await harness({ defaultFetch: true })
+        await d.c.stream({ endpoint: CHAT, body: d.body }).text()
+        expect(defaultFetchHook.backstopped).toEqual(d.urls)
+        expect(d.urls).toHaveLength(1)
+        await d.c.close()
+
+        // The reserve rides the plain fetch, as Go's reserve client has no
+        // backstop.
+        defaultFetchHook.reserveFetches.length = 0
+        const r = await harness({ defaultFetch: true, sdkReserve: true })
+        expect(defaultFetchHook.reserveFetches).toHaveLength(1)
+        expect(defaultFetchHook.reserveFetches[0]).toBe(r.p.cfg.fetch)
+        expect(r.p.cfg.fetch).not.toBe(r.p.cfg.inferenceFetch)
+        await r.c.close()
+
+        defaultFetchHook.backstopped.length = 0
+        const s = await harness()
+        await s.c.stream({ endpoint: CHAT, body: s.body }).text()
+        expect(s.urls).toHaveLength(1)
+        expect(defaultFetchHook.backstopped).toEqual([])
+        await s.c.close()
     })
 })

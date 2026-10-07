@@ -77,8 +77,11 @@ export function guardedLookup(resolve: Resolve = dnsLookup): LookupFunction {
 
 // undici cuts a body after 300 s without a byte by default. A streamed
 // answer's silences are Config.streamIdle's to bound, as Go's transport
-// leaves them to the caller, so the pool sets none of its own.
-const AGENT_OPTIONS = { bodyTimeout: 0 }
+// leaves them to the caller, so the pool sets none of its own. Its 300 s
+// wait for headers would bound the reserve and the probes, which Go bounds
+// by their own deadlines only; inference gets Go's header backstop from
+// Config's inferenceFetch instead.
+const AGENT_OPTIONS = { bodyTimeout: 0, headersTimeout: 0 }
 
 function guardedAgent(resolve?: Resolve): Agent {
     const connector = buildConnector({ lookup: guardedLookup(resolve) })

@@ -343,7 +343,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         spendGuard: cfg.spendGuard,
         remedies: cfg.remedies,
         network: cfg.network.network,
-        fetch: cfg.fetch,
+        fetch: cfg.inferenceFetch,
         relayReputation: st.relayReputation,
         logger,
         // With USDC locked on chain, the watchdog recovers it if no settlement

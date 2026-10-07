@@ -37,6 +37,7 @@ import {
     ESCROW_CONFIG_TIMEOUT_MS,
     FEE_RATE_CACHE_TTL_MS,
     FEE_RATE_REFRESH_TIMEOUT_MS,
+    RESPONSE_HEADER_BACKSTOP_MS,
     SETTLE_PENDING_GRACE_MS,
     defaults,
     kinds,
@@ -277,6 +278,7 @@ describe('vocabulary shared with the Go SDK', () => {
             feeRateCacheTtlMs: FEE_RATE_CACHE_TTL_MS,
             feeRateRefreshMs: FEE_RATE_REFRESH_TIMEOUT_MS,
             escrowConfigTimeoutMs: ESCROW_CONFIG_TIMEOUT_MS,
+            responseHeaderBackstopMs: RESPONSE_HEADER_BACKSTOP_MS,
         }).toEqual(vocab.defaults)
     })
 })

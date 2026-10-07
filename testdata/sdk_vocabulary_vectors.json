@@ -287,6 +287,7 @@
     "refreshIntervalMs": 300000,
     "refreshTimeoutMs": 30000,
     "reserveTimeoutMs": 5000,
+    "responseHeaderBackstopMs": 300000,
     "retryBudgetMs": 60000,
     "settlePendingGraceMs": 120000,
     "targetTopK": 8

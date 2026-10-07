@@ -23,7 +23,9 @@ import {
 import { IDAffinity } from '../src/affinity.js'
 import type { SpendGuard } from '../src/config.js'
 import type { ZsError } from '../src/errors.js'
+import { withHeaderBackstop } from '../src/header-backstop.js'
 import { IdleWatchdog, StreamIdleTimeoutError } from '../src/idle.js'
+import type { Fetch } from '../src/ports.js'
 import { ProtestReason, type Reserved } from '../src/parts.js'
 import { DISPUTE_EXCERPT_CAP, SettleSlot } from '../src/receipt-check.js'
 import { DRAIN_TAIL_TIMEOUT_MS } from '../src/response.js'
@@ -449,6 +451,18 @@ describe('forwardStream', () => {
             msg: 'upstream request failed',
             attrs: { endpoint: '/v1/chat/completions', relay_operator_id: 5, relay_node_id: 0, err: 'fetch failed' },
         })
+    })
+
+    // The residue Go's relayEvidence names: its backstop fires on a context
+    // the caller didn't end, so the relay is charged.
+    it('charges the relay when the header backstop gives up', async () => {
+        const rep = new RelayReputationStore({ clock: Date.now, targetReachable: () => true })
+        const outcome = vi.spyOn(rep, 'recordRelayOutcome')
+        const t = setup((init) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })))
+        const deps = { ...t.deps, fetch: withHeaderBackstop(t.deps.fetch as Fetch, 10), relayReputation: rep }
+        await forwardStream(deps, t.em as never, out, call(new AbortController().signal, hopOf()), async () => identity, noFallback, { value: false })
+        expect(outcome).toHaveBeenCalledWith({ op: 5, node: 0 }, false)
+        expect(t.em.failed).toMatchObject({ code: 'upstream_unreachable', message: 'timeout awaiting response headers' })
     })
 
     it('credits the relay that forwarded an event stream', async () => {

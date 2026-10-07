@@ -27,6 +27,7 @@ import {
 } from '@txnlab/zs-proto/wire'
 
 import type { Remedies, SpendGuard } from '../src/config.js'
+import { withHeaderBackstop } from '../src/header-backstop.js'
 import type { SealedRun } from '../src/dispatch.js'
 import type { ZsError } from '../src/errors.js'
 import { APPROVAL_ASSERT, ApprovalError, approvalErrorMessages } from '../src/escrow/revert.js'
@@ -34,6 +35,7 @@ import { ESCROW_METHOD_SIGNATURES } from '../src/escrow/generated/abi.js'
 import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import type { Operator } from '../src/operator.js'
 import type { OpenHandle, Reserved, WalletOpener } from '../src/parts.js'
+import type { Fetch } from '../src/ports.js'
 import type { RelayHop } from '../src/routing/relay.js'
 import { RelayReputationStore } from '../src/routing/reputation.js'
 import {
@@ -384,6 +386,25 @@ describe('forwardBuffered', () => {
             ok,
         )
         expect(em.failed).toMatchObject({ code: 'upstream_unreachable', kind: 'interrupted', message: 'fetch failed' })
+        expect(r.outcome.mock.calls).toEqual([[{ op: 5, node: 0 }, false]])
+    })
+
+    // Go's header backstop fires on a context the caller didn't end, so the
+    // relay is charged, the residue Go's relayEvidence names.
+    it('charges the relay when the default fetch’s header backstop gives up', async () => {
+        const r = reputation()
+        const em = new Recorder()
+        const silent: Fetch = (_, init) =>
+            new Promise((_, reject) => init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true }))
+        const caller = new AbortController()
+        await forwardBuffered(
+            { fetch: withHeaderBackstop(silent, 10), relayReputation: r.store, logger },
+            em,
+            out,
+            { endpoint: ENDPOINT, hop: hopOf(), signal: caller.signal },
+            ok,
+        )
+        expect(em.failed).toMatchObject({ code: 'upstream_unreachable', message: 'timeout awaiting response headers' })
         expect(r.outcome.mock.calls).toEqual([[{ op: 5, node: 0 }, false]])
     })
 

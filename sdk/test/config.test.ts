@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
     type Config,
+    type Fetch,
     type RegistryProvider,
     type ReserveClient,
     type Signer,
@@ -124,6 +125,55 @@ describe('resolveConfig', () => {
             vi.doUnmock('#default-fetch')
             vi.resetModules()
         }
+    })
+
+    // Go's default HTTPClient carries inference with a header backstop; the
+    // reserve and the probes ride clients without one.
+    describe('inferenceFetch', () => {
+        // A fetch that never answers, rejecting with its signal's reason as a
+        // runtime's fetch does.
+        const silent = vi.fn(
+            (_: RequestInfo | URL, init?: RequestInit) =>
+                new Promise<Response>((_, reject) => init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true })),
+        )
+
+        async function withDefault(f: Fetch) {
+            vi.resetModules()
+            vi.doMock('#default-fetch', () => ({ defaultFetch: () => f }))
+            try {
+                const { resolveConfig: resolve } = await import('../src/config.js')
+                return resolve(base)
+            } finally {
+                vi.doUnmock('#default-fetch')
+                vi.resetModules()
+            }
+        }
+
+        afterEach(() => {
+            vi.useRealTimers()
+        })
+
+        it('gives up on the default fetch after Go’s 5 minutes; the plain fetch waits on', async () => {
+            const c = await withDefault(silent)
+            vi.useFakeTimers()
+            const inference = c.inferenceFetch('http://x.example')
+            const plain = c.fetch('http://x.example', { signal: new AbortController().signal })
+            const settled = vi.fn()
+            inference.then(settled, settled)
+            plain.then(settled, settled)
+            await vi.advanceTimersByTimeAsync(299_999)
+            expect(settled).not.toHaveBeenCalled()
+            await vi.advanceTimersByTimeAsync(1)
+            expect(await inference.catch((e: unknown) => e)).toMatchObject({ name: 'TimeoutError' })
+            await vi.advanceTimersByTimeAsync(60 * 60_000)
+            expect(settled).toHaveBeenCalledOnce()
+        })
+
+        it('is a supplied fetch as is', () => {
+            const mine = vi.fn()
+            const c = resolveConfig({ ...base, fetch: mine })
+            expect([c.fetch, c.inferenceFetch]).toEqual([mine, mine])
+        })
     })
 
     it('gives the default cache the injected clock', async () => {
