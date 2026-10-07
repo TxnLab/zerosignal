@@ -174,6 +174,16 @@ export async function resolveResponseIdPin(
                 'proxy replica — retry without previous_response_id',
         }
     }
+    // An excluded node is barred as a target for the process, a continuation
+    // included: the exclusion fires in the settle of a turn whose response id
+    // is already recorded.
+    if (deps.nodeExclusions?.nodeExcluded(ref)) {
+        return {
+            reason:
+                `previous_response_id ${id} is pinned to operator ${ref.op} node ${ref.node}, which this payer excluded ` +
+                'for handing it a fraudulent settle group; start a new conversation',
+        }
+    }
     const op = await resolveNode(
         deps,
         ref,
@@ -310,13 +320,19 @@ export async function pickCandidates(deps: PickDeps, req: PickRequest, signal?: 
     }
 
     // The first tool-call id with a live pin decides; a pin whose node is gone
-    // is no preference at all.
+    // or excluded is no preference at all. selectTargets would put an excluded
+    // node back past the filter above, and this pin is a cache location, not a
+    // session, so even strict falls through to normal selection.
     let preferredOp: Operator | undefined
     if (deps.affinityPolicy !== 'none') {
         for (const id of extractInputToolCallIDs(text)) {
             const ref = deps.toolAffinity.lookup(id)
             if (ref === undefined) continue
-            preferredOp = await resolveNode(deps, ref, 'affinity-preferred node not in registry', {}, signal)
+            if (deps.nodeExclusions?.nodeExcluded(ref)) {
+                deps.logger.debug('affinity-preferred node is excluded', { operator_id: ref.op, node_id: ref.node })
+            } else {
+                preferredOp = await resolveNode(deps, ref, 'affinity-preferred node not in registry', {}, signal)
+            }
             break
         }
     }

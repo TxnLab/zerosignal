@@ -6,12 +6,15 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
@@ -156,6 +159,62 @@ func TestPickCandidates_ExcludedNodeDropped(t *testing.T) {
 	// so the empty-candidate diagnostics stay honest.
 	if pick.RegistryCount != 2 {
 		t.Errorf("RegistryCount = %d, want 2 (3 serving − 1 excluded)", pick.RegistryCount)
+	}
+}
+
+// The exclusion fires in the settle of a turn whose response id and tool-call
+// ids are already recorded, so both continuation pins must honour it too: the
+// response-id pin blocks (its session lives only on that node), and the
+// tool-call pin is no preference, even under strict, rather than handing
+// SelectTargets a node its own filter has just dropped.
+func TestPickCandidates_ExcludedNodeOffContinuationPins(t *testing.T) {
+	srv := minimalRoutingServer(t, []Operator{
+		routingOp(1, routingModel, 0, 0),
+		routingOp(7, routingModel, 0, 0),
+	})
+	source := &ChainOperatorSource{}
+	source.ExcludeNode(NodeRef{Op: 7})
+	srv.nodeExcluder = source
+	srv.responseAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.responseAffinity.Record(7, 0, []string{"rid"})
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(7, 0, []string{"call_1"})
+	sizing := SizingRequest{Model: routingModel, InputTokens: 100, MaxOutputTokens: 100}
+
+	// The response pin is a session, so it binds whatever the policy.
+	responseBody := []byte(`{"model":"` + routingModel + `","previous_response_id":"rid","input":[]}`)
+	const want = `previous_response_id "rid" is pinned to operator 7 node 0, which this payer excluded for handing it a fraudulent settle group; start a new conversation`
+	for _, policy := range []AffinityPolicy{AffinityNone, AffinityPrefer, AffinityStrict} {
+		srv.cfg.Affinity.Policy = policy
+		pick, err := srv.pickCandidates(context.Background(), endpointResponses, routingModel, responseBody,
+			sizing, false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+		if err != nil {
+			t.Fatalf("pickCandidates (%s): %v", policy, err)
+		}
+		if !pick.AffinityBlocked || len(pick.Operators) != 0 {
+			t.Fatalf("response pin to an excluded node under %s: want AffinityBlocked and no operators, got %v blocked=%v", policy, opIDs(pick), pick.AffinityBlocked)
+		}
+		if pick.AffinityBlockReason != want {
+			t.Errorf("reason under %s = %q, want %q", policy, pick.AffinityBlockReason, want)
+		}
+	}
+
+	toolBody := []byte(`{"model":"` + routingModel + `","messages":[{"role":"tool","tool_call_id":"call_1"}]}`)
+	for _, policy := range []AffinityPolicy{AffinityPrefer, AffinityStrict} {
+		var logs bytes.Buffer
+		srv.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		srv.cfg.Affinity.Policy = policy
+		pick, err := srv.pickCandidates(context.Background(), endpointChatCompletions, routingModel, toolBody,
+			sizing, false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+		if err != nil {
+			t.Fatalf("pickCandidates (%s): %v", policy, err)
+		}
+		if ids := opIDs(pick); pick.AffinityBlocked || len(ids) != 1 || ids[0] != 1 {
+			t.Fatalf("tool pin to an excluded node under %s: want [1], got %v blocked=%v", policy, ids, pick.AffinityBlocked)
+		}
+		if !strings.Contains(logs.String(), `msg="affinity-preferred node is excluded" operator_id=7 node_id=0`) {
+			t.Errorf("under %s, no exclusion debug line:\n%s", policy, logs.String())
+		}
 	}
 }
 

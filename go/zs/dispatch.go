@@ -1488,6 +1488,15 @@ func (s *Client) resolveResponseIDPin(ctx context.Context, previousResponseID, m
 			"proxy replica — retry without previous_response_id",
 			previousResponseID), Operator{}, false
 	}
+	// An excluded node is barred as a target for the process, a continuation
+	// included. The exclusion fires in the settle of a turn whose response id
+	// is already recorded, so without this the next continuation goes straight
+	// back to the node that handed us a fraudulent settle group.
+	if s.nodeExcluder != nil && s.nodeExcluder.NodeExcluded(NodeRef{Op: opID, Node: nodeID}) {
+		return fmt.Sprintf("previous_response_id %q is pinned to operator %d node %d, which this payer excluded "+
+			"for handing it a fraudulent settle group; start a new conversation",
+			previousResponseID, opID, nodeID), Operator{}, false
+	}
 	// The session lives in the serving node's upstream account, so the pin
 	// resolves the EXACT (operator, node) — a sibling node of the same operator
 	// would 404 the continuation just as a different operator would.
@@ -1731,7 +1740,17 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 				// — KV-cache reuse is per-node, so the preferred descriptor must
 				// carry the node. SelectTargets ranks it first (prefer) or pins
 				// it (strict); siblings stay eligible fallbacks (prefer).
-				if op, err := s.registryProvider.Resolve(ctx, opID, nodeID); err == nil {
+				//
+				// An excluded node is no preference, as one gone from the
+				// registry is: SelectTargets would otherwise put it back ahead of
+				// the exclusion filter above. Unlike the response-id pin this one
+				// is a cache location, so the request falls through to normal
+				// selection rather than blocking, even under strict.
+				if s.nodeExcluder != nil && s.nodeExcluder.NodeExcluded(NodeRef{Op: opID, Node: nodeID}) {
+					s.log.Debug("affinity-preferred node is excluded",
+						slog.Uint64("operator_id", opID),
+						slog.Uint64("node_id", nodeID))
+				} else if op, err := s.registryProvider.Resolve(ctx, opID, nodeID); err == nil {
 					sel := op.Selection()
 					preferred = &sel
 					preferredOp = &op
