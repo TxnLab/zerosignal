@@ -10,7 +10,7 @@
 // demotion, so a node that keeps failing goes behind one whose weights are
 // contradicted, and both still count toward the banding median.
 
-import { type BandingInput, type ResponsivenessMode, rankByResponsiveness } from './banding.js'
+import { type BandingInput, type RankDetail, type ResponsivenessMode, rankByResponsiveness } from './banding.js'
 
 export interface CandidateOrderInput extends BandingInput {
     /**
@@ -53,9 +53,21 @@ export function orderCandidates<T>(
     inputOf: (item: T) => CandidateOrderInput,
     mode: ResponsivenessMode,
 ): T[] {
+    return orderCandidatesDetailed(list, inputOf, mode).list
+}
+
+/**
+ * orderCandidatesDetailed is orderCandidates with the banding behind it:
+ * details is null when no banding ran, and its index is into list.
+ */
+export function orderCandidatesDetailed<T>(
+    list: readonly T[],
+    inputOf: (item: T) => CandidateOrderInput,
+    mode: ResponsivenessMode,
+): { list: T[]; details: RankDetail[] | null } {
     const inputs = list.map(inputOf)
-    const { order } = rankByResponsiveness(inputs, mode)
+    const { order, details } = rankByResponsiveness(inputs, mode)
     const weighed = demoteWhere(order, (i) => inputs[i]!.contradicted)
     const final = demoteWhere(weighed, (i) => inputs[i]!.backedOff && inputs[i]!.backoffPinned !== true)
-    return final.map((i) => list[i]!)
+    return { list: final.map((i) => list[i]!), details }
 }

@@ -9,7 +9,7 @@
 
 import algosdk from 'algosdk'
 
-import { type AffinityStore, IDAffinity } from './affinity.js'
+import { IDAffinity } from './affinity.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
 import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
@@ -25,6 +25,7 @@ import {
     isMemoryJournal,
     memoryJournal,
 } from './parts.js'
+import type { PickDeps } from './pick.js'
 import { payerBytesSigner } from './ports.js'
 import { Wallet } from './wallet.js'
 
@@ -45,9 +46,8 @@ interface Parts {
     registry: RegistryProvider
     reserveClient: ReserveClient
     wallet: WalletOpener
-    /** Both stores are always set: Stores' absent is a fresh IDAffinity. */
-    toolAffinity: AffinityStore
-    responseAffinity: AffinityStore
+    /** Candidate selection's view of the Client, the affinity stores always set. */
+    pick: PickDeps
     estimatePolicy: EstimatePolicy
     /** Undefined only with a caller's wallet and no Stores.journal. */
     journal: TicketJournal | undefined
@@ -124,8 +124,21 @@ export class Client {
         const stores: Stores = { ...st, toolAffinity, responseAffinity }
         if (journal !== undefined) stores.journal = journal
         const filled: ResolvedConfig = { ...cfg, reserveClient, wallet, stores }
+        const pick: PickDeps = {
+            registry,
+            toolAffinity,
+            responseAffinity,
+            affinityPolicy: cfg.affinity.policy,
+            allowStaging: cfg.allowStaging,
+            relayLatency: st.relayLatency,
+            targetBackoff: st.targetBackoff,
+            nodeExclusions: st.nodeExclusions,
+            relayReputation: st.relayReputation,
+            logger: cfg.logger,
+            weightsWarned: new Set(),
+        }
         const c = new Client(
-            { cfg: filled, registry, reserveClient, wallet, toolAffinity, responseAffinity, estimatePolicy, journal, durableJournal },
+            { cfg: filled, registry, reserveClient, wallet, pick, estimatePolicy, journal, durableJournal },
             claimedJournal,
         )
         c.#warmFeeRate()
