@@ -6,11 +6,12 @@
 // Operator/relay selection policy. Mirror of proto/go/selection/select.go —
 // keep in lockstep; pinned by proto/testdata/selection_vectors.json.
 
-import { protoVersionCompatible, usesTightInputBound } from '../wire/version.js'
+import { protoVersionCompatible } from '../wire/version.js'
 import {
     type Operator,
     type OperatorRef,
-    deriveMaxOutput,
+    effectiveInputTokens,
+    effectiveMaxOutput,
     fits,
     operatorRefMatches,
     servesModel,
@@ -210,8 +211,8 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     let fitList: Operator[] = []
     const sizingMisses: SizingMiss[] = []
     for (const op of pool) {
-        const eff = effectiveMaxOutput(op, c)
-        if (fits(op, c.model, effectiveInputTokens(op, c), eff)) {
+        const eff = opMaxOutput(op, c)
+        if (fits(op, c.model, opInputTokens(op, c), eff)) {
             fitList.push(op)
             continue
         }
@@ -427,8 +428,8 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     const preferredFits = fits(
         preferred,
         c.model,
-        effectiveInputTokens(preferred, c),
-        effectiveMaxOutput(preferred, c),
+        opInputTokens(preferred, c),
+        opMaxOutput(preferred, c),
     )
     // A broke preferred node yields under prefer (fitList already excludes it)
     // and blocks under strict with the funding cause, not affinity_blocked. The
@@ -460,32 +461,24 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     return { operators: out, diagnostics }
 }
 
-/**
- * effectiveMaxOutput is the max_output the sizing filter charges op with: the
- * flat request-level max_output_tokens, unless the caller left it unspecified
- * (max_output_unspecified), in which case it's the per-operator derivation from
- * op's declared capacity (deriveMaxOutput). An operator with no declared capacity
- * derives from zero window/max (i.e. the flat ceiling), but `fits` short-circuits
- * such operators to "unbounded" before the value is consulted. The caller's
- * reserve leg computes the identical value per operator, so the filter and the
- * escrowed max_output never disagree. Mirror of select.go::effectiveMaxOutput.
- */
-/**
- * Picks the input measurement to filter `op` on. v2 only where the operator
- * advertises support for it, mirroring the caller-side gate in the reserve leg
- * (usesTightInputBound) so the filter and the escrow agree on the same number
- * for the same operator.
- */
-function effectiveInputTokens(op: Operator, c: Constraints): number {
-    const v2 = c.input_tokens_v2 ?? 0
-    if (v2 > 0 && usesTightInputBound(op.proto_version)) return v2
-    return c.input_tokens
+/** The input measurement op is filtered on. Mirror of select.go::effectiveInputTokens. */
+function opInputTokens(op: Operator, c: Constraints): number {
+    return effectiveInputTokens(op.proto_version, c.input_tokens, c.input_tokens_v2 ?? 0)
 }
 
-function effectiveMaxOutput(op: Operator, c: Constraints): number {
-    if (!c.max_output_unspecified) return c.max_output_tokens
+/**
+ * The max_output the sizing filter charges op with. An operator with no
+ * declared capacity derives from a zero window and max (the flat ceiling), but
+ * `fits` treats it as unbounded before the value is consulted. Mirror of
+ * select.go::effectiveMaxOutput.
+ */
+function opMaxOutput(op: Operator, c: Constraints): number {
     const mc = op.model_capacities?.[c.model]
-    return deriveMaxOutput(mc?.context_window ?? 0, mc?.max_output_tokens ?? 0, c.max_output_ceiling ?? 0)
+    return effectiveMaxOutput(mc?.context_window ?? 0, mc?.max_output_tokens ?? 0, {
+        unspecified: c.max_output_unspecified ?? false,
+        flat: c.max_output_tokens,
+        ceiling: c.max_output_ceiling ?? 0,
+    })
 }
 
 /** Sort key for an advertised USD/1M rate: 0 ("undeclared") sorts last. Mirror

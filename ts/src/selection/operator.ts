@@ -12,6 +12,8 @@
 // proto/ts); numeric fields are `number` since real operator ids / token
 // counts stay within JS's safe-integer range.
 
+import { usesTightInputBound } from '../wire/version.js'
+
 export interface ModelCapacity {
     // bounds input_tokens + max_output_tokens (0 = unbounded).
     context_window: number
@@ -212,6 +214,37 @@ export function deriveMaxOutput(contextWindow: number, declaredMax: number, base
         return proportionate
     }
     return baseCeiling
+}
+
+/** How a request states its max_output. Mirror of selection.MaxOutputSpec. */
+export interface MaxOutputSpec {
+    /** The caller omitted max_output_tokens and no per-model default applied: derive per operator. */
+    unspecified: boolean
+    /** The caller's max_output_tokens, used verbatim unless unspecified. */
+    flat: number
+    /** deriveMaxOutput's baseCeiling; every caller passes DEFAULT_MAX_OUTPUT_CEILING. */
+    ceiling: number
+}
+
+/**
+ * effectiveMaxOutput is the max_output a request charges one operator: the
+ * number the sizing filter admits on and the number the reserve leg escrows,
+ * which must agree because a disagreement surfaces only after escrow.open.
+ * Mirror of selection.EffectiveMaxOutput.
+ */
+export function effectiveMaxOutput(contextWindow: number, declaredMax: number, spec: MaxOutputSpec): number {
+    if (!spec.unspecified) return spec.flat
+    return deriveMaxOutput(contextWindow, declaredMax, spec.ceiling)
+}
+
+/**
+ * effectiveInputTokens is the input measurement an operator is filtered and
+ * sized on: the tighter v2 bound where protoVersion supports it, else v1.
+ * inputTokensV2 0 means not supplied. Mirror of selection.EffectiveInputTokens.
+ */
+export function effectiveInputTokens(protoVersion: string, inputTokens: number, inputTokensV2: number): number {
+    if (inputTokensV2 > 0 && usesTightInputBound(protoVersion)) return inputTokensV2
+    return inputTokens
 }
 
 /**

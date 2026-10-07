@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { parseOperatorDetails } from '@txnlab/zs-proto/inject'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 
-import { modelPricingOf, verifyReservePrice } from '../src/index.js'
+import { detailsFieldsOf, modelPricingOf, operatorPricingOf, verifyReservePrice } from '../src/index.js'
 
 interface Scenario {
     name: string
@@ -47,6 +47,17 @@ describe('verifyReservePrice vectors', () => {
     it('covers every scenario', () => expect(vectors.scenarios.length).toBeGreaterThan(0))
     it.each(vectors.scenarios.map((s) => [s.name, s] as const))('%s', async (_name, sc) => {
         const v = await verifyReservePrice(call(sc))
+        expect(v === null ? null : { check: v.check, field: v.field, want: v.want, got: v.got }).toEqual(sc.want)
+    })
+})
+
+// Go's gate reads the routable operator the details were copied onto, which is
+// the path operatorPricingOf takes.
+describe('verifyReservePrice vectors through the operator', () => {
+    it.each(vectors.scenarios.map((s) => [s.name, s] as const))('%s', async (_name, sc) => {
+        const details = parseOperatorDetails(sc.details)!
+        const pricing = operatorPricingOf(detailsFieldsOf(details), sc.model)
+        const v = await verifyReservePrice({ ...call(sc), pricing })
         expect(v === null ? null : { check: v.check, field: v.field, want: v.want, got: v.got }).toEqual(sc.want)
     })
 })

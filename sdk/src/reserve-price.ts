@@ -25,6 +25,9 @@ import {
 } from '@txnlab/zs-proto/pricing'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 
+import type { Operator } from './operator.js'
+import { capacityOf } from './sizing.js'
+
 /**
  * A model's pricing as its node advertises it on /v1/zs/details, with the
  * operator-level minimum charge and tool-loop cap. An absent rate is a rate of
@@ -74,6 +77,35 @@ export function modelPricingOf(d: OperatorDetails, model: string): ModelPricing 
         vendorToolCatchAllMicroUsdc: m.vendor_tool_catchall_micro_usdc,
         vendorToolCallCap: m.vendor_tool_call_cap,
         vendorToolTokensPerCall: m.vendor_tool_tokens_per_call,
+    }
+}
+
+/**
+ * operatorPricingOf is model's pricing on a routable operator, or null when it
+ * declares no capacity for the model, as Go's reservePriceViolation reads it
+ * off zs.Operator.
+ */
+export function operatorPricingOf(
+    op: Pick<Operator, 'modelCapacities' | 'minChargeOutputTokens' | 'minChargeMicroUsdc' | 'maxToolIters'>,
+    model: string,
+): ModelPricing | null {
+    const mc = capacityOf(op, model)
+    if (mc === undefined) return null
+    return {
+        inputUsdPer1m: mc.inputUsdPer1m,
+        outputUsdPer1m: mc.outputUsdPer1m,
+        cacheReadUsdPer1m: mc.cacheReadUsdPer1m,
+        longContextThresholdTokens: mc.longContextThresholdTokens,
+        longContextInputUsdPer1m: mc.longContextInputUsdPer1m,
+        longContextOutputUsdPer1m: mc.longContextOutputUsdPer1m,
+        longContextCacheReadUsdPer1m: mc.longContextCacheReadUsdPer1m,
+        minChargeOutputTokens: op.minChargeOutputTokens,
+        minChargeMicroUsdc: op.minChargeMicroUsdc,
+        maxToolIterations: op.maxToolIters,
+        toolCallRatesMicroUsdc: mc.toolCallRatesMicroUsdc,
+        vendorToolCatchAllMicroUsdc: mc.vendorToolCatchAllMicroUsdc,
+        vendorToolCallCap: mc.vendorToolCallCap,
+        vendorToolTokensPerCall: mc.vendorToolTokensPerCall,
     }
 }
 
