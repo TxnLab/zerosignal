@@ -53,8 +53,20 @@ export function goDecodeRune(b: Bytes, i: number): [number, number] {
     return [REPLACEMENT, 1]
 }
 
+// Valid UTF-8 decodes the same whole as rune by rune, so a strict decoder is
+// the fast path, and the walk below runs only for bytes it refuses.
+// ignoreBOM: Go keeps a leading byte-order mark.
+const strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+
 /** goDecodeUTF8 is string(b) as Go reads it rune by rune: each invalid byte becomes one U+FFFD. */
 export function goDecodeUTF8(b: Bytes): string {
+    if (typeof b !== 'string') {
+        try {
+            return strict.decode(b)
+        } catch {
+            // Not valid UTF-8.
+        }
+    }
     const out: string[] = []
     for (let i = 0; i < b.length; ) {
         const [r, w] = goDecodeRune(b, i)

@@ -22,6 +22,13 @@ describe('Go text', () => {
         expect(goDecodeUTF8(bytes('é€\u{1f600}'))).toBe('é€\u{1f600}')
     })
 
+    // Go's string(b) keeps a leading byte-order mark, valid UTF-8 or not;
+    // a default TextDecoder would drop it.
+    it('keeps a leading byte-order mark', () => {
+        expect(goDecodeUTF8(bytes([0xef, 0xbb, 0xbf], '{}'))).toBe('﻿{}')
+        expect(goDecodeUTF8(bytes([0xef, 0xbb, 0xbf, 0xff]))).toBe('﻿�')
+    })
+
     // Each lead byte's bounds: the first sequence past each is one U+FFFD per
     // byte, and the last one inside decodes to its rune.
     it.each([
