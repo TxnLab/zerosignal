@@ -26,6 +26,7 @@ import {
 } from './parts.js'
 import type { PickDeps } from './pick.js'
 import { payerBytesSigner } from './ports.js'
+import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { Wallet } from './wallet.js'
 
 /** Bounds the escrow config read a built wallet needs, as Go's escrowConfigTimeout. */
@@ -120,8 +121,17 @@ export class Client {
             logger: cfg.logger,
             weightsWarned: new Set(),
         }
+        const guard = cfg.spendGuard
+        const refunds = new Watchdog({
+            logger: cfg.logger,
+            clock: cfg.clock,
+            remedy: cfg.remedies.recoverTicket,
+            // A ticket whose request failed after its escrow opened keeps its
+            // reservation in dispatch; its refund is what frees it.
+            refunded: guard ? (ticketId) => guard.release(ticketId) : undefined,
+        })
         const c = new Client(
-            { cfg: filled, registry, reserveClient, wallet, pick, estimatePolicy, journal, durableJournal },
+            { cfg: filled, registry, reserveClient, wallet, pick, estimatePolicy, journal, durableJournal, refunds },
             claimedJournal,
         )
         c.#warmFeeRate()
@@ -156,6 +166,11 @@ export class Client {
     /** The operator catalog the Client routes from. */
     get registry(): RegistryProvider {
         return this.#p.registry
+    }
+
+    /** The watchdog that recovers escrow for tickets whose settlement never arrived. */
+    get refunds(): RefundWatchdog {
+        return this.#p.refunds
     }
 
     /**

@@ -1375,6 +1375,8 @@ describe('the Client’s parts', () => {
             'emptyFrame',
             'isEmptyFrame',
             'streamApiFor',
+            'Watchdog',
+            'refundSources',
         ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }

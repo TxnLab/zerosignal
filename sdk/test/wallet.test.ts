@@ -47,6 +47,7 @@ const {
 type EscrowChain = import('../src/index.js').EscrowChain
 type Signer = import('../src/index.js').Signer
 const { testOperator } = await import('./fixtures.js')
+const { refundSources } = await import('../src/refund-watchdog.js')
 
 interface GroupVectors {
     open: {
@@ -121,8 +122,14 @@ class FakeChain implements EscrowChain {
     config = async (signal?: AbortSignal) => {
         this.signals.config = signal
         if (this.configErr) throw this.configErr
-        return { appId: BigInt(s.app_id), appAddress: s.app_address, usdcAssetId: BigInt(s.usdc_asset_id) }
+        return {
+            appId: BigInt(s.app_id),
+            appAddress: s.app_address,
+            usdcAssetId: BigInt(s.usdc_asset_id),
+            settlementGraceDefault: this.grace,
+        }
     }
+    grace = 300n
     protocolFeeBps = async (signal?: AbortSignal) => {
         this.signals.protocolFeeBps = signal
         return 250
@@ -168,6 +175,7 @@ class FakeChain implements EscrowChain {
     withdrawMbr = (payer: string, amount: bigint, signal?: AbortSignal) =>
         this.#record('withdrawMbr', [payer, amount], 'WITHDRAW', signal)
     closeDeposit = (payer: string, signal?: AbortSignal) => this.#record('closeDeposit', payer, 'CLOSE', signal)
+    readTicketBox = (ticketIdRaw: Uint8Array, signal?: AbortSignal) => this.#record('readTicketBox', ticketIdRaw, null, signal)
 }
 
 class SendRevert extends Error {}
@@ -798,6 +806,18 @@ describe('OpenHandle', () => {
         expect(chain.calls.settleLapsed).toEqual([{ ...ids, operatorOwnerAddr: OWNER, payer: s.payer_addr }])
         chain.fail.refundInactive = new Error('not yet')
         await expect(h.refundInactive()).rejects.toThrow('wallet: refund-inactive: not yet')
+    })
+
+    // Go's Track reads the handle's wallet: the box read and the cached grace.
+    it("hands the refund watchdog this ticket's box read and the escrow's grace", async () => {
+        chain.grace = 7n
+        const h = await open()
+        const src = refundSources.get(h)!
+        expect(src.graceSeconds).toBe(7n)
+        const signal = new AbortController().signal
+        expect(await src.readTicketBox(signal)).toBeNull()
+        expect(chain.calls.readTicketBox).toEqual([decodeTicketId(s.ticket_id_b64)])
+        expect(chain.signals.readTicketBox).toBe(signal)
     })
 })
 

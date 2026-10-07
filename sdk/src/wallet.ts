@@ -12,6 +12,7 @@
 
 import { base64 } from '@scure/base'
 import algosdk from 'algosdk'
+import type { TicketRecord } from '@txnlab/zs-proto/escrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 
@@ -23,6 +24,7 @@ import type { Operator } from './operator.js'
 import type { EscrowCall, OpenHandle, ProtestReasonCode, WalletOpener } from './parts.js'
 import { type Logger, type Signer, discardLogger } from './ports.js'
 import type { SettleArgs } from './reconcile.js'
+import { refundSources } from './refund-watchdog.js'
 
 /** The escrow deployment the payer's groups must name. */
 export interface EscrowChainConfig {
@@ -30,6 +32,12 @@ export interface EscrowChainConfig {
     /** The application account, receiver of the open's USDC transfer. */
     appAddress: string
     usdcAssetId: bigint
+    /**
+     * The contract's grace global: the settlement window of a ticket opened
+     * with settlementGraceSeconds 0, as the payer opens every one. 0 when the
+     * global is absent, a misconfigured deployment.
+     */
+    settlementGraceDefault: bigint
 }
 
 /** The payer's half of settle(); the contract freezes the ticket if any value differs from the node's. */
@@ -96,6 +104,8 @@ export interface EscrowChain extends MbrPoolChain {
     protest(c: ProtestCall, signal?: AbortSignal): Promise<EscrowCall>
     refundInactive(c: RefundInactiveCall, signal?: AbortSignal): Promise<string>
     settleLapsed(c: SettleLapsedCall, signal?: AbortSignal): Promise<string>
+    /** The ticket's box, or null once it is gone: finalized and deleted. */
+    readTicketBox(ticketIdRaw: Uint8Array, signal?: AbortSignal): Promise<TicketRecord | null>
     /** Reclaims unreserved pool balance; the contract caps it at what no ticket reserves. */
     withdrawMbr(payer: string, amount: bigint, signal?: AbortSignal): Promise<string>
     /** Closes the pool and opts out; reverts while any ticket is live. */
@@ -253,15 +263,18 @@ export class Wallet implements WalletOpener {
             }
             group = r.group
         }
-        return this.#handle({
-            appCallTxId: group.txids[1]!,
-            groupId: group.groupId,
-            ticketId: ticket.ticket_id,
-            operator: op,
-            maxPrice: ticket.max_price,
-            openFeesMicroalgos: Number(group.payerFeeMicroalgos),
-            signedGroup: group.signedGroup,
-        })
+        return this.#handle(
+            {
+                appCallTxId: group.txids[1]!,
+                groupId: group.groupId,
+                ticketId: ticket.ticket_id,
+                operator: op,
+                maxPrice: ticket.max_price,
+                openFeesMicroalgos: Number(group.payerFeeMicroalgos),
+                signedGroup: group.signedGroup,
+            },
+            cfg.settlementGraceDefault,
+        )
     }
 
     /**
@@ -382,7 +395,9 @@ export class Wallet implements WalletOpener {
         return wrap('close-deposit', this.#chain.closeDeposit(this.#signer.address, signal))
     }
 
-    #handle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'refundInactive' | 'settleLapsed'>): OpenHandle {
+    // graceSeconds is the grace global the open was checked against, which
+    // the refund watchdog times its first read by.
+    #handle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'refundInactive' | 'settleLapsed'>, graceSeconds: bigint): OpenHandle {
         const chain = this.#chain
         const signer = this.#signer
         const payer = signer.address
@@ -392,7 +407,7 @@ export class Wallet implements WalletOpener {
             operatorId: BigInt(fields.operator.id),
             nodeId: BigInt(fields.operator.nodeId),
         })
-        return {
+        const h: OpenHandle = {
             ...fields,
             ackSettle(receipt: UsageReceipt, settleGroup: string | null, signal?: AbortSignal): Promise<AckSettleResult> {
                 const group = settleGroup ?? ''
@@ -459,6 +474,11 @@ export class Wallet implements WalletOpener {
                 )
             },
         }
+        refundSources.set(h, {
+            graceSeconds,
+            readTicketBox: (signal) => chain.readTicketBox(decodeTicketId(fields.ticketId), signal),
+        })
+        return h
     }
 }
 

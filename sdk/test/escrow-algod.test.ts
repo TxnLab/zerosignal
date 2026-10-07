@@ -315,13 +315,22 @@ const settleCall = (over: Partial<{ amountCharged: bigint; maxPrice: bigint }> =
 
 describe('AlgodEscrowChain config', () => {
     it('reads the deployment from the globals once', async () => {
+        fake.globals.set('grace', { type: 2, uint: 600n })
         expect(await chain.config()).toEqual({
             appId: APP,
             appAddress: algosdk.getApplicationAddress(APP).toString(),
             usdcAssetId: USDC,
+            settlementGraceDefault: 600n,
         })
         await chain.config()
         expect(fake.paths.filter((p) => p === `/v2/applications/${APP}`)).toHaveLength(1)
+    })
+
+    // Go's readGlobals: an absent grace reads 0, a mistyped one is fatal.
+    it('reads an absent grace as 0 and refuses a mistyped one', async () => {
+        expect((await chain.config()).settlementGraceDefault).toBe(0n)
+        fake.globals.set('grace', { type: 1, bytes: new Uint8Array(8) })
+        await expect(newChain().config()).rejects.toThrow('escrow: settlementGraceDefault global has type 1, want 2 (uint)')
     })
 
     it('refuses a deployment missing usdc or the treasury, and reads again after a failure', async () => {
@@ -574,6 +583,26 @@ describe('AlgodEscrowChain settle calls', () => {
             chain.settleLapsed({ ticketIdRaw: TICKET, operatorId: 7n, nodeId: 1n, operatorOwnerAddr: OWNER, payer: PAYER }),
         ).rejects.toThrow('treasury global not found')
         expect(fake.sent).toEqual([])
+    })
+
+    describe('readTicketBox', () => {
+        it('decodes a live box, reads a missing one as gone, and wraps any other failure', async () => {
+            fake.boxes.set(b64(ticketBoxKey(TICKET)), ticketBox(1n, 100_000n, OWNER))
+            const ac = new AbortController()
+            expect(await chain.readTicketBox(TICKET, ac.signal)).toMatchObject({ maxPrice: 100_000n, pendingAmount: 1n, operatorOwnerAddr: OWNER })
+            // The request carried the caller's signal.
+            ac.abort()
+            expect(fake.signals.at(-1)?.aborted).toBe(true)
+            fake.boxes.delete(b64(ticketBoxKey(TICKET)))
+            expect(await chain.readTicketBox(TICKET)).toBeNull()
+            fake.boxes.set(b64(ticketBoxKey(TICKET)), 503)
+            await expect(chain.readTicketBox(TICKET)).rejects.toThrow(/^escrow: fetch ticket box: .*503/)
+        })
+
+        it('refuses an id that is not 16 bytes', async () => {
+            await expect(chain.readTicketBox(new Uint8Array(15))).rejects.toThrow('escrow: ticket id must be 16 bytes (got 15)')
+            expect(fake.paths).toEqual([])
+        })
     })
 
     describe('settleLapsed', () => {

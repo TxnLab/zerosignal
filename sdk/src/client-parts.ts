@@ -12,6 +12,7 @@ import type { DispatchDeps, RunSealed } from './dispatch.js'
 import type { EstimatePolicy } from './estimate.js'
 import type { RegistryProvider, ReserveClient, TicketJournal, WalletOpener } from './parts.js'
 import type { PickDeps } from './pick.js'
+import type { Watchdog } from './refund-watchdog.js'
 
 /**
  * The parts a Client runs on. Routing stores, the spend guard and the logger
@@ -28,6 +29,7 @@ export interface Parts {
     /** Undefined only with a caller's wallet and no Stores.journal. */
     journal: TicketJournal | undefined
     durableJournal: boolean
+    refunds: Watchdog
 }
 
 /** Each Client's parts, set by its constructor. */

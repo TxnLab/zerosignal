@@ -29,6 +29,7 @@ import {
     testnet,
 } from '../src/index.js'
 import { FeeRateCache } from '../src/fee-rate.js'
+import type { Watchdog } from '../src/refund-watchdog.js'
 import { turnOf } from '../src/turn.js'
 
 const signer: Signer = {
@@ -324,6 +325,42 @@ describe('Client.create', () => {
         const c = await Client.create(base)
         expect(c.feeRate()).toBeNull()
         c.close()
+    })
+
+    // Go's New: the watchdog logs the Remedies.RecoverTicket in force, and its
+    // refunds free the SpendGuard's reservation.
+    it('runs a refund watchdog on the configured clock, logger, remedy and spend guard', async () => {
+        const released: string[] = []
+        const logged: { msg: string; attrs: Record<string, unknown> | undefined }[] = []
+        const at = (msg: string, attrs?: Record<string, unknown>) => void logged.push({ msg, attrs })
+        // Decades ahead of the wall, so a deadline read off it never comes.
+        const now = 4_000_000_000_000
+        const make = (over: Partial<Config>) =>
+            Client.create({
+                ...base,
+                clock: () => now,
+                logger: { debug: at, info: at, warn: at, error: at },
+                spendGuard: { admit() {}, reserve() {}, settle() {}, release: (id) => void released.push(id) },
+                ...over,
+            })
+        const due = async () => ({ exists: true, verdict: 'refundInactive' as const, deadlineMs: 0 })
+        const giveUps = () => logged.filter((l) => l.msg.includes('giving up')).map((l) => l.attrs?.remedy)
+
+        const c = await make({ remedies: { recoverTicket: 'ask the operator' } })
+        const rw = c.refunds as Watchdog
+        rw.retryDelayMs = 1
+        rw.arm('T1', now, due, async () => 'TX', async () => '')
+        rw.arm('T2', now, due, () => Promise.reject(new Error('algod down')), async () => '')
+        await vi.waitFor(() => expect(giveUps()).toEqual(['ask the operator']))
+        expect(released).toEqual(['T1'])
+        c.close()
+
+        const d = await make({})
+        ;(d.refunds as Watchdog).retryDelayMs = 1
+        ;(d.refunds as Watchdog).arm('T3', now, due, () => Promise.reject(new Error('algod down')), async () => '')
+        await vi.waitFor(() => expect(giveUps()).toHaveLength(2))
+        expect(giveUps()[1]).toEqual(expect.stringContaining('call refundInactive on an open ticket'))
+        d.close()
     })
 
     it("starts no journal for a caller's wallet", async () => {

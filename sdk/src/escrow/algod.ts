@@ -12,6 +12,7 @@
 import algosdk, { ABIMethod, Address, AtomicTransactionComposer, OnApplicationComplete, type SuggestedParams } from 'algosdk'
 import {
     SECONDS_PER_DAY,
+    type TicketRecord,
     decodeNodeRecord,
     decodeOperatorRecord,
     decodeTicketRecord,
@@ -140,7 +141,7 @@ export class AlgodEscrowChain implements EscrowChain {
 
     async config(signal?: AbortSignal): Promise<EscrowChainConfig> {
         const g = await this.#readGlobalsOnce(signal)
-        return { appId: g.appId, appAddress: g.appAddress, usdcAssetId: g.usdcAssetId }
+        return { appId: g.appId, appAddress: g.appAddress, usdcAssetId: g.usdcAssetId, settlementGraceDefault: g.settlementGraceDefault }
     }
 
     /**
@@ -200,10 +201,15 @@ export class AlgodEscrowChain implements EscrowChain {
         if (trea === undefined) throw new Error(`escrow: treasury global not found on app ${this.#appId}`)
         if (trea.type !== 1) throw new Error(`escrow: treasury global has type ${trea.type}, want 1 (bytes)`)
         if (trea.bytes.length !== 32) throw new Error(`escrow: treasury raw bytes len = ${trea.bytes.length}, want 32`)
+        const grace = kv.get('grace')
+        if (grace !== undefined && grace.type !== 2) {
+            throw new Error(`escrow: settlementGraceDefault global has type ${grace.type}, want 2 (uint)`)
+        }
         return {
             appId: this.#appId,
             appAddress: this.#appAddress,
             usdcAssetId: BigInt(usdc.uint),
+            settlementGraceDefault: grace === undefined ? 0n : BigInt(grace.uint),
             treasury: new Address(trea.bytes).toString(),
         }
     }
@@ -449,6 +455,22 @@ export class AlgodEscrowChain implements EscrowChain {
             signal,
         )
         return r.txid
+    }
+
+    /** The ticket's box, or null once it is gone (Go's ReadTicketBox). */
+    async readTicketBox(ticketIdRaw: Uint8Array, signal?: AbortSignal): Promise<TicketRecord | null> {
+        checkLen('ticket id', ticketIdRaw, TICKET_ID_LEN)
+        let value: Uint8Array
+        try {
+            const box = await this.#algod
+                .getApplicationBoxByName(this.#appId, ticketBoxKey(ticketIdRaw))
+                .do(undefined, this.#opts(signal))
+            value = box.value
+        } catch (err) {
+            if (isNotFound(err)) return null
+            throw new Error(`escrow: fetch ticket box: ${message(err)}`, { cause: err })
+        }
+        return decodeTicketRecord(value)
     }
 
     // ---- plumbing ----
