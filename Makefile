@@ -126,6 +126,7 @@ update-vectors:
 	cd go && $(GO) test ./zs         -run TestOperatorVectors       -update
 	cd go && $(GO) test ./zs         -run TestReserveSizingVectors  -update
 	cd go && $(GO) test ./zs/handler -run TestRenderVectors         -update
+	cd go && $(GO) test ./zs/handler -run TestCompletionsVectors    -update
 
 # testdata/sealed_vectors.json (Go seals, TS opens) and ts_sealed_vectors.json
 # (TS seals, Go opens) are CAPTURED, not derived: sealing draws a fresh nonce per

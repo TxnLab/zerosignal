@@ -10,7 +10,7 @@
 import { computeFeeBreakdown } from '@txnlab/zs-proto/escrow'
 
 import type { ReceiptVerified } from '../events.js'
-import { goJSON } from '../responder.js'
+import { goJSON } from '../gojson.js'
 import { type StreamFrame, emptyFrame } from '../stream.js'
 
 /**

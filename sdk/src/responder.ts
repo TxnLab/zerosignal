@@ -29,6 +29,7 @@ import { newError } from './codes.js'
 import { NodeReply, ZsError } from './errors.js'
 import { decodeSettleGroup } from './escrow/settle.js'
 import type { Event } from './events.js'
+import { goJSON } from './gojson.js'
 import { goDecodeRune, goDecodeUTF8, goQuote } from './gotext.js'
 import { openAIError } from './http.js'
 import { type Operator, refOf } from './operator.js'
@@ -395,16 +396,6 @@ export function truncateForLog(s: string, n: number): string {
         i += w
     }
     return out
-}
-
-// What Go's json.Marshal escapes that JSON.stringify doesn't: the HTML
-// characters, and the two line separators. Built from char codes so no
-// editor or tool can turn the separators into raw characters.
-const GO_JSON_ESCAPES = new RegExp(`[<>&${String.fromCharCode(0x2028, 0x2029)}]`, 'g')
-
-/** goJSON is JSON.stringify(v) with the escapes Go's json.Marshal adds. */
-export function goJSON(v: unknown): string {
-    return JSON.stringify(v).replace(GO_JSON_ESCAPES, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 /** openAIErrorBody is an OpenAI-shaped error body, newline included, byte for byte as Go writes it. */
