@@ -1985,10 +1985,21 @@ dstack extends RTMR3 with a runtime event log instead of publishing the measurem
 ```
 acc = 0x00 * 48
 for each event in event_log where event_type == 0x08000001:
+    refuse if event.event contains ":"
     payload = hex_decode(event.event_payload)
     digest  = SHA-384( le32(event_type) || ":" || event.event || ":" || payload )
     acc     = SHA-384( acc || digest )
 ```
+
+**A runtime event whose name contains a colon MUST be refused** (`ambiguous_event`). The digest fixes where the name starts but not where it ends, so with a colon allowed one extension can be written as another name and payload: any `0x3a` in a payload can move into the name along with the bytes before it, so a `compose-hash` whose payload begins with that byte replays exactly like an event named `compose-hash:` carrying the rest. An operator who retries a compose edit until its hash has such a byte could file the real hash under another name and have the app emit a `compose-hash` of its choosing (dstack 0.5.x's `EmitEvent` takes any name), which every verifier would read, since the first occurrence of a name is the one that counts. With the colon refused the split is unique: the runtime type's four bytes contain no `0x3a` and UTF-8 never puts one inside a multi-byte character. dstack's own event names contain no colon.
+
+The log is decoded exactly as Go's `encoding/json` fills `[]Event`, so that two verifiers read the same events or both refuse:
+
+- `null` is no events, and a `null` element is the zero event, which the replay skips.
+- Keys match fields under Unicode simple case folding (`ſ` matches `s`; `ı` and `İ` match nothing), and members apply in document order, the last winning and a `null` leaving the field unchanged.
+- An integer field is plain digits within `uint32`; `-0`, `3.0` and `1e3` are refused.
+- A lone surrogate, escaped in the log or in the bundle around it, decodes to U+FFFD.
+- Any other value of the wrong type, or nesting past 10000 levels counting the log's own array, refuses the log.
 
 `acc` MUST equal RTMR3 from the verified quote, else `measurement_mismatch`. Then `compose-hash` and `os-image-hash` are read off the **replayed** events. Both MUST be checked against a known-good reference, but **the two references have different shapes, and a single allowlist for both does not scale**:
 

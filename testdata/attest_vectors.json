@@ -1589,6 +1589,66 @@
       }
     },
     {
+      "name": "a colon in a runtime event name",
+      "why": "The digest covers type:name:payload, so a colon lets the same bytes be read as another name and payload; this one replays exactly as compose-hash with payload 3a aa would.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash:\",\"event_payload\":\"aa\"}]",
+      "parse_error": "",
+      "replay_error": "ambiguous_event",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {
+        "compose-hash:": "aa"
+      }
+    },
+    {
+      "name": "a colon inside a runtime event name",
+      "why": "The general split: any 0x3a in a payload can move into the name with the bytes before it, so a check for a trailing colon alone misses this.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash:A\",\"event_payload\":\"aa\"}]",
+      "parse_error": "",
+      "replay_error": "ambiguous_event",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {
+        "compose-hash:A": "aa"
+      }
+    },
+    {
+      "name": "a colon in the name and a bad payload",
+      "why": "The name is checked first, so both sides report the ambiguity rather than the payload.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"a:b\",\"event_payload\":\"zz\"}]",
+      "parse_error": "",
+      "replay_error": "ambiguous_event",
+      "rtmr3_hex": "",
+      "extends": 0,
+      "measurements": {
+        "a:b": "zz"
+      }
+    },
+    {
+      "name": "a payload that starts with a colon byte",
+      "why": "The honest form of the same bytes: the rule is about names, so 0x3a in a payload replays.",
+      "log": "[{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"3aaa\"}]",
+      "parse_error": "",
+      "replay_error": "",
+      "rtmr3_hex": "47498e4a239a99fe68ab5aa5519b2afe89bdcc1b72d2a70c54d952c2c0b84186310c8d22bd6ca2ac903487a810082885",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "3aaa"
+      }
+    },
+    {
+      "name": "a colon in an event that isn't a runtime event",
+      "why": "Never replayed, so never ambiguous.",
+      "log": "[{\"imr\":3,\"event_type\":4,\"digest\":\"\",\"event\":\"a:b\",\"event_payload\":\"aa\"},{\"imr\":3,\"event_type\":134217729,\"digest\":\"\",\"event\":\"compose-hash\",\"event_payload\":\"aa\"}]",
+      "parse_error": "",
+      "replay_error": "",
+      "rtmr3_hex": "81b91503ffd4f38aaaf6b0ef96b7475e64cb7ba290536e77d5f56867ec5291213aff0989deddceec1660e9701e4b314d",
+      "extends": 1,
+      "measurements": {
+        "compose-hash": "aa"
+      }
+    },
+    {
       "name": "top-level null",
       "why": "Go reads it as no events, which the replay refuses as empty rather than as malformed.",
       "log": "null",

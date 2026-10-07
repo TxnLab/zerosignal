@@ -81,6 +81,13 @@ export type AttestErrorCode =
      */
     | 'undecodable_payload'
     /**
+     * A runtime event's name contains a colon. The extended digest
+     * covers type ":" name ":" payload, so a colon lets one extension be
+     * written as a different name and payload that replay identically,
+     * which can file the real compose-hash under another name.
+     */
+    | 'ambiguous_event'
+    /**
      * The quote's RTMR3 is all zero, which no genuinely measured CVM
      * produces. Comparing against it would let an all-zero replay pass.
      */
@@ -418,6 +425,12 @@ export function replayRTMR3(events: DstackEvent[]): ReplayResult {
 
     for (const [i, e] of events.entries()) {
         if (e.event_type !== DSTACK_RUNTIME_EVENT_TYPE) continue
+        if ((e.event ?? '').includes(':')) {
+            throw new AttestError(
+                'ambiguous_event',
+                `attest: runtime event name contains a colon: event ${i} (${JSON.stringify(e.event)})`,
+            )
+        }
 
         let payload: Uint8Array
         try {

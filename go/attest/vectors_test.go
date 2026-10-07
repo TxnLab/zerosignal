@@ -939,6 +939,8 @@ func replayErrorCode(err error) string {
 		return "undecodable_payload"
 	case errors.Is(err, ErrEmptyReplay):
 		return "empty_replay"
+	case errors.Is(err, ErrAmbiguousEvent):
+		return "ambiguous_event"
 	default:
 		return "unmapped"
 	}
@@ -1148,6 +1150,32 @@ func buildHostileCases(t *testing.T) []hostileCase {
 			"a key written with an escape",
 			"Go unescapes a key before matching it to a field.",
 			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","ev` + "\\" + `u0065nt":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"a colon in a runtime event name",
+			"The digest covers type:name:payload, so a colon lets the same bytes be read as another name and payload; this one replays exactly as compose-hash with payload 3a aa would.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash:","event_payload":"aa"}]`,
+		},
+		{
+			"a colon inside a runtime event name",
+			"The general split: any 0x3a in a payload can move into the name with the bytes before it, so a check for a trailing colon alone misses this.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash:A","event_payload":"aa"}]`,
+		},
+		{
+			"a colon in the name and a bad payload",
+			"The name is checked first, so both sides report the ambiguity rather than the payload.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"a:b","event_payload":"zz"}]`,
+		},
+		{
+			"a payload that starts with a colon byte",
+			"The honest form of the same bytes: the rule is about names, so 0x3a in a payload replays.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"3aaa"}]`,
+		},
+		{
+			"a colon in an event that isn't a runtime event",
+			"Never replayed, so never ambiguous.",
+			`[{"imr":3,"event_type":4,"digest":"","event":"a:b","event_payload":"aa"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
 		},
 		{
 			"top-level null",
