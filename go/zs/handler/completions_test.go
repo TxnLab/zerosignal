@@ -172,6 +172,41 @@ func TestReshapeChatToText_PassThroughNonChat(t *testing.T) {
 	}
 }
 
+// A node's body is untrusted: a null choice decodes to a nil map, which the
+// reshape must not write into. It passes through unchanged, like any other
+// shape that isn't a chat completion.
+func TestReshapeChatToText_NullChoicePassesThrough(t *testing.T) {
+	for _, tc := range []struct {
+		in        string
+		streaming bool
+	}{
+		{`{"object":"chat.completion","choices":[null]}`, false},
+		{`{"object":"chat.completion","choices":[{"index":0,"message":{"content":"a"}},null]}`, false},
+		{`{"object":"chat.completion.chunk","choices":[null]}`, true},
+		{`{"choices":[null]}`, true},
+	} {
+		var got []byte
+		if tc.streaming {
+			got = completionsChunkFromChat([]byte(tc.in))
+		} else {
+			got = completionsResponseFromChat([]byte(tc.in))
+		}
+		if string(got) != tc.in {
+			t.Errorf("%s: changed to %s", tc.in, got)
+		}
+	}
+}
+
+// An empty choice is an object, so the null guard must not catch it: it is
+// still a chat choice with no text.
+func TestReshapeChatToText_EmptyChoiceIsReshaped(t *testing.T) {
+	whole := completionsResponseFromChat([]byte(`{"object":"chat.completion","choices":[{}]}`))
+	if string(whole) != `{"choices":[{"logprobs":null,"text":""}],"object":"text_completion"}` {
+		t.Errorf("whole reply = %s", whole)
+	}
+	assertStreamText(t, completionsChunkFromChat([]byte(`{"object":"chat.completion.chunk","choices":[{}]}`)), "", "text_completion")
+}
+
 func assertStreamText(t *testing.T, out []byte, wantText, wantObj string) {
 	t.Helper()
 	var got map[string]json.RawMessage

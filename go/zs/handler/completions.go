@@ -203,6 +203,10 @@ func reshapeChatToText(plaintext []byte, streaming bool) ([]byte, bool) {
 			srcKey = "delta"
 		}
 		for _, ch := range choices {
+			// A null choice decodes to a nil map, which can't take the text.
+			if ch == nil {
+				return nil, false
+			}
 			text := ""
 			if msgRaw, ok := ch[srcKey]; ok {
 				var m struct {
