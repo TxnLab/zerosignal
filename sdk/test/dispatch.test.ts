@@ -1337,7 +1337,9 @@ describe('the Client’s parts', () => {
 
     it('stay out of the package exports', async () => {
         const sdk = await import('../src/index.js')
-        for (const name of ['dispatchDepsOf', 'partsOf', 'sleep', 'dispatch']) expect(sdk, name).not.toHaveProperty(name)
+        for (const name of ['dispatchDepsOf', 'partsOf', 'sleep', 'dispatch', 'runSealed', 'forwardBuffered', 'openAIError']) {
+            expect(sdk, name).not.toHaveProperty(name)
+        }
     })
 
     it('reach dispatch: affinity, staging, max_output and privacy as configured', async () => {

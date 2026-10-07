@@ -28,7 +28,7 @@ import {
     unwrapResponseKey,
 } from '@txnlab/zs-proto/wire'
 
-import { readLimited } from './http.js'
+import { openAIError, readLimited } from './http.js'
 import type { Clock, Fetch } from './ports.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import { verifyCommitK } from './verify.js'
@@ -604,22 +604,6 @@ export function reserveRefusal(f: ReserveRefusalFields): Error {
         retryAfterMs,
         relayHopMarked: f.relayHopMarked ?? false,
     })
-}
-
-// openAIError reads an OpenAI-shaped error body; a body that isn't one (a
-// gateway's HTML page) has no code, which is itself the signal an
-// intermediary, not the node, answered.
-function openAIError(text: string): { code: string; nodeMessage: string } {
-    try {
-        const v = JSON.parse(text) as { error?: { code?: unknown; message?: unknown } }
-        const e = v?.error
-        return {
-            code: typeof e?.code === 'string' ? e.code : '',
-            nodeMessage: typeof e?.message === 'string' ? e.message : '',
-        }
-    } catch {
-        return { code: '', nodeMessage: '' }
-    }
 }
 
 /**
