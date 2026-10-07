@@ -254,6 +254,10 @@ func AppendToolMessagesChat(body, assistantMsg json.RawMessage, results []ToolRe
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, fmt.Errorf("parse body: %w", err)
 	}
+	// A null body decodes without error into a nil map, which a write panics on.
+	if obj == nil {
+		return nil, errors.New("parse body: not a JSON object")
+	}
 	var messages []json.RawMessage
 	if raw, ok := obj["messages"]; ok {
 		if err := json.Unmarshal(raw, &messages); err != nil {
@@ -343,7 +347,8 @@ func chatMessageRole(msg json.RawMessage) string {
 // final response we ship — not just in-memory on the node.
 func SetChatUsage(resp []byte, input, output, cached uint64) []byte {
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(resp, &obj); err != nil {
+	// A null reply decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(resp, &obj); err != nil || obj == nil {
 		return resp
 	}
 	usage := map[string]any{

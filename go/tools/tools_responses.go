@@ -8,6 +8,7 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -274,6 +275,10 @@ func AppendImageToolOutputsResponses(body []byte, assistantItems []json.RawMessa
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, fmt.Errorf("parse body: %w", err)
 	}
+	// A null body decodes without error into a nil map, which a write panics on.
+	if obj == nil {
+		return nil, errors.New("parse body: not a JSON object")
+	}
 	var input []json.RawMessage
 	if raw, ok := obj["input"]; ok {
 		if err := json.Unmarshal(raw, &input); err != nil {
@@ -503,7 +508,8 @@ func mustMarshal(v any) json.RawMessage {
 // output_tokens, total_tokens).
 func SetResponsesUsage(resp []byte, input, output, cached uint64) []byte {
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(resp, &obj); err != nil {
+	// A null reply decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(resp, &obj); err != nil || obj == nil {
 		return resp
 	}
 	usage := map[string]any{

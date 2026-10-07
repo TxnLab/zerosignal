@@ -23,8 +23,8 @@ import (
 // Rules:
 //   - If the body is empty or not a JSON object, it is returned unchanged
 //     with injected=false. Upstream will decide how to handle it.
-//   - If `stream_options` is absent, a fresh object `{"include_usage": true}`
-//     is added and injected=true.
+//   - If `stream_options` is absent or null, a fresh object
+//     `{"include_usage": true}` is added and injected=true.
 //   - If `stream_options` is present and is a JSON object:
 //   - If `include_usage` is already set (any value), the body is returned
 //     unchanged with injected=false — the client's explicit choice wins.
@@ -50,7 +50,8 @@ func InjectStreamOptionsIncludeUsage(body []byte) ([]byte, bool, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A null body decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, false, nil
 	}
 

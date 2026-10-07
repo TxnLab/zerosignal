@@ -462,7 +462,8 @@ func SpliceEffectsChatBody(body []byte, effects []ToolEffect) ([]byte, error) {
 		return body, nil
 	}
 	var msg map[string]json.RawMessage
-	if err := json.Unmarshal(rawMsg, &msg); err != nil {
+	// "message": null decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(rawMsg, &msg); err != nil || msg == nil {
 		return body, nil
 	}
 	var existing string

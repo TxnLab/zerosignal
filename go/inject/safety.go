@@ -78,7 +78,8 @@ func InjectSafetyIdentifier(body []byte, identifier string) ([]byte, error) {
 	// verbatim via json.RawMessage. This avoids accidentally coercing or
 	// reformatting anything the client sent.
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A null body decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		// Not a JSON object at the top level — leave it alone. The
 		// upstream will decide whether to reject it; we're not in the
 		// validation business here.
