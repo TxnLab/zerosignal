@@ -83,7 +83,8 @@ export async function openReserveResponse(
     } catch (err) {
         throw new Error(`parse sealed reserve envelope: ${err instanceof Error ? err.message : String(err)}`)
     }
-    if (!env.ciphertext) throw new Error('sealed reserve envelope missing ciphertext')
+    // A null envelope is Go's zero struct, so it is missing its ciphertext.
+    if (!env?.ciphertext) throw new Error('sealed reserve envelope missing ciphertext')
 
     let ct: Uint8Array
     try {

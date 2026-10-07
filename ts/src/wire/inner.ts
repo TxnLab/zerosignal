@@ -79,5 +79,7 @@ export function decodeInnerRequest(raw: Uint8Array): { header: InnerRequestHeade
     } catch (err) {
         throw new Error(`parse inner request header: ${err instanceof Error ? err.message : String(err)}`)
     }
+    // Go decodes null as the zero header, which then fails its first required field.
+    if (header === null) header = {} as InnerRequestHeader
     return { header, body: raw.subarray(end) }
 }

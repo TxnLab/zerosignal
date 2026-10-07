@@ -5,7 +5,9 @@
 
 import { describe, it, expect } from 'vitest'
 import { base64 } from '@scure/base'
+import * as age from 'age-encryption'
 
+import { encodeInnerRequest, type InnerRequestHeader } from '../src/wire/inner.js'
 import {
     ADMISSION_TAG_SIZE,
     NONCE_SIZE,
@@ -203,6 +205,25 @@ describe('wrap / decrypt request round-trip', () => {
         })
         await expect(decryptRequest(envelope, node.secret)).rejects.toThrow(/admission_tag length/)
     })
+
+    // Go decodes a null envelope or a null inner header as the zero struct, so
+    // each fails on its first required field.
+    it('refuses a null envelope as missing its ciphertext', async () => {
+        const node = await newTestNode()
+        await expect(decryptRequest(new TextEncoder().encode('null'), node.secret)).rejects.toThrow(/^request envelope missing ciphertext$/)
+    })
+
+    it('refuses a null inner header as missing its reply-to key', async () => {
+        const node = await newTestNode()
+        const frame = encodeInnerRequest({} as InnerRequestHeader, new TextEncoder().encode('b'))
+        const prefix = frame.length - '{}'.length - 1
+        const withNull = new Uint8Array([...frame.subarray(0, prefix), ...new TextEncoder().encode('null'), 0x62])
+        new DataView(withNull.buffer).setUint32(prefix - 4, 4, false)
+        const e = new age.Encrypter()
+        e.addRecipient(node.recipient)
+        const envelope = new TextEncoder().encode(JSON.stringify({ ciphertext: base64.encode(await e.encrypt(withNull)) }))
+        await expect(decryptRequest(envelope, node.secret)).rejects.toThrow(/^inner request missing reply_to_public_key$/)
+    })
 })
 
 describe('response sealer / unwrap+decrypt', () => {
@@ -262,6 +283,21 @@ describe('response sealer / unwrap+decrypt', () => {
             }),
         )
         expect(() => decryptBody(env, k, 'TX', '')).toThrow(/invalid nonce length/)
+    })
+
+    // Go reads an absent nonce, or a null envelope, as the empty string.
+    it('decryptBody refuses an envelope with no nonce on its length', () => {
+        const k = randomBytes(RESPONSE_KEY_SIZE)
+        for (const raw of ['null', '{}']) {
+            expect(() => decryptBody(new TextEncoder().encode(raw), k, 'TX', '')).toThrow(/^invalid nonce length 0$/)
+        }
+    })
+
+    // And an absent ciphertext as the empty one, which fails to open.
+    it('decryptBody refuses an envelope with no ciphertext at the open', () => {
+        const k = randomBytes(RESPONSE_KEY_SIZE)
+        const env = new TextEncoder().encode(JSON.stringify({ nonce: base64.encode(randomBytes(NONCE_SIZE)) }))
+        expect(() => decryptBody(env, k, 'TX', '')).toThrow(/^aead open: /)
     })
 
     it('decryptBody rejects a tampered ciphertext byte', async () => {

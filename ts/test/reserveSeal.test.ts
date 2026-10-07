@@ -97,6 +97,9 @@ describe('sealReserveResponse / openReserveResponse', () => {
         await expect(
             openReserveResponse(new TextEncoder().encode('{}'), proxy),
         ).rejects.toThrow(/missing ciphertext/)
+        await expect(
+            openReserveResponse(new TextEncoder().encode('null'), proxy),
+        ).rejects.toThrow(/missing ciphertext/)
     })
 
     it('response content type is distinct from the request and inference ones', () => {
