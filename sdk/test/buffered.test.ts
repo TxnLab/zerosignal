@@ -137,7 +137,7 @@ interface Scripted {
 /** An OpenHandle whose ack and protest answer from s, Go's scriptedSettleHandle. */
 function handleOf(s: Scripted = {}) {
     const acks: [UsageReceipt, string | null, AbortSignal | undefined][] = []
-    const protests: [UsageReceipt, Uint8Array, number][] = []
+    const protests: [UsageReceipt, Uint8Array, number, AbortSignal | undefined][] = []
     const looks: string[] = []
     const h = {
         appCallTxId: 'APPCALL',
@@ -154,8 +154,8 @@ function handleOf(s: Scripted = {}) {
             if (s.err) res.err = s.err
             return res
         },
-        async protest(r: UsageReceipt, excerpt: Uint8Array, reason: number) {
-            protests.push([r, excerpt, reason])
+        async protest(r: UsageReceipt, excerpt: Uint8Array, reason: number, signal?: AbortSignal) {
+            protests.push([r, excerpt, reason, signal])
             if (s.throws !== undefined) throw s.throws
             if (s.err) throw s.err
             return { txId: s.txid ?? '', feeMicroalgos: s.fee ?? 0 }
@@ -273,9 +273,15 @@ describe('checkTurnReceipt', () => {
         }
     })
 
-    it('gives the submit its own bounded signal, not the caller’s', async () => {
+    it('gives the submit its own bounded signal, not the caller’s, and a whole budget', async () => {
         const f = await fixture()
         const h = handleOf({ txid: 'A' })
+        const ack = h.ackSettle.bind(h)
+        // A real ack takes a while; the bound mustn't end it.
+        h.ackSettle = async (...a) => {
+            await new Promise((r) => setTimeout(r, 20))
+            return ack(...a)
+        }
         await (await check(depsOf().deps, f, h)).submit!()
         const signal = h.acks[0]![2]!
         expect(signal).toBeInstanceOf(AbortSignal)
@@ -475,10 +481,13 @@ describe('checkTurnReceipt', () => {
         const f = await fixture({}, big)
         const h = handleOf({ txid: 'P' })
         await (await check(depsOf().deps, f, h, { matching: false })).submit!()
-        const [receipt, excerpt, reason] = h.protests[0]!
+        const [receipt, excerpt, reason, signal] = h.protests[0]!
         expect(receipt).toBe(f.receipt)
         expect(excerpt).toEqual(big.slice(0, DISPUTE_EXCERPT_CAP))
         expect(reason).toBe(ProtestReason.bodyHash)
+        // Bounded like the ack, so a wedged algod can't hold it.
+        expect(signal).toBeInstanceOf(AbortSignal)
+        expect(signal!.aborted).toBe(false)
         expect(h.acks).toEqual([])
     })
 
@@ -618,6 +627,24 @@ describe('Settles', () => {
         expect(await journal.list('P', 1n)).toHaveLength(1)
     })
 
+    it('ends a lookup in flight when the Client closes', async () => {
+        const life = new AbortController()
+        const settles = new Settles({ logger: recLogger(), journal: memoryJournal(), life: life.signal, confirmTimeoutMs: 60_000, confirmPollMs: 5 })
+        let looking = false
+        const h = Object.assign(handleOf({ txid: 'G' }), {
+            settleOutcome: (_tx: string, signal?: AbortSignal) =>
+                new Promise<SettleOutcome>((_, reject) => {
+                    looking = true
+                    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+                }),
+        })
+        settles.confirmSettled(TICKET_ID, 'G', h)
+        await new Promise((r) => setTimeout(r, 5))
+        expect(looking).toBe(true)
+        life.abort()
+        await settles.wait(AbortSignal.timeout(500))
+    })
+
     it('names a confirmation apart from a submit when it can’t wait them out', async () => {
         const settles = new Settles({ logger: recLogger(), journal: memoryJournal(), confirmTimeoutMs: 1000, confirmPollMs: 5 })
         settles.confirmSettled(TICKET_ID, 'G', handleOf({ outcomes: [] }))
@@ -660,8 +687,10 @@ describe('Settles', () => {
         release()
         await w
         expect(logger.logged).toContainEqual({ level: 'error', msg: 'escrow settle submit failed', attrs: { ticket_id: 'B', err: 'boom' } })
+        // A turn with nothing to submit runs nothing.
         settles.afterResponse('C', null)
-        await settles.wait()
+        await settles.wait(AbortSignal.abort())
+        expect(logger.logged.filter((l) => l.attrs?.ticket_id === 'C')).toEqual([])
     })
 })
 
@@ -714,8 +743,20 @@ describe('bufferedResponder', () => {
 
     it('replies with the opened body and usage, then hands over the submit', async () => {
         const s = await setup()
+        const order: string[] = []
+        const reply = s.em.reply.bind(s.em)
+        s.em.reply = (...a) => {
+            order.push('reply')
+            reply(...a)
+        }
+        const afterResponse = s.deps.afterResponse
+        s.deps.afterResponse = (...a) => {
+            order.push('afterResponse')
+            afterResponse(...a)
+        }
         const { resp, body } = sealedResponse(s, { group: VALID_GROUP })
         await bufferedResponder(s.deps, s.call)(s.em, resp, body)
+        expect(order).toEqual(['reply', 'afterResponse'])
         expect(s.em.failed).toBeUndefined()
         const [status, header, replied, usage] = s.em.replies[0]!
         expect(status).toBe(200)
@@ -763,6 +804,31 @@ describe('bufferedResponder', () => {
         release()
         await w
         expect((await slot.done).settlement).toEqual({ ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 0 })
+    })
+
+    // Go unmarshals a null body as an empty response: no id, and a reply.
+    it('replies to a null /v1/responses body', async () => {
+        const s = await setup({ endpoint: '/v1/responses' })
+        const plaintext = new TextEncoder().encode('null')
+        const f2 = await fixture({}, plaintext)
+        s.f.receipt = f2.receipt
+        s.f.op.ticketSigningKey = f2.op.ticketSigningKey
+        const { resp, body } = sealedResponse(s, { plaintext })
+        await bufferedResponder(s.deps, s.call)(s.em, resp, body)
+        expect(s.em.replies).toHaveLength(1)
+        expect(s.em.replies[0]![3]!.check.violation).toBe('')
+    })
+
+    it('hands over the submit even when the reply fails', async () => {
+        const s = await setup()
+        const boom = new Error('reply failed')
+        s.em.reply = () => {
+            throw boom
+        }
+        const { resp, body } = sealedResponse(s)
+        await expect(bufferedResponder(s.deps, s.call)(s.em, resp, body)).rejects.toBe(boom)
+        expect(s.after).toHaveLength(1)
+        expect(s.after[0]![1]).toBeTypeOf('function')
     })
 
     it('replies only once the receipt is journaled', async () => {
@@ -959,6 +1025,7 @@ describe('bufferedResponder', () => {
         ['whole rune kept', `${'x'.repeat(62)}\xc3\xa9`, `${'x'.repeat(62)}é`],
         ['an invalid run is one replacement', 'a\xff\xfeb', 'a�b'],
         ['a real replacement character is kept', '\xef\xbf\xbd\xff', '��'],
+        ['two invalid runs apart', 'a\xffb\xff', 'a�b�'],
     ])('truncateForLog: %s', (_name, header, want) => {
         expect(goDecodeUTF8(truncateForLog(header, 64))).toBe(want)
     })
