@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -169,7 +170,7 @@ func TestReserveWithTransientRetry_RotatesRelayAndSucceeds(t *testing.T) {
 	}
 
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if got.Err != nil {
 		t.Fatalf("reserve err = %v, want success on the second attempt", got.Err)
@@ -210,7 +211,7 @@ func TestReserveWithTransientRetry_RotationDifferentialBlamesFailedRelay(t *test
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 	if got.Err != nil {
 		t.Fatalf("reserve err = %v, want success on the rotated attempt", got.Err)
 	}
@@ -250,7 +251,7 @@ func TestReserveWithTransientRetry_AllRelaysFailRecordsNothing(t *testing.T) {
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 	if got.Err == nil {
 		t.Fatal("expected the final failure to be returned")
 	}
@@ -278,7 +279,7 @@ func TestReserveWithTransientRetry_TransportFailureBlamesRelayWithoutVersionGate
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) == 0 {
 		t.Fatal("a transport failure through a relay charged nobody; the dialed socket was the relay's")
@@ -309,7 +310,7 @@ func TestReserveWithTransientRetry_MarkedResponseLeavesRelayAlone(t *testing.T) 
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) != 0 {
 		t.Errorf("recorded %v for a MARKED response; the relay demonstrably forwarded, "+
@@ -338,7 +339,7 @@ func TestReserveWithTransientRetry_UnmarkedGatewayTimeoutChargesNobody(t *testin
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) != 0 {
 		t.Errorf("recorded %v for an unmarked gateway TIMEOUT; the relay may have been "+
@@ -365,7 +366,7 @@ func TestReserveWithTransientRetry_CallerCancellationChargesNoRelay(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) != 0 {
 		t.Errorf("recorded %v for a caller-cancelled request; we tore the socket down, "+
@@ -391,7 +392,7 @@ func TestReserveWithTransientRetry_MarkerlessFailureBlamesRelayImmediately(t *te
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) == 0 {
 		t.Fatal("a 9.1 relay answered a code-less 502 without its own hop marker and was not charged")
@@ -412,7 +413,7 @@ func TestReserveWithTransientRetry_DirectModeChargesNoRelay(t *testing.T) {
 	s, rep := retryServerWithRep(t, rc, []Operator{target})
 
 	s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		nil, nil, false, time.Now().Add(10*time.Second), nil)
+		nil, nil, false, false, time.Now().Add(10*time.Second), nil)
 
 	if len(rep.outcomes) != 0 {
 		t.Errorf("direct mode recorded relay outcomes %v; there was no relay in the path", rep.outcomes)
@@ -434,7 +435,7 @@ func TestReserveWithTransientRetry_TerminalErrorNotRetried(t *testing.T) {
 			rc := &scriptedReserveClient{script: []error{err}}
 			s := retryServer(t, false, rc, []Operator{target})
 			got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-				nil, nil, false, time.Now().Add(10*time.Second), nil)
+				nil, nil, false, false, time.Now().Add(10*time.Second), nil)
 			if got.Err == nil {
 				t.Fatal("expected the error to be surfaced")
 			}
@@ -453,7 +454,7 @@ func TestReserveWithTransientRetry_DirectModeStillRetries(t *testing.T) {
 	s := retryServer(t, false, rc, []Operator{target})
 
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		nil, nil, false, time.Now().Add(10*time.Second), nil)
+		nil, nil, false, false, time.Now().Add(10*time.Second), nil)
 	if got.Err != nil {
 		t.Fatalf("reserve err = %v, want success on the retry", got.Err)
 	}
@@ -469,7 +470,7 @@ func TestReserveWithTransientRetry_BoundedByInnerAttempts(t *testing.T) {
 	s := retryServer(t, false, rc, []Operator{target})
 
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		nil, nil, false, time.Now().Add(10*time.Second), nil)
+		nil, nil, false, false, time.Now().Add(10*time.Second), nil)
 	if got.Err == nil {
 		t.Fatal("expected the last failure to be surfaced")
 	}
@@ -487,7 +488,7 @@ func TestReserveWithTransientRetry_StopsAtDeadline(t *testing.T) {
 	s := retryServer(t, false, rc, []Operator{target})
 
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		nil, nil, false, time.Now(), nil) // already expired
+		nil, nil, false, false, time.Now(), nil) // already expired
 	if got.Err == nil {
 		t.Fatal("expected the failure to be surfaced")
 	}
@@ -506,7 +507,7 @@ func TestReserveWithTransientRetry_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	got := s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{},
-		nil, nil, false, time.Now().Add(10*time.Second), nil)
+		nil, nil, false, false, time.Now().Add(10*time.Second), nil)
 	if got.Err == nil {
 		t.Fatal("expected the failure to be surfaced")
 	}
@@ -531,7 +532,7 @@ func TestReserveWithTransientRetry_NoAlternateRelayStopsRatherThanGoingDirect(t 
 		t.Fatalf("initial relay pick: %v", err)
 	}
 	got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
-		hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+		hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 	if got.Err == nil {
 		t.Fatal("expected the failure to be surfaced")
 	}
@@ -724,7 +725,7 @@ func TestReserveWithTransientRetry_ResizesAfterReprobe(t *testing.T) {
 
 	got := s.reserveWithTransientRetry(context.Background(), target,
 		ticket.ReserveRequest{InputBoundVersion: boundVersionFor(target)},
-		nil, nil, false, time.Now().Add(time.Minute), resize)
+		nil, nil, false, false, time.Now().Add(time.Minute), resize)
 	if got.Err != nil {
 		t.Fatalf("expected the retry to succeed: %v", got.Err)
 	}
@@ -743,6 +744,62 @@ func TestReserveWithTransientRetry_ResizesAfterReprobe(t *testing.T) {
 		t.Errorf("post-reprobe attempt sized with v%d, want v%d — the request was not "+
 			"re-sized against the downgraded operator, so a v2 reserve would reach a v1 node",
 			rc.reqs[1].InputBoundVersion, want)
+	}
+}
+
+// A TEE-required request reaches the re-probe only for an attested node, but
+// the re-probe hands back a new key the old verdict does not cover. Pick never
+// sees the refreshed operator, so the retry itself must refuse it, or the
+// request is sealed to a key nothing attested.
+func TestReserveWithTransientRetry_RequireTEERefusesUnattestedReprobe(t *testing.T) {
+	target := retryOp(1, "OWNER-TARGET")
+	target.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true}
+	unattested := target
+	unattested.TEE = &TEEStatus{Mode: "dstack-tdx"}
+	attested := target
+	attested.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true}
+
+	for _, tc := range []struct {
+		name       string
+		healed     Operator
+		requireTEE bool
+		wantOK     bool
+	}{
+		{"require TEE, unattested under the new key", unattested, true, false},
+		{"require TEE, attested under the new key", attested, true, true},
+		{"no TEE required", unattested, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &scriptedReserveClient{script: []error{ErrNoEphemeral, nil}}
+			static, err := NewStaticRegistryProvider([]Operator{target})
+			if err != nil {
+				t.Fatalf("NewStaticRegistryProvider: %v", err)
+			}
+			reg := &healingRegistry{
+				StaticRegistryProvider: static,
+				heal:                   func(Operator) (Operator, bool) { return tc.healed, true },
+			}
+			s := retryServer(t, false, rc, []Operator{target})
+			s.registryProvider = reg
+
+			got := s.reserveWithTransientRetry(context.Background(), target, ticket.ReserveRequest{},
+				nil, nil, false, tc.requireTEE, time.Now().Add(time.Minute), nil)
+			if reg.calls != 1 {
+				t.Fatalf("ReprobeEphemeral calls = %d, want 1", reg.calls)
+			}
+			if tc.wantOK {
+				if got.Err != nil || rc.calls() != 2 {
+					t.Fatalf("err = %v after %d reserves, want the healed retry to succeed", got.Err, rc.calls())
+				}
+				return
+			}
+			if !errors.Is(got.Err, ErrNoEphemeral) {
+				t.Errorf("err = %v, want the original ErrNoEphemeral so dispatch fails over", got.Err)
+			}
+			if rc.calls() != 1 {
+				t.Errorf("reserve calls = %d, want 1: nothing may be sent to the unattested key", rc.calls())
+			}
+		})
 	}
 }
 
@@ -767,7 +824,7 @@ func TestReserveWithTransientRetry_NilResizeKeepsRequest(t *testing.T) {
 
 	orig := ticket.ReserveRequest{InputCount: 0, ImageN: 2, InputBoundVersion: 0}
 	if got := s.reserveWithTransientRetry(context.Background(), target, orig,
-		nil, nil, false, time.Now().Add(time.Minute), nil); got.Err != nil {
+		nil, nil, false, false, time.Now().Add(time.Minute), nil); got.Err != nil {
 		t.Fatalf("expected success: %v", got.Err)
 	}
 	if rc.reqs[1].ImageN != 2 || rc.reqs[1].InputCount != 0 || rc.reqs[1].InputBoundVersion != 0 {

@@ -109,7 +109,7 @@ func TestReserveWithTransientRetry_AnnouncesTheRetry(t *testing.T) {
 	}
 	var log noteLog
 	ctx := withNote(context.Background(), log.note)
-	if got := s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{}, hop, relaySel, true, time.Now().Add(10*time.Second), nil); got.Err != nil {
+	if got := s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{}, hop, relaySel, true, false, time.Now().Add(10*time.Second), nil); got.Err != nil {
 		t.Fatalf("reserve err = %v, want success on the rotated retry", got.Err)
 	}
 
@@ -147,7 +147,7 @@ func TestReserveWithTransientRetry_NoRelayLeftAnnouncesNoRetry(t *testing.T) {
 	}
 	var log noteLog
 	ctx := withNote(context.Background(), log.note)
-	s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{}, hop, relaySel, true, time.Now().Add(10*time.Second), nil)
+	s.reserveWithTransientRetry(ctx, target, ticket.ReserveRequest{}, hop, relaySel, true, false, time.Now().Add(10*time.Second), nil)
 	if rc.calls() != 1 {
 		t.Fatalf("reserve calls = %d, want 1", rc.calls())
 	}

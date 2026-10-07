@@ -34,7 +34,7 @@ import { DuplicateTicketError, type Remedies, type SpendGuard } from './config.j
 import { ZsError, findError } from './errors.js'
 import { type Estimate, type EstimatePolicy, MaxOutputRequiredError, estimate } from './estimate.js'
 import { type ReserveSizeRejection, noFitMessage, reserveSizeFailureMessage } from './nofit.js'
-import { type Operator, refOf, servesImageEdit, servesImageGen } from './operator.js'
+import { type Operator, isTeeAttested, refOf, servesImageEdit, servesImageGen } from './operator.js'
 import {
     BUSY_RETRIES,
     BUSY_RETRY_BUDGET_MS,
@@ -507,7 +507,21 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                         relaySel.filter((s) => !excluded.has(nodeRefString({ op: s.id, node: s.node_id }))),
                         o,
                     ),
-                reprobeEphemeral: (o) => deps.pick.registry.reprobeEphemeral(o, signal),
+                // Pick admitted o under its old key; the re-probe hands back a
+                // new one its verdict does not cover. A TEE-required request
+                // takes the refreshed node only if it is attested under it, as
+                // Go's reserveWithTransientRetry checks.
+                reprobeEphemeral: async (o) => {
+                    const refreshed = await deps.pick.registry.reprobeEphemeral(o, signal)
+                    if (refreshed !== null && requireTee && !isTeeAttested(refreshed)) {
+                        log.warn('re-probed node is not attested under its new key; skipping it', {
+                            operatorId: refreshed.id,
+                            nodeId: refreshed.nodeId,
+                        })
+                        return null
+                    }
+                    return refreshed
+                },
                 recordRelayFailure: (h) => deps.pick.relayReputation?.recordRelayOutcome(relayRef(h), false),
                 note: (ev) => em.note(ev),
                 ...(signal ? { signal } : {}),

@@ -895,6 +895,40 @@ describe('the reserve request', () => {
             expect(h.rc.calls[1]!.req).toEqual(direct.rc.calls[0]!.req)
         }
     })
+
+    // Pick admitted the node under its old key; the re-probe swaps the key
+    // after pick has run, so the TEE gate must be applied again.
+    it('takes a re-probed node for a TEE-required request only if attested under its new key', async () => {
+        const tee = (verified: boolean) => ({
+            mode: 'dstack-tdx',
+            attestedAt: 0,
+            verifierId: 'dstack-tdx',
+            verified,
+            failureTag: '',
+        })
+        // A null verdict is a re-probe that found nothing: still no refresh,
+        // and no throw on the way.
+        for (const [requireTee, healedVerified, wantSecond] of [
+            [true, false, false],
+            [true, true, true],
+            [false, false, true],
+            [true, null, false],
+        ] as const) {
+            const healed = healedVerified === null ? null : op(1, { tee: tee(healedVerified) })
+            const h = harness([op(1, { tee: tee(true) })], {
+                registry: { reprobeEphemeral: async () => healed },
+                answer: async (o, req, _hop, n) => {
+                    if (n === 0) throw new NoEphemeralError()
+                    return reservedFor(o, req)
+                },
+            })
+            const em = await h.run(chat(), { requireTee })
+            const label = `requireTee=${requireTee} healedVerified=${healedVerified}`
+            expect(h.rc.calls.length, label).toBe(wantSecond ? 2 : 1)
+            if (wantSecond) expect(em.runs[0]!.op, label).toBe(healed)
+            else expect(em.runs, label).toEqual([])
+        }
+    })
 })
 
 describe('the sweep', () => {

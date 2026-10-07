@@ -1736,6 +1736,49 @@ func TestDispatch_NoEphemeral_ReprobeSelfHeals(t *testing.T) {
 	}
 }
 
+// For a model that requires TEE, the self-heal must not hand the request to a
+// node whose new key carries no attested verdict: pick admitted the node under
+// its old key, and the re-probe swaps the key after pick has run.
+func TestDispatch_RequireTEE_ReprobeToUnattestedKeyIsRefused(t *testing.T) {
+	op := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamEncrypted,
+		replyPlaintext: []byte(`{"ok":true}`),
+	})
+	healed := op.operator
+	healed.TEE = &zs.TEEStatus{Mode: "dstack-tdx"}
+	op.operator.TEE = &zs.TEEStatus{Mode: "dstack-tdx", Verified: true}
+	op.operator.EphemeralRecipient = nil
+	op.operator.EphemeralRecipientPubkey = ""
+	op.operator.EphemeralExpiry = 0
+	op.operator.EphemeralIssuedAt = 0
+
+	cfg := testConfig()
+	cfg.TEERequiredModels = []string{"gpt-test"}
+	opts := setup(t, cfg, op)
+	static, err := zs.NewStaticRegistryProvider(cfg.ResolvedOperators)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := &healingRegistry{
+		StaticRegistryProvider: static,
+		heal:                   func(zs.Operator) (zs.Operator, bool) { return healed, true },
+	}
+	opts.RegistryProvider = reg
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+	if w.Result().StatusCode == http.StatusOK {
+		t.Fatalf("status 200: the request went to a key nothing attested")
+	}
+	if reg.calls != 1 {
+		t.Errorf("ReprobeEphemeral calls = %d, want 1", reg.calls)
+	}
+	if op.callCount != 0 {
+		t.Errorf("node calls = %d, want 0: nothing may reach the unattested key", op.callCount)
+	}
+}
+
 // TestDispatch_BadReserveEnvelope_ReprobeSelfHeals confirms the dispatch
 // self-heal for the *stale-but-unexpired* ephemeral case: unlike the
 // errNoEphemeral path (cached key already expired → Reserve never contacts the

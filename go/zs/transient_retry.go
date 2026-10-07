@@ -195,6 +195,12 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // candidate, tracked across attempts by reprobed, because a node with no live
 // ephemeral will keep refusing however many times we ask.
 //
+// When requireTEE is set, a re-probed operator counts only if it is attested
+// under its new key. The verdict is keyed by the ephemeral, so the re-probe
+// that hands back a new one also leaves the old verdict behind; pick's TEE
+// filter never sees the refreshed operator, so without this check the request
+// would be sealed to a key nothing attested.
+//
 // The returned reserveAttempt always describes the final attempt — on success
 // Ticket is non-nil, otherwise Err carries the last failure so the dispatch
 // loop's existing per-error-type handling still sees the real cause.
@@ -205,6 +211,7 @@ func (s *Client) reserveWithTransientRetry(
 	hop *RelayHop,
 	relaySel []selection.Operator,
 	usePrivacy bool,
+	requireTEE bool,
 	deadline time.Time,
 	resize func(Operator, *ticket.ReserveRequest),
 ) reserveAttempt {
@@ -217,6 +224,11 @@ func (s *Client) reserveWithTransientRetry(
 		},
 		reprobe: func(op Operator) (Operator, bool) {
 			refreshed, ok := s.registryProvider.ReprobeEphemeral(ctx, op)
+			if ok && requireTEE && !refreshed.IsTEEAttested() {
+				s.log.Warn("re-probed node is not attested under its new key; skipping it",
+					"operator_id", refreshed.ID, "node_id", refreshed.NodeID)
+				return op, false
+			}
 			// Re-size against the REFRESHED operator before re-sending. A
 			// re-probe fires exactly when the node restarted, which is the one
 			// moment its advertised proto_version and declared capacities can

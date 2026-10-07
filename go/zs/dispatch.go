@@ -793,7 +793,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				}
 			}
 			em.note(RelayHopChanged{Relay: relayOf(hop), Target: RefOf(op), Reason: RelayHopChosen})
-			attempt := s.reserveWithTransientRetry(ctx, op, reserveReq, hop, relaySel, usePrivacy, retryDeadline, resize)
+			attempt := s.reserveWithTransientRetry(ctx, op, reserveReq, hop, relaySel, usePrivacy, requireTEE, retryDeadline, resize)
 			op, hop = attempt.Op, attempt.Hop
 			rt, err := attempt.Ticket, attempt.Err
 			if err == nil {
