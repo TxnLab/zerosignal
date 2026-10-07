@@ -4,9 +4,9 @@
  */
 
 // The request-body mutators a payer applies before sealing: dropRoutingPreferences,
-// dropPromptCacheKey, dropEmptyTools and clampMaxOutput. Mirrors the functions of
-// the same names in proto/go/inject; their godoc carries the reasons for each.
-// The other Go mutators (store default, safety_identifier, stream_options,
+// dropPromptCacheKey, dropEmptyTools, clampMaxOutput and defaultStoreFalse.
+// Mirrors the functions of the same names in proto/go/inject; their godoc carries
+// the reasons for each. The other Go mutators (safety_identifier, stream_options,
 // reasoning, upstream privacy) are applied by the node and have no TS port.
 //
 // Run them BEFORE sealing: the admission tag commits to sha256 of the sealed
@@ -145,7 +145,7 @@ function parseObject(body: string | Uint8Array): ParsedObject | null {
   while (src.at(i) !== RBRACE) {
     const start = i
     const keyEnd = skipString(src, i)
-    const key = JSON.parse(src.text(start, keyEnd)) as string
+    const key = keyOf(body, start, keyEnd)
     const valueStart = skipWS(src, skipWS(src, keyEnd) + 1)
     const end = skipValue(src, valueStart)
     entries.push({ key, start, valueStart, end })
@@ -153,6 +153,46 @@ function parseObject(body: string | Uint8Array): ParsedObject | null {
     if (src.at(i) === COMMA) i = skipWS(src, i + 1)
   }
   return { src, open, close: i, entries }
+}
+
+// The key token at [a, b) as Go's decoder reads it: each invalid UTF-8 byte and
+// each lone surrogate, escaped or not, is U+FFFD. Keys Go's map merges thereby
+// merge here too, where a TextDecoder would fold a broken sequence into one
+// U+FFFD and JSON.parse would keep a lone surrogate.
+function keyOf(body: string | Uint8Array, a: number, b: number): string {
+  const raw = typeof body === 'string' ? body.slice(a, b) : goDecodeUTF8(body.subarray(a, b))
+  return (JSON.parse(raw) as string).replace(
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    '�',
+  )
+}
+
+// Go's utf8.DecodeRune applied across b: a valid sequence decodes, and any
+// other byte is one U+FFFD.
+function goDecodeUTF8(b: Uint8Array): string {
+  let out = ''
+  for (let i = 0; i < b.length; ) {
+    const c0 = b[i]!
+    let r = 0xfffd
+    let w = 1
+    const cont = (k: number) => i + k < b.length && (b[i + k]! & 0xc0) === 0x80
+    if (c0 < 0x80) r = c0
+    else if (c0 >= 0xc2 && c0 <= 0xdf && cont(1)) [r, w] = [((c0 & 0x1f) << 6) | (b[i + 1]! & 0x3f), 2]
+    else if (c0 >= 0xe0 && c0 <= 0xef) {
+      const c1 = b[i + 1] ?? 0
+      if (c1 >= (c0 === 0xe0 ? 0xa0 : 0x80) && c1 <= (c0 === 0xed ? 0x9f : 0xbf) && cont(2)) {
+        ;[r, w] = [((c0 & 0x0f) << 12) | ((c1 & 0x3f) << 6) | (b[i + 2]! & 0x3f), 3]
+      }
+    } else if (c0 >= 0xf0 && c0 <= 0xf4) {
+      const c1 = b[i + 1] ?? 0
+      if (c1 >= (c0 === 0xf0 ? 0x90 : 0x80) && c1 <= (c0 === 0xf4 ? 0x8f : 0xbf) && cont(2) && cont(3)) {
+        ;[r, w] = [((c0 & 0x07) << 18) | ((c1 & 0x3f) << 12) | ((b[i + 2]! & 0x3f) << 6) | (b[i + 3]! & 0x3f), 4]
+      }
+    }
+    out += String.fromCodePoint(r)
+    i += w
+  }
+  return out
 }
 
 // The last entry for key, the one a last-wins reader and Go's map decode see.
@@ -166,12 +206,14 @@ type Piece = [number, number] | string
 
 // Re-joins the object from pieces of the original rather than serializing a
 // parsed copy, which is what keeps every untouched value exact. Only the last
-// entry per key survives, and only if keep says so.
+// entry per key survives, and only if keep says so. append, a whole `"key":value`
+// member, goes after the kept ones.
 function rebuild(
   body: string | Uint8Array,
   obj: ParsedObject,
   keep: (e: Entry) => boolean,
   replace: (e: Entry) => string | undefined = () => undefined,
+  append?: string,
 ): string | Uint8Array {
   const pieces: Piece[] = [[0, obj.open + 1]]
   let first = true
@@ -183,6 +225,7 @@ function rebuild(
     if (value === undefined) pieces.push([e.start, e.end])
     else pieces.push([e.start, e.valueStart], value)
   }
+  if (append !== undefined) pieces.push(first ? append : `,${append}`)
   pieces.push([obj.close, body.length])
 
   if (typeof body === 'string') {
@@ -248,6 +291,28 @@ export function dropEmptyTools(body: string | Uint8Array): string | Uint8Array {
     const empty = raw === 'null' || (raw.startsWith('[') && raw.slice(1, -1).trim() === '')
     return empty ? TOOLS_AND_CHOICE : NOTHING
   })
+}
+
+/**
+ * Sets the top-level `store` to false when the caller omitted it or sent null,
+ * so a provider that retains by default doesn't keep the prompt. An explicit
+ * value, true included, is the caller's choice and stands. null counts as
+ * omitted: OpenAI reads it as its default, which is retention.
+ */
+export function defaultStoreFalse(body: string): string
+export function defaultStoreFalse(body: Uint8Array): Uint8Array
+export function defaultStoreFalse(body: string | Uint8Array): string | Uint8Array {
+  const obj = parseObject(body)
+  if (obj === null) return body
+  const store = lastEntry(obj, 'store')
+  if (store === undefined) return rebuild(body, obj, () => true, undefined, '"store":false')
+  if (obj.src.text(store.valueStart, store.end) !== 'null') return body
+  return rebuild(
+    body,
+    obj,
+    () => true,
+    (e) => (e === store ? 'false' : undefined),
+  )
 }
 
 const MAX_OUTPUT_FIELDS = ['max_completion_tokens', 'max_tokens', 'max_output_tokens'] as const

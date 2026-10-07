@@ -44,7 +44,9 @@ func DefaultStoreFalse(body []byte) ([]byte, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A top-level null decodes without error into a nil map, which the
+	// assignment below would panic on; it is no object, so it is left alone.
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, nil
 	}
 
@@ -94,7 +96,8 @@ func ForceStoreFalse(body []byte) ([]byte, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A top-level null is no object (see DefaultStoreFalse).
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, nil
 	}
 

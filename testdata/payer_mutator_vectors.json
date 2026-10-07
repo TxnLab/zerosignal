@@ -741,5 +741,139 @@
       "want": "{\"max_tokens\":100}",
       "requested": "500"
     }
+  ],
+  "default_store_false": [
+    {
+      "name": "empty_body",
+      "body": "",
+      "changed": false,
+      "want": ""
+    },
+    {
+      "name": "not_json",
+      "body": "{\"store\":",
+      "changed": false,
+      "want": "{\"store\":"
+    },
+    {
+      "name": "top_level_array",
+      "body": "[{\"model\":\"m\"}]",
+      "changed": false,
+      "want": "[{\"model\":\"m\"}]"
+    },
+    {
+      "name": "top_level_null",
+      "body": "null",
+      "changed": false,
+      "want": "null"
+    },
+    {
+      "name": "absent",
+      "body": "{\"model\":\"m\",\"input\":\"hi\"}",
+      "changed": true,
+      "want": "{\"input\":\"hi\",\"model\":\"m\",\"store\":false}"
+    },
+    {
+      "name": "empty_object",
+      "body": "{}",
+      "changed": true,
+      "want": "{\"store\":false}"
+    },
+    {
+      "name": "empty_object_spaced",
+      "body": "{ \n }",
+      "changed": true,
+      "want": "{\"store\":false}"
+    },
+    {
+      "name": "explicit_true",
+      "body": "{\"model\":\"m\",\"store\":true}",
+      "changed": false,
+      "want": "{\"model\":\"m\",\"store\":true}"
+    },
+    {
+      "name": "explicit_false",
+      "body": "{\"store\":false,\"model\":\"m\"}",
+      "changed": false,
+      "want": "{\"store\":false,\"model\":\"m\"}"
+    },
+    {
+      "name": "explicit_string_left_alone",
+      "body": "{\"store\":\"no\"}",
+      "changed": false,
+      "want": "{\"store\":\"no\"}"
+    },
+    {
+      "name": "explicit_object_left_alone",
+      "body": "{\"store\":{}}",
+      "changed": false,
+      "want": "{\"store\":{}}"
+    },
+    {
+      "name": "null",
+      "body": "{\"store\":null,\"model\":\"m\"}",
+      "changed": true,
+      "want": "{\"model\":\"m\",\"store\":false}"
+    },
+    {
+      "name": "null_whitespace",
+      "body": "{\"store\" :  null  ,\"model\":\"m\"}",
+      "changed": true,
+      "want": "{\"model\":\"m\",\"store\":false}"
+    },
+    {
+      "name": "nested_not_top_level",
+      "body": "{\"metadata\":{\"store\":true},\"model\":\"m\"}",
+      "changed": true,
+      "want": "{\"metadata\":{\"store\":true},\"model\":\"m\",\"store\":false}"
+    },
+    {
+      "name": "escaped_key_true",
+      "body": "{\"st\\u006fre\":true}",
+      "changed": false,
+      "want": "{\"st\\u006fre\":true}"
+    },
+    {
+      "name": "escaped_key_null",
+      "body": "{\"st\\u006fre\":null,\"m\":1}",
+      "changed": true,
+      "want": "{\"m\":1,\"store\":false}"
+    },
+    {
+      "name": "repeated_last_null",
+      "body": "{\"store\":true,\"store\":null}",
+      "changed": true,
+      "want": "{\"store\":false}"
+    },
+    {
+      "name": "repeated_last_true",
+      "body": "{\"store\":null,\"store\":true}",
+      "changed": false,
+      "want": "{\"store\":null,\"store\":true}"
+    },
+    {
+      "name": "large_integer_elsewhere",
+      "body": "{\"seed\":12345678901234567890,\"temperature\":0.10}",
+      "changed": true,
+      "want": "{\"seed\":12345678901234567890,\"store\":false,\"temperature\":0.10}"
+    },
+    {
+      "name": "leading_bom",
+      "body": "﻿{\"model\":\"m\"}",
+      "changed": false,
+      "want": "﻿{\"model\":\"m\"}"
+    },
+    {
+      "name": "lone_surrogate_keys_merge",
+      "body": "{\"\\ud800\":1,\"\\udc00\":2}",
+      "changed": true,
+      "want": "{\"store\":false,\"�\":2}"
+    },
+    {
+      "name": "surrogate_pair_key_kept",
+      "body": "{\"\\ud83d\\ude00\":1,\"\\ud83d\":2}",
+      "changed": true,
+      "want": "{\"store\":false,\"�\":2,\"😀\":1}"
+    }
   ]
 }

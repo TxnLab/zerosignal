@@ -72,6 +72,35 @@ var dropBodies = []struct{ name, body string }{
 	{"repeated_keys_last_empty", `{"tools":[{"type":"function"}],"tool_choice":"auto","tools":[]}`},
 }
 
+// Bodies for DefaultStoreFalse: an explicit caller value stands, an absent or
+// null one becomes false.
+var storeBodies = []struct{ name, body string }{
+	{"empty_body", ``},
+	{"not_json", `{"store":`},
+	{"top_level_array", `[{"model":"m"}]`},
+	{"top_level_null", `null`},
+	{"absent", `{"model":"m","input":"hi"}`},
+	{"empty_object", `{}`},
+	{"empty_object_spaced", "{ \n }"},
+	{"explicit_true", `{"model":"m","store":true}`},
+	{"explicit_false", `{"store":false,"model":"m"}`},
+	{"explicit_string_left_alone", `{"store":"no"}`},
+	{"explicit_object_left_alone", `{"store":{}}`},
+	// Go's null falls back to the provider's default, retention.
+	{"null", `{"store":null,"model":"m"}`},
+	{"null_whitespace", "{\"store\" :  null  ,\"model\":\"m\"}"},
+	{"nested_not_top_level", `{"metadata":{"store":true},"model":"m"}`},
+	{"escaped_key_true", `{"st` + "\x5c" + `u006fre":true}`},
+	{"escaped_key_null", `{"st` + "\x5c" + `u006fre":null,"m":1}`},
+	{"repeated_last_null", `{"store":true,"store":null}`},
+	{"repeated_last_true", `{"store":null,"store":true}`},
+	{"large_integer_elsewhere", `{"seed":12345678901234567890,"temperature":0.10}`},
+	{"leading_bom", "\xef\xbb\xbf{\"model\":\"m\"}"},
+	// Both lone surrogates decode to U+FFFD, so Go's map keeps one member.
+	{"lone_surrogate_keys_merge", `{"` + "\x5c" + `ud800":1,"` + "\x5c" + `udc00":2}`},
+	{"surrogate_pair_key_kept", `{"` + "\x5c" + `ud83d` + "\x5c" + `ude00":1,"` + "\x5c" + `ud83d":2}`},
+}
+
 var clampBodies = []struct {
 	name    string
 	body    string
@@ -131,13 +160,19 @@ type payerMutatorVectorsFile struct {
 	DropPromptCacheKey     []dropCase  `json:"drop_prompt_cache_key"`
 	DropEmptyTools         []dropCase  `json:"drop_empty_tools"`
 	ClampMaxOutput         []clampCase `json:"clamp_max_output"`
+	DefaultStoreFalse      []dropCase  `json:"default_store_false"`
 }
 
 func buildDropCases(t *testing.T, fn func([]byte) ([]byte, error)) []dropCase {
 	t.Helper()
-	out := make([]dropCase, 0, len(dropBodies))
+	return buildBodyCases(t, dropBodies, fn)
+}
+
+func buildBodyCases(t *testing.T, bodies []struct{ name, body string }, fn func([]byte) ([]byte, error)) []dropCase {
+	t.Helper()
+	out := make([]dropCase, 0, len(bodies))
 	var changed int
-	for _, b := range dropBodies {
+	for _, b := range bodies {
 		got, err := fn([]byte(b.body))
 		if err != nil {
 			t.Fatalf("%s: %v", b.name, err)
@@ -187,6 +222,7 @@ func buildPayerMutatorVectors(t *testing.T) payerMutatorVectorsFile {
 		DropPromptCacheKey:     buildDropCases(t, inject.DropPromptCacheKey),
 		DropEmptyTools:         buildDropCases(t, inject.DropEmptyTools),
 		ClampMaxOutput:         clamp,
+		DefaultStoreFalse:      buildBodyCases(t, storeBodies, inject.DefaultStoreFalse),
 	}
 }
 

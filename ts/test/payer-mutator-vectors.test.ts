@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   clampMaxOutput,
+  defaultStoreFalse,
   dropEmptyTools,
   dropPromptCacheKey,
   dropRoutingPreferences,
@@ -43,13 +44,26 @@ function checkResult(input: JsonBody, got: JsonBody, c: Json): void {
     return
   }
   expect(got).not.toBe(input)
-  expect(JSON.parse(text(got))).toEqual(JSON.parse(c.want))
+  expect(asGoReads(text(got))).toEqual(asGoReads(c.want))
+}
+
+// The top level as Go's decoder reads it: a lone surrogate in a key is U+FFFD.
+// TS keeps a kept key's original spelling, which Go reads the same; but two
+// members Go would merge must already be one, as in Go's output.
+function asGoReads(s: string): Json {
+  const out: Json = {}
+  for (const [k, v] of Object.entries(JSON.parse(s) as Json)) {
+    const key = k.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '�')
+    expect(Object.hasOwn(out, key), `members ${JSON.stringify(key)} not merged`).toBe(false)
+    out[key] = v
+  }
+  return out
 }
 
 describe('payer_mutator_vectors.json', () => {
   it('is the schema this test expects', () => {
     expect(v.version).toBe(1)
-    for (const k of ['drop_routing_preferences', 'drop_prompt_cache_key', 'drop_empty_tools', 'clamp_max_output']) {
+    for (const k of ['drop_routing_preferences', 'drop_prompt_cache_key', 'drop_empty_tools', 'clamp_max_output', 'default_store_false']) {
       expect(v[k].length).toBeGreaterThan(0)
     }
   })
@@ -63,6 +77,7 @@ describe('payer_mutator_vectors.json', () => {
     ['drop_routing_preferences', dropRoutingPreferences],
     ['drop_prompt_cache_key', dropPromptCacheKey],
     ['drop_empty_tools', dropEmptyTools],
+    ['default_store_false', defaultStoreFalse],
   ]
   for (const [key, fn] of drops) {
     describe(key, () => {
@@ -137,6 +152,48 @@ describe('payer mutators keep untouched values byte for byte (TS only)', () => {
       requested: 200n,
     })
     expect(dropPromptCacheKey('{"a":1,"prompt_cache_key":"k","a":2}')).toBe('{"a":2}')
+  })
+
+  // Go reads each invalid byte of a key as its own U+FFFD, so \xff and \xfe
+  // are one key and a truncated 4-byte sequence is not the same key as its
+  // first byte. A JSON vector can't carry these bytes.
+  it('merges keys as Go reads invalid UTF-8 in them', () => {
+    const bytes = (...parts: (string | number[])[]) =>
+      new Uint8Array(parts.flatMap((p) => (typeof p === 'string' ? [...utf8.encode(p)] : p)))
+    expect(text(defaultStoreFalse(bytes('{"', [0xff], '":1,"', [0xfe], '":2}')))).toBe('{"�":2,"store":false}')
+    const kept = defaultStoreFalse(bytes('{"', [0xf0, 0x9f, 0x98], '":1,"', [0xf0], '":2}'))
+    expect(text(kept)).toBe('{"�":1,"�":2,"store":false}')
+  })
+
+  // Each lead byte's bounds: the first sequence past each is n invalid bytes,
+  // merging with n bytes of 0xff; the last one inside decodes to one rune.
+  // Read from the raw bytes: a TextDecoder would merge the keys itself.
+  it.each([
+    [[0xc0, 0x80], true],
+    [[0xc2, 0x80], false],
+    [[0xe0, 0x9f, 0xbf], true],
+    [[0xe0, 0xa0, 0x80], false],
+    [[0xed, 0xa0, 0x80], true],
+    [[0xed, 0x9f, 0xbf], false],
+    [[0xf0, 0x8f, 0xbf, 0xbf], true],
+    [[0xf0, 0x90, 0x80, 0x80], false],
+    [[0xf4, 0x90, 0x80, 0x80], true],
+    [[0xf4, 0x8f, 0xbf, 0xbf], false],
+    [[0xf5, 0x80, 0x80, 0x80], true],
+  ])('reads key bytes %j as Go does (merge: %s)', (seq, merges) => {
+    const bytes = new Uint8Array([
+      ...utf8.encode('{"'), ...seq, ...utf8.encode('":1,"'), ...seq.map(() => 0xff), ...utf8.encode('":2}'),
+    ])
+    const out = String.fromCharCode(...defaultStoreFalse(bytes))
+    // Merged, only the last member, the 0xff key, survives.
+    expect(out.includes(`"${String.fromCharCode(...seq)}":1`)).toBe(!merges)
+    expect(out.includes(`"${String.fromCharCode(...seq.map(() => 0xff))}":2`)).toBe(true)
+  })
+
+  it('appends store after the kept members, and replaces a null in place', () => {
+    expect(defaultStoreFalse('{"seed":12345678901234567890}')).toBe('{"seed":12345678901234567890,"store":false}')
+    expect(defaultStoreFalse(' { } ')).toBe(' {"store":false} ')
+    expect(defaultStoreFalse('{"store" : null,"a":1}')).toBe('{"store" : false,"a":1}')
   })
 
   it('returns a plain Uint8Array for a Buffer, typed as one', () => {
