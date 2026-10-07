@@ -17,6 +17,7 @@ import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
 import type { EstimatePolicy } from './estimate.js'
 import { FeeRateCache } from './fee-rate.js'
+import { FETCH_BASE_URL, openAIFetch } from './fetch/serve.js'
 import {
     type RegistryProvider,
     type Stores,
@@ -26,7 +27,7 @@ import {
     memoryJournal,
 } from './parts.js'
 import type { PickDeps } from './pick.js'
-import { payerBytesSigner } from './ports.js'
+import { type Fetch, payerBytesSigner } from './ports.js'
 import type { SettleSlot } from './receipt-check.js'
 import { type JournalDeps, Reconciler, journalOpen, journalReceipt, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
@@ -50,9 +51,25 @@ export class Client {
     readonly #feeRate = new FeeRateCache()
     #closing: Promise<void> | undefined
 
+    /**
+     * An OpenAI-compatible endpoint as a fetch function: hand it to an OpenAI
+     * client built on baseURL, once, and every request it sends is a turn of
+     * this Client, routed to a node per request. The response is the node's,
+     * as an OpenAI API would send it; a stream's usage arrives in a zs.usage
+     * frame only when the request sets X-Zs-Usage-Frame. openAIFetch builds
+     * one with options this one leaves out, such as a funding hint.
+     */
+    readonly fetch: Fetch
+
     private constructor(p: Parts) {
         this.#p = p
         partsOf.set(this, p)
+        this.fetch = openAIFetch(this, { network: p.cfg.network.network, logger: p.cfg.logger })
+    }
+
+    /** The base URL for an OpenAI client whose fetch is this Client's fetch. */
+    get baseURL(): string {
+        return FETCH_BASE_URL
     }
 
     /**

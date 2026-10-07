@@ -388,6 +388,65 @@ describe('Client.stream', () => {
     })
 })
 
+describe('Client.fetch', () => {
+    const sse = (data: string) => `data: ${data}\n\n`
+    const post = (h: Awaited<ReturnType<typeof harness>>, init: RequestInit = {}) =>
+        h.c.fetch(`${h.c.baseURL}/chat/completions`, { method: 'POST', body: h.body, ...init })
+
+    it('answers a whole reply with the node’s body and the usage in headers', async () => {
+        const h = await harness()
+        const res = await post(h, { headers: { Authorization: 'Bearer sk-not-forwarded' } })
+        expect(res.status).toBe(200)
+        expect(await res.text()).toBe(ANSWER)
+        expect(res.headers.get('Content-Type')).toBe('application/json')
+        expect(res.headers.get('X-Zs-Ticket-Id')).toBe(TICKET_ID)
+        // The caller's own credentials never reach the node.
+        expect(new Headers(h.sent[0]!.headers).get('Authorization')).toBeNull()
+        await h.c.waitSettles()
+        expect(h.handle.acks).toHaveLength(1)
+        await h.c.close()
+    })
+
+    it('streams the node’s frames as SSE and settles inline', async () => {
+        const h = await harness({ stream: true, group: true, outcomes: ['landed'] })
+        const res = await post(h)
+        expect(res.headers.get('Content-Type')).toBe('text/event-stream')
+        expect(await res.text()).toBe(FRAMES.map(sse).join('') + sse('[DONE]'))
+        expect(h.handle.acks.map((a) => a[1])).toEqual([VALID_GROUP])
+        await h.c.close()
+    })
+
+    it('reports a stream’s usage in a zs.usage frame on the opt-in header', async () => {
+        const h = await harness({ stream: true })
+        const text = await (await post(h, { headers: { 'X-Zs-Usage-Frame': '1' } })).text()
+        expect(text).toContain(`event: zs.usage\ndata: {"type":"zs.usage","ticket_id":"${TICKET_ID}"`)
+        await h.c.close()
+    })
+
+    it('cancels the node when the caller cancels the body before generation finished', async () => {
+        const h = await harness({ stream: true, lateTail: true })
+        const reader = (await post(h)).body!.getReader()
+        await reader.read()
+        await reader.cancel()
+        await vi.waitFor(() => expect(h.upstreamAborted).toBe(true))
+        expect(h.handle.acks).toEqual([])
+        await h.c.close()
+    })
+
+    it('settles when the caller aborts after generation finished', async () => {
+        const h = await harness({ stream: true, lateTail: true })
+        const caller = new AbortController()
+        const reader = (await post(h, { signal: caller.signal })).body!.getReader()
+        let seen = ''
+        while (!seen.includes('finish_reason')) seen += new TextDecoder().decode((await reader.read()).value)
+        caller.abort()
+        await expect(reader.read()).rejects.toThrow()
+        await vi.waitFor(() => expect(h.handle.acks).toHaveLength(1))
+        expect(h.upstreamAborted).toBe(false)
+        await h.c.close()
+    })
+})
+
 describe('Client.stream’s wiring', () => {
     function guard() {
         const calls: string[] = []

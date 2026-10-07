@@ -142,10 +142,10 @@ export function openAIErrorResponse(h: Headers, status: number, type: string, co
     return new Response(openAIErrorBody(type, code, message), { status, headers: h })
 }
 
-/** errorResponse renders e as an OpenAI-shaped error response over h. */
-export function errorResponse(h: Headers, e: ZsError): Response {
+/** errorResponse renders e as an OpenAI-shaped error response over h, with message in place of e's when given. */
+export function errorResponse(h: Headers, e: ZsError, message: string = e.message): Response {
     const sh = errorShapes.get(e.code) ?? kindShapes.get(e.kind)!
     setShouldRetry(h, shouldRetry(e))
     setRetryAfter(h, e.retryAfter)
-    return openAIErrorResponse(h, sh.status, sh.type, e.code, e.message)
+    return openAIErrorResponse(h, sh.status, sh.type, e.code, message)
 }
