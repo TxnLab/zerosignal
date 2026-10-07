@@ -1383,6 +1383,9 @@ describe('the Client’s parts', () => {
             'journalOpen',
             'journalReceipt',
             'idle',
+            'StreamEmitter',
+            'TurnStream',
+            'turnOf',
         ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }

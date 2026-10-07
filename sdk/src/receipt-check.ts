@@ -72,7 +72,7 @@ export class SettleSlot {
     expected = false
     readonly done: Promise<SettleResult>
     #resolve!: (r: SettleResult) => void
-    #finished = false
+    #result: SettleResult | undefined
 
     constructor() {
         this.done = new Promise((resolve) => {
@@ -80,10 +80,15 @@ export class SettleSlot {
         })
     }
 
+    /** The outcome once finish has recorded it. */
+    get result(): SettleResult | undefined {
+        return this.#result
+    }
+
     /** Records the outcome; only the first call counts. */
     finish(r: SettleResult): void {
-        if (this.#finished) return
-        this.#finished = true
+        if (this.#result !== undefined) return
+        this.#result = r
         this.#resolve(r)
     }
 }

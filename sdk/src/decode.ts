@@ -20,7 +20,7 @@
 // a string, where Go's decoder replaces it with U+FFFD.
 
 import { newError } from './codes.js'
-import { ProviderError, type ZsError } from './errors.js'
+import { type NodeReply, ProviderError, type ZsError } from './errors.js'
 import type {
     AnnotationAdded,
     Done,
@@ -90,6 +90,25 @@ export class StreamDecoder {
             }
         }
         return newError('stream_interrupted', 'the stream ended before the node said generation finished')
+    }
+
+    /** @internal The error the node reported in place of content, or null; for the stream emitter. */
+    reportedFailure(): ZsError | null {
+        return this.failure
+    }
+
+    /**
+     * @internal For the stream emitter.
+     * replyStatus folds a single-body reply's HTTP status into the outcome,
+     * once body has decoded it. A reply the node marked failed is not a
+     * finished answer even when its body doesn't say why, and a failure the
+     * body did report takes the reply's status and retryAfterMs.
+     */
+    replyStatus(reply: NodeReply, retryAfterMs: number): void {
+        if (reply.status < 400) return
+        this.failure ??= newError('upstream_error', `the node answered HTTP ${reply.status}`, { cause: reply })
+        if (retryAfterMs > 0) (this.failure as { retryAfter?: number }).retryAfter = retryAfterMs
+        if (this.failure.cause instanceof ProviderError) this.failure.cause.status = reply.status
     }
 
     /** frame decodes one streamed frame's data. */

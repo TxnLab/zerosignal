@@ -10,8 +10,9 @@
 import algosdk from 'algosdk'
 
 import { IDAffinity } from './affinity.js'
-import { type Parts, partsOf } from './client-parts.js'
+import { type Parts, dispatchDepsOf, partsOf } from './client-parts.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
+import { type RunSealed, dispatch } from './dispatch.js'
 import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
 import type { EstimatePolicy } from './estimate.js'
@@ -26,8 +27,14 @@ import {
 } from './parts.js'
 import type { PickDeps } from './pick.js'
 import { payerBytesSigner } from './ports.js'
-import { Reconciler, walletChain } from './reconciler.js'
+import type { SettleSlot } from './receipt-check.js'
+import { type JournalDeps, Reconciler, journalOpen, journalReceipt, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
+import { type ResponderDeps, bufferedResponder } from './responder.js'
+import { type SealedDeps, runSealed } from './sealed.js'
+import { Settles } from './settles.js'
+import { type GenComplete, forwardStream, frameFactory } from './stream.js'
+import { type Request, type Stream, TurnStream, turnOf } from './turn.js'
 import { Wallet } from './wallet.js'
 
 /** Bounds the escrow config read a built wallet needs, as Go's escrowConfigTimeout. */
@@ -126,6 +133,8 @@ export class Client {
             // reservation in dispatch; its refund is what frees it.
             refunded: guard ? (ticketId) => guard.release(ticketId) : undefined,
         })
+        const life = new AbortController()
+        const settles = new Settles({ logger: cfg.logger, journal, life: life.signal })
         // Only the SDK's own wallet runs the sweep, which is what deletes rows.
         const chain = walletChain(wallet)
         let reconciler: Reconciler | undefined
@@ -164,6 +173,8 @@ export class Client {
             durableJournal,
             refunds,
             reconciler,
+            settles,
+            life,
         })
         reconciler?.start()
         c.#warmFeeRate()
@@ -171,16 +182,57 @@ export class Client {
     }
 
     /**
+     * Returns request as a Stream bound to signal. Aborting signal before the
+     * node finishes generating cancels the turn; after it, the receipt is
+     * still collected and the ticket settled.
+     */
+    stream(request: Request, signal?: AbortSignal): Stream {
+        const p = this.#p
+        const feeRate = () => this.feeRate()
+        // Read now, as Go copies its Request: a later change to request
+        // must not route the turn one way and decode it another.
+        const turn = turnOf(request)
+        return new TurnStream(
+            (em, slot, sig) => {
+                const runSealedTurn: RunSealed = (sem, run, s) => runSealed(sealedDeps(p, feeRate, slot), sem, run, s)
+                return dispatch(dispatchDepsOf(this, runSealedTurn), em, turn, sig)
+            },
+            request,
+            signal,
+            p.cfg.logger,
+        )
+    }
+
+    /**
+     * Resolves once no background escrow work is running: the submits made
+     * after a whole reply, and the watches on atomic settles until each is
+     * seen to land, is dropped, or times out. Work that starts while it waits
+     * is waited for too. Call it once no new turns start, and before close.
+     * When signal aborts first it rejects naming the tickets still being
+     * submitted, since a submit that dies with the process is not recovered
+     * in-process (the refund watchdog is in-memory too), apart from settles
+     * submitted but not yet seen to land, whose journal rows stay for the
+     * reconciler.
+     */
+    waitSettles(signal?: AbortSignal): Promise<void> {
+        return this.#p.settles.wait(signal)
+    }
+
+    /**
      * Stops the ticket sweep create started and releases this Client's hold
-     * on its journal, so another Client may sweep it. When the Client runs the
-     * SDK's Wallet over a journal the caller supplied, it also stops the refund watchdog,
-     * waiting out a refund it already sent, and leaves the tickets it watched
-     * to the next Client that sweeps that journal, or to the next process; a
-     * request still in flight here is then not watched. Safe to call more than
-     * once.
+     * on its journal, so another Client may sweep it. It does not wait for
+     * settlements; see waitSettles. It ends any watch on a settle still
+     * unconfirmed, leaving that ticket's journal row in place. When the Client
+     * runs the SDK's Wallet over a journal the caller supplied, it also stops
+     * the refund watchdog, waiting out a refund it already sent, and leaves
+     * the tickets it watched to the next Client that sweeps that journal, or
+     * to the next process; a request still in flight here is then not
+     * watched, so call waitSettles first when no Client follows. Safe to call
+     * more than once.
      */
     close(): Promise<void> {
         this.#closing ??= (async () => {
+            this.#p.life.abort()
             const r = this.#p.reconciler
             if (r === undefined) return
             const refunds = this.#p.refunds
@@ -238,6 +290,57 @@ export class Client {
     #warmFeeRate(): void {
         this.feeRate()
     }
+}
+
+/**
+ * sealedDeps is the sealed run's view of a Client for one turn, whose escrow
+ * submit reports through slot.
+ */
+function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): SealedDeps {
+    const cfg = p.cfg
+    const st = cfg.stores
+    const logger = cfg.logger
+    // Journal rows carry wall-clock times, as Go's do.
+    const journal: JournalDeps = {
+        journal: p.journal,
+        logger,
+        clock: Date.now,
+        escrowAppId: cfg.network.escrowAppId,
+        payer: p.wallet.payerAddr(),
+    }
+    const responder: ResponderDeps = {
+        logger,
+        spendGuard: cfg.spendGuard,
+        nodeExclusions: st.nodeExclusions,
+        journalReceipt: (h, receipt) => journalReceipt(journal, h, receipt),
+        resolveRefund: (ticketId) => p.refunds.resolve(ticketId),
+        confirmSettled: (ticketId, txId, h) => p.settles.confirmSettled(ticketId, txId, h),
+        toolAffinity: p.pick.toolAffinity,
+        responseAffinity: p.pick.responseAffinity,
+        feeRate,
+        afterResponse: (ticketId, submit) => p.settles.afterResponse(ticketId, submit),
+    }
+    const deps: SealedDeps = {
+        wallet: p.wallet,
+        spendGuard: cfg.spendGuard,
+        remedies: cfg.remedies,
+        network: cfg.network.network,
+        fetch: cfg.fetch,
+        relayReputation: st.relayReputation,
+        logger,
+        // With USDC locked on chain, the watchdog recovers it if no settlement
+        // resolves the ticket, and the journal keeps it past a restart.
+        opened: async (h, ticket) => {
+            p.refunds.track(h, ticket.expires_at)
+            await journalOpen(journal, h, ticket)
+        },
+        buffered: (call) => bufferedResponder(responder, call, slot),
+        streamed: (em, out, call, buffered) => {
+            const genComplete: GenComplete = { value: false }
+            return forwardStream(deps, em, out, call, frameFactory(responder, call, genComplete, slot), buffered, genComplete)
+        },
+    }
+    return deps
 }
 
 /** buildWallet reads the escrow's config and builds the wallet that opens tickets against it. */

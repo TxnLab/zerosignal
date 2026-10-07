@@ -14,6 +14,7 @@ import type { RegistryProvider, ReserveClient, TicketJournal, WalletOpener } fro
 import type { PickDeps } from './pick.js'
 import type { Reconciler } from './reconciler.js'
 import type { Watchdog } from './refund-watchdog.js'
+import type { Settles } from './settles.js'
 
 /**
  * The parts a Client runs on. Routing stores, the spend guard and the logger
@@ -33,6 +34,10 @@ export interface Parts {
     refunds: Watchdog
     /** The journal sweep; set only with the SDK's Wallet. */
     reconciler: Reconciler | undefined
+    /** The escrow work turns leave running after their replies. */
+    settles: Settles
+    /** Aborted by close, ending background work that would outlive the Client. */
+    life: AbortController
 }
 
 /** Each Client's parts, set by its constructor. */

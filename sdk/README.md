@@ -6,8 +6,8 @@ Go SDK, [`github.com/TxnLab/zerosignal/go/zs`](https://github.com/TxnLab/zerosig
 event names, error kinds, config defaults and network presets are shared with it and pinned by
 a golden fixture both test suites read.
 
-> **Status: in development.** This release holds the API vocabulary and the ports. The client
-> itself (`Client`, `stream`) is being ported from the ZeroSignal chat app and is not here yet.
+> **Status: in development.** `Client.stream` runs a paid turn end to end, but the Client
+> builds no operator discovery of its own yet, so `Config.registry` is required.
 
 ## Install
 

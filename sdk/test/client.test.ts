@@ -586,6 +586,30 @@ describe('Client.create', () => {
             })
         }
 
+        // Go's Close calls endLife first: a settle watch ends before the
+        // reconciler hands off, not after.
+        it('ends settle watches before handing the watchdog off', async () => {
+            const c = await Client.create({ ...base, wallet: sdkWallet(), stores: { journal: memoryJournal() } })
+            const p = partsOf.get(c)!
+            let finish!: () => void
+            const gate = new Promise<void>((r) => (finish = r))
+            const handOff = p.refunds.handOff.bind(p.refunds)
+            p.refunds.handOff = async () => {
+                await gate
+                await handOff()
+            }
+            const pending = { settleOutcome: async () => 'pending' as const } as unknown as Parameters<typeof p.settles.confirmSettled>[2]
+            p.settles.confirmSettled('WATCHED', 'TX', pending)
+            const closed = c.close()
+            const ended = await Promise.race([
+                p.settles.wait().then(() => true),
+                new Promise<boolean>((r) => setTimeout(() => r(false), 2000)),
+            ])
+            expect(ended, 'the watch outlived the hand-off').toBe(true)
+            finish()
+            await closed
+        })
+
         // The default journal dies with the Client, so its watchdog stays the
         // only thing that finishes its tickets.
         it('keeps the watchdog running past close over its own memory journal', async () => {
