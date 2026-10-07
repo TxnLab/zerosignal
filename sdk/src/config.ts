@@ -10,6 +10,7 @@
 import { defaultFetch } from '#default-fetch'
 
 import { configError } from './errors.js'
+import { DEFAULT_STREAM_IDLE, type StreamIdle } from './idle.js'
 import type { Network, ResolvedNetwork } from './network.js'
 import { resolveNetwork } from './network.js'
 import type { RegistryProvider, ReserveClient, Stores, WalletOpener } from './parts.js'
@@ -24,6 +25,7 @@ import {
     memoryCache,
     memoryStorage,
 } from './ports.js'
+import { MAX_TIMER_MS } from './sleep.js'
 import type { AffinityPolicy, Privacy } from './types.js'
 
 /** Affinity configures continuation pinning. */
@@ -144,6 +146,16 @@ export interface Config {
     /** Bounds one request's retrying of transient failures, all before payment. */
     retryBudget?: number
     /**
+     * How long a streamed answer may go without a byte before the turn ends
+     * stream_interrupted, caused by a StreamIdleTimeoutError; false for no
+     * bound. A browser's fetch has no read timeout and the SDK's Node fetch
+     * sets none, so without one a node or relay that stops sending without
+     * closing holds the turn until the caller gives up. The Go SDK has no
+     * such bound: its callers set their context's deadline. A budget past
+     * setTimeout's limit, about 24.8 days, is held to it.
+     */
+    streamIdle?: Partial<StreamIdle> | false
+    /**
      * The wait in ms before the given retry sweep over the candidate list.
      * Set, it also replaces the wait before a busy re-sweep, the node's
      * Retry-After included.
@@ -202,6 +214,8 @@ export interface ResolvedConfig {
     discovery: Discovery
     reserveTimeout: number
     retryBudget: number
+    /** null for no bound. */
+    streamIdle: StreamIdle | null
     sweepDelay: ((sweep: number) => number) | undefined
     allowStaging: boolean
     allowPrivateHosts: boolean
@@ -253,6 +267,12 @@ const defaultRemedies: Remedies = {
 // a timer handed Infinity fires at once.
 function orDefault(v: number | undefined, def: number): number {
     return v !== undefined && Number.isFinite(v) && v > 0 ? v : def
+}
+
+// A budget meant as "never" would otherwise fire at once, as setTimeout does
+// past its limit.
+function idleBudget(v: number | undefined, def: number): number {
+    return Math.min(orDefault(v, def), MAX_TIMER_MS)
 }
 
 /** resolveConfig applies the defaults and validates, or throws a ZsError. */
@@ -333,6 +353,14 @@ export function resolveConfig(c: Config): ResolvedConfig {
         discovery,
         reserveTimeout: orDefault(c.reserveTimeout, defaults.reserveTimeout),
         retryBudget: orDefault(c.retryBudget, defaults.retryBudget),
+        streamIdle:
+            c.streamIdle === false
+                ? null
+                : {
+                      preStream: idleBudget(c.streamIdle?.preStream, DEFAULT_STREAM_IDLE.preStream),
+                      midStream: idleBudget(c.streamIdle?.midStream, DEFAULT_STREAM_IDLE.midStream),
+                      toolActive: idleBudget(c.streamIdle?.toolActive, DEFAULT_STREAM_IDLE.toolActive),
+                  },
         sweepDelay: c.sweepDelay,
         allowStaging: c.allowStaging ?? false,
         allowPrivateHosts,

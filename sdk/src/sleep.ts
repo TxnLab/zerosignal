@@ -27,7 +27,7 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<bool
 }
 
 // setTimeout fires at once past this delay, so a longer wait is taken in steps.
-const MAX_TIMER_MS = 2 ** 31 - 1
+export const MAX_TIMER_MS = 2 ** 31 - 1
 
 /**
  * idle is the background loops' sleep: the refund watchdog's and the

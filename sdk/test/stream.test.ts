@@ -23,6 +23,7 @@ import {
 import { IDAffinity } from '../src/affinity.js'
 import type { SpendGuard } from '../src/config.js'
 import type { ZsError } from '../src/errors.js'
+import { IdleWatchdog, StreamIdleTimeoutError } from '../src/idle.js'
 import { ProtestReason, type Reserved } from '../src/parts.js'
 import { DISPUTE_EXCERPT_CAP, SettleSlot } from '../src/receipt-check.js'
 import { DRAIN_TAIL_TIMEOUT_MS } from '../src/response.js'
@@ -359,8 +360,10 @@ class StreamRecorder {
         this.onFrame?.(o)
         return o.frame === undefined ? 0 : frameSSE(o.frame).length
     }
-    interrupt() {
+    causes: unknown[] = []
+    interrupt(cause?: unknown) {
         this.interrupted++
+        this.causes.push(cause)
     }
     get data(): string[] {
         return this.outs.flatMap((o) => (o.frame ? [dec.decode(o.frame.data)] : []))
@@ -724,6 +727,144 @@ describe('forwardStream', () => {
         await new Promise((r) => setTimeout(r, 30))
         expect(t.logger.logged.map((l) => l.msg)).not.toContain('receipt tail drain timed out; cancelling upstream')
     })
+
+    describe('with an idle watchdog', () => {
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+        it('cancels a node that goes silent, and interrupts the turn with why', async () => {
+            let upstream!: AbortSignal
+            const t = setup((init) => {
+                upstream = init.signal!
+                const src = source(upstream)
+                src.push('data: a\n\n')
+                return new Response(src.stream, { headers: SSE })
+            })
+            const idle = new IdleWatchdog({ preStream: 1000, midStream: 20, toolActive: 1000 })
+            await forwardStream(t.deps, t.em as never, out, call(new AbortController().signal), async () => identity, noFallback, { value: false }, idle)
+            expect(t.em.data).toEqual(['a'])
+            expect(upstream.aborted).toBe(true)
+            expect(t.em.interrupted).toBe(1)
+            const cause = t.em.causes[0] as StreamIdleTimeoutError
+            expect(cause).toBeInstanceOf(StreamIdleTimeoutError)
+            expect([cause.phase, cause.timeoutMs]).toEqual(['mid-stream', 20])
+            expect(t.logger.logged).toContainEqual({
+                level: 'warn',
+                msg: 'upstream stream idle; cancelling upstream',
+                attrs: { endpoint: '/v1/chat/completions', phase: 'mid-stream', timeout_ms: 20 },
+            })
+        })
+
+        it('bounds the wait for the first byte by the pre-stream budget', async () => {
+            const t = setup((init) => new Response(source(init.signal!).stream, { headers: SSE }))
+            const idle = new IdleWatchdog({ preStream: 20, midStream: 1000, toolActive: 1000 })
+            await forwardStream(t.deps, t.em as never, out, call(), async () => identity, noFallback, { value: false }, idle)
+            expect((t.em.causes[0] as StreamIdleTimeoutError).phase).toBe('pre-stream')
+        })
+
+        it('counts a keepalive comment as the node being alive', async () => {
+            let src!: ReturnType<typeof source>
+            const t = setup((init) => {
+                src = source(init.signal!)
+                return new Response(src.stream, { headers: SSE })
+            })
+            const idle = new IdleWatchdog({ preStream: 60, midStream: 60, toolActive: 60 })
+            const run = forwardStream(t.deps, t.em as never, out, call(), async () => identity, noFallback, { value: false }, idle)
+            for (let i = 0; i < 5; i++) {
+                await sleep(20)
+                src.push(': zs-keepalive\n\n')
+            }
+            src.push('data: end\n\n')
+            src.close()
+            await run
+            expect(t.em.interrupted).toBe(0)
+            expect(t.em.data.at(-1)).toBe('end')
+        })
+
+        it('bounds a receipt-tail drain, telling nobody', async () => {
+            const caller = new AbortController()
+            let upstream!: AbortSignal
+            const t = setup((init) => {
+                upstream = init.signal!
+                const src = source(upstream)
+                src.push('data: done\n\n')
+                return new Response(src.stream, { headers: SSE })
+            })
+            t.deps.drainTailTimeoutMs = 60_000
+            const gen: GenComplete = { value: false }
+            const idle = new IdleWatchdog({ preStream: 1000, midStream: 20, toolActive: 1000 })
+            const started = Date.now()
+            await forwardStream(
+                t.deps,
+                t.em as never,
+                out,
+                call(caller.signal),
+                async () => async (f) => {
+                    gen.value = true
+                    caller.abort()
+                    return { frame: f }
+                },
+                noFallback,
+                gen,
+                idle,
+            )
+            expect(Date.now() - started).toBeLessThan(5000)
+            expect(upstream.aborted).toBe(true)
+            expect(t.em.interrupted).toBe(0)
+            expect(t.logger.logged.map((l) => l.msg)).toContain('upstream stream idle; cancelling upstream')
+        })
+
+        // A receipt's settle runs inline and reads nothing; that wait is the
+        // SDK's, not the node's.
+        it('doesn’t count the frame hook’s own time as silence', async () => {
+            const t = setup(() => new Response(bodyOf('data: a\n\ndata: b\n\n'), { headers: SSE }))
+            const idle = new IdleWatchdog({ preStream: 1000, midStream: 20, toolActive: 1000 })
+            await forwardStream(
+                t.deps,
+                t.em as never,
+                out,
+                call(),
+                async () => async (f) => {
+                    await sleep(60)
+                    return { frame: f }
+                },
+                noFallback,
+                { value: false },
+                idle,
+            )
+            expect(t.em.interrupted).toBe(0)
+            expect(t.em.data).toEqual(['a', 'b'])
+        })
+
+        it('disarms when the stream ends', async () => {
+            const t = setup(() => new Response(bodyOf('data: done\n\n'), { headers: SSE }))
+            const idle = new IdleWatchdog({ preStream: 10, midStream: 10, toolActive: 10 })
+            await forwardStream(t.deps, t.em as never, out, call(), async () => identity, noFallback, { value: false }, idle)
+            await sleep(30)
+            expect(t.em.interrupted).toBe(0)
+            expect(t.logger.logged.map((l) => l.msg)).not.toContain('upstream stream idle; cancelling upstream')
+        })
+
+        it('arms nothing for a reply that isn’t a stream', async () => {
+            const t = setup(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+            const idle = new IdleWatchdog({ preStream: 10, midStream: 10, toolActive: 10 })
+            let replied = false
+            await forwardStream(
+                t.deps,
+                t.em as never,
+                out,
+                call(),
+                async () => identity,
+                async () => {
+                    await sleep(30)
+                    replied = true
+                },
+                { value: false },
+                idle,
+            )
+            expect(replied).toBe(true)
+            expect(t.logger.logged.map((l) => l.msg)).not.toContain('upstream stream idle; cancelling upstream')
+        })
+    })
 })
 
 describe('frameFactory', () => {
@@ -792,6 +933,21 @@ describe('frameFactory', () => {
         const out = await fn(receiptFrame(s))
         expect(s.handle.acks[0]![1]).toBeNull()
         expect(out.usage).toMatchObject({ settleFees: 1000, check: { settled: { kind: 'payer_ack', feesMicroAlgos: 1000 } } })
+    })
+
+    it('shows the idle watchdog each opened content frame, and nothing else', async () => {
+        const opening = '{"type":"response.zs_tool_call.in_progress","item_id":"t1","tool":"zs_image_generation"}'
+        const s = await setup({ frames: [opening] })
+        const idle = new IdleWatchdog({ preStream: 1000, midStream: 1000, toolActive: 1000 })
+        const seen: [string, string][] = []
+        vi.spyOn(idle, 'frame').mockImplementation((text, raw) => {
+            seen.push([text(), dec.decode(raw)])
+        })
+        const fn = await frameFactory(s.deps, s.call, s.gen, undefined, idle)(keyed(s))
+        await fn(zs(s, s.frames[0]!))
+        await fn(groupFrame(s, VALID_GROUP))
+        await fn(receiptFrame(s))
+        expect(seen).toEqual([[opening, opening]])
     })
 
     it('marks the generation complete on a terminal frame, and only then', async () => {

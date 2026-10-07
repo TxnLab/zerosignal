@@ -35,7 +35,8 @@ import {
     testnet,
 } from '../src/index.js'
 import { retryable } from '../src/codes.js'
-import { ZsError } from '../src/errors.js'
+import { ZsError, findError } from '../src/errors.js'
+import { IdleWatchdog, StreamIdleTimeoutError } from '../src/idle.js'
 import { NodeExclusionStore } from '../src/routing/exclusion.js'
 import { RelayReputationStore } from '../src/routing/reputation.js'
 import type { Request } from '../src/turn.js'
@@ -67,6 +68,8 @@ interface HarnessOptions {
     plaintext?: string
     /** Streamed: send the first frame, then hold the stream open until the request is aborted. */
     hold?: boolean
+    /** The plaintext of the frame a held stream sends, the first content frame by default. */
+    holdFrame?: string
     /** Streamed: send the content, then the receipt tail a moment later, unless the request is aborted first. */
     lateTail?: boolean
     /** The open handle carries no operator, so the journal row can't be built. */
@@ -115,7 +118,8 @@ async function harness(o: HarnessOptions = {}) {
     const node: Node = {
         answer: (s, init) => {
             if (o.hold) {
-                const first = `event: zs\ndata: ${s.sealStreamFrame(frames[0]!)}\n\n`
+                const pt = o.holdFrame === undefined ? frames[0]! : enc.encode(o.holdFrame)
+                const first = `event: zs\ndata: ${s.sealStreamFrame(pt)}\n\n`
                 const body = new ReadableStream<Uint8Array>({
                     start(ctl) {
                         ctl.enqueue(enc.encode(first))
@@ -340,6 +344,55 @@ describe('Client.stream', () => {
         expect(err).toMatchObject({ retryable: false, paid: true })
         expect(st.err).toBe(err)
         await h.c.close()
+    })
+
+    describe('on a node that goes silent', () => {
+        async function silence(config: Partial<Config>, holdFrame?: string, abortAfterMs?: number) {
+            const h = await harness({ stream: true, hold: true, config, ...(holdFrame === undefined ? {} : { holdFrame }) })
+            const ac = new AbortController()
+            const timer = abortAfterMs === undefined ? undefined : setTimeout(() => ac.abort(), abortAfterMs)
+            const started = Date.now()
+            let err: unknown
+            try {
+                await read(h.c.stream({ endpoint: CHAT, body: h.body }, ac.signal).events())
+            } catch (e) {
+                err = e
+            }
+            clearTimeout(timer)
+            await h.c.close()
+            return { err: err as ZsError, elapsed: Date.now() - started }
+        }
+
+        it('ends the turn stream_interrupted, a retry, with the timeout as its cause', async () => {
+            const { err } = await silence({ streamIdle: { midStream: 20 } })
+            expect(err).toBeInstanceOf(ZsError)
+            expect(err).toMatchObject({ code: 'stream_interrupted', retryable: true, paid: true })
+            const cause = findError(err, StreamIdleTimeoutError)
+            expect([cause?.phase, cause?.timeoutMs]).toEqual(['mid-stream', 20])
+        })
+
+        it('waits out an image tool round on the tool budget', async () => {
+            const opening = '{"type":"response.zs_tool_call.in_progress","item_id":"t1","tool":"zs_image_generation"}'
+            const { err, elapsed } = await silence({ streamIdle: { midStream: 20, toolActive: 150 } }, opening)
+            expect(elapsed).toBeGreaterThanOrEqual(140)
+            expect([findError(err, StreamIdleTimeoutError)?.phase]).toEqual(['tool-active'])
+        })
+
+        it('arms the configured budgets by default, and nothing with the watchdog off', async () => {
+            const start = vi.spyOn(IdleWatchdog.prototype, 'start')
+            try {
+                const { err } = await silence({}, undefined, 50)
+                expect(err).toMatchObject({ retryable: false })
+                expect(start).toHaveBeenCalledTimes(1)
+                start.mockClear()
+                const off = await silence({ streamIdle: false }, undefined, 50)
+                expect(off.err).toMatchObject({ retryable: false })
+                expect(findError(off.err, StreamIdleTimeoutError)).toBeUndefined()
+                expect(start).not.toHaveBeenCalled()
+            } finally {
+                start.mockRestore()
+            }
+        })
     })
 
     // A caller who stops reading once generation has finished still has the

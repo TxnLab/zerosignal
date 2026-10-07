@@ -271,6 +271,6 @@ export interface Emitter {
      * a tail drain still reaches the receipt.
      */
     frame(out: OutFrame): number
-    /** Ends an open stream that broke before its end. */
-    interrupt(): void
+    /** Ends an open stream that broke before its end, for cause when the SDK knows why. */
+    interrupt(cause?: unknown): void
 }

@@ -5,6 +5,7 @@
 
 import type { LookupAddress } from 'node:dns'
 import { createServer, type Server } from 'node:http'
+import { createRequire } from 'node:module'
 import {
     type AddressInfo,
     createServer as createNetServer,
@@ -18,6 +19,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { type Config, resolveConfig, testnet, ZsError } from '../src/index.js'
 import { guardedLookup } from '../src/node/fetch.js'
 import { nodeFetch, PrivateTargetError } from '../src/node/index.js'
+
+// undici's own timer module, the one its fetch reads; tick is its test hook.
+const undiciTimers = createRequire(import.meta.url)('undici/lib/util/timers.js') as { tick(delay: number): void }
 
 let server: Server
 let port: number
@@ -116,6 +120,35 @@ describe('nodeFetch', () => {
     it('dials a private address when allowed', async () => {
         const res = await nodeFetch({ allowPrivateHosts: true })(`http://127.0.0.1:${port}/`)
         expect(await res.json()).toEqual(GET)
+    })
+
+    // A streamed answer's silences are Config.streamIdle's to bound, and
+    // undici's own default would cut any at 300 s, whatever that says.
+    it('puts no bound of its own on a silence in the body', async () => {
+        let resume!: () => void
+        const slow = createServer((_, res) => {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+            res.write('a')
+            resume = () => res.end('b')
+        })
+        await new Promise<void>((r) => slow.listen(0, '127.0.0.1', r))
+        try {
+            const res = await nodeFetch({ allowPrivateHosts: true })(`http://127.0.0.1:${(slow.address() as AddressInfo).port}/`)
+            const reader = res.body!.getReader()
+            expect((await reader.read()).value).toEqual(new TextEncoder().encode('a'))
+            const next = reader.read()
+            // undici times a body on a clock of its own, which faked timers
+            // can't reach once another test has started it. Its first tick
+            // starts a new timer; only a later one can expire it.
+            undiciTimers.tick(0)
+            undiciTimers.tick(301_000)
+            await new Promise((r) => setTimeout(r, 20))
+            resume()
+            expect((await next).value).toEqual(new TextEncoder().encode('b'))
+        } finally {
+            slow.closeAllConnections()
+            await new Promise<void>((r) => slow.close(() => r()))
+        }
     })
 
     // The SDK's reserve and probe pass a URL and an init; the request must

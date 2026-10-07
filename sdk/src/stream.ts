@@ -32,6 +32,7 @@ import {
 
 import { newError } from './codes.js'
 import { goDecodeUTF8 } from './gotext.js'
+import type { IdleWatchdog, StreamIdleTimeoutError } from './idle.js'
 import { type Operator, refOf } from './operator.js'
 import type { Clock, LogAttrs } from './ports.js'
 import { type ReceiptCheckDeps, type SettleSlot, checkTurnReceipt } from './receipt-check.js'
@@ -223,6 +224,8 @@ export async function pumpSSE(
     body: ReadableStream<Uint8Array> | null,
     frameFn: FrameTransform,
     tally: StreamTally,
+    /** Called for each chunk of body read, before any of it is parsed. */
+    onChunk?: () => void,
 ): Promise<void> {
     let frame = emptyFrame()
     let data: Uint8Array[] = []
@@ -306,6 +309,7 @@ export async function pumpSSE(
             if (signal.aborted) throw abortError(signal)
             const { done, value } = await reader.read()
             if (done) break
+            onChunk?.()
             let start = 0
             for (let nl = value.indexOf(0x0a); nl !== -1; nl = value.indexOf(0x0a, start)) {
                 if (signal.aborted) throw abortError(signal)
@@ -349,6 +353,10 @@ function withHeader(h: Record<string, string>, name: string, value: string): Rec
  * the drain timeout, so the operator is paid for what it delivered and the
  * payer still checks the receipt; one who leaves before cancels the node at
  * once, which settles nothing.
+ *
+ * idle bounds the silences of the node's body, the drain included: a silence
+ * past its budget cancels the node, and the turn ends stream_interrupted with
+ * the StreamIdleTimeoutError as its cause.
  */
 export async function forwardStream(
     deps: StreamForwardDeps,
@@ -358,6 +366,7 @@ export async function forwardStream(
     factory: FrameTransformFactory,
     fallback: BufferedResponder,
     genComplete: GenComplete,
+    idle?: IdleWatchdog,
 ): Promise<void> {
     const log = deps.logger
     const clock = deps.clock ?? Date.now
@@ -444,14 +453,38 @@ export async function forwardStream(
         if (signal?.aborted) onLeave()
         else signal?.addEventListener('abort', onLeave, { once: true })
 
+        let idleErr: StreamIdleTimeoutError | undefined
+        idle?.start((err) => {
+            idleErr = err
+            log.warn('upstream stream idle; cancelling upstream', {
+                endpoint,
+                ...relayAttrs(hop),
+                phase: err.phase,
+                timeout_ms: err.timeoutMs,
+            })
+            upstream.abort(err)
+        })
+        // The hook settles a receipt inline, reading nothing meanwhile.
+        const timedFn: FrameTransform =
+            idle === undefined
+                ? frameFn
+                : async (f) => {
+                      idle.pause()
+                      try {
+                          return await frameFn(f)
+                      } finally {
+                          idle.resume()
+                      }
+                  }
         let pumpErr: unknown
         let failed = false
         try {
-            await pumpSSE(upstream.signal, (o) => em.frame(o), resp.body, frameFn, tally)
+            await pumpSSE(upstream.signal, (o) => em.frame(o), resp.body, timedFn, tally, idle && (() => idle.chunk()))
         } catch (err) {
             failed = true
             pumpErr = err
         } finally {
+            idle?.stop()
             signal?.removeEventListener('abort', onLeave)
             if (drainTimer !== undefined) clearTimeout(drainTimer)
         }
@@ -469,7 +502,7 @@ export async function forwardStream(
         if (failed) {
             log.warn('sse pump ended with error', { endpoint, err: errText(pumpErr) })
             // A drain the caller ended has nobody to tell.
-            if (!signal?.aborted) em.interrupt()
+            if (!signal?.aborted) em.interrupt(idleErr)
         }
     } finally {
         upstream.abort()
@@ -492,7 +525,13 @@ export function streamApiFor(endpoint: Endpoint): StreamApi {
  * A node controls how many receipts it sends; only the first is acted on, so
  * it can't steer the spend guard and the ack down different branches.
  */
-export function frameFactory(deps: FrameDeps, call: SealedCall, genComplete: GenComplete, slot?: SettleSlot): FrameTransformFactory {
+export function frameFactory(
+    deps: FrameDeps,
+    call: SealedCall,
+    genComplete: GenComplete,
+    slot?: SettleSlot,
+    idle?: IdleWatchdog,
+): FrameTransformFactory {
     const log = deps.logger
     const { endpoint, model, op, reserved, handle, txId, hop } = call
     const ticket = reserved.ticket
@@ -549,6 +588,8 @@ export function frameFactory(deps: FrameDeps, call: SealedCall, genComplete: Gen
                     // U+FFFD, which is how the next turn's ids are read too.
                     let text: string | undefined
                     const textOf = () => (text ??= goDecodeUTF8(pt))
+                    // An image tool's round is silent while it runs.
+                    idle?.frame(textOf, pt)
                     if (deps.toolAffinity) {
                         const ids = extractStreamToolCallIDs(textOf())
                         if (ids.length > 0) deps.toolAffinity.record(refOf(op), ids)

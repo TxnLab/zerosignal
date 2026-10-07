@@ -75,9 +75,15 @@ export function guardedLookup(resolve: Resolve = dnsLookup): LookupFunction {
     }
 }
 
+// undici cuts a body after 300 s without a byte by default. A streamed
+// answer's silences are Config.streamIdle's to bound, as Go's transport
+// leaves them to the caller, so the pool sets none of its own.
+const AGENT_OPTIONS = { bodyTimeout: 0 }
+
 function guardedAgent(resolve?: Resolve): Agent {
     const connector = buildConnector({ lookup: guardedLookup(resolve) })
     return new Agent({
+        ...AGENT_OPTIONS,
         connect: (opts, callback) => {
             if (isIP(opts.hostname) && isPrivateAddress(opts.hostname)) {
                 callback(new PrivateTargetError(opts.hostname, [opts.hostname]), null)
@@ -111,7 +117,7 @@ export function nodeFetch(opts: NodeFetchOptions = {}): Fetch {
     if (!opts.allowPrivateHosts && !guardsDials()) {
         throw configError('nodeFetch guards dials only under Node; this runtime would let a private address through')
     }
-    const dispatcher = opts.allowPrivateHosts ? new Agent() : guardedAgent(opts.resolve)
+    const dispatcher = opts.allowPrivateHosts ? new Agent(AGENT_OPTIONS) : guardedAgent(opts.resolve)
     return ((input: RequestInfo | URL, init?: RequestInit) => {
         // undici's fetch takes only its own Request class, and reads any other
         // object as a URL string.

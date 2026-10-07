@@ -34,6 +34,7 @@ import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
 import { Settles } from './settles.js'
+import { IdleWatchdog } from './idle.js'
 import { type GenComplete, forwardStream, frameFactory } from './stream.js'
 import { type Request, type Stream, TurnStream, turnOf } from './turn.js'
 import { Wallet } from './wallet.js'
@@ -354,7 +355,9 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         buffered: (call) => bufferedResponder(responder, call, slot),
         streamed: (em, out, call, buffered) => {
             const genComplete: GenComplete = { value: false }
-            return forwardStream(deps, em, out, call, frameFactory(responder, call, genComplete, slot), buffered, genComplete)
+            const idle = cfg.streamIdle === null ? undefined : new IdleWatchdog(cfg.streamIdle)
+            const frames = frameFactory(responder, call, genComplete, slot, idle)
+            return forwardStream(deps, em, out, call, frames, buffered, genComplete, idle)
         },
     }
     return deps

@@ -187,9 +187,9 @@ export class StreamEmitter implements Emitter {
     }
 
     /** Ends a stream that broke. A failure the node already reported is the better account of why, so it wins. */
-    interrupt(): void {
+    interrupt(cause?: unknown): void {
         const reported = this.#dec?.reportedFailure() ?? null
-        this.#end(reported ?? newError('stream_interrupted', 'the stream broke before its end'))
+        this.#end(reported ?? newError('stream_interrupted', 'the stream broke before its end', cause === undefined ? {} : { cause }))
     }
 }
 

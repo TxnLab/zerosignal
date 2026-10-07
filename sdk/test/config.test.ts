@@ -49,6 +49,7 @@ describe('resolveConfig', () => {
         expect(c.reserveTimeout).toBe(defaults.reserveTimeout)
         expect(c.retryBudget).toBe(defaults.retryBudget)
         expect(c.maxOutputCeiling).toBe(defaults.maxOutputCeiling)
+        expect(c.streamIdle).toEqual({ preStream: 300_000, midStream: 60_000, toolActive: 300_000 })
         expect(c.logger).toBe(discardLogger)
         expect(c.warnings).toEqual([])
         expect(c.remedies.fund).not.toBe('')
@@ -59,6 +60,25 @@ describe('resolveConfig', () => {
         expect([c.allowPrivacyOverride, c.allowStaging, c.allowPrivateHosts, c.disableTee, c.requireMaxOutput]).toEqual(
             [false, false, false, false, false],
         )
+    })
+
+    it('fills each stream idle budget left unset, and turns the watchdog off with false', () => {
+        expect(resolveConfig({ ...base, streamIdle: { midStream: 5, toolActive: -1 } }).streamIdle).toEqual({
+            preStream: 300_000,
+            midStream: 5,
+            toolActive: 300_000,
+        })
+        expect(resolveConfig({ ...base, streamIdle: { preStream: 7 } }).streamIdle?.preStream).toBe(7)
+        expect(resolveConfig({ ...base, streamIdle: false }).streamIdle).toBeNull()
+    })
+
+    it('holds a stream idle budget to the longest a timer can wait', () => {
+        const max = 2 ** 31 - 1
+        expect(resolveConfig({ ...base, streamIdle: { preStream: max, midStream: max + 1, toolActive: Number.MAX_SAFE_INTEGER } }).streamIdle).toEqual({
+            preStream: max,
+            midStream: max,
+            toolActive: max,
+        })
     })
 
     // The build of #default-fetch outside Node; these tests run the Node one,
