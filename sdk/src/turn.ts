@@ -13,6 +13,7 @@ import type { Event } from './events.js'
 import type { Operator } from './operator.js'
 import type { Reserved } from './parts.js'
 import type { UsageReport } from './responder.js'
+import type { OutFrame } from './stream.js'
 import type { Endpoint } from './types.js'
 
 /**
@@ -85,4 +86,18 @@ export interface Emitter {
      * reads a throw as the response failing and would end the turn twice.
      */
     reply(status: number, header: Headers, body: Uint8Array, usage: UsageReport | null): void
+    /**
+     * Starts a stream; header is the node's own, as for reply. False means it
+     * could not start and the caller has already been told.
+     */
+    open(status: number, header: Headers): boolean
+    /**
+     * Delivers one stream frame, or the usage its receipt carried, and returns
+     * the frame's size on the wire for the stream tally; a usage report counts
+     * 0. Frames that arrive after the caller left are dropped, not refused, so
+     * a tail drain still reaches the receipt.
+     */
+    frame(out: OutFrame): number
+    /** Ends an open stream that broke before its end. */
+    interrupt(): void
 }

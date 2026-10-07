@@ -32,6 +32,7 @@ import type { Event } from './events.js'
 import { goDecodeRune, goDecodeUTF8, goQuote } from './gotext.js'
 import { openAIError } from './http.js'
 import { type Operator, refOf } from './operator.js'
+import type { Reserved } from './parts.js'
 import type { LogAttrs, Logger } from './ports.js'
 import { type ReceiptCheckDeps, type SettleSlot, type SettleSubmit, type TurnCheck, checkTurnReceipt } from './receipt-check.js'
 import { parseRetryAfter } from './reserve.js'
@@ -202,13 +203,7 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
 
         // Throws on a key that won't unwrap or doesn't match commit_k, which
         // the forwarder reports.
-        let responseKey: Uint8Array
-        try {
-            responseKey = await openResponseKey(wrappedKey, reserved.identity, ticket)
-        } catch (err) {
-            if (err instanceof ResponseKeyUnwrapError) throw new Error(`unwrap response key: ${err.message}`, { cause: err })
-            throw err
-        }
+        const responseKey = await openCommittedKey(wrappedKey, reserved)
         // One opener binds the body and both sealed headers to one (txId, ticketId).
         const opener = new ResponseOpener(responseKey, txId, ticket.ticket_id)
         let plaintext: Uint8Array
@@ -308,7 +303,21 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
     }
 }
 
-interface MetaContext {
+/**
+ * openCommittedKey unwraps the response key the node sent and checks it
+ * against the ticket's commit_k. It throws on either failure, prefixed as Go's
+ * responders do.
+ */
+export async function openCommittedKey(wrappedKey: string, reserved: Reserved): Promise<Uint8Array> {
+    try {
+        return await openResponseKey(wrappedKey, reserved.identity, reserved.ticket)
+    } catch (err) {
+        if (err instanceof ResponseKeyUnwrapError) throw new Error(`unwrap response key: ${err.message}`, { cause: err })
+        throw err
+    }
+}
+
+export interface MetaContext {
     ticket: Ticket
     op: Operator
     hop: RelayHop | null
@@ -321,7 +330,7 @@ interface MetaContext {
  * both link to the payer and a relay forwards the response verbatim. '' for
  * an absent value; a failed open is logged and reads as absent.
  */
-function openSealedResponseMeta(m: MetaContext, opener: ResponseOpener, sealed: string, name: string): string {
+export function openSealedResponseMeta(m: MetaContext, opener: ResponseOpener, sealed: string, name: string): string {
     if (sealed === '') return ''
     try {
         return new TextDecoder().decode(opener.openHeader(sealed, name))
@@ -342,7 +351,7 @@ function openSealedResponseMeta(m: MetaContext, opener: ResponseOpener, sealed: 
  * null: an absent one is normal, a malformed one is logged and the ack goes
  * standalone.
  */
-function settleGroupOf(m: MetaContext, b64: string): string | null {
+export function settleGroupOf(m: MetaContext, b64: string): string | null {
     if (b64 === '') return null
     try {
         decodeSettleGroup(b64)

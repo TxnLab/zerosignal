@@ -199,6 +199,15 @@ class Recorder {
     reply() {
         throw new Error('the reserve phase never replies')
     }
+    open(): boolean {
+        throw new Error('the reserve phase never streams')
+    }
+    frame(): number {
+        throw new Error('the reserve phase never streams')
+    }
+    interrupt() {
+        throw new Error('the reserve phase never streams')
+    }
 }
 
 interface Harness {
@@ -1355,6 +1364,17 @@ describe('the Client’s parts', () => {
             'usageEvents',
             'openAIErrorBody',
             'truncateForLog',
+            'openCommittedKey',
+            'openSealedResponseMeta',
+            'settleGroupOf',
+            'forwardStream',
+            'frameFactory',
+            'pumpSSE',
+            'StreamTally',
+            'frameSSE',
+            'emptyFrame',
+            'isEmptyFrame',
+            'streamApiFor',
         ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }

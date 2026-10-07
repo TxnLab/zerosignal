@@ -9,19 +9,9 @@
 // group-rejection exclusion, and the receipt, spend and pre-envelope cases of
 // go/zs/handler dispatch_test.go and spend_dispatch_test.go.
 
-import { generateKeyPairSync, sign } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-import {
-    type Ticket,
-    type UsageReceipt,
-    commitResponseKey,
-    encodeReceiptHeader,
-    setBodyHashBytes,
-    signReceipt,
-} from '@txnlab/zs-proto/ticket'
+import { type Ticket, type UsageReceipt, encodeReceiptHeader } from '@txnlab/zs-proto/ticket'
 import {
     ENCRYPTED_CONTENT_TYPE,
     RECEIPT_HEADER,
@@ -34,12 +24,10 @@ import {
     generateEphemeralIdentity,
 } from '@txnlab/zs-proto/wire'
 
-import type { AckSettleResult } from '../src/ack.js'
 import { IDAffinity } from '../src/affinity.js'
 import type { SpendGuard } from '../src/config.js'
 import { NodeReply, type ZsError } from '../src/errors.js'
 import { type OpenHandle, ProtestReason, type Reserved, type SettleOutcome, memoryJournal } from '../src/parts.js'
-import type { LogAttrs, Logger } from '../src/ports.js'
 import {
     DISPUTE_EXCERPT_CAP,
     type ReceiptCheckDeps,
@@ -62,125 +50,7 @@ import { NodeExclusionStore } from '../src/routing/exclusion.js'
 import type { SealedCall } from '../src/sealed.js'
 import { Settles } from '../src/settles.js'
 import { testOperator } from './fixtures.js'
-
-const groupVectors = JSON.parse(
-    readFileSync(fileURLToPath(new URL('../../testdata/escrow_group_vectors.json', import.meta.url)), 'utf8'),
-) as { settle: { cases: { name: string; group_b64: string }[] } }
-const VALID_GROUP = groupVectors.settle.cases.find((c) => c.name === 'valid')!.group_b64
-
-interface Logged {
-    level: string
-    msg: string
-    attrs: LogAttrs | undefined
-}
-
-function recLogger(): Logger & { logged: Logged[] } {
-    const logged: Logged[] = []
-    const at = (level: string) => (msg: string, attrs?: LogAttrs) => {
-        logged.push({ level, msg, attrs })
-    }
-    return { logged, debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error') }
-}
-
-function keypair() {
-    const { publicKey, privateKey } = generateKeyPairSync('ed25519')
-    const jwk = publicKey.export({ format: 'jwk' })
-    return {
-        pub: new Uint8Array(Buffer.from(jwk.x!, 'base64url')),
-        signer: { signBytes: async (_a: string, msg: Uint8Array) => new Uint8Array(sign(null, msg, privateKey)) },
-    }
-}
-
-const TICKET_ID = 'dGlja2V0LXdhaXQtMDAwMDA='
-
-/** A ticket and a receipt its operator signed over plaintext, Go's settleFixture. */
-async function fixture(over: Partial<UsageReceipt> = {}, plaintext = new TextEncoder().encode('hello world')) {
-    const k = keypair()
-    const op = testOperator({ id: 7, nodeId: 3, ownerAddr: 'OWNER7', ticketSigningKey: k.pub })
-    const responseKey = crypto.getRandomValues(new Uint8Array(32))
-    const ticket = {
-        ticket_id: TICKET_ID,
-        operator_id: 7,
-        node_id: 3,
-        max_price: 100_000,
-        commit_k: Buffer.from(commitResponseKey(responseKey)).toString('base64'),
-    } as unknown as Ticket
-    const receipt: UsageReceipt = {
-        ticket_id: TICKET_ID,
-        actual_input_count: 10,
-        actual_output_count: 5,
-        amount_charged: 50_000,
-        ttft_ms: 0,
-        decode_ms: 0,
-        body_hash: '',
-        input_usage_type: 1,
-        output_usage_type: 1,
-        aux_output_usage_type: 0,
-        aux_output_count: 0,
-        cached_input_count: 0,
-    } as UsageReceipt
-    setBodyHashBytes(receipt, bodyHashOfBody(plaintext))
-    Object.assign(receipt, over)
-    await signReceipt(receipt, k.signer, 'SIGNER')
-    return { op, ticket, receipt, plaintext, responseKey }
-}
-
-interface Scripted {
-    txid?: string
-    fee?: number
-    groupRejected?: boolean
-    err?: unknown
-    throws?: unknown
-    outcomes?: (SettleOutcome | Error)[]
-}
-
-/** An OpenHandle whose ack and protest answer from s, Go's scriptedSettleHandle. */
-function handleOf(s: Scripted = {}) {
-    const acks: [UsageReceipt, string | null, AbortSignal | undefined][] = []
-    const protests: [UsageReceipt, Uint8Array, number, AbortSignal | undefined][] = []
-    const looks: string[] = []
-    const h = {
-        appCallTxId: 'APPCALL',
-        groupId: 'GROUP',
-        ticketId: TICKET_ID,
-        openFeesMicroalgos: 2000,
-        acks,
-        protests,
-        looks,
-        async ackSettle(r: UsageReceipt, g: string | null, signal?: AbortSignal): Promise<AckSettleResult> {
-            acks.push([r, g, signal])
-            if (s.throws !== undefined) throw s.throws
-            const res: AckSettleResult = { txid: s.err ? '' : (s.txid ?? ''), feeMicroalgos: s.err ? 0 : (s.fee ?? 0), groupRejected: s.groupRejected ?? false }
-            if (s.err) res.err = s.err
-            return res
-        },
-        async protest(r: UsageReceipt, excerpt: Uint8Array, reason: number, signal?: AbortSignal) {
-            protests.push([r, excerpt, reason, signal])
-            if (s.throws !== undefined) throw s.throws
-            if (s.err) throw s.err
-            return { txId: s.txid ?? '', feeMicroalgos: s.fee ?? 0 }
-        },
-        async refundInactive() {
-            return ''
-        },
-        async settleLapsed() {
-            return ''
-        },
-    }
-    if (s.outcomes !== undefined) {
-        const script = s.outcomes
-        Object.assign(h, {
-            async settleOutcome(txid: string): Promise<SettleOutcome> {
-                looks.push(txid)
-                if (script.length === 0) return 'pending'
-                const step = script[Math.min(looks.length, script.length) - 1]!
-                if (step instanceof Error) throw step
-                return step
-            },
-        })
-    }
-    return h as typeof h & OpenHandle
-}
+import { TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
 
 function depsOf(over: Partial<ReceiptCheckDeps> = {}) {
     const resolved: string[] = []
@@ -1054,5 +924,14 @@ class Recorder {
     }
     reply(status: number, header: Headers, body: Uint8Array, usage: UsageReport | null) {
         this.replies.push([status, header, body, usage])
+    }
+    open(): boolean {
+        throw new Error('a buffered turn never streams')
+    }
+    frame(): number {
+        throw new Error('a buffered turn never streams')
+    }
+    interrupt() {
+        throw new Error('a buffered turn never streams')
     }
 }

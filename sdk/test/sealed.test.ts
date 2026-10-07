@@ -245,6 +245,15 @@ class Recorder {
     reply() {
         throw new Error('a test responder records its own reply')
     }
+    open(): boolean {
+        throw new Error('a test stream records its own frames')
+    }
+    frame(): number {
+        throw new Error('a test stream records its own frames')
+    }
+    interrupt() {
+        throw new Error('a test stream records its own frames')
+    }
 }
 
 describe('relayEvidence and attributeRelayHop', () => {
