@@ -265,17 +265,121 @@ const utf8 = new TextEncoder()
 
 /** parseEventLog decodes the raw JSON array carried as the bundle's `event_log`. */
 export function parseEventLog(raw: string): DstackEvent[] {
+    // The log arrives as a string inside the bundle's JSON, where Go has
+    // already made each escaped lone surrogate U+FFFD and JSON.parse has not;
+    // left alone, one could pair with an escape inside the log into a
+    // character Go never sees.
+    raw = goString(raw)
     let parsed: unknown
     try {
         parsed = JSON.parse(raw)
     } catch (e) {
         throw new AttestError('malformed_log', `attest: event log is not JSON: ${String(e)}`)
     }
+    // Go reads null into a nil slice without error; the replay then finds nothing.
+    if (parsed === null) return []
     if (!Array.isArray(parsed)) {
         throw new AttestError('malformed_log', 'attest: event log is not a JSON array of events')
     }
-    return parsed as DstackEvent[]
+    if (nestingDepth(raw) > GO_MAX_NESTING_DEPTH) {
+        throw new AttestError('malformed_log', 'attest: event log is not a JSON array of events: exceeded max depth')
+    }
+    return children(raw).map(decodeEvent)
 }
+
+/**
+ * decodeEvent reads one element's source text as Go's json.Unmarshal fills
+ * attest.Event. Two relying parties must reach one verdict on one log, so a
+ * leniency here is as much a defect as a strictness, and so is reading
+ * different evidence: a field named twice decodes to different events in Go
+ * and in JSON.parse, which keeps the last value at the first key's place.
+ * So this works from the source, as Go does: null is the zero event; members
+ * apply in document order, matched to fields case-insensitively, the last one
+ * winning; a null value leaves the field as it was; an integer must be written
+ * as plain digits; and any value of the wrong type refuses the whole log.
+ */
+function decodeEvent(src: string): DstackEvent {
+    const e: DstackEvent = { imr: 0, event_type: 0, digest: '', event: '', event_payload: '' }
+    if (src === 'null') return e
+    if (src[0] !== '{') {
+        throw new AttestError('malformed_log', 'attest: event log is not a JSON array of events')
+    }
+    for (const member of children(src)) {
+        const keyEnd = stringEnd(member, 0)
+        const field = EVENT_FIELDS.get(goFoldKey(JSON.parse(member.slice(0, keyEnd)) as string))
+        const value = member.slice(member.indexOf(':', keyEnd) + 1).trim()
+        if (field === undefined || value === 'null') continue
+        if (field === 'imr' || field === 'event_type') {
+            if (!/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 0xffffffffn) {
+                throw new AttestError('malformed_log', `attest: event log is not a JSON array of events: ${field} is not a uint32`)
+            }
+            e[field] = Number(value)
+        } else {
+            if (value[0] !== '"') {
+                throw new AttestError('malformed_log', `attest: event log is not a JSON array of events: ${field} is not a string`)
+            }
+            e[field] = goString(JSON.parse(value) as string)
+        }
+    }
+    return e
+}
+
+/** Go's json scanner refuses nesting deeper than this; JSON.parse doesn't. */
+const GO_MAX_NESTING_DEPTH = 10000
+
+// The helpers below walk text JSON.parse has already accepted, so they track
+// only strings and brackets.
+
+/** stringEnd returns the index just past the string literal starting at i. */
+function stringEnd(src: string, i: number): number {
+    for (i++; i < src.length && src[i] !== '"'; i++) if (src[i] === '\\') i++
+    return i + 1
+}
+
+function nestingDepth(src: string): number {
+    let depth = 0
+    let max = 0
+    for (let i = 0; i < src.length; i++) {
+        const c = src[i]
+        if (c === '"') i = stringEnd(src, i) - 1
+        else if (c === '[' || c === '{') max = Math.max(max, ++depth)
+        else if (c === ']' || c === '}') depth--
+    }
+    return max
+}
+
+/** children returns the source text of each element of an array, or each member of an object. */
+function children(src: string): string[] {
+    const out: string[] = []
+    let depth = 0
+    let start = -1
+    for (let i = 0; i < src.length; i++) {
+        const c = src[i]!
+        if (depth === 1 && start < 0 && !' \t\n\r,'.includes(c) && c !== ']' && c !== '}') start = i
+        if (c === '"') i = stringEnd(src, i) - 1
+        else if (c === '[' || c === '{') depth++
+        else if (c === ']' || c === '}') {
+            if (--depth > 0) continue
+            if (start >= 0) out.push(src.slice(start, i).trim())
+            break
+        } else if (c === ',' && depth === 1) {
+            out.push(src.slice(start, i).trim())
+            start = -1
+        }
+    }
+    return out
+}
+
+// Go decodes an escaped lone surrogate as U+FFFD; JSON.parse keeps it.
+const goString = (s: string) => s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�')
+
+const EVENT_FIELDS = new Map<string, keyof DstackEvent>(
+    (['imr', 'event_type', 'digest', 'event', 'event_payload'] as const).map((f) => [f, f]),
+)
+
+// Go folds under Unicode simple folding, which also maps ſ to s and the
+// Kelvin sign to k; toLowerCase covers the Kelvin sign but leaves ſ.
+const goFoldKey = (key: string) => key.toLowerCase().replaceAll('ſ', 's')
 
 export interface ReplayResult {
     /** The recomputed 48-byte RTMR3. */
@@ -349,7 +453,8 @@ export function replayRTMR3(events: DstackEvent[]): ReplayResult {
  * means an appended event cannot displace a measured one.
  */
 export function runtimeMeasurements(events: DstackEvent[]): Record<string, string> {
-    const out: Record<string, string> = {}
+    // No prototype, so an event named __proto__ is a key like any other, as in Go.
+    const out: Record<string, string> = Object.create(null)
     for (const e of events) {
         if (e.event_type !== DSTACK_RUNTIME_EVENT_TYPE || !e.event) continue
         if (Object.hasOwn(out, e.event)) continue
