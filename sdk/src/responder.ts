@@ -402,10 +402,14 @@ export function truncateForLog(s: string, n: number): string {
 // editor or tool can turn the separators into raw characters.
 const GO_JSON_ESCAPES = new RegExp(`[<>&${String.fromCharCode(0x2028, 0x2029)}]`, 'g')
 
+/** goJSON is JSON.stringify(v) with the escapes Go's json.Marshal adds. */
+export function goJSON(v: unknown): string {
+    return JSON.stringify(v).replace(GO_JSON_ESCAPES, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+}
+
 /** openAIErrorBody is an OpenAI-shaped error body, newline included, byte for byte as Go writes it. */
 export function openAIErrorBody(type: string, code: string, message: string): Uint8Array {
     const error: Record<string, string> = { message, type }
     if (code !== '') error.code = code
-    const json = JSON.stringify({ error }).replace(GO_JSON_ESCAPES, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
-    return new TextEncoder().encode(`${json}\n`)
+    return new TextEncoder().encode(`${goJSON({ error })}\n`)
 }

@@ -1386,6 +1386,16 @@ describe('the Client’s parts', () => {
             'StreamEmitter',
             'TurnStream',
             'turnOf',
+            'errorResponse',
+            'errorShapes',
+            'openAIErrorResponse',
+            'copyResponseHeaders',
+            'stripZsHeaders',
+            'setUsageHeaders',
+            'usageFrame',
+            'feeBreakdownFor',
+            'goJSON',
+            'dollars',
         ]) {
             expect(sdk, name).not.toHaveProperty(name)
         }
