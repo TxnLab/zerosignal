@@ -15,9 +15,12 @@ package zs
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"mime"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,6 +206,26 @@ type sizingVecBusyWait struct {
 	OK           bool    `json:"ok"`
 }
 
+// sizingVecImageEdit's body is base64, since a multipart body is bytes.
+type sizingVecImageEdit struct {
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	BodyB64     string `json:"body_b64"`
+	Model       string `json:"model"`
+	N           int    `json:"n"`
+	Size        string `json:"size"`
+	Quality     string `json:"quality"`
+	Stream      bool   `json:"stream"`
+	Err         string `json:"err"`
+}
+
+type sizingVecMediaType struct {
+	In        string            `json:"in"`
+	MediaType string            `json:"mediatype"`
+	Params    map[string]string `json:"params"`
+	Err       string            `json:"err"`
+}
+
 type sizingVectors struct {
 	Comment       string                  `json:"comment"`
 	Constants     map[string]uint64       `json:"constants"`
@@ -213,6 +236,8 @@ type sizingVectors struct {
 	Estimate      []sizingVecEstimate     `json:"estimate"`
 	Streamable    []sizingVecStreamable   `json:"streamable"`
 	ImageN        []sizingVecImageN       `json:"image_n"`
+	ImageEdit     []sizingVecImageEdit    `json:"image_edit"`
+	MediaType     []sizingVecMediaType    `json:"media_type"`
 	Messages      []sizingVecMessage      `json:"messages"`
 	Admit         []sizingVecAdmit        `json:"admit"`
 	UsePrivacy    []sizingVecPrivacy      `json:"use_privacy"`
@@ -362,6 +387,9 @@ func sizingExtractCases() []sizingVecExtract {
 		{"whitespace around", " \n{\"max_tokens\" : 5 }\t"},
 		{"whitespace only", `  `},
 		{"nested max_tokens is not read", `{"options":{"max_tokens":5}}`},
+		{"nested to Go's limit", `{"a":` + strings.Repeat("[", 9999) + strings.Repeat("]", 9999) + `,"max_tokens":3}`},
+		{"nested past Go's limit", `{"a":` + strings.Repeat("[", 10000) + strings.Repeat("]", 10000) + `,"max_tokens":3}`},
+		{"brackets inside a string are no nesting", `{"a":"` + strings.Repeat("[", 10001) + `","max_tokens":3}`},
 	}
 	out := make([]sizingVecExtract, len(bodies))
 	for i, b := range bodies {
@@ -420,11 +448,151 @@ func sizingImageNCases() []sizingVecImageN {
 		`{"n":null}`, `{"n":2,"n":null}`, `{"n":1.5}`, `{"n":"2"}`, `{"n":9223372036854775807}`, `{"n":9223372036854775808}`,
 		`{"N":4,"SIZE":"256x256"}`, `{"size":"a","size":null}`, `{"size":5}`, `{"quality":true}`, `null`, `[]`, ``, `{`,
 		`{"n":-0}`,
+		`{"size":"\ud800x","quality":"\udc00😀"}`,
+		`{"s\ud800ize":"a"}`,
+		`{"n":2,"a":` + strings.Repeat("{\"b\":", 10000) + `1` + strings.Repeat("}", 10000) + `}`,
 	}
 	out := make([]sizingVecImageN, len(bodies))
 	for i, b := range bodies {
 		n, size, quality, err := parseImageRequestN([]byte(b))
 		out[i] = sizingVecImageN{Body: b, N: n, Size: size, Quality: quality}
+		if err != nil {
+			out[i].Err = err.Error()
+		}
+	}
+	return out
+}
+
+// mpPart is one form-data part with a CRLF header block.
+func mpPart(boundary, name, value string) string {
+	return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"\r\n\r\n" + value + "\r\n"
+}
+
+func mpImage(boundary string) string {
+	return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"image\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n\x89PNG\r\n\x1a\n\x00\xff--" + boundary + "x\r\n--" + boundary + "-y\r\n"
+}
+
+// qpOther is a quoted-printable part Go drains and ignores whose first byte
+// fails to decode, followed by filler and no CRLF, so the next boundary line
+// hides inside its body.
+func qpOther(filler int) string {
+	return "--XyZ\r\nContent-Disposition: form-data; name=\"other\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n\x01" + strings.Repeat("a", filler)
+}
+
+func sizingImageEditCases() []sizingVecImageEdit {
+	const b = "XyZ"
+	ct := "multipart/form-data; boundary=" + b
+	img := mpImage(b)
+	end := "--" + b + "--\r\n"
+	model := mpPart(b, "model", "gpt-image-1")
+	cases := []sizingVecImageEdit{
+		{Name: "every field", ContentType: ct, BodyB64: img + model + mpPart(b, "n", "2") + mpPart(b, "size", "1024x1024") + mpPart(b, "quality", "high") + mpPart(b, "stream", "true") + end},
+		{Name: "n defaults to 1", ContentType: ct, BodyB64: model + img + end},
+		{Name: "an empty n is the default", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "") + end},
+		{Name: "a signed n", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "+3") + end},
+		{Name: "n of 0", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "0") + end},
+		{Name: "a negative n", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "-1") + end},
+		{Name: "n not a number", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "two") + end},
+		{Name: "n out of range", ContentType: ct, BodyB64: model + img + mpPart(b, "n", "9223372036854775808") + end},
+		{Name: "stream 1", ContentType: ct, BodyB64: model + img + mpPart(b, "stream", "1") + end},
+		{Name: "stream TRUE is not true", ContentType: ct, BodyB64: model + img + mpPart(b, "stream", "TRUE") + end},
+		{Name: "the last model wins", ContentType: ct, BodyB64: model + img + mpPart(b, "model", "dall-e-2") + end},
+		{Name: "a UTF-8 model", ContentType: ct, BodyB64: mpPart(b, "model", "modèle") + img + end},
+		{Name: "no Content-Type", ContentType: "", BodyB64: model + img + end},
+		{Name: "no boundary", ContentType: "multipart/form-data", BodyB64: model + img + end},
+		{Name: "an empty quoted boundary", ContentType: `multipart/form-data; boundary=""`, BodyB64: model + img + end},
+		{Name: "a bad media type", ContentType: "multipart/", BodyB64: model + img + end},
+		{Name: "a quoted boundary with a space", ContentType: `multipart/form-data; boundary="a b"`, BodyB64: mpPart("a b", "model", "m") + mpImage("a b") + "--a b--"},
+		{Name: "an RFC 2231 boundary", ContentType: "multipart/form-data; boundary*=utf-8''X%79Z", BodyB64: model + img + end},
+		{Name: "the media type is not checked", ContentType: "text/plain; BOUNDARY=XyZ", BodyB64: model + img + end},
+		{Name: "a trailing semicolon", ContentType: ct + ";", BodyB64: model + img + end},
+		{Name: "a no-break space before the parameters", ContentType: "multipart/form-data ; boundary=XyZ", BodyB64: model + img + end},
+		{Name: "no image part", ContentType: ct, BodyB64: model + end},
+		{Name: "no model", ContentType: ct, BodyB64: img + end},
+		{Name: "an empty model", ContentType: ct, BodyB64: mpPart(b, "model", "") + img + end},
+		{Name: "LF line endings", ContentType: ct, BodyB64: "--XyZ\nContent-Disposition: form-data; name=model\n\nm\n--XyZ\nContent-Disposition: form-data; name=image\n\nPNG\n--XyZ--\n"},
+		{Name: "a preamble and an epilogue", ContentType: ct, BodyB64: "This is a preamble.\r\n--not it\r\n" + model + img + end + "epilogue\r\n"},
+		{Name: "transport padding after the boundary", ContentType: ct, BodyB64: "--XyZ \t\r\nContent-Disposition: form-data; name=model\r\n\r\nm\r\n--XyZ\t\r\nContent-Disposition: form-data; name=image\r\n\r\nx\r\n--XyZ-- \r\n"},
+		{Name: "a final boundary without CRLF", ContentType: ct, BodyB64: model + img + "--XyZ--"},
+		{Name: "no final boundary", ContentType: ct, BodyB64: model + img},
+		{Name: "a part cut off inside its body", ContentType: ct, BodyB64: model + "--XyZ\r\nContent-Disposition: form-data; name=image\r\n\r\nPNGDATA"},
+		{Name: "a field cut off inside its body", ContentType: ct, BodyB64: img + "--XyZ\r\nContent-Disposition: form-data; name=model\r\n\r\nm"},
+		{Name: "EOF inside the headers", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=n"},
+		{Name: "EOF after a header line", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=n\r\n"},
+		{Name: "EOF right after a boundary", ContentType: ct, BodyB64: model + img + "--XyZ\r\n"},
+		{Name: "EOF inside the headers before the image", ContentType: ct, BodyB64: model + "--XyZ\r\nContent-Disposition: form-data; name=image"},
+		{Name: "a header without a colon", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition form-data\r\n\r\nx\r\n" + end},
+		{Name: "a header block opening with a space", ContentType: ct, BodyB64: model + img + "--XyZ\r\n Content-Disposition: form-data; name=n\r\n\r\n2\r\n" + end},
+		{Name: "a control byte in a header value", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=n\x01\r\n\r\n2\r\n" + end},
+		{Name: "a lower-case header key", ContentType: ct, BodyB64: "--XyZ\r\ncontent-disposition: form-data; name=model\r\n\r\nm\r\n" + img + end},
+		{Name: "a header key with a space is not found", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition : form-data; name=model\r\n\r\nm\r\n" + img + end},
+		{Name: "a continued header line", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data;\r\n\tname=model\r\n\r\nm\r\n" + img + end},
+		{Name: "Form-Data and NAME in any case", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: Form-Data; NAME=model\r\n\r\nm\r\n" + img + end},
+		{Name: "an attachment is no form field", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: attachment; name=model\r\n\r\nm\r\n" + img + end},
+		{Name: "an RFC 2231 name", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name*=UTF-8''mo%64el\r\n\r\nm\r\n" + img + end},
+		{Name: "a split RFC 2231 name", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name*0=mo; name*1=del\r\n\r\nm\r\n" + img + end},
+		{Name: "two different names drop the part", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model; name=n\r\n\r\nm\r\n" + img + end},
+		{Name: "a quoted-printable model", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: Quoted-Printable\r\n\r\ngpt=2Dimage=\r\n-1\r\n" + img + end},
+		{Name: "a quoted-printable model with a bad byte", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ngpt\x01\r\n" + img + end},
+		{Name: "a quoted-printable lone equals", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\na=zb\r\n" + img + end},
+		{Name: "a quoted-printable n", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=n\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n=34\r\n" + end},
+		{Name: "a boundary-looking line inside the image", ContentType: ct, BodyB64: model + "--XyZ\r\nContent-Disposition: form-data; name=image\r\n\r\nab\r\n--XyZab\r\n--XyZ-x\r\n" + mpPart(b, "n", "5") + end},
+		{Name: "a part with an empty body at the boundary", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=size\r\n\r\n--XyZ--"},
+		{Name: "a line between parts", ContentType: ct, BodyB64: model + "junk\r\n" + img + end},
+		{Name: "a stray line after a part", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\n\r\nm\r\n--XyZ \r\nx" + end},
+		{Name: "a preamble line past the buffer", ContentType: ct, BodyB64: strings.Repeat("p", 5000) + "\r\n" + model + img + end},
+		{Name: "a preamble line at the buffer", ContentType: ct, BodyB64: strings.Repeat("p", 4094) + "\r\n" + model + img + end},
+		{Name: "an LF first boundary switches to LF", ContentType: ct, BodyB64: "--XyZ\nContent-Disposition: form-data; name=model\r\n\r\nm\r\n--XyZ\r\nContent-Disposition: form-data; name=image\n\nx\n--XyZ--\n"},
+		// A skipped quoted-printable part that fails to decode: Go's drain
+		// stops where its read-ahead got to and reads lines from there.
+		{Name: "a failed skipped QP part resumes inside it", ContentType: ct, BodyB64: model + img + qpOther(4095) + mpPart(b, "n", "7") + end},
+		{Name: "a failed skipped QP part resumes at a stray line", ContentType: ct, BodyB64: model + img + qpOther(3828) + mpPart(b, "n", "7") + end},
+		{Name: "a failed short skipped QP part hides the next part", ContentType: ct, BodyB64: model + img + qpOther(10) + mpPart(b, "n", "7") + end},
+		{Name: "a QP image over a buffer with a control byte", ContentType: ct, BodyB64: model + "--XyZ\r\nContent-Disposition: form-data; name=image\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n\x01" + strings.Repeat("a", 5000) + "\r\n" + end},
+		{Name: "a dotted capital I is no quoted-printable", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-prİntable\r\n\r\ngpt=2Dimage\r\n" + img + end},
+		{Name: "a QP field of exactly a buffer", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=size\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + strings.Repeat("a", 4096) + "\r\n" + end},
+		{Name: "a QP field one past a buffer", ContentType: ct, BodyB64: model + img + "--XyZ\r\nContent-Disposition: form-data; name=size\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + strings.Repeat("a", 4097) + "\r\n" + end},
+		{Name: "a QP field with a short escape", ContentType: ct, BodyB64: img + "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n=61\r\nb==\r\n" + end},
+		{Name: "a QP soft break before a bare CR", ContentType: ct, BodyB64: img + "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\na=\r\r\n" + end},
+		{Name: "a QP equals before a space stays literal", ContentType: ct, BodyB64: img + "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nab= \rx\r\n" + end},
+		{Name: "an unterminated QP field", ContentType: ct, BodyB64: img + "--XyZ\r\nContent-Disposition: form-data; name=model\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nab\x01cd"},
+		{Name: "a long header line opening with a space", ContentType: ct, BodyB64: model + img + "--XyZ\r\n " + strings.Repeat("h", 100) + "\r\n\r\n" + end},
+		{Name: "a header line quoted with an invalid byte", ContentType: ct, BodyB64: model + img + "--XyZ\r\nX-K\xffey: v\r\n\r\nx\r\n" + end},
+		{Name: "a header value quoted with a canonical key", ContentType: ct, BodyB64: model + img + "--XyZ\r\nx-foo: bar\x01é\r\n\r\nx\r\n" + end},
+		{Name: "a model of invalid UTF-8", ContentType: ct, BodyB64: mpPart(b, "model", "m\xf0\x9f\x98x\xff") + img + end},
+		{Name: "a header line over the buffer", ContentType: ct, BodyB64: "--XyZ\r\nContent-Disposition: form-data; name=model\r\nX-Long: " + strings.Repeat("v", 6000) + "\r\n\r\nm\r\n" + img + end},
+	}
+	for i := range cases {
+		c := &cases[i]
+		body := []byte(c.BodyB64)
+		c.BodyB64 = base64.StdEncoding.EncodeToString(body)
+		m, n, size, quality, stream, err := parseImageEditMultipart(c.ContentType, body)
+		if err != nil {
+			c.Err = err.Error()
+			continue
+		}
+		c.Model, c.N, c.Size, c.Quality, c.Stream = m, n, size, quality, stream
+	}
+	return cases
+}
+
+func sizingMediaTypeCases() []sizingVecMediaType {
+	ins := []string{
+		``, `form-data`, ` Form-Data `, `multipart/form-data`, `multipart/`, `/x`, `a/b/c`, `a b`,
+		`form-data; name=model`, `form-data; NAME="mo\"del"`, `form-data; name="a\b"`, `form-data; name=""`,
+		`form-data; name="unterminated`, `form-data; name="a` + "\r" + `b"`, `form-data; name=a; name=a`,
+		`form-data; name=a; name=b`, `form-data; name`, `form-data; name=`, `form-data; =x`, `form-data;`,
+		`form-data; ;`, `form-data; name=a;`, `form-data; name=a b`, `form-data;name=a`, "form-data;\tname = a ",
+		`form-data; name*=utf-8''a%20b`, `form-data; name*=iso-8859-1''a`, `form-data; name*=utf-8'en'%E2%82%AC`,
+		`form-data; name*=utf-8''bad%2`, `form-data; name=plain; name*=utf-8''enc`, `form-data; name*0=a; name*1=b; name*2=c`,
+		`form-data; name*0*=utf-8''a%20; name*1*=b%21; name*2=c`, `form-data; name*1=skipped`, `form-data; name*0=a; name*2=gap`,
+		`form-data; name*0*=bogus%; name*1=x`, `form-data; title*=US-ASCII'en'x`, "Kind/x", "İtem/x", "a/b ; x=y",
+		"a/b　", " a/b", "a/é", `a/b; x="tab	in"`, `a/b; x=1; y=2; Z=3`,
+	}
+	out := make([]sizingVecMediaType, len(ins))
+	for i, in := range ins {
+		mt, params, err := mime.ParseMediaType(in)
+		out[i] = sizingVecMediaType{In: in, MediaType: mt, Params: params}
 		if err != nil {
 			out[i].Err = err.Error()
 		}
@@ -504,6 +672,7 @@ func sizingAdmitCases() []sizingVecAdmit {
 		{Name: "long context uses its rates", Ops: []sizingVecOp{longCtx(f64(2), f64(4))}, FeeBps: fee(0), Sizing: flat, Body: sizingVecTools},
 		{Name: "long context without its rates is unpriced", Ops: []sizingVecOp{longCtx(f64(2), nil)}, FeeBps: fee(0), Sizing: flat, Body: sizingVecTools},
 		{Name: "under the threshold the base rates apply", Ops: []sizingVecOp{longCtx(nil, nil)}, FeeBps: fee(0), Sizing: sizingVecRequest{Model: "m", MaxOutputTokens: 100}},
+		{Name: "a negative rate is unpriced", Ops: []sizingVecOp{priced(1, -1, 1)}, FeeBps: fee(0), Sizing: flat},
 		{Name: "a rate past uint64 is unpriced", Ops: []sizingVecOp{priced(1, 2e13, 1)}, FeeBps: fee(0), Sizing: flat},
 		{Name: "a cost past uint64 is unpriced", Ops: []sizingVecOp{priced(1, 1e12, 1)}, FeeBps: fee(0), Sizing: sizingVecRequest{Model: "m", MaxOutputTokens: 100}},
 		{Name: "a fee product past uint64 is unpriced", Ops: []sizingVecOp{priced(1, 1, 1.8e12)}, FeeBps: fee(1_000_000_000), Sizing: sizingVecRequest{Model: "m", MaxOutputTokens: 10}},
@@ -607,6 +776,8 @@ func TestReserveSizingVectors(t *testing.T) {
 		Estimate:      sizingEstimateCases(),
 		Streamable:    sizingStreamableCases(),
 		ImageN:        sizingImageNCases(),
+		ImageEdit:     sizingImageEditCases(),
+		MediaType:     sizingMediaTypeCases(),
 		Messages:      sizingMessageCases(),
 		Admit:         sizingAdmitCases(),
 		UsePrivacy:    sizingPrivacyCases(),

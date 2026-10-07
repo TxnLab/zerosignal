@@ -28,6 +28,7 @@ import {
     fits,
     maxDeclaredOutput,
     noFitMessage,
+    parseImageEditMultipart,
     parseImageRequestN,
     reserveInputCount,
     reserveSizeFailureMessage,
@@ -35,6 +36,7 @@ import {
     streamableRequest,
 } from '../src/index.js'
 import type { Operator, SizingRequest } from '../src/index.js'
+import { parseMediaType, textOf, utf8Binary } from '../src/multipart.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
@@ -138,6 +140,50 @@ describe('reserve_sizing_vectors.json', () => {
                     if (c.err) expect(() => parseImageRequestN(body)).toThrow(c.err)
                     else expect(parseImageRequestN(body)).toEqual({ n: c.n, size: c.size, quality: c.quality })
                 }
+            })
+        }
+    })
+
+    describe('parseImageEditMultipart', () => {
+        for (const c of v.image_edit) {
+            it(c.name, () => {
+                const body = Uint8Array.from(Buffer.from(c.body_b64, 'base64'))
+                if (c.err === '') {
+                    expect(parseImageEditMultipart(c.content_type, body)).toEqual({
+                        model: c.model,
+                        n: c.n,
+                        size: c.size,
+                        quality: c.quality,
+                        stream: c.stream,
+                    })
+                    return
+                }
+                let msg = ''
+                try {
+                    parseImageEditMultipart(c.content_type, body)
+                } catch (err) {
+                    msg = (err as Error).message
+                }
+                expect(msg).toBe(c.err)
+            })
+        }
+    })
+
+    describe('parseMediaType', () => {
+        for (const c of v.media_type) {
+            it(JSON.stringify(c.in), () => {
+                let got: { mediatype: string; params: Record<string, string> | null; err: string }
+                try {
+                    const mt = parseMediaType(utf8Binary(c.in))
+                    const params: Record<string, string> = {}
+                    for (const [k, val] of mt.params) params[textOf(k)] = textOf(val)
+                    got = { mediatype: textOf(mt.mediatype), params, err: '' }
+                } catch (err) {
+                    got = { mediatype: '', params: null, err: (err as Error).message }
+                }
+                // Go returns the media type alongside an invalid-parameter error; the parse throws.
+                const want = c.err === '' ? c : { ...c, mediatype: '', params: null }
+                expect(got).toEqual({ mediatype: want.mediatype, params: want.params, err: want.err })
             })
         }
     })
