@@ -123,10 +123,18 @@ export function extractPreviousResponseID(body: string): string {
  * discriminator.
  */
 export function extractResponseID(body: string): string {
-    const o = parse(body) as { id?: unknown; object?: unknown } | undefined
-    if (o === undefined) return ''
-    if (typeof o.object === 'string' && o.object !== '' && o.object !== 'response') return ''
-    return typeof o.id === 'string' ? o.id : ''
+    const o = parse(body)
+    // Go reads null as an empty struct, and fails on any other non-object.
+    if (o === null || typeof o !== 'object' || Array.isArray(o)) return ''
+    const { id, object } = o as { id?: unknown; object?: unknown }
+    // A field of the wrong type fails Go's whole unmarshal; null leaves it unset.
+    if (!stringOrUnset(id) || !stringOrUnset(object)) return ''
+    if (typeof object === 'string' && object !== '' && object !== 'response') return ''
+    return typeof id === 'string' ? id : ''
+}
+
+function stringOrUnset(v: unknown): boolean {
+    return v === undefined || v === null || typeof v === 'string'
 }
 
 // Sort values for RoutingPreferences.sort — the caller's base-ordering choice.

@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import {
     extractRequestedBuiltinTools,
+    extractResponseID,
     extractRoutingPreferences,
     normalizeRelay,
     type Operator,
@@ -22,6 +23,27 @@ import {
     routingPreferencesAllowOperator,
     SORT_THROUGHPUT,
 } from '../src/selection/index.js'
+
+// Each as Go's ExtractResponseID unmarshals it.
+describe('extractResponseID', () => {
+    it.each([
+        ['{"id":"resp_1","object":"response"}', 'resp_1'],
+        ['{"id":"resp_1"}', 'resp_1'],
+        ['{"id":"resp_1","object":""}', 'resp_1'],
+        ['{"id":"resp_1","object":null}', 'resp_1'],
+        ['{"id":"chatcmpl_1","object":"chat.completion"}', ''],
+        ['{"id":"resp_1","object":5}', ''],
+        ['{"id":5}', ''],
+        ['{"id":null}', ''],
+        ['null', ''],
+        ['[]', ''],
+        ['"resp_1"', ''],
+        ['7', ''],
+        ['not json', ''],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractResponseID(body)).toBe(want)
+    })
+})
 
 describe('normalizeRelay', () => {
     it.each([

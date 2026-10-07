@@ -46,6 +46,31 @@ func TestExtractRequestedBuiltinTools(t *testing.T) {
 	}
 }
 
+// TestExtractResponseID mirrors proto/ts/test/extract.test.ts
+// (extractResponseID), which must read every body as Go's unmarshal does.
+func TestExtractResponseID(t *testing.T) {
+	cases := []struct{ body, want string }{
+		{`{"id":"resp_1","object":"response"}`, "resp_1"},
+		{`{"id":"resp_1"}`, "resp_1"},
+		{`{"id":"resp_1","object":""}`, "resp_1"},
+		{`{"id":"resp_1","object":null}`, "resp_1"},
+		{`{"id":"chatcmpl_1","object":"chat.completion"}`, ""},
+		{`{"id":"resp_1","object":5}`, ""},
+		{`{"id":5}`, ""},
+		{`{"id":null}`, ""},
+		{`null`, ""},
+		{`[]`, ""},
+		{`"resp_1"`, ""},
+		{`7`, ""},
+		{`not json`, ""},
+	}
+	for _, c := range cases {
+		if got := selection.ExtractResponseID([]byte(c.body)); got != c.want {
+			t.Errorf("ExtractResponseID(%s) = %q, want %q", c.body, got, c.want)
+		}
+	}
+}
+
 // TestParseOperatorRef mirrors proto/ts/test/extract.test.ts (parseOperatorRef)
 // so the proxy and client/ resolve a caller ref string identically. Both forms
 // and every malformed shape must agree.
