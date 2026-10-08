@@ -12,8 +12,11 @@ a golden fixture both test suites read.
 ## Install
 
 ```bash
-pnpm add @txnlab/zerosignal
+pnpm add @txnlab/zerosignal algosdk
 ```
+
+`algosdk` (^3.6) is a peer dependency: the `Signer` port is algosdk's `TransactionSigner`, called
+with algosdk `Transaction` objects, so the SDK and your wallet must share one copy.
 
 The protocol primitives (`@txnlab/zs-proto`) come with it, at exactly the version this release
 was built with, under `@txnlab/zerosignal/proto` and `@txnlab/zerosignal/proto/<name>`

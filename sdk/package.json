@@ -102,10 +102,10 @@
         "@noble/hashes": "2.2.0",
         "@scure/base": "2.2.0",
         "@txnlab/zs-proto": "workspace:*",
-        "algosdk": "^3.6.0",
         "undici": "^7.30.0"
     },
     "peerDependencies": {
+        "algosdk": "^3.6.0",
         "@algorandfoundation/algokit-utils": "^9.2.0",
         "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
         "@scure/bip39": "^2.2.0"
@@ -127,6 +127,7 @@
         "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
         "@scure/bip39": "2.2.0",
         "@types/node": "^22.10.0",
+        "algosdk": "3.6.0",
         "typescript": "5.6.3",
         "vitest": "3.2.6"
     }
