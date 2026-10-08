@@ -89,8 +89,9 @@ type ReserveSucceeded struct {
 	ExpiresAt time.Time
 }
 
-// PaymentCommitted fires once, when the escrow open confirms. Nothing is
-// resent after it: a later failure ends in settle, protest or refund.
+// PaymentCommitted fires once, when algod accepts the escrow open group; it
+// may still be pending. Nothing is resent after it: a later failure ends in
+// settle, protest or refund.
 type PaymentCommitted struct {
 	TicketID       string
 	OpenTxID       string

@@ -73,8 +73,9 @@ export interface ReserveSucceeded {
 }
 
 /**
- * Once, when the escrow open confirms. Nothing is resent after it: a later
- * failure ends in settle, protest or refund.
+ * Once, when algod accepts the escrow open group; it may still be pending.
+ * Nothing is resent after it: a later failure ends in settle, protest or
+ * refund.
  */
 export interface PaymentCommitted {
     type: 'payment.committed'
