@@ -31,6 +31,22 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-08 — the TypeScript SDK runs a paid turn
+
+`@txnlab/zerosignal` gains `Client`, the twin of the Go SDK's `zs.Client`. `Client.create`
+builds the payer from a `Config` with a `registry`; the SDK builds no operator discovery of its
+own yet. `stream(request)` routes, reserves, pays, seals and streams one turn and yields its
+events in Go's order, with the names and fields `sdk_vocabulary_vectors.json` pins. Its `wait()`
+resolves when the escrow submit returns, not when it lands, and `payment.committed` fires when
+algod accepts the open group, on both sides. `waitSettles` and `close` drain and stop the
+Client. `zs.fetch` (`openAIFetch`) serves the Go handler's POST routes as a fetch function for
+an OpenAI client built on `FETCH_BASE_URL`, with the same `X-Zs-*` usage headers, opt-in
+`zs.usage` frame and error shapes; the catalog GET routes are not ported. Two behaviours have
+no Go counterpart: `Request.admitNode` lets a host refuse a node before anything is sealed to
+it, asked again on each sweep and after an ephemeral self-heal; and a streamed answer that
+stalls ends with `StreamIdleTimeoutError` (by default 300 s to the first byte, 60 s between
+bytes, 300 s while a node-run tool works; `Config.streamIdle: false` turns it off).
+
 ### 2026-10-06 — a recovery phrase's separators no longer pick the account
 
 Go's keystore (`DeriveAddress`, `New`) now rejoins a phrase's words with single spaces before

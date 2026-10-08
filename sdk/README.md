@@ -1,7 +1,7 @@
 # @txnlab/zerosignal
 
-The ZeroSignal payer SDK for TypeScript: discovery, routing, reserve, escrow, sealing, relay
-hops, streaming and receipt checks for private LLM inference on Algorand. It is the twin of the
+The ZeroSignal payer SDK for TypeScript: routing, reserve, escrow, sealing, relay hops,
+streaming and receipt checks for private LLM inference on Algorand. It is the twin of the
 Go SDK, [`github.com/TxnLab/zerosignal/go/zs`](https://github.com/TxnLab/zerosignal/tree/main/go/zs):
 event names, error kinds, config defaults and network presets are shared with it and pinned by
 a golden fixture both test suites read.
@@ -101,6 +101,119 @@ const config = resolveConfig({ signer, network: testnet() })
 and private deployments set `network.escrowAppId`. Durations are milliseconds. A config the SDK
 cannot run with throws a `ZsError` with kind `invalid_request` and code `invalid_config`.
 
+## Client
+
+`Client.create(config)` builds the payer. One Client serves every concurrent turn. It builds
+the reserve client and the wallet when `Config` leaves them out. Building the wallet reads the
+escrow's config from chain, so `create` fails if algod can't be reached.
+
+`Config.registry` is required, and the host implements it: a `RegistryProvider` lists the
+operators for a model, resolves one node by its ref, lists every operator for the relay pool,
+re-probes a node whose ephemeral key went stale, and records which models were asked for. The
+SDK ships none; `CatalogEngine` folds probe results but is not one.
+
+A Client learns between turns only through the routing stores passed in `Config.stores` (see
+[Routing stores](#routing-stores)). Without them it keeps no relay reputation, latency or
+target backoff, and a node whose settle group fails its check is not barred.
+
+```ts
+import { Client, testnet } from '@txnlab/zerosignal'
+
+const zs = await Client.create({ signer, network: testnet(), registry })
+
+const turn = zs.stream({
+  endpoint: '/v1/chat/completions',
+  body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], stream: true }),
+})
+for await (const ev of turn.events()) {
+  if (ev.type === 'delta.text') process.stdout.write(ev.delta)
+}
+const { settlement } = await turn.wait()
+```
+
+`stream(request, signal)` returns a `Stream` and sends nothing until `events()` is read. The turn
+routes, reserves, pays, seals the body to the node and yields its events in order, then throws
+the turn's error if it has one (`err` holds it too). `text()` runs the turn and returns only the
+answer text. Each `Stream` can be read once.
+
+- **Leaving early.** A loop that stops reading, or a `signal` that aborts, is a caller who left.
+  Before the node finishes generating, the node is told to stop. After that, the receipt is
+  still collected and the ticket settled, and the loop's exit waits for it.
+- **Settlement.** `wait()` resolves once the turn's escrow submit has returned, with what it
+  submitted; call it after `events()` has started, or it rejects. A failed submit does not
+  reject: it comes back as `err` beside a `settlement` that was attempted, not one that took
+  effect. `wait()` does not wait for the transaction to land: the refund watchdog and the
+  journal cover one that never does. A whole (non-streamed) reply emits no `settle.submitted`,
+  so `wait()` is where its settle shows.
+- **Stalls.** A streamed answer that stops sending ends with a `StreamIdleTimeoutError` in the
+  error's `cause` chain: by default after 300 s with no first byte, 60 s between bytes after
+  that, or 300 s while a tool the node runs is working. `Config.streamIdle` sets each bound, and
+  `false` turns it off. A whole reply has no such bound. The Go SDK
+  has none.
+
+A `Request` is the OpenAI-shaped `body` for one `endpoint` (`/v1/chat/completions`,
+`/v1/responses`, `/v1/images/generations`, `/v1/images/edits`) plus the routing preferences that
+don't travel in it:
+
+| Field | Purpose |
+|---|---|
+| `contentType` | The body's media type. Only a multipart image edit needs it. |
+| `requireTee` | Route only to attested nodes, on top of `Config.requireTeeModels`. |
+| `relay` | `"auto"`, `"off"` or `"required"`; anything else defers to `Config.privacy`, and `"off"` applies only with `Config.allowPrivacyOverride`. A `provider.relay` in the body outranks it. |
+| `framesOnly` | Yield the node's frames without decoding them, for a caller that re-emits the bytes. |
+| `admitNode` | A check of each node before anything is sealed to it. See below. |
+
+`admitNode(op, signal)` is for content that needs more of a node than `requireTee` checks. The
+turn asks it about each candidate before that candidate's reserve, again on every repeat sweep,
+and about a node whose ephemeral key was just refreshed, since the request would then be sealed
+to the new key. `op` is a frozen copy, and the reserve seals to the key it shows. A refused node
+is skipped, as is one whose check throws; the turn fails `no_tee_capacity` only when every
+candidate was refused. The Go SDK has no counterpart.
+
+### Lifecycle
+
+Open tickets are recorded in `Stores.journal`. When the Client runs the SDK's `Wallet` (built or
+passed in) and no journal is given, it keeps an in-memory one, so a ticket a crash leaves open
+is refunded only by hand; `journalDurable` says which you have. Each such Client needs its own
+journal: `create` throws for one another live Client already sweeps.
+
+To shut down, stop starting turns, `await zs.waitSettles(signal)` for the escrow submits still
+running, then `await zs.close()`. `feeRate()` is the protocol fee in basis points this payer
+pays, read from chain in the background: null until the first read lands, or when the wallet
+can't read it.
+
+### `zs.fetch`
+
+`zs.fetch` is an OpenAI-compatible endpoint as a fetch function. Build an OpenAI client on it
+once, and each request it sends becomes a turn of this Client, routed to a node per request:
+
+```ts
+import OpenAI from 'openai'
+
+const openai = new OpenAI({ baseURL: zs.baseURL, fetch: zs.fetch, apiKey: 'unused' })
+```
+
+`baseURL` (`FETCH_BASE_URL`) names no server, so a client that loses the fetch fails rather than
+reaching a host. Nothing reads the API key, and the SDK forwards no `Authorization` header. It
+serves `POST` on the four endpoints above and on `/v1/completions`, which it emulates over chat.
+Every other request gets a 404: the catalog `GET` routes (`/v1/models` and the rest) are not
+ported yet, so `openai.models.list()` fails.
+
+The response is the node's, as an OpenAI API would send it. Request headers set the turn's
+preferences: `X-Zs-Relay`, and `X-Zs-Require-TEE` and `X-Zs-Usage-Frame`, which any non-blank
+value turns on (`X-Zs-Require-TEE: false` requires a TEE). A whole reply reports its
+cost in `X-Zs-*` response headers. A stream's headers go out before its receipt, so with
+`X-Zs-Usage-Frame` set the stream carries the cost in an `event: zs.usage` frame instead. That
+frame is opt-in because its data is not an OpenAI chunk, and strict OpenAI clients fail on it. A
+failure the SDK reports itself is an OpenAI-shaped error body with `X-Should-Retry`, and
+`Retry-After` when there is a wait to report. An error the node sends keeps the node's status
+and body; the SDK sets those two headers and strips the node's `X-Zs-*` ones.
+
+`openAIFetch(zs, options)` builds the same fetch with options `zs.fetch` leaves out, such as
+the `fundingUrl` a `wallet_unfunded` error points at. Its options replace `zs.fetch`'s rather
+than add to them, and the hint shows only on mainnet, so pass `network: 'mainnet'` and your
+`logger` alongside it.
+
 ## Routing stores
 
 `@txnlab/zerosignal/routing` holds the payer's own routing signals: `RelayReputationStore`,
@@ -109,8 +222,8 @@ the Go SDK, and `RelayHealthStore`, the transient exclusions and direct-contact 
 browser needs because it can't reach every node a server can. Relay selection
 (`selectRelayHopWeighted`, `applyRelay`) comes with them. They are per-instance and take an
 injected clock. A wall clock that steps back costs at most one window, since each store
-re-dates a record it finds in the future. A `Client` will own one of each; until it exists, a
-host that routes for itself constructs them.
+re-dates a record it finds in the future. A `Client` routes with the ones passed in
+`Config.stores`, and keeps no such signal for one left out; `RelayHealthStore` is the host's.
 
 ## Catalog
 
@@ -175,9 +288,30 @@ for one payer serializes them, or both may deposit.
 The SDK's own failures are `ZsError`s. Branch on `kind`, the stable contract; `code` is
 diagnostic and may gain values. Two exceptions carry fields a caller acts on:
 `SignerAddressError`, which `payerBytesSigner` rejects with when asked to sign for another
-address, and `MbrDepositUnaffordableError` from `ensureMbrDeposit`. A turn's events are a discriminated union on `type`
-(`payment.committed`, `delta.text`, `receipt.verified`, `done`, …). The set grows, so a
-consumer must ignore types it does not handle.
+address, and `MbrDepositUnaffordableError` from `ensureMbrDeposit`. `findError(err, Class)`
+looks for one through an error's `cause` chain: a streamed turn that stalls ends with a
+`StreamIdleTimeoutError` there.
+
+A turn's events are a discriminated union on `type`, with Go's event names and fields in lower
+camel case:
+
+- **Routing and reserve:** `max_output.clamped` (before any reserve), `route.candidates`,
+  `relay.hop`, `reserve.started`, `reserve.retrying` and `reserve.succeeded`.
+- **Payment:** `payment.committed`, once algod accepts the escrow open. Nothing is resent after
+  it; a later failure ends in settle, protest or refund.
+- **Response:** `response.started`, then `frame` (one per server-sent event as bytes; a whole
+  reply is one frame) and the decoded content: `item.opened` / `item.closed`, `delta.text`,
+  `delta.reasoning`, `delta.tool_call`, `annotation.added`, `tool.status`, `image.progress`,
+  `image.partial` and `usage`.
+- **Receipt and settlement:** `receipt.verified`, then on a stream `settle.submitted`. When
+  the node's pre-signed settle group fails its check, the payer acks on its own instead
+  (`atomic: false`), and with `Stores.nodeExclusions` set `node.excluded` comes first and bars
+  the node. `receipt.violated` replaces `receipt.verified` when the receipt fails its check, and
+  no settle follows.
+- **End:** `done`, for a turn the node sealed as finished. A failed turn ends with the events
+  loop throwing instead.
+
+The set grows, so a consumer must ignore types it does not handle.
 
 ## Development
 
