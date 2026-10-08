@@ -339,6 +339,27 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
     let priceRejected = false
     // The spend guard refused a candidate's signed ceiling; a later, cheaper one may fit.
     let capRefused = false
+    // The caller's admitNode refused a candidate, or the key a re-probe handed
+    // back. A refusal filters, as requireTee does at pick, so it is the turn's
+    // answer only when no candidate got past it: a node that was let through
+    // and then failed some other way reports that failure. A re-probed key the
+    // caller refused takes its node back out.
+    let admitRefused = false
+    let admittedCount = 0
+    // The node as admitNode judged it, frozen, and what the reserve then seals
+    // to, so a registry that refreshes its operators in place can't swap the
+    // key in between. A check that throws refuses: nothing is sealed to a node
+    // it couldn't clear.
+    const admitted = async (o: Operator): Promise<Operator | null> => {
+        if (!t.admitNode) return o
+        const judged = Object.freeze({ ...o })
+        try {
+            if (await t.admitNode(judged, signal)) return judged
+        } catch (err) {
+            if (!signal?.aborted) log.warn('admit check failed; refusing operator', { ...opAttrs(o), err: errText(err) })
+        }
+        return null
+    }
     // Built once: the pool is target-independent.
     let relaySel: SelectionOperator[] = []
     if (usePrivacy) relaySel = await relayPool(deps.pick, signal)
@@ -408,7 +429,15 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         // already cut a pinned turn down to its one operator.
         for (const candidate of candidates) {
             if (signal?.aborted) break
-            let op = candidate
+            const judged = await admitted(candidate)
+            if (judged === null) {
+                // Not a refusal by the node, so it votes on no re-sweep.
+                admitRefused = true
+                log.info('caller refused operator; trying next', { ...opAttrs(candidate), endpoint })
+                continue
+            }
+            admittedCount++
+            let op = judged
             let hop: RelayHop | null = null
             if (usePrivacy) {
                 hop = relayHopForPool(deps.pick, relaySel, op)
@@ -520,7 +549,18 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                         })
                         return null
                     }
-                    return refreshed
+                    if (refreshed === null) return null
+                    // Admitted under its old key, which the node no longer holds.
+                    const rejudged = await admitted(refreshed)
+                    if (rejudged === null) {
+                        admitRefused = true
+                        admittedCount--
+                        log.warn('caller refused the re-probed node under its new key; skipping it', {
+                            operatorId: refreshed.id,
+                            nodeId: refreshed.nodeId,
+                        })
+                    }
+                    return rejudged
                 },
                 recordRelayFailure: (h) => deps.pick.relayReputation?.recordRelayOutcome(relayRef(h), false),
                 note: (ev) => em.note(ev),
@@ -758,6 +798,13 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                 `spend cap reached: this request would exceed the configured USDC limit — to fix it, ${deps.remedies.raiseSpendCap}.`,
             ),
         )
+        return
+    }
+    // Nothing got past the caller, so nothing else happened, except that a
+    // re-probed key it refused left its node without an ephemeral: ahead of
+    // that gap, since the refusal is the real answer.
+    if (admitRefused && admittedCount === 0) {
+        em.fail(newError('no_tee_capacity', 'no operator the caller admits can serve this request'))
         return
     }
     // A forward-secrecy posture gap, told apart from capacity.

@@ -33,6 +33,17 @@ export interface Request {
     /** Routes only to attested nodes, on top of Config.requireTeeModels. */
     requireTee?: boolean
     /**
+     * Refuses a node before anything is sealed to it, for content that needs
+     * more of a node than requireTee checks. It is asked about each candidate
+     * before its reserve, again on each re-sweep, and about a node the
+     * ephemeral self-heal refreshed, since the new key is what the request
+     * would then be sealed to. op is a frozen copy, and the reserve seals to
+     * the key it shows. A refused node is skipped, as is one whose check
+     * throws, like a node pick filtered out; the turn fails no_tee_capacity
+     * only when it refused every candidate. Go has no counterpart.
+     */
+    admitNode?: (op: Readonly<Operator>, signal?: AbortSignal) => boolean | Promise<boolean>
+    /**
      * "auto", "off" or "required"; absent or anything else defers to
      * Config.privacy. A `provider.relay` in body outranks it. "off" takes
      * effect only with Config.allowPrivacyOverride.
@@ -52,6 +63,7 @@ export interface Turn {
     body: Uint8Array | string
     contentType: string
     requireTee: boolean
+    admitNode: Request['admitNode']
     /** The caller's normalized relay preference; the body's outranks it. */
     relay: string
 }
@@ -62,6 +74,7 @@ export function turnOf(r: Request): Turn {
         body: r.body,
         contentType: r.contentType ?? '',
         requireTee: r.requireTee ?? false,
+        admitNode: r.admitNode,
         relay: normalizeRelay(r.relay),
     }
 }

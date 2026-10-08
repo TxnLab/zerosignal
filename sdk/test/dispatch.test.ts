@@ -931,6 +931,196 @@ describe('the reserve request', () => {
     })
 })
 
+describe('the caller’s admitNode check', () => {
+    it('skips a node it refuses before any reserve, and is handed the turn’s signal', async () => {
+        const signal = new AbortController().signal
+        const asked: [number, AbortSignal | undefined][] = []
+        const h = harness([op(1), op(2)])
+        const em = await h.run(
+            chat(),
+            {
+                admitNode: (o, s) => {
+                    asked.push([o.id, s])
+                    return o.id !== 1
+                },
+            },
+            signal,
+        )
+        expect(asked).toEqual([
+            [1, signal],
+            [2, signal],
+        ])
+        expect(ids(h.rc.calls)).toEqual([2])
+        expect(em.runs[0]!.op.id).toBe(2)
+    })
+
+    it('fails no_tee_capacity with its own message when it refuses every node, without a re-sweep', async () => {
+        for (const admitNode of [() => false, async () => false, () => Promise.reject(new Error('no verdict'))]) {
+            const h = harness([op(1), op(2)], { deps: { sweepDelay: () => 0 } })
+            const em = await h.run(chat(), { admitNode })
+            expect(em.failed).toMatchObject({
+                code: 'no_tee_capacity',
+                kind: 'no_route',
+                message: 'no operator the caller admits can serve this request',
+            })
+            expect(h.rc.calls).toEqual([])
+            expect(h.sleeps).toEqual([])
+        }
+    })
+
+    // A refusal filters, as requireTee does at pick: the node it let through
+    // reports its own failure, retryable ones included.
+    it('leaves an admitted node’s failure as the answer', async () => {
+        for (const [fail, want] of [
+            [() => gateway(), 'operators_unreachable'],
+            [() => new NoEphemeralError(), 'no_ephemeral_capacity'],
+            [() => busy(7000), 'operators_busy'],
+        ] as const) {
+            const h = harness([op(1), op(2)], {
+                answer: perNode({ 2: () => fail() }),
+                deps: { sweepDelay: () => 0, retryBudget: 1500 },
+            })
+            const em = await h.run(chat(), { admitNode: (o) => o.id !== 1 })
+            expect(em.failed?.code, want).toBe(want)
+        }
+    })
+
+    it('keeps the weather and busy re-sweeps for the nodes it lets through', async () => {
+        const unreachable = harness([op(1), op(2)], {
+            answer: perNode({ 2: () => gateway() }),
+            deps: { sweepDelay: () => 0, retryBudget: 1500 },
+        })
+        await unreachable.run(chat(), { admitNode: (o) => o.id !== 1 })
+        const alone = harness([op(2)], {
+            answer: perNode({ 2: () => gateway() }),
+            deps: { sweepDelay: () => 0, retryBudget: 1500 },
+        })
+        await alone.run(chat())
+        expect(alone.sleeps.length).toBeGreaterThan(0)
+        expect(unreachable.sleeps).toEqual(alone.sleeps)
+
+        const freed = harness([op(1), op(2)], {
+            answer: perNode({ 2: (n) => (n === 0 ? busy() : reservedFor(op(2), {} as Req)) }),
+            deps: { sweepDelay: () => 0 },
+        })
+        const em = await freed.run(chat(), { admitNode: (o) => o.id !== 1 })
+        expect(em.failed).toBeUndefined()
+        expect(em.runs[0]!.op.id).toBe(2)
+    })
+
+    // Admitted under the key pick saw; the re-probe hands back one it never judged.
+    // A refusal of that key is the answer even where the node had no key at
+    // all, which would otherwise read as the ephemeral gap.
+    it('is asked again about a re-probed node, under its new key', async () => {
+        for (const first of [() => new BadReserveEnvelopeError(), () => new NoEphemeralError()]) {
+            for (const refuseNew of [true, false]) {
+                const label = `${first().constructor.name}, refuseNew=${refuseNew}`
+                const healed = op(1, { ephemeralRecipient: 'age1new' })
+                const seen: (string | undefined)[] = []
+                const h = harness([op(1, { ephemeralRecipient: 'age1old' })], {
+                    registry: { reprobeEphemeral: async () => healed },
+                    answer: async (o, req, _hop, n) => {
+                        if (n === 0) throw first()
+                        return reservedFor(o, req)
+                    },
+                })
+                const em = await h.run(chat(), {
+                    admitNode: (o) => {
+                        seen.push(o.ephemeralRecipient)
+                        const ok = !(refuseNew && o.ephemeralRecipient === 'age1new')
+                        // The registry refreshing in place after the check.
+                        if (o.ephemeralRecipient === 'age1new') healed.ephemeralRecipient = 'age1swapped'
+                        return ok
+                    },
+                })
+                expect(seen, label).toEqual(['age1old', 'age1new'])
+                if (refuseNew) {
+                    expect(h.rc.calls, label).toHaveLength(1)
+                    expect(em.runs, label).toEqual([])
+                    expect(em.failed, label).toMatchObject({ code: 'no_tee_capacity' })
+                } else {
+                    expect(h.rc.calls, label).toHaveLength(2)
+                    expect(h.rc.calls[1]!.op.ephemeralRecipient, label).toBe('age1new')
+                    expect(Object.isFrozen(h.rc.calls[1]!.op), label).toBe(true)
+                    expect(em.runs[0]!.op.ephemeralRecipient, label).toBe('age1new')
+                }
+            }
+        }
+    })
+
+    // A verdict can change between sweeps (a key's check lands, or is withdrawn).
+    it('asks again on every sweep rather than keeping its first answer', async () => {
+        const asked = new Map<number, number>()
+        const events: string[] = []
+        const h = harness([op(1), op(2)], {
+            answer: perNode({
+                2: () => {
+                    events.push('reserve')
+                    return gateway()
+                },
+            }),
+            deps: { sweepDelay: () => 0, retryBudget: 1500 },
+        })
+        await h.run(chat(), {
+            admitNode: (o) => {
+                const n = (asked.get(o.id) ?? 0) + 1
+                asked.set(o.id, n)
+                const ok = o.id === 2 && n === 1
+                if (o.id === 2) events.push(ok ? 'admit' : 'refuse')
+                return ok
+            },
+        })
+        // Admitted on the first sweep (whose own retry reserves it again), then
+        // refused on the re-sweep, and never reserved after that.
+        expect(events[0]).toBe('admit')
+        expect(events.slice(events.indexOf('refuse'))).toEqual(['refuse'])
+    })
+
+    it('counts a node whose re-probed key it refused as not let through, beside a busy one', async () => {
+        const h = harness([op(1, { ephemeralRecipient: 'age1old' }), op(2)], {
+            registry: { reprobeEphemeral: async () => op(1, { ephemeralRecipient: 'age1new' }) },
+            answer: perNode({ 1: () => new BadReserveEnvelopeError(), 2: () => busy(7000) }),
+            deps: { sweepDelay: () => 0 },
+        })
+        const em = await h.run(chat(), { admitNode: (o) => o.ephemeralRecipient !== 'age1new' })
+        expect(em.failed?.code).toBe('operators_busy')
+    })
+
+    // A registry may refresh its operators in place: what the reserve seals to
+    // must be the key that was judged.
+    it('seals to the frozen copy it judged, whatever the registry does to its own', async () => {
+        const live = op(1, { ephemeralRecipient: 'age1judged' })
+        let frozen = false
+        const h = harness([live])
+        const em = await h.run(chat(), {
+            admitNode: (o) => {
+                frozen = Object.isFrozen(o)
+                live.ephemeralRecipient = 'age1swapped'
+                return true
+            },
+        })
+        expect(frozen).toBe(true)
+        expect(h.rc.calls[0]!.op.ephemeralRecipient).toBe('age1judged')
+        expect(em.runs[0]!.op.ephemeralRecipient).toBe('age1judged')
+    })
+
+    it('does not warn about a check the caller’s own abort ended', async () => {
+        const ac = new AbortController()
+        const h = harness([op(1)])
+        await h.run(
+            chat(),
+            {
+                admitNode: () => {
+                    ac.abort()
+                    throw new Error('aborted')
+                },
+            },
+            ac.signal,
+        )
+        expect(h.logged.filter((l) => l.msg === 'admit check failed; refusing operator')).toEqual([])
+    })
+})
+
 describe('the sweep', () => {
     it('falls through a busy node to a healthy one', async () => {
         const h = harness([op(1), op(2)], { answer: perNode({ 1: () => busy() }) })
