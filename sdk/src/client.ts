@@ -17,7 +17,7 @@ import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
 import type { EstimatePolicy } from './estimate.js'
 import { FeeRateCache } from './fee-rate.js'
-import { FETCH_BASE_URL, openAIFetch } from './fetch/serve.js'
+import { FETCH_BASE_URL, type FetchTarget, openAIFetch } from './fetch/serve.js'
 import {
     type RegistryProvider,
     type Stores,
@@ -65,7 +65,9 @@ export class Client {
     private constructor(p: Parts) {
         this.#p = p
         partsOf.set(this, p)
-        this.fetch = openAIFetch(this, { network: p.cfg.network.network, logger: p.cfg.logger })
+        // FetchTarget.config is optional, so only this pins that a Client
+        // still hands zs.fetch its network and logger.
+        this.fetch = openAIFetch(this satisfies Required<Pick<FetchTarget, 'config'>>)
     }
 
     /** The base URL for an OpenAI client whose fetch is this Client's fetch. */

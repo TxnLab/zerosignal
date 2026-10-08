@@ -43,9 +43,14 @@ export const FETCH_BASE_URL = 'https://zerosignal.invalid/v1'
  */
 export const MAX_CLIENT_BODY_BYTES = 16 << 20
 
-/** What zs.fetch reads off the Client. */
+/**
+ * What zs.fetch reads off the Client. config is the Client's: its network is
+ * read as Go's handler.New reads the zs.Client's, and its logger stands in
+ * for the separate logger argument Go's New takes and openAIFetch does not.
+ */
 export interface FetchTarget {
     stream(request: TurnRequest, signal?: AbortSignal): Stream
+    readonly config?: { readonly network: { readonly network: string }; readonly logger?: Logger }
 }
 
 export interface FetchOptions {
@@ -55,8 +60,9 @@ export interface FetchOptions {
      * elsewhere.
      */
     fundingUrl?: string | undefined
-    /** The Client's network; the funding hint is offered on mainnet only. */
+    /** The network the funding hint checks for mainnet. Absent is the target's. */
     network?: string | undefined
+    /** Absent is the target's. */
     logger?: Logger | undefined
 }
 
@@ -81,8 +87,10 @@ const ROUTES: ReadonlyMap<string, { endpoint: Endpoint; legacy: boolean }> = new
  * is still read and the ticket settled.
  */
 export function openAIFetch(target: FetchTarget, opts: FetchOptions = {}): Fetch {
+    const network = opts.network ?? target.config?.network.network
+    const logger = opts.logger ?? target.config?.logger
     const hint =
-        opts.network === 'mainnet' && opts.fundingUrl
+        network === 'mainnet' && opts.fundingUrl
             ? `If this is your web account, you can add funds in the web app instead (${opts.fundingUrl}).`
             : ''
     return async (input, init) => {
@@ -143,7 +151,7 @@ export function openAIFetch(target: FetchTarget, opts: FetchOptions = {}): Fetch
             // Go's recoverer: whatever broke, the caller gets a 500 and the
             // turn is not left running for nobody.
             stop()
-            opts.logger?.error('panic in handler', { path, err: err instanceof Error ? err.message : String(err) })
+            logger?.error('panic in handler', { path, err: err instanceof Error ? err.message : String(err) })
             return openAIErrorResponse(new Headers(), 500, 'proxy_error', 'panic', 'internal server error')
         }
     }

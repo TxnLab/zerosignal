@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ZsError, NodeReply } from '../src/errors.js'
 import type { Event, ReceiptVerified } from '../src/events.js'
-import { MAX_CLIENT_BODY_BYTES, type ServeOptions, goBlank, openAIFetch, serveTurn } from '../src/fetch/serve.js'
+import { type FetchTarget, MAX_CLIENT_BODY_BYTES, type ServeOptions, goBlank, openAIFetch, serveTurn } from '../src/fetch/serve.js'
 import type { Request as TurnRequest, Stream } from '../src/turn.js'
 import { recLogger } from './turn-fixtures.js'
 
@@ -572,6 +572,17 @@ describe('openAIFetch', () => {
         expect(logger.logged.map((l) => l.msg)).toContain('panic in handler')
     })
 
+    it('logs a broken handler to the Client’s logger when the options leave it out', async () => {
+        const logger = recLogger()
+        const broken = {
+            stream: () => ({ events: () => { throw new Error('broken') } }) as unknown as Stream,
+            config: { network: { network: 'testnet' }, logger },
+        }
+        const res = await openAIFetch(broken)(CHAT_URL, { method: 'POST', body: '{}' })
+        expect(res.status).toBe(500)
+        expect(logger.logged.map((l) => l.msg)).toContain('panic in handler')
+    })
+
     // Go's mux matches the unescaped path; a path that doesn't unescape never
     // reaches it.
     it('routes the unescaped path', async () => {
@@ -607,5 +618,16 @@ describe('openAIFetch', () => {
         const busy = () => script([], new ZsError({ kind: 'busy', code: 'operators_busy', message: 'm.' })).events
         const res = await openAIFetch(target(busy), { network: 'mainnet', fundingUrl: 'https://app' })(CHAT_URL, { method: 'POST', body: '{}' })
         expect(await res.text()).toContain('"message":"m."')
+    })
+
+    it('reads the network off the Client when the options leave it out, as Go’s handler does', async () => {
+        const unfunded = () => script([], new ZsError({ kind: 'funds', code: 'wallet_unfunded', message: 'm.' })).events
+        const onNet = (network: string) => ({ ...target(unfunded), config: { network: { network } } })
+        const body = async (t: FetchTarget, o: Parameters<typeof openAIFetch>[1]) =>
+            (await openAIFetch(t, o)(CHAT_URL, { method: 'POST', body: '{}' })).text()
+        expect(await body(onNet('mainnet'), { fundingUrl: 'https://app' })).toContain('(https://app).')
+        expect(await body(onNet('testnet'), { fundingUrl: 'https://app' })).toContain('"message":"m."')
+        // An explicit network still outranks the Client's.
+        expect(await body(onNet('mainnet'), { network: 'testnet', fundingUrl: 'https://app' })).toContain('"message":"m."')
     })
 })

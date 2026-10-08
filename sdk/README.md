@@ -210,9 +210,8 @@ failure the SDK reports itself is an OpenAI-shaped error body with `X-Should-Ret
 and body; the SDK sets those two headers and strips the node's `X-Zs-*` ones.
 
 `openAIFetch(zs, options)` builds the same fetch with options `zs.fetch` leaves out, such as
-the `fundingUrl` a `wallet_unfunded` error points at. Its options replace `zs.fetch`'s rather
-than add to them, and the hint shows only on mainnet, so pass `network: 'mainnet'` and your
-`logger` alongside it.
+the `fundingUrl` a `wallet_unfunded` error points at. It reads the network and logger off the
+Client unless the options set them, and the hint shows only on mainnet.
 
 ## Routing stores
 
