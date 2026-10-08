@@ -8,8 +8,8 @@
 # workspace:* rather than a range or a hand-written number that drifts.
 #
 # Only pnpm rewrites workspace:*. A tarball built by `npm pack` or published
-# by `npm publish` from sdk/ ships the literal and cannot be installed, so a
-# release job must `pnpm pack` and publish that tarball.
+# by `npm publish` from sdk/ ships the literal and cannot be installed, so
+# release.yml's SDK job publishes the unpacked `pnpm pack` tarball.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

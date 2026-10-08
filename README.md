@@ -159,15 +159,27 @@ cd ts && pnpm build
 
 ## Releasing
 
-Go and TypeScript release in lockstep: one version number, both tags on the same commit.
+Go, `@txnlab/zs-proto` and the `@txnlab/zerosignal` SDK release in lockstep: one version
+number, all three tags on the same commit.
 
-1. Set `ts/package.json` `version` to `X.Y.Z` and commit.
-2. Tag that commit `go/vX.Y.Z` and `ts/vX.Y.Z`, then push both tags.
+1. Set `version` to `X.Y.Z` in both `ts/package.json` and `sdk/package.json` and commit
+   (`make check-lockstep` refuses a mismatch).
+2. Tag that commit `go/vX.Y.Z`, `ts/vX.Y.Z` and `sdk/vX.Y.Z`, then push exactly those three:
+   `git push origin go/vX.Y.Z ts/vX.Y.Z sdk/vX.Y.Z`. GitHub starts no workflow for a push of
+   more than three tags, so don't use `--tags`.
 3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`).
-   The `ts/v*` tag runs [`release.yml`](./.github/workflows/release.yml), which tests both
-   implementations and **stages** the npm package. It does not publish it.
-4. A maintainer approves the staged package with 2FA, either in the package's *Staged Packages*
-   tab on npmjs.com or with `npm stage approve <id>`. Only then is it installable.
+   Each of the `ts/v*` and `sdk/v*` tags runs [`release.yml`](./.github/workflows/release.yml),
+   which runs the full test suite and **stages** that npm package. It does not publish it.
+   The SDK is staged from its `pnpm pack` tarball, which pins `@txnlab/zs-proto` at `X.Y.Z`,
+   and only when `ts/vX.Y.Z` is on the same commit.
+4. A maintainer approves each staged package with 2FA, either in the package's *Staged
+   Packages* tab on npmjs.com or with `npm stage approve <id>`. Only then is it installable.
+   Approve `@txnlab/zs-proto` first: the SDK can't be installed until the version it pins is.
+   If the zs-proto job failed, reject the staged SDK too.
+
+A new package needs a one-time setup before its first tag: npmjs.com lets a trusted publisher be
+added only to a package that exists, so publish its first version by hand, then add a trusted
+publisher for `TxnLab/zerosignal`'s `release.yml` that may only stage.
 
 Under 0.x a minor bump is a breaking change and a patch bump is not. Never move or delete a
 pushed `go/v*` tag: the Go checksum database has already recorded it.
