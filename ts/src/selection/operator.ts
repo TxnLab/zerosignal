@@ -12,7 +12,8 @@
 // proto/ts); numeric fields are `number` since real operator ids / token
 // counts stay within JS's safe-integer range.
 
-import { usesTightInputBound } from '../wire/version.js'
+import { CEILING_FORWARD_FACTOR } from '../tokenize/bound.js'
+import { defersFitToUpstream, usesTightInputBound } from '../wire/version.js'
 
 export interface ModelCapacity {
     // bounds input_tokens + max_output_tokens (0 = unbounded).
@@ -154,6 +155,20 @@ export function fitsContextWindow(input: number, maxOutput: number, window: numb
 }
 
 /**
+ * fitsContextWindow plus the deferral a node advertising defersFitToUpstream
+ * applies: past the window, such a node is still offered an input bound up to
+ * CEILING_FORWARD_FACTOR × its input ceiling (window − maxOutput), because the
+ * bound runs about twice a real tokenizer and the node lets the upstream
+ * decide. Mirror of proto/go/selection/operator.go::FitsContextWindowFor, which
+ * carries the reasoning.
+ */
+export function fitsContextWindowFor(protoVersion: string, input: number, maxOutput: number, window: number): boolean {
+    if (fitsContextWindow(input, maxOutput, window)) return true
+    if (window <= maxOutput || !defersFitToUpstream(protoVersion)) return false
+    return input <= CEILING_FORWARD_FACTOR * (window - maxOutput)
+}
+
+/**
  * Reports whether op can serve a request for model under its declared
  * capacity. No declared capacity for model ⇒ unbounded ⇒ true. Mirror of
  * proto/go/zs/sizing.go::Fits.
@@ -161,7 +176,7 @@ export function fitsContextWindow(input: number, maxOutput: number, window: numb
 export function fits(op: Operator, model: string, inputTokens: number, maxOutputTokens: number): boolean {
     const mc = op.model_capacities?.[model]
     if (mc === undefined) return true
-    if (!fitsContextWindow(inputTokens, maxOutputTokens, mc.context_window)) return false
+    if (!fitsContextWindowFor(op.proto_version, inputTokens, maxOutputTokens, mc.context_window)) return false
     if (mc.max_output_tokens > 0 && maxOutputTokens > mc.max_output_tokens) return false
     return true
 }

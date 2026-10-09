@@ -41,6 +41,11 @@ import type { SizingRequest } from '../src/sizing.js'
 import type { NodeRef } from '../src/types.js'
 import { testOperator } from './fixtures.js'
 
+// A node that judges fit itself rather than deferring to its upstream (pre-9.11):
+// the cases that need a size refusal use it, since a current node is offered a
+// bound up to 3x its input ceiling.
+const JUDGES_FIT = '9.10'
+
 const MODEL = 'm'
 
 function cap(over: Partial<ModelCapacity> = {}): ModelCapacity {
@@ -278,7 +283,7 @@ describe('pickCandidates', () => {
         expect(res.signerUnderfundedReason).toBe('')
         res = await pickCandidates(deps([op(1)]), request({ endpoint: '/v1/images/generations' }))
         expect(res.imageEndpointUnsupported).toBe(true)
-        res = await pickCandidates(deps([op(1, {}, { contextWindow: 150 })]), request())
+        res = await pickCandidates(deps([op(1, { protoVersion: JUDGES_FIT }, { contextWindow: 150 })]), request())
         expect(res.sizingMisses).toEqual([{ operator_id: 1, context_window: 150, max_output_tokens: 0, effective_max_output: 100 }])
         expect(res.operators).toEqual([])
     })
@@ -286,7 +291,7 @@ describe('pickCandidates', () => {
     it('derives max_output per operator when the caller omitted it, under the caller’s ceiling', async () => {
         // A flat 200k would miss both; derived, the 100k window fits, and the
         // 4k one misses at a quarter of its window clamped to the ceiling.
-        const ops = [op(1, {}, { contextWindow: 100_000 }), op(2, {}, { contextWindow: 4000 })]
+        const ops = [op(1, {}, { contextWindow: 100_000 }), op(2, { protoVersion: JUDGES_FIT }, { contextWindow: 4000 })]
         const s = sizing({ inputTokens: 4000, maxOutputTokens: 200_000, deriveMaxOutput: true, maxOutputCeiling: 500 })
         const res = await pickCandidates(deps(ops), request({ sizing: s }))
         expect(ids(res.operators)).toEqual(['1/1'])
@@ -388,7 +393,7 @@ describe('pickCandidates', () => {
                 'previous_response_id "rid" is pinned to operator 7 which no longer serves model "m"',
             )
 
-            const small = pinned(op(7, {}, { contextWindow: 1000 }))
+            const small = pinned(op(7, { protoVersion: JUDGES_FIT }, { contextWindow: 1000 }))
             const res = await pick(small, { sizing: sizing({ inputTokens: 990, maxOutputTokens: 100 }) })
             expect(res.affinityBlocked).toBe(true)
             expect(res.affinityBlockReason).toBe(
@@ -396,8 +401,17 @@ describe('pickCandidates', () => {
             )
         })
 
+        it('keeps a pin to a node that defers fit to its upstream, up to 3x its input ceiling', async () => {
+            const deferring = (inputTokens: number) =>
+                pick(pinned(op(7, {}, { contextWindow: 1000 })), { sizing: sizing({ inputTokens, maxOutputTokens: 100 }) })
+            const within = await deferring(2700)
+            expect(within.affinityBlocked).toBe(false)
+            expect(ids(within.operators)).toEqual(['7/1'])
+            expect((await deferring(2701)).affinityBlocked).toBe(true)
+        })
+
         it('reports the max_output the pin was fit-checked against, derived when the caller omitted it', async () => {
-            const res = await pick(pinned(op(7, {}, { contextWindow: 1000 })), {
+            const res = await pick(pinned(op(7, { protoVersion: JUDGES_FIT }, { contextWindow: 1000 })), {
                 sizing: sizing({ inputTokens: 990, maxOutputTokens: 32768, deriveMaxOutput: true, maxOutputCeiling: 32768 }),
             })
             expect(res.affinityBlockReason).toBe(
@@ -477,7 +491,7 @@ describe('pickCandidates', () => {
         })
 
         it('blocks a strict pin that cannot fit, as an affinity refusal', async () => {
-            const list = [op(1), op(7, {}, { contextWindow: 150 })]
+            const list = [op(1), op(7, { protoVersion: JUDGES_FIT }, { contextWindow: 150 })]
             const res = await pickCandidates(withPin({ affinityPolicy: 'strict' }, list), request({ body }))
             expect(res.affinityBlocked).toBe(true)
             expect(res.operators).toEqual([])

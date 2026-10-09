@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-09 — the payer's fit filter defers to a 9.11 node
+
+`selection.Fits`, and the reserve-leg `Fits` in both SDKs, go through
+`selection.FitsContextWindowFor` (TS `fitsContextWindowFor`). An operator advertising 9.11 or
+later (`wire.DefersFitToUpstream`) is offered an input bound up to `CeilingForwardFactor` (3) ×
+its input ceiling (`context_window − max_output`), matching the node's forward rule (9.11 below)
+minus the node's tolerance, which the payer cannot see. An older operator is filtered on the
+window as before. Before this, every payer refused at the window on the bound, which runs about
+2× a real tokenizer, so a chat was refused at roughly half the real window whatever the node
+would have done. The `previous_response_id` and tool-call pins use the same rule, and a
+`context_length_exceeded` from the filter against a 9.11 operator means the 3× cap, not the
+window.
+
 ### 2026-10-09 — releases are private again
 
 `TxnLab/zerosignal` is private, and new releases follow it. `@txnlab/zs-proto` and
@@ -309,13 +322,12 @@ rounds now bills those rounds' reported usage, as the streaming loop already did
 settle at zero, which gave a prompt built to overflow on round two its first round free.
 
 Callers ask `wire.DefersFitToUpstream(proto_version)` and compare against
-`CeilingForwardFactor` (mirrored in TS as `CEILING_FORWARD_FACTOR`). Nothing in this module calls
-either yet: the proxy and SDK still pre-filter operators with `selection.Fits` on the bound
-before reserving, so for their users the early refusal happens there instead. Only the web
-client, which sizes without that pre-filter, reaches the forwarding path today. Relaxing
-`Fits` for 9.11 nodes is the follow-up. Mixed versions are safe in
-both directions. A caller that predicts the old refusal against a 9.11 node only compacts early.
-A caller that sends to a pre-9.11 node gets that node's zero-cost refusal, as before.
+`CeilingForwardFactor` (mirrored in TS as `CEILING_FORWARD_FACTOR`). The payer's pre-reserve
+filter applies them (see "the payer's fit filter defers to a 9.11 node" under Unversioned); in
+the release that introduced this generation it still refused at the window, so no payer,
+the web client included, reached the node's forwarding path. Mixed versions are safe in both
+directions: a pre-9.11 operator is filtered on the window exactly as before, and a caller that
+predicts the old refusal against a 9.11 node only compacts early.
 
 ---
 

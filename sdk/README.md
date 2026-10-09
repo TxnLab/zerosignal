@@ -232,8 +232,9 @@ with its `maxOutputCeiling`.
   it declares none.
 - `effectiveMaxOutput(op, req)` is the max_output that operator's reserve escrows.
 - `fits(op, req)` is whether the input bound plus that max_output fits the operator's context
-  window and the max_output its cap. An operator that declares no capacity for the model fits
-  any request.
+  window and the max_output its cap. An operator at wire 9.11 or later lets its backend decide
+  fit, so it also fits an input bound up to 3 × its input ceiling (`window − max_output`). An
+  operator that declares no capacity for the model fits any request.
 - `maxDeclaredOutput(ops, model)` is the largest `maxOutputTokens` any of `ops` declares, or 0
   when one of them declares none: one uncapped operator leaves no ceiling to clamp a request
   to. A turn reads it over the operators it could route to, before any reserve, and reports a
