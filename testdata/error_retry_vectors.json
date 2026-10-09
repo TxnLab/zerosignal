@@ -1,0 +1,443 @@
+[
+  {
+    "kind": "invalid_request",
+    "code": "bad_image_edit_request",
+    "retryable": false
+  },
+  {
+    "kind": "invalid_request",
+    "code": "bad_image_request",
+    "retryable": false
+  },
+  {
+    "kind": "operator_fault",
+    "code": "build_request",
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "canceled",
+    "retryable": false
+  },
+  {
+    "kind": "context_exceeded",
+    "code": "context_length_exceeded",
+    "retryable": false
+  },
+  {
+    "kind": "funds",
+    "code": "free_quota_exhausted",
+    "retryable": false
+  },
+  {
+    "kind": "invalid_request",
+    "code": "max_output_required",
+    "retryable": false
+  },
+  {
+    "kind": "busy",
+    "code": "mbr_pool_exhausted",
+    "retryable": true
+  },
+  {
+    "kind": "funds",
+    "code": "mbr_pool_underfunded",
+    "retryable": false
+  },
+  {
+    "kind": "invalid_request",
+    "code": "missing_model",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_compatible_operator",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_ephemeral_capacity",
+    "retryable": true
+  },
+  {
+    "kind": "no_route",
+    "code": "no_funded_operator",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_operator",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_pinned_operator",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_production_operator",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_relay_available",
+    "retryable": true
+  },
+  {
+    "kind": "no_route",
+    "code": "no_tee_capacity",
+    "retryable": false
+  },
+  {
+    "kind": "no_route",
+    "code": "no_tool_capacity",
+    "retryable": false
+  },
+  {
+    "kind": "operator_fault",
+    "code": "operator_inconsistent_response",
+    "retryable": true
+  },
+  {
+    "kind": "operator_fault",
+    "code": "operator_ticket_reuse",
+    "retryable": true
+  },
+  {
+    "kind": "operator_fault",
+    "code": "operator_unsealed_response",
+    "retryable": true
+  },
+  {
+    "kind": "busy",
+    "code": "operators_busy",
+    "retryable": true
+  },
+  {
+    "kind": "unreachable",
+    "code": "operators_unreachable",
+    "retryable": true
+  },
+  {
+    "kind": "invalid_request",
+    "code": "pin_conflicts_with_continuation",
+    "retryable": false
+  },
+  {
+    "kind": "price_rejected",
+    "code": "price_ceiling_exceeded",
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "read_upstream",
+    "retryable": true
+  },
+  {
+    "kind": "internal",
+    "code": "registry",
+    "retryable": false
+  },
+  {
+    "kind": "operator_fault",
+    "code": "response_handler",
+    "retryable": true
+  },
+  {
+    "kind": "spend_cap",
+    "code": "spend_cap_exceeded",
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "stream_interrupted",
+    "retryable": true
+  },
+  {
+    "kind": "operator_fault",
+    "code": "stream_setup",
+    "retryable": true
+  },
+  {
+    "kind": "operator_fault",
+    "code": "ticket_price_rejected",
+    "retryable": false
+  },
+  {
+    "kind": "internal",
+    "code": "tokenize",
+    "retryable": false
+  },
+  {
+    "kind": "invalid_request",
+    "code": "unsupported_tool",
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "upstream_unreachable",
+    "retryable": true
+  },
+  {
+    "kind": "internal",
+    "code": "wallet_open",
+    "retryable": false
+  },
+  {
+    "kind": "funds",
+    "code": "wallet_unfunded",
+    "retryable": false
+  },
+  {
+    "kind": "internal",
+    "code": "wrap_request",
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "provider_overloaded",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "provider_error",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "upstream_truncated",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "rate_limit_exceeded",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "payment_verification_failed",
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "context_length_exceeded",
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "image_generation_failed",
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 429,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 502,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 503,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 504,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 400,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "",
+    "node_status": 507,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "provider_code": "context_length_exceeded",
+    "node_status": 503,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 400,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 429,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 500,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 501,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 502,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 503,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 504,
+    "retryable": true
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 505,
+    "retryable": false
+  },
+  {
+    "kind": "upstream",
+    "code": "upstream_error",
+    "node_status": 507,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "ticket_invalid",
+    "node_status": 402,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "payment_verification_failed",
+    "node_status": 402,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "ticket_required",
+    "node_status": 402,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "admission_tag_invalid",
+    "node_status": 402,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "bad_envelope",
+    "node_status": 400,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "request_too_large",
+    "node_status": 413,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "node_draining",
+    "node_status": 503,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 408,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 429,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 500,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 502,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 504,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 507,
+    "retryable": true
+  },
+  {
+    "kind": "interrupted",
+    "code": "",
+    "node_status": 404,
+    "retryable": false
+  },
+  {
+    "kind": "interrupted",
+    "code": "canceled",
+    "node_status": 503,
+    "retryable": false
+  }
+]

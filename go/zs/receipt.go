@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2026. TxnLab Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package zs
+
+import (
+	"crypto/ed25519"
+	"errors"
+	"fmt"
+
+	"github.com/TxnLab/zerosignal/go/ticket"
+)
+
+// ReceiptCheck is the three-part verification the proxy runs on every
+// UsageReceipt. One helper so the non-stream responder and the
+// stream-end responder run the exact same checks in the same order
+// and produce consistent error surfaces (and the same dispute
+// trigger).
+//
+//   - Sig verifies under the operator's SigningAddr ed25519 pubkey.
+//   - AmountCharged ≤ ticket.MaxPrice (the contract enforces this too,
+//     but we fail fast and with a clean error).
+//   - BodyHash equals sha256 of the plaintext the proxy just
+//     reconstructed. Mismatch is cryptographic evidence the operator
+//     signed for content it didn't deliver (SPEC.md § 3b case (e))
+//     and drives escrow.protest in step 8.
+type ReceiptCheck struct {
+	Ticket       *ticket.Ticket
+	Operator     Operator
+	Receipt      *ticket.UsageReceipt
+	ComputedHash [32]byte // sha256 of the plaintext body / concatenated stream frames
+}
+
+// ReceiptViolation enumerates the three failure modes VerifyReceipt
+// can surface. Used by callers to decide logging level and (step 8)
+// whether to drive escrow.protest.
+type ReceiptViolation int
+
+const (
+	ReceiptOK                ReceiptViolation = iota // no violation
+	ReceiptViolationSig                              // signature invalid
+	ReceiptViolationAmount                           // amount_charged > max_price, or a self-inconsistent billing count (cached_input_count > actual_input_count)
+	ReceiptViolationBodyHash                         // body_hash != computed
+)
+
+// String renders the violation as a stable lowercase tag suitable for
+// structured-log fields and metric labels. Keeps the wire/log surface
+// readable without leaking the underlying iota value.
+func (v ReceiptViolation) String() string {
+	switch v {
+	case ReceiptOK:
+		return "ok"
+	case ReceiptViolationSig:
+		return "sig"
+	case ReceiptViolationAmount:
+		return "amount"
+	case ReceiptViolationBodyHash:
+		return "body_hash"
+	default:
+		return "unknown"
+	}
+}
+
+// ReceiptError wraps the underlying error plus a classification so
+// callers can distinguish "operator misbehaved" (protest material)
+// from "receipt corrupted in transit" (retry / reject).
+type ReceiptError struct {
+	Violation ReceiptViolation
+	Err       error
+}
+
+func (e *ReceiptError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *ReceiptError) Unwrap() error { return e.Err }
+
+// VerifyReceipt runs the three checks. Returns nil on happy path, a
+// *ReceiptError on any violation.
+func VerifyReceipt(c ReceiptCheck) error {
+	if c.Receipt == nil {
+		return &ReceiptError{
+			Violation: ReceiptViolationSig,
+			Err:       errors.New("receipt is nil"),
+		}
+	}
+	if len(c.Operator.TicketSigningKey) != ed25519.PublicKeySize {
+		return &ReceiptError{
+			Violation: ReceiptViolationSig,
+			Err:       fmt.Errorf("operator signing key length %d, want %d", len(c.Operator.TicketSigningKey), ed25519.PublicKeySize),
+		}
+	}
+	if err := c.Receipt.Verify(c.Operator.TicketSigningKey); err != nil {
+		return &ReceiptError{
+			Violation: ReceiptViolationSig,
+			Err:       fmt.Errorf("receipt signature verify: %w", err),
+		}
+	}
+	if c.Ticket != nil && c.Receipt.AmountCharged > c.Ticket.MaxPrice {
+		return &ReceiptError{
+			Violation: ReceiptViolationAmount,
+			Err:       fmt.Errorf("receipt amount_charged %d exceeds ticket max_price %d", c.Receipt.AmountCharged, c.Ticket.MaxPrice),
+		}
+	}
+	// Cached-read count is a subset of the input (SPEC §3a). A signed but
+	// self-inconsistent receipt (cached > actual input) is operator
+	// misbehaviour — mirror the node-side buildReceipt invariant so a buggy /
+	// malicious operator can't slip a malformed billing tuple past the proxy.
+	// Log-only (no protest): there's no body_hash dispute here, and the
+	// contract settles on the digest regardless.
+	if c.Receipt.CachedInputCount > c.Receipt.ActualInputCount {
+		return &ReceiptError{
+			Violation: ReceiptViolationAmount,
+			Err:       fmt.Errorf("receipt cached_input_count %d exceeds actual_input_count %d", c.Receipt.CachedInputCount, c.Receipt.ActualInputCount),
+		}
+	}
+	gotHash, err := c.Receipt.BodyHashBytes()
+	if err != nil {
+		return &ReceiptError{
+			Violation: ReceiptViolationBodyHash,
+			Err:       fmt.Errorf("receipt body_hash malformed: %w", err),
+		}
+	}
+	if gotHash != c.ComputedHash {
+		return &ReceiptError{
+			Violation: ReceiptViolationBodyHash,
+			Err:       fmt.Errorf("receipt body_hash mismatch (got %x want %x)", gotHash, c.ComputedHash),
+		}
+	}
+	return nil
+}
+
+// AsReceiptError unwraps err into its *ReceiptError, if any. Thin
+// convenience for log-path callers that want the classification.
+func AsReceiptError(err error) (*ReceiptError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	if re, ok := errors.AsType[*ReceiptError](err); ok {
+		return re, true
+	}
+	return nil, false
+}

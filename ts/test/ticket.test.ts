@@ -8,11 +8,13 @@ import { base64 } from '@scure/base'
 
 import {
     commitResponseKey,
+    parseTicketJSON,
     signTicket,
     ticketCanonicalBytes,
     verifyTicket,
     type Ticket,
 } from '../src/ticket/ticket.js'
+import { parseReserveResponseJSON } from '../src/ticket/reserve.js'
 import { UsageType } from '../src/ticket/usagetype.js'
 import { RESPONSE_KEY_SIZE } from '../src/wire/constants.js'
 import { newFakeSigner } from './helpers.js'
@@ -191,5 +193,122 @@ describe('commitResponseKey', () => {
         k2[0] = 1
         expect(commitResponseKey(k1)).toEqual(commitResponseKey(k1))
         expect(commitResponseKey(k1)).not.toEqual(commitResponseKey(k2))
+    })
+})
+
+const enc = (v: unknown) => new TextEncoder().encode(JSON.stringify(v))
+
+describe('parseTicketJSON', () => {
+    // Distinct values, so a field read from its neighbour can't pass.
+    it('round-trips every signed field', async () => {
+        const { signer, address, publicKey } = newFakeSigner()
+        const t = {
+            ...sampleTicket(),
+            input_usage_type: UsageType.None,
+            output_usage_type: UsageType.Images,
+            cache_read_rate: 3,
+        }
+        await signTicket(t, signer, address)
+        const got = parseTicketJSON(enc(t))
+        expect(got).toEqual(t)
+        expect(() => verifyTicket(got, publicKey)).not.toThrow()
+    })
+
+    it('accepts each bound itself, and a negative expires_at', () => {
+        const t = {
+            ...sampleTicket(),
+            max_price: Number.MAX_SAFE_INTEGER,
+            output_usage_type: 255 as UsageType,
+            expires_at: Number.MIN_SAFE_INTEGER,
+        }
+        expect(parseTicketJSON(enc(t))).toMatchObject({
+            max_price: Number.MAX_SAFE_INTEGER,
+            output_usage_type: 255,
+            expires_at: Number.MIN_SAFE_INTEGER,
+        })
+    })
+
+    it('reads an absent or null field as zero and leaves sig off', () => {
+        const got = parseTicketJSON(enc({ ticket_id: 't', max_price: null, stream: null, sig: null }))
+        expect(got).toMatchObject({ ticket_id: 't', max_price: 0, stream: false, model: '', expires_at: 0 })
+        expect('sig' in got).toBe(false)
+    })
+
+    // The canonical bytes write a uint64, so -1 signs as 2^64-1 and would pass
+    // any ceiling the payer holds max_price to; 256 masks to 0 in a usage byte.
+    it.each([
+        ['max_price', -1],
+        ['min_price', 1.5],
+        ['input_count', '5'],
+        ['max_output_count', 2 ** 53],
+        ['operator_id', true],
+        ['node_id', -1],
+        ['input_rate', -1],
+        ['output_rate', -1],
+        ['cache_read_rate', -1],
+        ['expires_at', 2 ** 53],
+        ['expires_at', 1.5],
+        ['input_usage_type', 256],
+        ['output_usage_type', -1],
+        ['stream', 'true'],
+        ['stream', 1],
+        ['model', 5],
+        ['commit_k', {}],
+        ['ticket_id', []],
+        ['sig', 5],
+    ])('refuses %s = %j', (field, value) => {
+        expect(() => parseTicketJSON(enc({ ...sampleTicket(), [field]: value }))).toThrow(
+            new RegExp(`decode ticket json: ${field}`),
+        )
+    })
+
+    it('refuses malformed JSON or a non-object', () => {
+        for (const s of ['not json', '1', 'null', '[]', '"x"']) {
+            expect(() => parseTicketJSON(new TextEncoder().encode(s))).toThrow(/decode ticket json/)
+        }
+    })
+})
+
+describe('parseReserveResponseJSON', () => {
+    it('round-trips a full response', async () => {
+        const { signer, address } = newFakeSigner()
+        const ticket = sampleTicket()
+        await signTicket(ticket, signer, address)
+        const r = { ticket, wrapped_response_key: 'wk', algo_usd_price: 0.25, presigned_open_txn: 'pg' }
+        expect(parseReserveResponseJSON(enc(r))).toEqual(r)
+    })
+
+    it('leaves zero-valued optional fields off, as Go omitempty does', () => {
+        const got = parseReserveResponseJSON(
+            enc({ ticket: sampleTicket(), wrapped_response_key: '', algo_usd_price: 0, presigned_open_txn: null }),
+        )
+        expect(got).toEqual({ ticket: sampleTicket() })
+    })
+
+    it('reads an absent ticket as the zero ticket', () => {
+        expect(parseReserveResponseJSON(enc({})).ticket).toMatchObject({ ticket_id: '', max_price: 0 })
+    })
+
+    it('reads the ticket as strictly as parseTicketJSON', () => {
+        expect(() => parseReserveResponseJSON(enc({ ticket: { ...sampleTicket(), max_price: -1 } }))).toThrow(
+            /decode reserve response json: ticket: max_price/,
+        )
+    })
+
+    it('refuses an algo_usd_price that overflows a float64', () => {
+        const raw = new TextEncoder().encode('{"ticket":{},"algo_usd_price":1e400}')
+        expect(() => parseReserveResponseJSON(raw)).toThrow(/algo_usd_price Infinity is not a finite number/)
+    })
+
+    it.each([
+        ['ticket', 'x'],
+        ['ticket', []],
+        ['wrapped_response_key', 5],
+        ['algo_usd_price', '0.25'],
+        ['presigned_open_txn', {}],
+    ])('refuses %s = %j', (field, value) => {
+        expect(() => parseReserveResponseJSON(enc({ ticket: sampleTicket(), [field]: value }))).toThrow(
+            new RegExp(`decode reserve response json: ${field}`),
+        )
     })
 })

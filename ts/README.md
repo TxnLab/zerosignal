@@ -2,7 +2,8 @@
 
 TypeScript primitives for the [ZeroSignal](https://docs.zerosignal.ai) protocol: envelope
 sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing,
-tokenize bounds, transient-error classification, and TEE attestation checks. Enough for a
+tokenize bounds, transient-error classification, escrow box decoding and settlement rules, and
+TEE attestation checks. Enough for a
 browser or Node process to speak the protocol directly to a node, with no proxy daemon in front.
 
 It is a port of the Go reference implementation and is kept byte-for-byte compatible with it on
@@ -18,6 +19,9 @@ This package ships primitives only. It does no chain access, discovery, or reque
 pnpm add @txnlab/zs-proto
 ```
 
+The package is private for now: the install needs an npm token that can read the `@txnlab`
+scope, in your user-level `~/.npmrc`.
+
 ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@noble/ciphers`,
 `@noble/ed25519`, `@noble/hashes`, `@scure/base`, `age-encryption`.
 
@@ -25,21 +29,25 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 
 | Import | Contents |
 |---|---|
-| `@txnlab/zs-proto` | Everything from `wire`, `ticket`, `selection`, `imageprice`, `tokenize`, `attest`, `inject` |
+| `@txnlab/zs-proto` | Everything from `wire`, `ticket`, `selection`, `imageprice`, `tokenize`, `attest`, `inject`, `tools` |
 | `…/wire` | Envelope types, `wrapRequest` / `unwrapResponseKey` / `decryptBody` / `decryptSSEDataValue`, `decryptRequest` / `ResponseSealer` (node side, for round-trip tests), AAD builders, admission-tag HMAC, body hash, sealed inner frame, ephemeral identity, protocol version |
 | `…/ticket` | `Ticket` / `UsageReceipt` / reserve types, `signTicket` / `verifyTicket` / `signReceipt` / `verifyReceipt`, signature digests, `commitResponseKey`, receipt header codec, Algorand address codec, `BytesSigner` |
 | `…/selection` | Operator and relay selection policy, `deriveMaxOutput` |
 | `…/pricing` | Token pricing and `verifyTicketPrice` |
 | `…/imageprice` | Image-generation pricing |
 | `…/tokenize` | Input-token bound used to size a reserve |
-| `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule |
+| `…/transient` | Retryable-vs-terminal error classification and the shared retry schedule; the reserve `429` `BusyCode`s with `retryableBusyCode`; `retryableAfterPayment` |
+| `…/steering` | The arithmetic behind a payer's own routing signals: relay-reputation `decay` / `bump` / `relayDownranked`, target backoff (`backoffWindowMs`, `recordFailure`, `backoffRemaining`), and the weights-digest `weightsConsensus`. The stores they feed stay with the payer |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
+| `…/tools` | What a payer reads off a tool-bearing stream: the sealed tool-status and image progress / partial / completed frames with `parseStatusEvent` and `partialImageDataUrl`, `ToolAction` and its source icons (`iconHostKey`, `iconDataUrl`, `sanitizeIcons`), `isLinkableUrl` for any URL that becomes an href, and the usage shapes with `generatedOutputTokens` |
+| `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
 | `…/attest` | dstack / Intel TDX measurement checks and compose-file policy |
-| `…/inject` | Tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
+| `…/inject` | The `/v1/zs/details` discovery types and `parseOperatorDetails`, retention tiers (`isKnownRetention`, `combineRetention`), TEE modes, the payer's pre-seal body mutators (`dropRoutingPreferences`, `dropPromptCacheKey`, `dropEmptyTools`, `clampMaxOutput`), tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
 | `…/testdata/*` | The golden-vector fixtures this package is tested against |
 
-`pricing`, `transient`, and `relay` are subpath-only: their names (`classify`, `wait`,
-`buildRequest`, …) are package-qualified in Go and would be ambiguous at the root.
+`escrow`, `pricing`, `transient`, `steering`, and `relay` are subpath-only: their names
+(`classify`, `wait`, `decay`, `buildRequest`, …) are package-qualified in Go and would be
+ambiguous at the root.
 
 ## Signing: raw Ed25519, not Algorand `signBytes`
 
@@ -59,6 +67,8 @@ Function names use camelCase. Constants use UPPER_SNAKE.
 
 Go's `uint64` / `int64` fields are typed as `number` here. Real values stay well within JS's safe-integer range (token counts, microUSDC totals up to ~10^12). Internally, the canonical-bytes encoder coerces via `BigInt` before writing the 8-byte big-endian form, so values up to 2^53−1 are encoded correctly.
 
+`escrow` is the exception: it decodes on-chain boxes, whose `uint64` fields can hold any value, so they are `bigint`. Fields the contract stores in one or two bytes (statuses, the pending side, usage types, fee bps, staging) are `number`. Its arithmetic is unbounded where Go's `uint64` wraps, so the two agree only on values the contract can actually produce; the fee functions accept fee bps as either type. `decodeNodeRecord` refuses a base URL that is not valid UTF-8, which Go decodes with the raw bytes kept.
+
 ## Secret-key lifetime
 
 JS strings are immutable, so the AGE-SECRET-KEY-1… representation of an ephemeral identity cannot be reliably wiped from memory the way the Go side does (`ZeroEphemeralIdentity` reaches into age internals via reflect+unsafe). Callers should:
@@ -70,14 +80,21 @@ JS strings are immutable, so the AGE-SECRET-KEY-1… representation of an epheme
 For higher-assurance setups, terminate envelopes in a worker / iframe whose JS heap can be discarded entirely on completion.
 
 Not ported (intentionally): the Go file-IO identity loader, the Go `ZeroEphemeralIdentity` wipe,
-and the Go `algo`, `algod`, `escrow`, `tools`, and `keystore` packages.
+the Go `algo`, `algod`, and `keystore` packages, the node-side half of `tools` (request rewriters,
+the tool loop, markup recovery), and the chain-access half of `escrow` (transaction composition,
+box reads, group verification).
 
 ## Cross-implementation byte parity
 
 Every vectored module is checked against a fixture the Go implementation generates: AAD layout,
 admission tag, body hash, ticket / receipt canonical bytes, signature digests, address
-encoding, selection order, pricing, tokenize bounds, transient verdicts, and attestation
-checks. The Go suite fails when its output no longer matches the fixture, and this package's
+encoding, selection order, pricing, tokenize bounds, transient verdicts, escrow box keys,
+record decoding, `classify` and fee math, discovery field names and retention tiers, which
+bodies the pre-seal mutators change (compared by value: TS splices the original text where Go
+re-marshals), tool-status frames as a node emits them, icon host keys and the usage arithmetic,
+reputation decay, target backoff and the weights consensus, and attestation checks. `parseOperatorDetails` is deliberately more lenient than Go's decoder —
+it drops a malformed field rather than rejecting the whole body — and that part is tested
+here only. The Go suite fails when its output no longer matches the fixture, and this package's
 suite fails when its output does, so drift on either side fails. In a checkout of the
 repository:
 
@@ -88,8 +105,11 @@ make update-vectors    # regenerate fixtures after an intentional format change
 
 ## Development
 
+This package and the SDK (`../sdk`) are one pnpm workspace with one lockfile, rooted one
+directory up, so install from there.
+
 ```bash
-pnpm install
+cd .. && pnpm install && cd ts
 pnpm test          # vitest --run
 pnpm typecheck
 pnpm build

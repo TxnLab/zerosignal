@@ -252,13 +252,13 @@ The full per-component breakdown lives in the implementation plan and the operat
 
 ### 9.2 Proxy-side surface
 
-- **Verifier interface** — `TEEVerifier`, with `NRASVerifier` as its implementation. The interface exists so a `LocalNvtrustVerifier` or alternative-vendor implementation lands as a config switch, not a refactor.
+- **Verifier interface** — `tee.Verifier` (`proto/go/zs/tee`), with `BundleVerifier` as its implementation. The interface exists so a `LocalNvtrustVerifier` or alternative-vendor implementation lands as a config switch, not a refactor.
 - **Capability cache** — `Operator.TEE *TEEStatus` carrying mode, last-attested timestamp, verifier name, and (on failure) a tagged failure reason for telemetry. Verifier failures demote the operator to non-TEE for routing purposes.
 - **Routing filter** — when a request carries `X-Zs-Require-TEE: nvidia-cc` (or an equivalent proxy-side policy fires), `pickCandidates` filters to operators with `Operator.IsTEEAttested()` — `TEE != nil && TEE.Verified`. `Verified` is the routing-relevant bit; `TEE.FailureTag` carries the verdict tag for telemetry and is empty exactly when `Verified` is true. No survivor → `503 no_tee_capacity`. Silent fallback is forbidden.
 
 ### 9.3 Off-chain advertising
 
-Capability is advertised off-chain via `/v1/zs/details` (the `tee.mode` field, plus matching evidence on `/v1/zs/attestation`) and verified directly by the proxy via `proxy/internal/hayai/attestation.go::NRASVerifier`.
+Capability is advertised off-chain via `/v1/zs/details` (the `tee.mode` field, plus matching evidence on `/v1/zs/attestation`) and verified directly by the payer via `proto/go/zs/tee/verify.go::BundleVerifier`.
 
 **This section is the source of truth for the deferred on-chain migration. Do not duplicate it.**
 

@@ -65,7 +65,7 @@ const MODELS_PREFIX = '/v1/models/'
 /**
  * isAllowedInnerPath reports whether p is a path a relay may forward — the
  * SSRF boundary. Anything outside the allow-list (or any traversal attempt) is
- * rejected, so a relay reaches only the well-known hayai endpoints on a known
+ * rejected, so a relay reaches only the well-known zs endpoints on a known
  * operator, never an arbitrary host.
  */
 export function isAllowedInnerPath(p: string): boolean {

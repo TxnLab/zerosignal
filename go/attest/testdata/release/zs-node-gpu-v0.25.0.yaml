@@ -1,0 +1,474 @@
+# THIS FILE IS MEASURED AND PUBLIC.
+#
+# dstack hashes it verbatim into RTMR3 before expanding `${VAR}` values:
+#
+#   NODE_CONFIG_YAML   Measured. It contains the node's public configuration.
+#   ${SECRETS}         Unmeasured. Only the variable names are measured.
+#
+# This is the `sealed_local` shape: the weights run inside the CVM, so nothing
+# leaves it. The inference engine is one of the three services in this same
+# document, pinned by digest, so it is inside the measurement as the node is.
+#
+# The engine keeps its native llama.cpp library on a volume outside this
+# measurement, seeded from the engine's image. That is not a hole: the digest
+# that library must have is baked into the engine binary, which the engine's
+# image digest pins, so it is inside the measurement, and the engine refuses to
+# start on a library that does not match.
+# What this shape does NOT prove is anything about GPU memory — there is no GPU
+# attestation here. README.md has both.
+#
+# Emit this file with `zs-node tee compose --gpu`, never by hand-copying it —
+# that resolves the release image digest and verifies the result against the
+# published skeleton before anything reaches disk.
+#
+# Edit only:
+#
+#   1. `image:` on the `zs-node` service, when upgrading to another release.
+#   2. The body of `NODE_CONFIG_YAML:`.
+#
+# Everything else is fixed, including comments, spacing, key order, service
+# ORDER, and volume names — and, on this shape, the OTHER TWO `image:` lines.
+# Only the first is lifted, so the engine's digest is inside the hashed text:
+# that is what makes the engine part of the measurement rather than something
+# an operator chooses, and it is why bumping it is a release change rather than
+# a local edit. Changing any of it still produces a valid deployment, but
+# payers will reject the node because its skeleton is unknown.
+#
+# Why the three services are arranged this way — and why `zs-node` must stay
+# first — is in README.md; it is not something to reason out from here.
+#
+# The node publishes this entire document at `/v1/zs/attestation`. Never put a
+# secret in `NODE_CONFIG_YAML`.
+#
+# This shape needs a GPU host and a production NVIDIA guest image:
+#
+#   phala deploy \
+#     --name zs-node-gpu-1 \
+#     --compose docker-compose.gpu.yaml \
+#     --image dstack-nvidia-0.5.9 \
+#     --no-dev-os \
+#     --listed \
+#     --instance-type h200.small \
+#     -e .env.secrets
+#
+# `--no-dev-os` is required. Without it, Phala may copy a local SSH public key
+# into the CVM as an authorized root key, which payers refuse outright.
+#
+# `--listed` defaults to OFF and publishes your deployment to Phala's trust
+# center, where a payer can see Phala's own re-verification of this node's
+# quote. Like `--name`, it is force-new: adding it later means a NEW CVM with a
+# new app_id and gateway hostname.
+#
+# This is not a GPU confidential-computing claim. `POST /v1/AttestGpu` is not
+# available on the `dstack-nvidia-0.5.x` line, so the evidence is CPU-TEE plus
+# an engine measured by its image digest. That is what makes the served weights
+# verifiable; it is not a statement about GPU memory.
+
+services:
+  zs-node:
+    # Use the published release by digest, never by tag. A tag could change
+    # without changing the compose measurement. Do not override `command` or
+    # `entrypoint`; the release starts `/app/zs-node`, which reads
+    # NODE_CONFIG_YAML because `/app/config.yaml` is absent.
+    #
+    # This service must stay FIRST in the document. The skeleton extractor
+    # lifts the first `image:` as the one an operator may vary and requires
+    # every later one to be digest-pinned, so reordering hands it the engine's
+    # reference instead. That matters the day this shape gets a published
+    # skeleton; today it is also just the order README.md documents.
+    image: ghcr.io/txnlab/zs-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+    volumes:
+      # Required for attestation. The node fails startup if the dstack guest
+      # agent socket is unavailable.
+      - /var/run/dstack.sock:/var/run/dstack.sock
+
+      # Persists the settlement ledger and cached evidence across restarts and
+      # in-place updates.
+      - zs-node-state:/data
+
+    # Shares one network namespace with the engine, held by `netns` below, so
+    # the engine is reachable on 127.0.0.1 and nowhere else. Do not point this
+    # at another service and do not add `ports:` here; both break the
+    # deployment in ways neither container's log explains. README.md has why.
+    network_mode: "service:netns"
+
+    # `service_healthy` on the engine, NOT a bare dependency, and it is load
+    # bearing for the weights chain. A plain `- kronk` orders container START
+    # only, so the node reached its one-shot runtime-integrity fetch about 30
+    # seconds before the engine's API was listening, took the connection refusal
+    # as "this runtime reports no integrity", and advertised no weights digest
+    # for the whole process lifetime — silently, and on EVERY cold boot, since
+    # the node gets there in milliseconds and the engine never does.
+    #
+    # Measured on an H200: node at 03:46:17, engine API at 03:46:47.
+    #
+    # The engine image carries its own HEALTHCHECK, so this waits for the API to
+    # answer — not for the model to finish loading, which takes minutes longer
+    # and which the node's own boot probe already tolerates.
+    depends_on:
+      netns:
+        condition: service_started
+      kronk:
+        condition: service_healthy
+
+    # Phala kills the CVM after about 180 seconds even if Compose requests more,
+    # so this is the real ceiling and it cannot be raised to fit a longer drain.
+    # The node's three drain stages below are additive and must finish INSIDE
+    # this value — they total 165s, leaving 5s to exit cleanly before Docker's
+    # SIGKILL and 15s before Phala's. Lengthen one stage and shorten another;
+    # letting the sum reach 170 kills the drain mid-flight, which is the exact
+    # outcome the drain exists to prevent.
+    stop_grace_period: 170s
+
+    # Mapping form is required for the multi-line config value.
+    environment:
+      # This whole block is measured and publicly readable. Put secrets only in
+      # the environment entries below it. If `${VAR}` does not resolve, fix the
+      # file passed to `phala deploy -e`; do not paste the value here.
+      NODE_CONFIG_YAML: |
+        # EDIT ONLY THIS BLOCK. Verifiers remove its body before hashing the
+        # release skeleton, so config changes do not require a new allowlist.
+        zs:
+          # Fill both `EDIT ME` sections. The placeholders fail at startup.
+          # Other node config may be added here as needed.
+          #
+          # Safe to tune: capacity, ticket TTL, refresh interval, models, and
+          # rates.
+          #
+          # Enforced for this attestation mode: dataflow, LLM provider and base
+          # URL, debug_dump_errors, and built-in network tools.
+          #
+          # Required but not automatically enforced: drain timings,
+          # `0.0.0.0` listening, and `/data` paths.
+
+          # EDIT ME (1 of 2): copy these IDs from operator.zerosignal.ai.
+          # The node does not register itself, and zero is invalid.
+          operator_id: 0
+          node_id: 0
+
+          # This document declares no `algod:` block, so it targets MAINNET:
+          # an unset network and endpoint default there, and the escrow app id
+          # is filled in to match. For a testnet contract, add a top-level
+          # `algod:` block beside `llm:` below — and note that adding it moves
+          # this document's hash.
+
+          # The named volume keeps unsettled work durable across restarts.
+          settlement_db_path: /data/settlement.db
+
+          # The built-in tools are ON by default and are allowed here. A tool
+          # runs only when the CALLER lists it in the request's `tools[]`, so
+          # the payer decides per request whether a query or a URL leaves the
+          # enclave; the posture this node publishes describes the inference
+          # route. Uncomment to withhold them from every caller instead.
+          # `zs_get_time` computes locally and reaches nobody either way.
+          # builtin_tools:
+          #   web_search:
+          #     enabled: false
+          #   image_search:
+          #     enabled: false
+          #   web_read:
+          #     enabled: false
+
+          # EDIT ME (2 of 2): add every served model and its rates. Empty or
+          # unpriced models fail startup.
+          #
+          # The model ID must be the one the engine serves, which is NEITHER
+          # the HuggingFace repo name NOR the file name — it is `<org>/<file
+          # stem>`. Read it off the running engine rather than deriving it:
+          #
+          #     curl -s <base-url>/v1/models | jq -r '.data[].id'
+          #
+          # `source` lets the node cross-check the weights digest the engine
+          # reports against the one the source repository publishes. Do not
+          # also pin `weights.digest`: the digest should come from the engine,
+          # inside the measurement, and a pin only creates a conflict.
+          #
+          # Example shape:
+          #
+          #     models:
+          #       <org>/<file-stem>:
+          #         source: "hf:<org>/<repo>@main"
+          #         pricing:
+          #           input_rate: 0.20   # USD per 1M input tokens
+          #           output_rate: 0.50  # USD per 1M output tokens
+          #         context:
+          #           context_window: 131072
+          models: {}
+
+        llm:
+          # The engine below, over the shared loopback interface. Only a
+          # terminal runtime is accepted here: `openai_passthrough` is refused
+          # even on 127.0.0.1, because an opaque local endpoint may forward
+          # onward and a relay to a hosted API looks identical from the node.
+          provider: kronk
+          openai:
+            base_url: http://127.0.0.1:11435/v1
+
+            # TEE validation requires this to remain false because enabling it
+            # writes decrypted prompt content to stderr.
+            debug_dump_errors: false
+
+        tee:
+          mode: dstack-tdx
+
+          # The node runs the weights itself and nothing leaves the CVM. Unlike
+          # `attested_passthrough` this does not force `store: false`, because
+          # there is no upstream to store anything.
+          dataflow: sealed_local
+
+          attestation:
+            # dstack uses the local guest agent; no `nras_url` is needed.
+            # Refresh with the ephemeral sealing-key rotation and cache on the
+            # durable volume.
+            refresh_interval: 20m
+            evidence_cache_path: /data/attestation.json
+
+        server:
+          # The gateway reaches the container outside its loopback interface.
+          listen: "0.0.0.0:9090"
+
+          # These three are additive and total 165s, which must stay under the
+          # `stop_grace_period` above (170s) — Docker SIGKILLs there, so a sum
+          # that reaches it truncates paid work rather than draining it.
+          drain_grace: 10s
+          drain_timeout: 140s
+          shutdown_timeout: 15s
+
+      # dstack injects these encrypted values after measurement. The variable
+      # names are measured, but their values are not. Keep this list limited to
+      # secrets so it cannot become an unmeasured config override channel.
+      #
+      # There is no TEXT LLM key, and its absence is a choice rather than an
+      # oversight: this shape's engine runs on a loopback interface nothing
+      # outside the CVM can reach, so there is no credential to supply for it,
+      # and omitting the name is what stops this document from doubling as a
+      # hosted-passthrough deployment.
+      #
+      # NODE_IMAGE_LLM_OPENAI_API_KEY is declared ahead of need — a hosted image
+      # route that `sealed_local` does not admit today. It is NOT inert when
+      # left unsupplied: docker renders an unset ${VAR} as the empty string and
+      # the node's env override accepts an empty value, so declaring the name
+      # BLANKS any image_llm.openai.api_key set in the block above rather than
+      # deferring to it. ZS_MNEMONIC_URLS genuinely is inert empty.
+      OPERATOR_SIGNING_MNEMONIC: ${OPERATOR_SIGNING_MNEMONIC}
+      NODE_IMAGE_LLM_OPENAI_API_KEY: ${NODE_IMAGE_LLM_OPENAI_API_KEY}
+      ZS_MNEMONIC_URLS: ${ZS_MNEMONIC_URLS}
+
+    restart: always
+
+  # Holds the network namespace the other two services share. It runs no code
+  # and serves no request; it exists so that neither service that can crash
+  # owns the namespace both depend on. README.md has the full reasoning.
+  #
+  # Do not move this above `zs-node` — everything joins it, so hoisting it
+  # reads as tidying, and it would hand the release check this image instead of
+  # the node's.
+  netns:
+    image: registry.k8s.io/pause@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+
+    # The only published port in this document, and it is the NODE's listener.
+    # Keep this list to 9090. It is also the only ports list Docker does not
+    # police here: the other two services join a namespace and are refused a
+    # ports list outright, while this one owns it.
+    ports:
+      - "9090:9090"
+
+    restart: always
+
+  # The in-enclave inference engine. Its image digest in this document is its
+  # measurement, which is what turns the weights digest it reports into
+  # evidence rather than a claim.
+  kronk:
+    # Pinned by digest to the `v1.32.7-cuda` release. Changing the engine
+    # changes the measured document, so it is a release change, not an
+    # operator-local edit.
+    image: ghcr.io/ardanlabs/kronk@sha256:143870311dbc9dd4ab586afc12c615fb30629d5f4f7985ae297ad06eaa504ff3
+
+    network_mode: "service:netns"
+
+    depends_on:
+      - netns
+
+    volumes:
+      # Weights and the engine's native llama.cpp library land here. Phala's
+      # disk is encrypted and survives both a restart and an in-place update,
+      # so a multi-gigabyte pull happens once rather than on every boot.
+      #
+      # This volume is not measured, and it shadows the image's own copy of the
+      # library once Docker seeds it. Neither is a gap: the digest that library
+      # must have is baked into the engine binary above and is therefore inside
+      # the measurement, and the engine refuses to start if what is on this
+      # volume does not match it.
+      #
+      # Upgrading an EXISTING volume is fine and does not need recreating: a
+      # library older than the engine's baked version is replaced in place and
+      # verified. The one shape that fails is a library NEWER than it, which an
+      # engine running unpinned could have left — the version check then
+      # short-circuits on a copy that predates the install records, and the
+      # engine aborts rather than trusting it. There is no shell into the CVM
+      # to delete just the library, so recovering from that means recreating
+      # this volume and re-pulling the weights. Nothing else does.
+      - kronk-data:/kronk
+
+    # Mounts the MEASURED engine config below. Without this the engine falls
+    # back to `<basePath>/models/model_config.yaml` — on the unmeasured volume
+    # above, where nothing a payer can see governs how the model is loaded.
+    # Both this target and the env var pointing at it are inside the skeleton,
+    # so neither can be redirected at an unmeasured file.
+    configs:
+      - source: zs-engine-config
+        target: /etc/zs/engine-config.yaml
+
+    environment:
+      # Points the engine at the measured file mounted above.
+      KRONK_POOL_MODEL_CONFIG_FILE: /etc/zs/engine-config.yaml
+
+      # Binds the engine to loopback. THIS LINE IS THE GUARANTEE that its
+      # unauthenticated admin API stays off the gateway — a published port
+      # reaches the sandbox address, which a loopback-bound listener never
+      # sees. Do not remove it.
+      KRONK_WEB_API_HOST: 127.0.0.1:11435
+
+      # The engine gates its model-integrity endpoint behind the same grant as
+      # its admin API, and that endpoint is the entire source of the attested
+      # weights digest. Safe only because of the loopback bind above.
+      KRONK_AUTHORIZATION_MODE: open
+
+      # Pinned, not auto-detected. Runtime selection is silent and has chosen a
+      # backend with no matching device, which fails at the first inference
+      # rather than at startup.
+      KRONK_PROCESSOR: cuda
+
+      # KRONK_LIB_VERSION is DELIBERATELY UNSET, and that is the verified
+      # configuration rather than the lazy one. The engine bakes its llama.cpp
+      # version as `<tag>@sha256:<manifest-digest>`, so the expected digest of
+      # every native artifact rides inside the image digest above — and a
+      # pinned version makes verification mandatory, not best-effort. Unset means that baked pin applies and the bundle already
+      # in the image satisfies it, so on a fresh volume nothing is downloaded.
+      #
+      # Setting a BARE tag here undoes that, and how loudly depends on the tag.
+      # One the publisher issued digests for quietly degrades: with no
+      # `@sha256:` the engine takes whatever digests the release host serves
+      # beside the assets, which catches a damaged download and not a
+      # substituted one. One from before the digest manifests, such as `b10639`,
+      # has no digests to fall back to, so verification errors and the engine
+      # aborts at startup.
+      # If you must move the version, carry the full pin from
+      # https://hybridgroup.github.io/llama-cpp-builder/version.json, and verify
+      # the bump with one real completion — `b10751` installs cleanly and then
+      # aborts inside `load_tensors`.
+
+    # Phala's own GPU templates use exactly this and no `runtime: nvidia`.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    restart: always
+
+volumes:
+  zs-node-state: {}
+  kronk-data: {}
+
+# THE ENGINE'S OWN CONFIGURATION — the third span an operator may edit.
+#
+# EDIT ONLY THE BODY BELOW `content: |`. Verifiers lift that body out before
+# hashing the release skeleton, exactly as they do for NODE_CONFIG_YAML, so
+# sizing the engine for your hardware does not stop you matching the published
+# release. Everything else here — this comment, the entry name, the indentation
+# — is measured structure: change a byte of it and every payer refuses you.
+#
+# It is MEASURED but not release-pinned. The body travels inside app_compose and
+# is covered by compose_hash, so it is world-readable and any payer can see
+# exactly how you load the model. That is the point: the alternative is the
+# engine's default path on the unmeasured weights volume, where the same
+# settings are invisible to everyone.
+#
+# TWO KEYS ARE FORBIDDEN AND THE NODE REFUSES TO START ON THEM: `adapters`
+# (LoRA) and `template` (the jinja chat template). Both change what the model
+# SAYS while the weights digest keeps reporting a byte-perfect match against
+# HuggingFace, and the weights chain cannot see either — it reports the
+# artifacts the runtime loaded, and an adapter is not one of them. Payers
+# enforce this too, so a patched node that started anyway would not be routed
+# to. Everything about speed and capacity is yours to set.
+#
+# The body is the engine's own model_config.yaml, so it must carry `version: 1`
+# and nest per-model settings under `models:`. The minimal valid body is those
+# two lines with an empty map, which is what ships below — an EMPTY body is not
+# a valid file here, and the reason is under `content:`.
+configs:
+  zs-engine-config:
+    content: |
+      # `version: 1` IS REQUIRED, and leaving it out breaks the deployment in a
+      # way the engine's log does not explain. On a file with no version key the
+      # engine rewrites it in place at startup — wrapping the body under
+      # `models:` and stamping the version — but this file is mounted READ-ONLY,
+      # because a config the engine could rewrite would no longer be the config
+      # a payer measured. So the already-upgraded shape is the only one that
+      # works here.
+      version: 1
+
+      # Per-model engine settings, keyed by the SERVED model id — the same id
+      # you used under `zs.models:` above, and NOT the HuggingFace repo name.
+      # An empty map means engine defaults, which is a fine place to start.
+      #
+      # Keys are NOT validated: the engine parses this with no unknown-key
+      # rejection, so a typo is ignored in silence and your tuning simply does
+      # not happen. Copy names exactly.
+      models: {}
+
+      # A worked example. Replace `models: {}` above with a block like this:
+      #
+      # models:
+      #   unsloth/gemma-4-31B-it-BF16:
+      #     # Cuts the KV cache linearly. The engine sizes to the model's full
+      #     # window otherwise, which on a large BF16 model can reserve more
+      #     # VRAM than the card has left after the weights.
+      #     context-window: 65536
+      #     # Gemma is a sliding-window model. The engine defaults this ON,
+      #     # which forces a full-size KV cache and gives up the whole saving.
+      #     swa-full: false
+      #     # Execution slots, and queued requests on top of them. Set BOTH:
+      #     # the node reads admission capacity as nseq-max x queue-depth, and
+      #     # an nseq-max alone is deliberately NOT read as implying the stock
+      #     # depth — an engine that publishes no depth is claiming nothing.
+      #     nseq-max: 4
+      #     queue-depth: 2
+      #
+      # Nothing propagates this to the node at run time. `zs.max_active_tickets`
+      # is a separate setting you must keep in step by hand: `zs-node init`
+      # reads the engine's capacity once when it writes your config, and the
+      # serving path then reads only what is written there. Declaring more than
+      # the engine admits costs a payer a round trip (they are charged nothing,
+      # and the escrow refunds in full); declaring less only costs you work.
+
+# REGISTRATION ORDER
+#
+# The node cannot self-register and will not start without its on-chain
+# operator and node records. The node URL contains the Phala app ID, which is
+# created by the first deployment:
+#
+#   1. Deploy. A crash loop for the missing node record is expected. The node's
+#      logs are empty during it — a crash-looping container is absent for most
+#      of each backoff window — so use `--follow` and wait out a cycle.
+#   2. Copy `app_id` from the deployment output.
+#   3. At operator.zerosignal.ai, create the node with:
+#      https://<app-id>-9090.<gateway-domain>
+#      Build it from those two parts. Do NOT copy `.endpoints[0].app` out of
+#      `phala cvms get --json`: it carries Phala's default port 8000, not the
+#      9090 this document publishes, and the wrong URL registers cleanly and
+#      then fails every request.
+#   4. The next restart completes startup.
+#
+# Choose `--name` carefully. Renaming creates a new app ID and URL. In-place
+# updates with `phala deploy --cvm-id` preserve both while changing the compose
+# measurement.
+#
+# FIRST BOOT IS SLOW. A large GGUF loads off the encrypted volume at roughly
+# 115-200 MB/s, so a 48 GB model needs several minutes before the node's boot
+# checks can succeed. The node allows for this and its retry joins the load
+# already in flight; no setting needs changing.

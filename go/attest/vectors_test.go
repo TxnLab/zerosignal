@@ -43,7 +43,7 @@ const vectorsPath = "../../testdata/attest_vectors.json"
 
 // The (pubkey, operator_id) the captured quote's report_data was minted
 // over — the dstackprobe deployment's placeholder recipient and its
-// operator id. Mirrored by proxy/internal/hayai's capturedKey /
+// operator id. Mirrored by proto/go/zs's capturedKey /
 // capturedOperatorID, which is exactly why they are published into the
 // vectors: a constant that lives only in two Go test files is not
 // available to a third implementation reading this capture.
@@ -131,6 +131,9 @@ type hostileCase struct {
 	Name string `json:"name"`
 	Why  string `json:"why"`
 	Log  string `json:"log"`
+
+	// Set when ParseEventLog refused the log; nothing below is then pinned.
+	ParseError string `json:"parse_error"`
 
 	// Empty when the replay succeeded.
 	ReplayError string `json:"replay_error"`
@@ -936,10 +939,16 @@ func replayErrorCode(err error) string {
 		return "undecodable_payload"
 	case errors.Is(err, ErrEmptyReplay):
 		return "empty_replay"
+	case errors.Is(err, ErrAmbiguousEvent):
+		return "ambiguous_event"
 	default:
 		return "unmapped"
 	}
 }
+
+// lone writes the JSON escape for one UTF-16 half, built at run time so no
+// editor folds an adjacent pair into the character it would encode.
+func lone(hex4 string) string { return "\\u" + hex4 }
 
 // buildHostileCases runs each operator-authored log through Go and
 // records what Go did. Nothing here is asserted against a hand-written
@@ -1007,13 +1016,204 @@ func buildHostileCases(t *testing.T) []hostileCase {
 			"Not decodable as bytes; skipping it silently would yield a partial replay indistinguishable from a whole one.",
 			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"abc"}]`,
 		},
+		{
+			"null element",
+			"Go decodes null as the zero Event, which the replay skips; a mirror that read a field of it would throw on a log Go verifies.",
+			`[null,{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"null event_type",
+			"Null leaves the zero value, so the event is not a runtime event and is skipped.",
+			`[{"imr":3,"event_type":null,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"keys in another case",
+			"Go matches a key to a field case-insensitively, so this is a runtime event to Go; a mirror reading exact keys would skip it and replay a different RTMR3.",
+			`[{"IMR":3,"Event_Type":` + strconv.Itoa(rt) + `,"Digest":"","EVENT":"compose-hash","event_PAYLOAD":"aa"}]`,
+		},
+		{
+			"long s in a key",
+			"Go's case folding maps ſ to s, so digeſt is the digest field and a number there refuses the log; a mirror folding with toLowerCase alone ignores the key.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digeſt":5,"event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"element that is not an object",
+			"Go refuses the whole log; a mirror skipping the element would accept a log Go refuses.",
+			`["x",{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"element that is an array",
+			"Also refused by Go; a mirror testing typeof alone reads an array as an object with no known keys.",
+			`[[1],{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"event_type as a string",
+			"A wrong-typed field refuses the whole log in Go, wherever it is.",
+			`[{"imr":3,"event_type":"` + strconv.Itoa(rt) + `","digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"event as a number",
+			"Same rule for a string field.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":7,"event_payload":"aa"}]`,
+		},
+		{
+			"negative imr",
+			"imr is a uint32; Go refuses a negative.",
+			`[{"imr":-1,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"event_type past uint32",
+			"Go refuses a value that overflows the field rather than wrapping it.",
+			`[{"imr":3,"event_type":4294967296,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"fractional imr",
+			"Go refuses a fraction for an integer field.",
+			`[{"imr":3.5,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"largest uint32",
+			"The other side of the overflow edge: Go takes 4294967295.",
+			`[{"imr":4294967295,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"negative zero",
+			"Go's integer decode refuses -0; JSON.parse reads it as a number that passes every range check.",
+			`[{"imr":-0,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"integer written with a fraction part",
+			"Go refuses 3.0 for an integer field; JSON.parse has already made it 3.",
+			`[{"imr":3.0,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"integer written with an exponent",
+			"Same for an exponent.",
+			`[{"imr":3,"event_type":1.34217729e8,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"fraction a double rounds away",
+			"Go refuses the fraction; JSON.parse rounds it to the runtime event type.",
+			`[{"imr":3,"event_type":134217729.00000000001,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"a field named twice: the last wins",
+			"Go assigns members in document order. JSON.parse keeps the last value at the first key's place, so a reader of its object takes the case variant between.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"decoy","EVENT":"other","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"a field named twice: a later null keeps the first",
+			"Null leaves a field as it was, so this is a runtime event to Go; a reader of JSON.parse's object sees only the null.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"event_type":null,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"a field named twice: a later null keeps a string",
+			"The same rule for a string field.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","EVENT":null,"event_payload":"aa"}]`,
+		},
+		{
+			"a field named twice: a wrong-typed first refuses",
+			"Go refuses the log for the first value even though a later one is good.",
+			`[{"imr":-1,"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"lone surrogates in event names",
+			"Go decodes each as U+FFFD, so the two names are one and the first measurement wins; JSON.parse keeps them apart.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"\ud800","event_payload":"aa"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"\ud801","event_payload":"bb"}]`,
+		},
+		{
+			"lone low surrogates in event names",
+			"Go replaces a low half with no high before it too.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"\udc00","event_payload":"aa"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"x\udfff","event_payload":"bb"}]`,
+		},
+		{
+			"adjacent lone surrogates in event names",
+			"Two halves of the same kind are no pair, so each is U+FFFD: these four names are two to Go.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"` + lone("dc00") + lone("dc00") + `","event_payload":"aa"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"` + lone("dc00") + lone("dc01") + `","event_payload":"bb"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"x` + lone("d800") + lone("d801") + `","event_payload":"cc"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"x` + lone("d800") + lone("d802") + `","event_payload":"dd"}]`,
+		},
+		{
+			"an event named __proto__",
+			"Go keeps it as a measurement like any other; a map that inherits a prototype drops it.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"__proto__","event_payload":"aa"}]`,
+		},
+		{
+			"escaped quote in an event name",
+			"A reader that ends a string at the first quote loses its place in the element.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash\",\"event\",\"x","event_payload":"aa"}]`,
+		},
+		{
+			"a key written with an escape",
+			"Go unescapes a key before matching it to a field.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","ev` + "\\" + `u0065nt":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"a colon in a runtime event name",
+			"The digest covers type:name:payload, so a colon lets the same bytes be read as another name and payload; this one replays exactly as compose-hash with payload 3a aa would.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash:","event_payload":"aa"}]`,
+		},
+		{
+			"a colon inside a runtime event name",
+			"The general split: any 0x3a in a payload can move into the name with the bytes before it, so a check for a trailing colon alone misses this.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash:A","event_payload":"aa"}]`,
+		},
+		{
+			"a colon in the name and a bad payload",
+			"The name is checked first, so both sides report the ambiguity rather than the payload.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"a:b","event_payload":"zz"}]`,
+		},
+		{
+			"a payload that starts with a colon byte",
+			"The honest form of the same bytes: the rule is about names, so 0x3a in a payload replays.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"3aaa"}]`,
+		},
+		{
+			"a colon in an event that isn't a runtime event",
+			"Never replayed, so never ambiguous.",
+			`[{"imr":3,"event_type":4,"digest":"","event":"a:b","event_payload":"aa"},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa"}]`,
+		},
+		{
+			"top-level null",
+			"Go reads it as no events, which the replay refuses as empty rather than as malformed.",
+			`null`,
+		},
+		{
+			"nesting at Go's limit",
+			"Go's scanner takes 10000 levels, counting the log's own array.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa","x":` +
+				strings.Repeat("[", 9998) + strings.Repeat("]", 9998) + `}]`,
+		},
+		{
+			"nesting past Go's limit",
+			"And refuses one more, under a key it never reads; JSON.parse has no limit. The event after it keeps a reader honest about the deepest level rather than the last.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa","x":` +
+				strings.Repeat("[", 9999) + strings.Repeat("]", 9999) + `},` +
+				`{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"app-id","event_payload":"bb"}]`,
+		},
+		{
+			"many shallow objects",
+			"Depth is how deep, not how many: 10000 sibling objects are three levels.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa","x":[` +
+				strings.TrimSuffix(strings.Repeat("{},", 10000), ",") + `]}]`,
+		},
+		{
+			"wrong-typed field Go never reads into",
+			"An unknown key is ignored whatever its type.",
+			`[{"imr":3,"event_type":` + strconv.Itoa(rt) + `,"digest":"","event":"compose-hash","event_payload":"aa","extra":{"x":[1]}}]`,
+		},
 	}
 
 	out := make([]hostileCase, 0, len(cases))
 	for _, c := range cases {
 		events, err := ParseEventLog(c.log)
 		if err != nil {
-			t.Fatalf("%s: ParseEventLog: %v", c.name, err)
+			out = append(out, hostileCase{Name: c.name, Why: c.why, Log: c.log, ParseError: "malformed_log"})
+			continue
 		}
 		value, extends, replayErr := ReplayRTMR3(events)
 		code := replayErrorCode(replayErr)

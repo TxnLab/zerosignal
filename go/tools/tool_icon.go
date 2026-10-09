@@ -7,8 +7,9 @@ package tools
 
 import (
 	"bytes"
-	"net"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -88,14 +89,16 @@ type SourceIcon struct {
 // function does the extra work. Naming one external standard gives both sides
 // a target instead of two hand-rolled normalizers to keep identical forever.
 //
-// Verified against the browser by TestIconHostKey_MatchesWHATWG, whose table
-// is duplicated in the reference client's favicon-store.test.ts — edit one,
-// edit the other.
+// Verified against the browser by TestIconHostKey_MatchesWHATWG, and pinned to
+// the TS port by testdata/tools_vectors.json, whose host-key table the reference
+// client's favicon-store.test.ts also duplicates — edit one, edit the others.
 //
-// Remaining known divergence: WHATWG canonicalizes IPv4 shorthand (`127.1` →
-// `127.0.0.1`) and Go's net.ParseIP rejects it. Every such form is a private
-// address, so the fetch is refused by the SSRF guard and no icon is ever
-// produced to be keyed.
+// Known divergences, all URLs WHATWG refuses outright and Go's parser takes, so
+// the consumer has no key to look the icon up by anyway: a port above 65535, a
+// host whose last label is numeric but not a valid IPv4 address (`256.1.1.1`,
+// `example.123`), and `<` / `>` in the host. WHATWG also canonicalizes IPv4
+// shorthand and integer forms (`127.1`, `16843009` = 1.1.1.1) where Go keys the
+// literal text; the SSRF guard refuses the private ones, not all of them.
 func IconHostKey(rawURL string) (string, bool) {
 	if !linkableURL(rawURL) {
 		return "", false
@@ -105,13 +108,15 @@ func IconHostKey(rawURL string) (string, bool) {
 		return "", false
 	}
 	h := parsed.Hostname()
-	if h == "" {
+	// A zone identifier (`fe80::1%eth0`) has no WHATWG form: the browser
+	// refuses the URL, so no consumer could ever look its icon up.
+	if h == "" || strings.Contains(h, "%") {
 		return "", false
 	}
-	// An IPv6 literal keeps its brackets and takes its canonical compressed
-	// form, matching URL.hostname. net.IP.String() is that canonical form.
-	if ip := net.ParseIP(h); ip != nil && ip.To4() == nil {
-		return "[" + ip.String() + "]", true
+	// An IPv6 literal keeps its brackets and takes WHATWG's serialization,
+	// which matches RFC 5952 except that an embedded IPv4 is written in hex.
+	if addr, err := netip.ParseAddr(h); err == nil && addr.Is6() {
+		return "[" + whatwgIPv6(addr) + "]", true
 	}
 	if isASCII(h) {
 		// Already the ToASCII fixed point. Taken as-is rather than through
@@ -125,6 +130,50 @@ func IconHostKey(rawURL string) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(a), true
+}
+
+// whatwgIPv6 serializes an IPv6 address as the URL Standard does: eight
+// lowercase hex groups with the first longest run of two or more zero groups
+// compressed. That is netip's RFC 5952 form except for an IPv4-mapped address,
+// which RFC 5952 writes dotted (`::ffff:1.2.3.4`) and WHATWG in hex
+// (`::ffff:102:304`).
+func whatwgIPv6(addr netip.Addr) string {
+	if !addr.Is4In6() {
+		return addr.String()
+	}
+	b := addr.As16()
+	var groups [8]uint16
+	for i := range groups {
+		groups[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+	}
+	runStart, runLen := -1, 1
+	for i := 0; i < len(groups); {
+		if groups[i] != 0 {
+			i++
+			continue
+		}
+		j := i
+		for j < len(groups) && groups[j] == 0 {
+			j++
+		}
+		if j-i > runLen {
+			runStart, runLen = i, j-i
+		}
+		i = j
+	}
+	var sb strings.Builder
+	for i := 0; i < len(groups); i++ {
+		if i == runStart {
+			sb.WriteString("::")
+			i += runLen - 1
+			continue
+		}
+		if i > 0 && i != runStart+runLen {
+			sb.WriteByte(':')
+		}
+		sb.WriteString(strconv.FormatUint(uint64(groups[i]), 16))
+	}
+	return sb.String()
 }
 
 func isASCII(s string) bool {

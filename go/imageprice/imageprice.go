@@ -238,6 +238,11 @@ func reduce(num, den uint64) (uint64, uint64) {
 }
 
 // ceilDiv returns ceil(a/b) for b > 0. b is a rational denominator here, always ≥ 1.
+// Not (a + b - 1) / b: that sum wraps for a within b of MaxUint64.
 func ceilDiv(a, b uint64) uint64 {
-	return (a + b - 1) / b
+	q := a / b
+	if a%b != 0 {
+		q++
+	}
+	return q
 }

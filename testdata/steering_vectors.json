@@ -1,0 +1,1167 @@
+{
+  "version": 1,
+  "constants": {
+    "RELAY_DOWNRANK_THRESHOLD": 3,
+    "RELAY_REPUTATION_COOLDOWN_MS": 600000,
+    "RELAY_TIMEOUT_COOLDOWN_MS": 3600000,
+    "RELAY_TIMEOUT_DOWNRANK_THRESHOLD": 5,
+    "TARGET_BACKOFF_BASE_MS": 30000,
+    "TARGET_BACKOFF_CAP_MS": 300000,
+    "WEIGHTS_CONSENSUS_MIN_OWNERS": 2
+  },
+  "forward_timeout_statuses": [
+    {
+      "status": 0,
+      "timeout": false
+    },
+    {
+      "status": 200,
+      "timeout": false
+    },
+    {
+      "status": 400,
+      "timeout": false
+    },
+    {
+      "status": 404,
+      "timeout": false
+    },
+    {
+      "status": 408,
+      "timeout": true
+    },
+    {
+      "status": 425,
+      "timeout": false
+    },
+    {
+      "status": 429,
+      "timeout": false
+    },
+    {
+      "status": 500,
+      "timeout": false
+    },
+    {
+      "status": 502,
+      "timeout": false
+    },
+    {
+      "status": 503,
+      "timeout": false
+    },
+    {
+      "status": 504,
+      "timeout": true
+    },
+    {
+      "status": 520,
+      "timeout": false
+    },
+    {
+      "status": 522,
+      "timeout": false
+    },
+    {
+      "status": 524,
+      "timeout": true
+    },
+    {
+      "status": 525,
+      "timeout": false
+    }
+  ],
+  "decay": [
+    {
+      "name": "no evidence",
+      "evidence": null,
+      "now_ms": 1760000000000,
+      "cooldown_ms": 600000,
+      "decayed": null,
+      "bumped": {
+        "count": 1,
+        "at_ms": 1760000000000
+      }
+    },
+    {
+      "name": "no time elapsed",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760000000000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1760000000000
+      }
+    },
+    {
+      "name": "just under one cooldown",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760000599999,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1760000599999
+      }
+    },
+    {
+      "name": "exactly one cooldown",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760000600000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 1,
+        "at_ms": 1760000600000
+      },
+      "bumped": {
+        "count": 2,
+        "at_ms": 1760000600000
+      }
+    },
+    {
+      "name": "one cooldown and a residue",
+      "evidence": {
+        "count": 3,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760001020000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000600000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1760001020000
+      }
+    },
+    {
+      "name": "two cooldowns",
+      "evidence": {
+        "count": 3,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760001200000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 1,
+        "at_ms": 1760001200000
+      },
+      "bumped": {
+        "count": 2,
+        "at_ms": 1760001200000
+      }
+    },
+    {
+      "name": "decays to zero exactly",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760001200000,
+      "cooldown_ms": 600000,
+      "decayed": null,
+      "bumped": {
+        "count": 1,
+        "at_ms": 1760001200000
+      }
+    },
+    {
+      "name": "decays past zero",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760005400000,
+      "cooldown_ms": 600000,
+      "decayed": null,
+      "bumped": {
+        "count": 1,
+        "at_ms": 1760005400000
+      }
+    },
+    {
+      "name": "backwards clock by a second",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1759999999000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1759999999000
+      }
+    },
+    {
+      "name": "backwards clock by more than a cooldown",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1759998200000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1759998200000
+      }
+    },
+    {
+      "name": "backwards clock by a fraction past one cooldown",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1759999399999,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1759999399999
+      }
+    },
+    {
+      "name": "timeout streak under its own cooldown",
+      "evidence": {
+        "count": 4,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760003540000,
+      "cooldown_ms": 3600000,
+      "decayed": {
+        "count": 4,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 5,
+        "at_ms": 1760003540000
+      }
+    },
+    {
+      "name": "timeout streak one cooldown",
+      "evidence": {
+        "count": 4,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760003900000,
+      "cooldown_ms": 3600000,
+      "decayed": {
+        "count": 3,
+        "at_ms": 1760003600000
+      },
+      "bumped": {
+        "count": 4,
+        "at_ms": 1760003900000
+      }
+    },
+    {
+      "name": "the short cooldown would have aged it",
+      "evidence": {
+        "count": 4,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760001800000,
+      "cooldown_ms": 3600000,
+      "decayed": {
+        "count": 4,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 5,
+        "at_ms": 1760001800000
+      }
+    },
+    {
+      "name": "over-threshold evidence",
+      "evidence": {
+        "count": 9,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760002400000,
+      "cooldown_ms": 600000,
+      "decayed": {
+        "count": 5,
+        "at_ms": 1760002400000
+      },
+      "bumped": {
+        "count": 6,
+        "at_ms": 1760002400000
+      }
+    },
+    {
+      "name": "zero count with a timestamp",
+      "evidence": {
+        "count": 0,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760000600000,
+      "cooldown_ms": 600000,
+      "decayed": null,
+      "bumped": {
+        "count": 1,
+        "at_ms": 1760000600000
+      }
+    },
+    {
+      "name": "zero cooldown ages nothing",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760005400000,
+      "cooldown_ms": 0,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1760005400000
+      }
+    },
+    {
+      "name": "negative cooldown ages nothing",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1760005400000,
+      "cooldown_ms": -600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1760005400000
+      }
+    },
+    {
+      "name": "negative cooldown on a backwards clock",
+      "evidence": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "now_ms": 1759998800000,
+      "cooldown_ms": -600000,
+      "decayed": {
+        "count": 2,
+        "at_ms": 1760000000000
+      },
+      "bumped": {
+        "count": 3,
+        "at_ms": 1759998800000
+      }
+    }
+  ],
+  "backoff_windows": [
+    {
+      "failures": -1,
+      "window_ms": 0
+    },
+    {
+      "failures": 0,
+      "window_ms": 0
+    },
+    {
+      "failures": 1,
+      "window_ms": 30000
+    },
+    {
+      "failures": 2,
+      "window_ms": 60000
+    },
+    {
+      "failures": 3,
+      "window_ms": 120000
+    },
+    {
+      "failures": 4,
+      "window_ms": 240000
+    },
+    {
+      "failures": 5,
+      "window_ms": 300000
+    },
+    {
+      "failures": 6,
+      "window_ms": 300000
+    },
+    {
+      "failures": 64,
+      "window_ms": 300000
+    },
+    {
+      "failures": 1048576,
+      "window_ms": 300000
+    }
+  ],
+  "backoff": [
+    {
+      "name": "no record",
+      "backoff": null,
+      "now_ms": 1760000000000,
+      "floor_ms": 0,
+      "remaining_ms": 0,
+      "forget": true,
+      "failed": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      }
+    },
+    {
+      "name": "inside the first window",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000010000,
+      "floor_ms": 0,
+      "remaining_ms": 20000,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000010000,
+        "until_ms": 1760000070000
+      }
+    },
+    {
+      "name": "first window just lapsed",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000030000,
+      "floor_ms": 0,
+      "remaining_ms": 0,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000030000,
+        "until_ms": 1760000090000
+      }
+    },
+    {
+      "name": "inside the second window",
+      "backoff": {
+        "failures": 2,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000060000
+      },
+      "now_ms": 1760000059000,
+      "floor_ms": 0,
+      "remaining_ms": 1000,
+      "forget": false,
+      "failed": {
+        "failures": 3,
+        "at_ms": 1760000059000,
+        "until_ms": 1760000179000
+      }
+    },
+    {
+      "name": "inside the capped window",
+      "backoff": {
+        "failures": 9,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000300000
+      },
+      "now_ms": 1760000240000,
+      "floor_ms": 0,
+      "remaining_ms": 60000,
+      "forget": false,
+      "failed": {
+        "failures": 10,
+        "at_ms": 1760000240000,
+        "until_ms": 1760000540000
+      }
+    },
+    {
+      "name": "lapsed, inside the grace period",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000329999,
+      "floor_ms": 0,
+      "remaining_ms": 0,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000329999,
+        "until_ms": 1760000389999
+      }
+    },
+    {
+      "name": "lapsed, grace period over",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000330000,
+      "floor_ms": 0,
+      "remaining_ms": 0,
+      "forget": true,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000330000,
+        "until_ms": 1760000390000
+      }
+    },
+    {
+      "name": "floor longer than the window",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000045000,
+      "floor_ms": 120000,
+      "remaining_ms": 75000,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000045000,
+        "until_ms": 1760000105000
+      }
+    },
+    {
+      "name": "floor lapsed, inside the grace period",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000419999,
+      "floor_ms": 120000,
+      "remaining_ms": 0,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000419999,
+        "until_ms": 1760000479999
+      }
+    },
+    {
+      "name": "floor lapsed, grace period over",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1760000420000,
+      "floor_ms": 120000,
+      "remaining_ms": 0,
+      "forget": true,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1760000420000,
+        "until_ms": 1760000480000
+      }
+    },
+    {
+      "name": "floor shorter than the window",
+      "backoff": {
+        "failures": 3,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000120000
+      },
+      "now_ms": 1760000090000,
+      "floor_ms": 10000,
+      "remaining_ms": 30000,
+      "forget": false,
+      "failed": {
+        "failures": 4,
+        "at_ms": 1760000090000,
+        "until_ms": 1760000330000
+      }
+    },
+    {
+      "name": "backwards clock",
+      "backoff": {
+        "failures": 1,
+        "at_ms": 1760000000000,
+        "until_ms": 1760000030000
+      },
+      "now_ms": 1759999940000,
+      "floor_ms": 0,
+      "remaining_ms": 90000,
+      "forget": false,
+      "failed": {
+        "failures": 2,
+        "at_ms": 1759999940000,
+        "until_ms": 1760000000000
+      }
+    }
+  ],
+  "weights_consensus": [
+    {
+      "name": "majority of distinct owners",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:bbbb"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "name": "one owner each is not a consensus",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:bbbb"
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false
+      ]
+    },
+    {
+      "name": "a tie for the lead",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "D",
+          "digest": "sha256:bbbb"
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "a tie behind a clear leader",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "D",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "E",
+          "digest": "sha256:cccc"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        false,
+        true,
+        true
+      ]
+    },
+    {
+      "name": "a tie for second does not block the leader",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "D",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "E",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "F",
+          "digest": "sha256:cccc"
+        },
+        {
+          "owner": "G",
+          "digest": "sha256:cccc"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "name": "one owner's many nodes count once",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "one owner on both sides",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "name": "a lone publisher",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": ""
+        },
+        {
+          "owner": "C",
+          "digest": ""
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "nobody publishes",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": ""
+        },
+        {
+          "owner": "B",
+          "digest": ""
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false
+      ]
+    },
+    {
+      "name": "case-insensitive",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "SHA256:AAAA"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:BBBB"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        true
+      ]
+    },
+    {
+      "name": "owners with no digest do not form a camp",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "C",
+          "digest": ""
+        },
+        {
+          "owner": "D",
+          "digest": ""
+        },
+        {
+          "owner": "E",
+          "digest": ""
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "ASCII fold covers A and Z",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "AZ"
+        },
+        {
+          "owner": "B",
+          "digest": "az"
+        },
+        {
+          "owner": "C",
+          "digest": "az"
+        }
+      ],
+      "consensus": "az",
+      "contradicts": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "ASCII fold stops at @ and [",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "x@["
+        },
+        {
+          "owner": "B",
+          "digest": "x`{"
+        },
+        {
+          "owner": "C",
+          "digest": "x`{"
+        }
+      ],
+      "consensus": "x`{",
+      "contradicts": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "only ASCII folds: a non-ASCII capital is a different digest",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "xÉ"
+        },
+        {
+          "owner": "B",
+          "digest": "xé"
+        },
+        {
+          "owner": "C",
+          "digest": "xé"
+        }
+      ],
+      "consensus": "xé",
+      "contradicts": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "only ASCII folds",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "xΣ"
+        },
+        {
+          "owner": "B",
+          "digest": "xσ"
+        },
+        {
+          "owner": "C",
+          "digest": "xσ"
+        }
+      ],
+      "consensus": "xσ",
+      "contradicts": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "claims with no owner are not evidence",
+      "claims": [
+        {
+          "owner": "",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:aaaa"
+        }
+      ],
+      "consensus": "",
+      "contradicts": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "claims with no owner are still judged",
+      "claims": [
+        {
+          "owner": "",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "A",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:aaaa"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "leader found after a larger runner-up was seen",
+      "claims": [
+        {
+          "owner": "A",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "B",
+          "digest": "sha256:bbbb"
+        },
+        {
+          "owner": "C",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "D",
+          "digest": "sha256:aaaa"
+        },
+        {
+          "owner": "E",
+          "digest": "sha256:aaaa"
+        }
+      ],
+      "consensus": "sha256:aaaa",
+      "contradicts": [
+        true,
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "no claims",
+      "claims": null,
+      "consensus": "",
+      "contradicts": []
+    }
+  ],
+  "relay_downranked": [
+    {
+      "failures": 0,
+      "stale": 0,
+      "timeouts": 0,
+      "downranked": false
+    },
+    {
+      "failures": 2,
+      "stale": 0,
+      "timeouts": 0,
+      "downranked": false
+    },
+    {
+      "failures": 3,
+      "stale": 0,
+      "timeouts": 0,
+      "downranked": true
+    },
+    {
+      "failures": 0,
+      "stale": 2,
+      "timeouts": 0,
+      "downranked": false
+    },
+    {
+      "failures": 0,
+      "stale": 3,
+      "timeouts": 0,
+      "downranked": true
+    },
+    {
+      "failures": 0,
+      "stale": 0,
+      "timeouts": 4,
+      "downranked": false
+    },
+    {
+      "failures": 0,
+      "stale": 0,
+      "timeouts": 5,
+      "downranked": true
+    },
+    {
+      "failures": 2,
+      "stale": 2,
+      "timeouts": 4,
+      "downranked": false
+    },
+    {
+      "failures": 3,
+      "stale": 0,
+      "timeouts": 5,
+      "downranked": true
+    },
+    {
+      "failures": 0,
+      "stale": 0,
+      "timeouts": 3,
+      "downranked": false
+    }
+  ]
+}

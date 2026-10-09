@@ -344,6 +344,31 @@ func TestPostWithRetry_RetriesAPreReserveRateLimit(t *testing.T) {
 	}
 }
 
+// A proxy's X-Should-Retry outranks the status rule, both ways: a 503 it marks
+// false is not re-asked, and a 502 it marks true is.
+func TestPost_FollowsXShouldRetry(t *testing.T) {
+	for _, tc := range []struct {
+		status      int
+		shouldRetry string
+		want        bool
+	}{
+		{http.StatusServiceUnavailable, "false", false},
+		{http.StatusBadGateway, "true", true},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Should-Retry", tc.shouldRetry)
+			w.WriteHeader(tc.status)
+			fmt.Fprint(w, `{"error":{"message":"x","code":"some_code"}}`)
+		}))
+		_, retryable, err := post(context.Background(), testOptions(srv.URL), []byte(`{}`))
+		srv.Close()
+		if err == nil || retryable != tc.want {
+			t.Errorf("%d with X-Should-Retry %s: retryable %v (err %v), want %v", tc.status, tc.shouldRetry, retryable, err, tc.want)
+		}
+	}
+}
+
 // A transport error is NOT automatically free, and the two halves of that rule
 // need separate tests or one covers for the other.
 //

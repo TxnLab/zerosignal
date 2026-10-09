@@ -11,7 +11,10 @@
 import { describe, it, expect } from 'vitest'
 import {
     extractRequestedBuiltinTools,
+    extractResponseID,
     extractRoutingPreferences,
+    extractStreamToolCallIDs,
+    normalizeRelay,
     type Operator,
     type OperatorRef,
     parseOperatorRef,
@@ -22,12 +25,74 @@ import {
     SORT_THROUGHPUT,
 } from '../src/selection/index.js'
 
+// Each as Go's ExtractResponseID unmarshals it.
+describe('extractResponseID', () => {
+    it.each([
+        ['{"id":"resp_1","object":"response"}', 'resp_1'],
+        ['{"id":"resp_1"}', 'resp_1'],
+        ['{"id":"resp_1","object":""}', 'resp_1'],
+        ['{"id":"resp_1","object":null}', 'resp_1'],
+        ['{"id":"chatcmpl_1","object":"chat.completion"}', ''],
+        ['{"id":"resp_1","object":5}', ''],
+        ['{"id":5}', ''],
+        ['{"id":null}', ''],
+        ['null', ''],
+        ['[]', ''],
+        ['"resp_1"', ''],
+        ['7', ''],
+        ['not json', ''],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractResponseID(body)).toBe(want)
+    })
+})
+
+// The same table as Go's TestExtractStreamToolCallIDs.
+describe('extractStreamToolCallIDs', () => {
+    it.each([
+        ['{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"f","arguments":""}}]}}]}', ['call_a']],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":"a"},{"id":"b"}]}},{"delta":{"tool_calls":[{"id":"c"}]}}]}', ['a', 'b', 'c']],
+        ['{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"x\\""}}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":""},{"id":null},{"id":"d"}]}}]}', ['d']],
+        ['{"choices":[{"delta":{"content":"hi"}}]}', []],
+        ['{"choices":[null,{"delta":null},{"delta":{"tool_calls":null}},{"delta":{"tool_calls":[null,{"id":"e"}]}}]}', ['e']],
+        ['{"choices":[{"message":{"tool_calls":[{"id":"m"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":"ok"},{"id":5}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":{"id":"x"}}}]}', []],
+        ['{"choices":{"delta":{}}}', []],
+        ['{"choices":["x"]}', []],
+        ['{"choices":["x",{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":5},{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":"x"}},{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
+        ['{"choices":[{"delta":{"tool_calls":[5,{"id":"a"}]}}]}', []],
+        ['{"type":"response.function_call_arguments.delta","item_id":"fc_1"}', []],
+        ['null', []],
+        ['[]', []],
+        ['[DONE]', []],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractStreamToolCallIDs(body)).toEqual(want)
+    })
+})
+
+describe('normalizeRelay', () => {
+    it.each([
+        ['auto', 'auto'],
+        [' OFF\t', 'off'],
+        ['Required', 'required'],
+        ['', ''],
+        ['maybe', ''],
+        [undefined, ''],
+        [1, ''],
+    ])('reads %j as %j', (v, want) => {
+        expect(normalizeRelay(v)).toBe(want)
+    })
+})
+
 describe('extractRequestedBuiltinTools', () => {
     const cases: Array<{ name: string; body: string; want: string[] }> = [
         { name: 'none', body: '{"model":"m1"}', want: [] },
         { name: 'empty tools', body: '{"tools":[]}', want: [] },
         {
-            name: 'hayai and non-hayai, order preserved',
+            name: 'zs and non-zs, order preserved',
             body: '{"tools":[{"type":"function"},{"type":"zs_web_search"},{"type":"zs_image_search"}]}',
             want: ['zs_web_search', 'zs_image_search'],
         },

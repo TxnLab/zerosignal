@@ -16,7 +16,7 @@ import (
 // it. An explicit caller value (true or false) is preserved unchanged
 // — the caller has the choice whether to allow upstream retention.
 //
-// Hayai's protocol-level promise is therefore "non-retention by
+// ZeroSignal's protocol-level promise is therefore "non-retention by
 // default": clients that don't know or care about `store` get the
 // privacy-preserving behavior, while clients that need server-side
 // retention features (e.g. Responses API `previous_response_id`
@@ -44,7 +44,9 @@ func DefaultStoreFalse(body []byte) ([]byte, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A top-level null decodes without error into a nil map, which the
+	// assignment below would panic on; it is no object, so it is left alone.
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, nil
 	}
 
@@ -94,7 +96,8 @@ func ForceStoreFalse(body []byte) ([]byte, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A top-level null is no object (see DefaultStoreFalse).
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, nil
 	}
 

@@ -16,7 +16,8 @@ import "slices"
 // resolver, because four consumers read them (node, proxy, client, operator
 // dashboard) and a per-consumer copy of a wire enum forks the moment a tier is
 // added. That is the mistake the weights trust tiers already made — they are
-// declared once in node/internal/config and again in proxy/internal/server.
+// declared only in node/internal/config, and every other consumer spells the
+// strings out by hand.
 //
 // ORDERED, strongest evidence first. The ordering is real and worth stating,
 // but note carefully what it orders: how well the tier is EVIDENCED, not how

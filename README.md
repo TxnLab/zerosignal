@@ -85,29 +85,42 @@ The canonical implementation; it generates every golden vector.
 | `pricing` | Token-pricing math; `VerifyTicketPrice` checks a signed ticket's price before a payer escrows it. |
 | `imageprice` | Deterministic image-generation pricing from (size, quality) and an operator's image rate. |
 | `tokenize` | Model-agnostic input-token bound used to size a reserve and enforce it at inference time. |
-| `transient` | Classifies a failed request as retryable or terminal, with the shared retry schedule. |
+| `transient` | Classifies a failed request as retryable or terminal, with the shared retry schedule; the reserve `429` busy codes and `RetryableBusyCode`; `RetryableAfterPayment`. |
+| `steering` | The arithmetic behind a payer's own routing signals: relay-reputation decay, target backoff windows, and the weights-digest consensus. The stores they feed belong to each SDK: `go/zs` and `@txnlab/zerosignal/routing`. |
 | `relay` | Relay-indirection metadata and the closed allow-list of inner paths a relay forwards. |
-| `attest` | TEE measurement checks: Intel TDX quote parsing, dstack event-log replay into RTMR3, compose-file policy, PCK chain and collateral. |
+| `attest` | TEE measurement checks: Intel TDX quote parsing, dstack event-log replay into RTMR3, compose-file policy, PCK chain and collateral, and the trusted dstack OS images and zs-node releases. |
 | `inject` | Body mutators applied before sealing (`DefaultStoreFalse`, `DropEmptyTools`, `DropRoutingPreferences`, `InjectSafetyIdentifier`, `InjectStreamOptionsIncludeUsage`) plus `FitsContextWindow`; discovery shapes (`OperatorDetails` / `OperatorDetailsModel` / `ModelReasoning`, `TEEAdvertisement` / `TEEEvidenceBundle`). None touch message/reasoning/tool history. |
 | `tools` | Built-in tool registry + tool-loop helpers (chat/responses rewriters, frame stitchers, marker/effect/status frame marshaling). |
 | `escrow` | `ZeroSignalEscrow` ABI client (embedded ARC-56 JSON). `ComposeOpen` / `ComposeSettle` / `ComposeProtest`, `VerifyOpenAppCall` / `VerifyOpenGroup`, box decoders, operator-registry helpers. |
 | `algod` | Thin `Client` interface over the algod SDK, plus per-network presets (escrow app id, endpoints). |
 | `algo` | Adapts a keystore entry into a `TransactionSigner` for `AtomicTransactionComposer` groups. |
 | `keystore` | Signing-mnemonic loader: `<NAME>_MNEMONIC` env vars + `ZS_MNEMONIC_URLS` cloud-secret URLs (AWS/GCP/Azure). See [`go/keystore/README.md`](./go/keystore/README.md). |
+| `wallet` | A payer's local wallet: generate or import a recovery phrase, held in the OS keychain or a passphrase-encrypted file, shared by every zerosignal program on the machine. Feeds `keystore` through `Wallet.Provider`; `LoadPayer` loads it with the environment's keys and picks a `zs.Signer`. |
 | `httpx` | A tuned, shared `http.Transport` for node↔node and payer↔node calls, with a private-address dial guard. |
 | `gcplog` | `slog` attribute names for Google Cloud Logging. |
+| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts. Used by `zs-proxy`. |
 | `cmd/releasenotes` | Release-notes generator used by the `zs-proxy` and `zs-node` release builds. |
+| `cmd/zschat` | One chat-completions prompt through `zs`, streamed to stdout: the smallest complete payer. |
 
 ### TypeScript — [`ts/`](./ts/), npm package `@txnlab/zs-proto`
 
 A port of the vectored Go packages so a browser can speak the protocol directly to a node.
 Subpaths: `wire`, `ticket`, `selection`, `pricing`, `imageprice`, `tokenize`, `transient`,
-`relay`, `attest`, `inject`, plus the fixtures under `testdata/*`. See
+`steering`, `relay`, `attest`, `inject`, `escrow`, `tools`, plus the fixtures under `testdata/*`. See
 [`ts/README.md`](./ts/README.md).
 
 Wire-shaped types use snake_case property names matching the JSON wire format, so `JSON.stringify(envelope)` produces the bytes the Go side emits — no field-rename layer. Function names are camelCase.
 
-Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), and the `algo/`, `algod/`, `escrow/`, `tools/`, `keystore/` subpackages.
+Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (transaction composition, box reads, group verification).
+
+### TypeScript SDK — [`sdk/`](./sdk/), npm package `@txnlab/zerosignal`
+
+The twin of `go/zs`, in development. It holds the shared API vocabulary (events, error kinds,
+config and its defaults, network presets) and the ports a host app implements (signer, storage,
+cache, logger, clock, fetch); the client is being ported from the chat app. It depends on
+`@txnlab/zs-proto` at exactly its own version and re-exports it under
+`@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
+`testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).
 
 ### Golden vectors — [`testdata/`](./testdata/)
 
@@ -116,6 +129,11 @@ a `Test*Vectors` test, and the matching `ts/test/*-vectors.test.ts` reads it unc
 byte-format drift between the two implementations fails on either side. `make update-vectors`
 regenerates them all; `make check-vector-generators` (part of `make test`) fails if a generator
 is missing from that target.
+
+Two fixtures pin the sealing framing instead, and are captured rather than derived (nonces and
+age wrapping are random): `sealed_vectors.json` is sealed by Go and opened by TS, and
+`ts_sealed_vectors.json` is sealed by TS and opened by Go. Regenerate them only when the framing
+changes on purpose, with `make update-sealed-vectors` and `make update-ts-sealed-vectors`.
 
 ## Setup (shared across services)
 
@@ -130,9 +148,10 @@ is missing from that target.
 ## Build & test
 
 ```bash
-make test                  # vector-generator check + Go suite + TS suite
+pnpm install               # one workspace: ts/ and sdk/
+make test                  # vector-generator check + Go suite + ts and sdk suites
 make vet typecheck
-make verify-vectors        # read-only: every fixture matches current Go output
+make verify-vectors        # read-only: every fixture matches current Go output; Go opens the TS-sealed one
 make update-vectors        # regenerate fixtures after an intentional format change
 cd go && go test -race ./...   # before crypto/streaming changes
 cd ts && pnpm build
@@ -140,18 +159,42 @@ cd ts && pnpm build
 
 ## Releasing
 
-Go and TypeScript release in lockstep: one version number, both tags on the same commit.
+Go, `@txnlab/zs-proto` and the `@txnlab/zerosignal` SDK release in lockstep: one version
+number, all three tags on the same commit.
 
-1. Set `ts/package.json` `version` to `X.Y.Z` and commit.
-2. Tag that commit `go/vX.Y.Z` and `ts/vX.Y.Z`, then push both tags.
-3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`).
-   The `ts/v*` tag runs [`release.yml`](./.github/workflows/release.yml), which tests both
-   implementations and **stages** the npm package. It does not publish it.
-4. A maintainer approves the staged package with 2FA, either in the package's *Staged Packages*
-   tab on npmjs.com or with `npm stage approve <id>`. Only then is it installable.
+1. Set `version` to `X.Y.Z` in both `ts/package.json` and `sdk/package.json` and commit
+   (`make check-lockstep` refuses a mismatch).
+2. Tag that commit `go/vX.Y.Z`, `ts/vX.Y.Z` and `sdk/vX.Y.Z`, then push exactly those three:
+   `git push origin go/vX.Y.Z ts/vX.Y.Z sdk/vX.Y.Z`. GitHub starts no workflow for a push of
+   more than three tags, so don't use `--tags`.
+3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`,
+   with the private-repo setup below).
+   Each of the `ts/v*` and `sdk/v*` tags runs [`release.yml`](./.github/workflows/release.yml),
+   which runs the full test suite and **stages** that npm package. It does not publish it.
+   The SDK is staged from its `pnpm pack` tarball, which pins `@txnlab/zs-proto` at `X.Y.Z`,
+   and only when `ts/vX.Y.Z` is on the same commit.
+4. A maintainer approves each staged package with 2FA, either in the package's *Staged
+   Packages* tab on npmjs.com or with `npm stage approve <id>`. Only then is it installable.
+   Approve `@txnlab/zs-proto` first: the SDK can't be installed until the version it pins is.
+   If the zs-proto job failed, reject the staged SDK too.
+
+A new package needs a one-time setup before its first tag: npmjs.com lets a trusted publisher be
+added only to a package that exists, so publish its first version by hand with
+`pnpm publish --access restricted` (pnpm, because `npm publish` would ship a `workspace:*`
+dependency literally), then add a trusted publisher for `TxnLab/zerosignal`'s `release.yml` that
+may only stage.
+
+While this repo is private, so are new releases. Both npm packages publish with
+`--access restricted` and no provenance (npm generates provenance only for a public package from a
+public repo), and installing them needs a token that reads the `@txnlab` scope. The Go module
+needs `GOPRIVATE=github.com/TxnLab/*` and git credentials for `TxnLab/zerosignal`. `go/v0.1.0`
+and `go/v0.1.1` predate this and stay public on the Go module proxy. Going public means flipping
+the repo, `publishConfig.access` in both `package.json` files, the `--access` and `--provenance`
+flags in `release.yml`, and the access value its two metadata checks expect, together.
 
 Under 0.x a minor bump is a breaking change and a patch bump is not. Never move or delete a
-pushed `go/v*` tag: the Go checksum database has already recorded it.
+pushed `go/v*` tag: every consumer's `go.sum` has recorded its hash, so a moved tag fails their
+builds with a checksum mismatch.
 
 ## License
 

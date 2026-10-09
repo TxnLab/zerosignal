@@ -40,16 +40,27 @@ var networkDefaults = map[Network]struct {
 	endpoint    string
 	token       string
 	escrowAppID uint64
+	feeSink     string
 }{
 	NetworkLocalnet: {endpoint: "http://localhost:4001", token: strings.Repeat("a", 64), escrowAppID: 0},
-	NetworkTestnet:  {endpoint: "https://testnet-api.4160.nodely.dev", token: "", escrowAppID: 765860477},
-	NetworkMainnet:  {endpoint: "https://mainnet-api.4160.nodely.dev", token: "", escrowAppID: 3628061142},
+	NetworkTestnet: {endpoint: "https://testnet-api.4160.nodely.dev", token: "", escrowAppID: 765860477,
+		feeSink: "A7NMWS3NT3IUDMLVO26ULGXGIIOUQ3ND2TXSER6EBGRZNOBOUIQXHIBGDE"},
+	NetworkMainnet: {endpoint: "https://mainnet-api.4160.nodely.dev", token: "", escrowAppID: 3628061142,
+		feeSink: "Y76M3MSY6DKBRHBL7C3NNDXGS5IIMQVQVUAB6MP4XEMMGVF2QWNPL226CA"},
+}
+
+// FeeSink returns the genesis fee-sink address of a public network, or "" for
+// localnet (per-instance genesis) and any unknown network. The account is
+// always funded, so it serves as the sender of a read-only simulate that must
+// succeed before the payer holds any ALGO. Nothing signs for it.
+func FeeSink(network string) string {
+	return networkDefaults[Network(strings.ToLower(strings.TrimSpace(network)))].feeSink
 }
 
 // EscrowAppID returns the canonical ZeroSignalEscrow application id embedded for a
 // public network ("testnet" | "mainnet", case-insensitive). It returns 0 when
 // none is shipped — localnet (deploy-specific) and any unknown/empty network —
-// in which case the value must come from config (hayai.escrow_app_id). The
+// in which case the value must come from config (zs.escrow_app_id). The
 // lowercase normalization mirrors Resolve so the two agree on what "MainNet"
 // means.
 //

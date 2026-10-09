@@ -136,6 +136,7 @@ type vectorsFile struct {
 	BodyHashFrames    bodyHashFramesVector  `json:"body_hash_frames"`
 	CommitResponseKey commitKeyVector       `json:"commit_response_key"`
 	Ticket            ticketVectorEntry     `json:"ticket"`
+	TicketEdge        ticketVectorEntry     `json:"ticket_edge"`
 	Receipt           receiptVectorEntry    `json:"receipt"`
 	Ephemeral         ephemeralVectorEntry  `json:"ephemeral_advertisement"`
 	Reserve           reserveVectorEntry    `json:"reserve_request"`
@@ -212,6 +213,23 @@ func buildVectors() *vectorsFile {
 	}
 	tkCanon := tk.CanonicalBytes()
 	tkDigest := ticket.TicketSigDigest(&tk)
+
+	// The shapes the main ticket can't carry: stream false (a buffered image
+	// ticket), every string empty (bare zero length prefixes), and a negative
+	// expires_at, which the i64 slot must write as its two's-complement u64.
+	edge := ticket.Ticket{
+		OperatorID:      1,
+		NodeID:          2,
+		MaxOutputCount:  1,
+		OutputRate:      3,
+		MaxPrice:        3,
+		ExpiresAt:       -1,
+		Stream:          false,
+		InputUsageType:  ticket.UsageTypeTokens,
+		OutputUsageType: ticket.UsageTypeNone,
+	}
+	edgeCanon := edge.CanonicalBytes()
+	edgeDigest := ticket.TicketSigDigest(&edge)
 
 	rc := ticket.UsageReceipt{
 		TicketID:          tk.TicketID,
@@ -291,7 +309,7 @@ func buildVectors() *vectorsFile {
 
 	return &vectorsFile{
 		Version: 6,
-		Comment: "Cross-impl byte-parity vectors for the hayai protocol. " +
+		Comment: "Cross-impl byte-parity vectors for the ZeroSignal protocol. " +
 			"Regenerate via: cd proto/go && go test ./ticket -run TestVectors -update. " +
 			"Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
 		AADBodyWithTicket: aadVector{
@@ -345,6 +363,11 @@ func buildVectors() *vectorsFile {
 			Value:             tk,
 			CanonicalBytesHex: hex.EncodeToString(tkCanon),
 			SigDigestHex:      hex.EncodeToString(tkDigest[:]),
+		},
+		TicketEdge: ticketVectorEntry{
+			Value:             edge,
+			CanonicalBytesHex: hex.EncodeToString(edgeCanon),
+			SigDigestHex:      hex.EncodeToString(edgeDigest[:]),
 		},
 		Receipt: receiptVectorEntry{
 			Value:             rc,

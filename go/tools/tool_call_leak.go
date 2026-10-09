@@ -1004,6 +1004,10 @@ func RepairChatAssistantWithRecoveredCalls(assistantMsg json.RawMessage, scan Le
 			return nil, nil, err
 		}
 	}
+	// Unmarshal of null resets the map to nil, which a write panics on.
+	if obj == nil {
+		obj = map[string]json.RawMessage{}
+	}
 	obj["role"] = json.RawMessage(`"assistant"`)
 
 	// Strip the markup from the replayed content: the model must not be shown

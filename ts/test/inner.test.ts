@@ -28,6 +28,17 @@ describe('inner request frame', () => {
         expect(gotBody).toEqual(body)
     })
 
+    // Go decodes a null header as the zero header.
+    it('reads a null header as an empty one', () => {
+        const frame = encodeInnerRequest({} as InnerRequestHeader, utf8('b'))
+        const prefix = frame.length - utf8('{}').length - 1
+        const withNull = new Uint8Array([...frame.subarray(0, prefix), ...utf8('null'), ...utf8('b')])
+        new DataView(withNull.buffer).setUint32(prefix - 4, 4, false)
+        const { header, body } = decodeInnerRequest(withNull)
+        expect(header).toEqual({})
+        expect(body).toEqual(utf8('b'))
+    })
+
     // The admission tag and the receipt's body_hash both commit to sha256(body),
     // so the framing must return the body's exact bytes — including whitespace a
     // JSON re-serialization would drop.

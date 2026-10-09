@@ -252,11 +252,11 @@ frame; the outer `RequestEnvelope` is a single `ciphertext` field.
 | Envelope encode (caller) | `proto/go/wire/wrap.go` — `WrapRequestWithIdentity`; `WrapRequest` is a tests-only generate-identity variant that cannot satisfy the reply-to check |
 | Reserve delivery (proto types) | `proto/go/ticket/reserve.go` — `ReserveRequest.ProxyRecipient`, `ReserveResponse.WrappedResponseKey`, `CanonicalBytes` |
 | Reserve delivery (node) | `node/internal/server/reserve.go` — `wrapResponseKeyForProxy` |
-| Reserve delivery (proxy) | `proxy/internal/hayai/reserve.go` — `HTTPReserveClient.Reserve` |
+| Reserve delivery (Go payer SDK) | `proto/go/zs/reserve.go` — `HTTPReserveClient.Reserve` |
 | Node verification | `node/internal/server/admission.go` — `verifyAdmissionTag`, `verifyReplyTo`, `verifyRequestModel`, and the payer comparison in `verifyPaymentGroup` |
 | Peek-verify-consume ordering | `node/internal/server/admission.go` — `Server.refuseEnvelope` (true == refused), called from the three admission sites in `handlers.go` |
 | Ticket store | `node/internal/server/tickets.go` — `ticketStore.Peek` returns `PeekedTicket` (key + reserve-time recipient) in one lock acquisition |
-| Proxy tag computation | `proxy/internal/server/hayai_dispatch.go` — `runHayaiSealed`, before `WrapRequestWithIdentity` |
+| Proxy tag computation | `proto/go/zs/dispatch.go` — `runSealed`, before `WrapRequestWithIdentity` |
 | TS parity | `proto/ts/src/wire/admission.ts` — `computeAdmissionTag`; client call site `client/src/stream/envelope-fetch.ts` |
 
 Go↔TS parity is pinned by the `admission_tag` golden vector in `proto/testdata/vectors.json`.

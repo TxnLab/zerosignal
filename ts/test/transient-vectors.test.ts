@@ -20,7 +20,10 @@ import {
     INNER_ATTEMPTS,
     OVERALL_DEADLINE_MS,
     SWEEPS,
+    BusyCode,
     classify,
+    retryableAfterPayment,
+    retryableBusyCode,
     innerDelayMs,
     isRelayFrontDoorStatus,
     narrowRelayed,
@@ -95,6 +98,15 @@ interface TransientVectorsFile {
     version_cases: VersionCase[]
     front_door_cases: FrontDoorCase[]
     wait_cases: WaitCase[]
+    code_cases: CodeCase[]
+}
+
+// One row per code a node or relay emits: every answer a payer derives from it.
+interface CodeCase {
+    code: string
+    classify: { retryable: boolean; attribution: string }
+    retryable_busy: boolean
+    retryable_after_payment: boolean
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -103,7 +115,8 @@ const vectors = JSON.parse(fs.readFileSync(vectorsPath, 'utf-8')) as TransientVe
 
 describe('cross-impl transient vectors (proto/testdata/transient_vectors.json)', () => {
     it('vectors file is current schema', () => {
-        expect(vectors.version).toBe(2)
+        expect(vectors.version).toBe(3)
+        expect(vectors.code_cases.length).toBeGreaterThan(0)
         expect(vectors.classify_cases.length).toBeGreaterThan(0)
         expect(vectors.narrow_cases.length).toBeGreaterThan(0)
         expect(vectors.version_cases.length).toBeGreaterThan(0)
@@ -153,6 +166,39 @@ describe('cross-impl transient vectors (proto/testdata/transient_vectors.json)',
             expect(isRelayFrontDoorStatus(fc.status)).toBe(fc.front_door)
         })
     }
+
+    for (const cc of vectors.code_cases) {
+        it(`code: ${JSON.stringify(cc.code)}`, () => {
+            expect(classify(503, cc.code)).toEqual(cc.classify)
+            expect(retryableBusyCode(cc.code)).toBe(cc.retryable_busy)
+            expect(retryableAfterPayment(cc.code)).toBe(cc.retryable_after_payment)
+        })
+    }
+
+    // The Go predicates take a string, so the fixture can only say "". A JS
+    // caller reading an absent error.code passes null or undefined instead.
+    it('absent code fails closed as null and undefined too', () => {
+        for (const code of [null, undefined]) {
+            expect(retryableBusyCode(code)).toBe(false)
+            expect(retryableAfterPayment(code)).toBe(false)
+        }
+    })
+
+    // Literal, not derived from the fixture: the table is keyed by value, so a
+    // swap between two names would still find four matching rows.
+    it('BusyCode maps each name to its wire string', () => {
+        expect(BusyCode).toEqual({
+            NoCapacity: 'no_capacity',
+            PayerSlotCap: 'payer_slot_cap',
+            RateLimited: 'rate_limited',
+            Banned: 'reserve_temporarily_banned',
+        })
+    })
+
+    it('BusyCode names every busy code in the table', () => {
+        const busy = new Set<string>(Object.values(BusyCode))
+        expect(vectors.code_cases.filter((c) => busy.has(c.code))).toHaveLength(busy.size)
+    })
 
     for (const wc of vectors.wait_cases) {
         it(`wait: ${wc.name}`, () => {

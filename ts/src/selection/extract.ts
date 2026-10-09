@@ -41,7 +41,7 @@ export function extractRequestedBuiltinTools(body: string): string[] {
 
 /**
  * Per-request image-tool budgets a client declares on a /v1/responses body to
- * opt the hayai image tools in:
+ * opt the zs image tools in:
  *
  *     "tool_budgets": {
  *       "zs_image_generation": { "max_n": 4 },
@@ -111,6 +111,51 @@ export function extractResponseToolCallIDs(body: string): string[] {
     return out
 }
 
+/**
+ * extractStreamToolCallIDs is extractResponseToolCallIDs for one decrypted
+ * chat-completions stream chunk: the tool_calls[].id values in its choices'
+ * deltas. A tool call's id rides only its first chunk. As in Go, a field of
+ * the wrong type yields no ids at all, and null reads as absent. Mirror of
+ * proto/go/selection ExtractStreamToolCallIDs, short of Go's decoder on a
+ * duplicate key, nesting past 10000 and an escaped lone surrogate, where
+ * JSON.parse differs.
+ */
+export function extractStreamToolCallIDs(frameData: string): string[] {
+    const o = parse(frameData)
+    if (!objectOrNull(o)) return []
+    const choices = (o as { choices?: unknown } | null)?.choices
+    if (!arrayOrUnset(choices)) return []
+    const out: string[] = []
+    for (const ch of choices ?? []) {
+        if (!objectOrNull(ch)) return []
+        const delta = (ch as { delta?: unknown } | null)?.delta
+        if (!objectOrUnset(delta)) return []
+        const calls = (delta as { tool_calls?: unknown } | null | undefined)?.tool_calls
+        if (!arrayOrUnset(calls)) return []
+        for (const tc of calls ?? []) {
+            if (!objectOrNull(tc)) return []
+            const id = (tc as { id?: unknown } | null)?.id
+            if (id !== undefined && id !== null && typeof id !== 'string') return []
+            if (typeof id === 'string' && id !== '') out.push(id)
+        }
+    }
+    return out
+}
+
+// What Go unmarshals into a struct: an object, or null.
+function objectOrNull(v: unknown): boolean {
+    return v === null || (typeof v === 'object' && !Array.isArray(v))
+}
+
+function objectOrUnset(v: unknown): boolean {
+    return v === undefined || objectOrNull(v)
+}
+
+// What Go unmarshals into a slice: an array, or null.
+function arrayOrUnset(v: unknown): v is unknown[] | null | undefined {
+    return v === undefined || v === null || Array.isArray(v)
+}
+
 /** Pulls "previous_response_id" from a /v1/responses request body. */
 export function extractPreviousResponseID(body: string): string {
     const o = parse(body) as { previous_response_id?: unknown } | undefined
@@ -123,10 +168,18 @@ export function extractPreviousResponseID(body: string): string {
  * discriminator.
  */
 export function extractResponseID(body: string): string {
-    const o = parse(body) as { id?: unknown; object?: unknown } | undefined
-    if (o === undefined) return ''
-    if (typeof o.object === 'string' && o.object !== '' && o.object !== 'response') return ''
-    return typeof o.id === 'string' ? o.id : ''
+    const o = parse(body)
+    // Go reads null as an empty struct, and fails on any other non-object.
+    if (o === null || typeof o !== 'object' || Array.isArray(o)) return ''
+    const { id, object } = o as { id?: unknown; object?: unknown }
+    // A field of the wrong type fails Go's whole unmarshal; null leaves it unset.
+    if (!stringOrUnset(id) || !stringOrUnset(object)) return ''
+    if (typeof object === 'string' && object !== '' && object !== 'response') return ''
+    return typeof id === 'string' ? id : ''
+}
+
+function stringOrUnset(v: unknown): boolean {
+    return v === undefined || v === null || typeof v === 'string'
 }
 
 // Sort values for RoutingPreferences.sort — the caller's base-ordering choice.
@@ -245,7 +298,13 @@ function normalizeSort(s: unknown): string {
     }
 }
 
-function normalizeRelay(s: unknown): string {
+/**
+ * normalizeRelay maps a relay preference to RELAY_AUTO, RELAY_OFF or
+ * RELAY_REQUIRED, case- and space-insensitively, and anything else to "".
+ * Exported, as Go's NormalizeRelay, so a preference passed beside the body
+ * reads as the body's `provider.relay` does.
+ */
+export function normalizeRelay(s: unknown): string {
     if (typeof s !== 'string') return ''
     switch (s.trim().toLowerCase()) {
         case RELAY_AUTO:

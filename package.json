@@ -1,0 +1,5 @@
+{
+    "name": "zerosignal-workspace",
+    "private": true,
+    "description": "pnpm workspace root for ts/ (@txnlab/zs-proto) and sdk/ (@txnlab/zerosignal). Not published."
+}

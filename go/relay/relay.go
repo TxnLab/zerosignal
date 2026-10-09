@@ -109,7 +109,7 @@ func IsHopErrorCode(code string) bool {
 // IsAllowedInnerPath reports whether p is a path a relay may forward. This is
 // the SSRF boundary on the relay side: anything outside the allow-list (or any
 // path attempting traversal) is rejected, so a relay can only be used to reach
-// the well-known hayai endpoints on a known operator — never as a
+// the well-known zs endpoints on a known operator — never as a
 // general-purpose open proxy.
 func IsAllowedInnerPath(p string) bool {
 	// The relay forwards any query string to the target verbatim (it is

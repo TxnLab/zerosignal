@@ -193,6 +193,33 @@ func TestReplayGuards(t *testing.T) {
 		}
 	})
 
+	// The attack the colon rule closes. A compose-hash whose payload starts
+	// with 0x3a extends the same bytes as an event named "compose-hash:"
+	// with that byte dropped, so without the rule the second log replays
+	// to the first's RTMR3 with the real hash filed under another name.
+	t.Run("a colon moves a byte from payload to name", func(t *testing.T) {
+		// The premise: both events hash the same bytes, so only the rule
+		// can tell them apart.
+		preimage := func(name, payloadHex string) string {
+			p, err := hex.DecodeString(payloadHex)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return "\x01\x00\x00\x08:" + name + ":" + string(p)
+		}
+		if preimage("compose-hash", "3aaa") != preimage("compose-hash:", "aa") {
+			t.Fatal("the two events extend different bytes; the case tests nothing")
+		}
+		honest := []Event{{IMR: 3, EventType: DstackRuntimeEventType, Event: "compose-hash", EventPayload: "3aaa"}}
+		if _, _, err := ReplayRTMR3(honest); err != nil {
+			t.Fatalf("honest log: %v", err)
+		}
+		moved := []Event{{IMR: 3, EventType: DstackRuntimeEventType, Event: "compose-hash:", EventPayload: "aa"}}
+		if _, _, err := ReplayRTMR3(moved); !errors.Is(err, ErrAmbiguousEvent) {
+			t.Errorf("err = %v, want ErrAmbiguousEvent", err)
+		}
+	})
+
 	t.Run("all-zero rtmr3 in quote", func(t *testing.T) {
 		// The mirror case: a genuine log against a quote whose RTMR3
 		// was never measured. VerifyEventLog must refuse rather than

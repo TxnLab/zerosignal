@@ -51,11 +51,11 @@ const (
 	// AttrNone accompanies a non-retryable verdict.
 	AttrNone Attribution = ""
 
-	// AttrRelay means the relay itself failed and the target provably never saw
-	// the request. This is the only attribution safe to retry AFTER escrow has
-	// committed: the ticket cannot have been consumed, so re-sending the
-	// byte-identical sealed envelope through a different relay can't collide
-	// with an inference already running.
+	// AttrRelay means the relay hop is at fault: a relay hop code, or a
+	// relayed failure NarrowRelayed pinned on the relay. It charges the relay's
+	// reputation. It does NOT by itself make a post-escrow retry safe: a
+	// connection that dropped after the relay forwarded is AttrRelay too, and
+	// the target may be mid-generation. RetryableAfterPayment decides that.
 	AttrRelay Attribution = "relay"
 
 	// AttrTarget means the target is implicated — either it answered with a

@@ -24,6 +24,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
+import { parseObject } from '../util/strictjson.js'
 import type { BytesSigner } from './signing.js'
 import type { UsageType } from './usagetype.js'
 
@@ -153,7 +154,7 @@ export function encodeReceiptHeader(r: UsageReceipt): string {
 }
 
 // decodeReceiptHeader parses the base64(JSON) shape the node writes to
-// X-Zs-Receipt. Use before verifyReceipt.
+// X-Zs-Receipt, as strictly as parseReceiptJSON. Use before verifyReceipt.
 export function decodeReceiptHeader(value: string): UsageReceipt {
     let raw: Uint8Array
     try {
@@ -161,10 +162,34 @@ export function decodeReceiptHeader(value: string): UsageReceipt {
     } catch (err) {
         throw new Error(`decode receipt header base64: ${err instanceof Error ? err.message : String(err)}`)
     }
-    try {
-        return JSON.parse(new TextDecoder().decode(raw)) as UsageReceipt
-    } catch (err) {
-        throw new Error(`decode receipt header json: ${err instanceof Error ? err.message : String(err)}`)
+    return receiptFromJSON(raw, 'decode receipt header json')
+}
+
+// parseReceiptJSON decodes a receipt from its JSON bytes, refusing any value
+// that doesn't fit its field's Go type (see util/strictjson.ts). That is what
+// makes verifyReceipt's amount check sound: a node that signed 2^64-1 can't
+// send -1 past amount_charged ≤ max_price.
+export function parseReceiptJSON(raw: Uint8Array): UsageReceipt {
+    return receiptFromJSON(raw, 'decode receipt json')
+}
+
+function receiptFromJSON(raw: Uint8Array, what: string): UsageReceipt {
+    const { uint, str } = parseObject(raw, what)
+    const usage = (name: string) => uint(name, 255) as UsageType
+    return {
+        ticket_id: str('ticket_id'),
+        actual_input_count: uint('actual_input_count'),
+        actual_output_count: uint('actual_output_count'),
+        amount_charged: uint('amount_charged'),
+        ttft_ms: uint('ttft_ms'),
+        decode_ms: uint('decode_ms'),
+        body_hash: str('body_hash'),
+        input_usage_type: usage('input_usage_type'),
+        output_usage_type: usage('output_usage_type'),
+        aux_output_usage_type: usage('aux_output_usage_type'),
+        aux_output_count: uint('aux_output_count'),
+        cached_input_count: uint('cached_input_count'),
+        sig: str('sig'),
     }
 }
 

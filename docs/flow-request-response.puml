@@ -1,4 +1,4 @@
-' Hayai request/response flow — encrypted envelope choreography.
+' ZeroSignal request/response flow — encrypted envelope choreography.
 ' Companion to proto/SPEC.md §§ 3, 4, 5, 6, 7, 9. Function names reference the
 ' Go reference implementation in the proto/, proxy/, and node/ modules.
 '
@@ -18,7 +18,7 @@
 ' adds the confidentiality the relay would break.
 
 @startuml flow-request-response
-title Hayai request / response — proxy <-> node encryption choreography
+title ZeroSignal request / response — proxy <-> node encryption choreography
 
 autonumber "<b>[00]</b>"
 skinparam sequence {
@@ -30,7 +30,7 @@ skinparam sequence {
 }
 
 participant "Client\n(OpenAI SDK)" as Client
-participant "Proxy\nhayai_dispatch.go\n+ hayai/wallet.go" as Proxy
+participant "Proxy\nproto/go/zs/dispatch.go\n+ proto/go/zs/wallet.go" as Proxy
 participant "Node\ninternal/server/handlers.go\n+ receipt.go + settlement worker" as Node
 participant "LLM\n(OpenAI upstream)" as LLM
 
@@ -39,7 +39,7 @@ participant "LLM\n(OpenAI upstream)" as LLM
 Client -> Proxy: POST /v1/chat/completions\nContent-Type: application/json\n(plaintext OpenAI body)
 
 note over Proxy
-  Per-request state (built by dispatchHayai before this block):
+  Per-request state (built by Client.dispatch before this block):
   - tokenize.EstimateWithRegistry(body) -> input_tokens, max_output_tokens
   - pickCandidates(model, body, sizing) -> ordered operator list
       (registry filter -> sizing filter -> tool_call affinity re-rank)
@@ -157,7 +157,7 @@ end
 == Settlement watchdog (operator side, asynchronous) ==
 
 note over Node
-  After hayai.settlement_watchdog_seconds (default 30s) past
+  After zs.settlement_watchdog_seconds (default 30s) past
   Entry.NotBefore, the settlement driver sweeps unsettled
   ledger rows. For each candidate row:
     1. Pre-flight: BoxChecker.TicketBoxExists(ticketId)

@@ -123,9 +123,11 @@ export function decryptBody(
         throw new Error(`parse response envelope: ${err instanceof Error ? err.message : String(err)}`)
     }
 
+    // An absent field, or a null envelope, is the empty string to Go, so it
+    // fails on the nonce's length rather than on its decoding.
     let nonce: Uint8Array
     try {
-        nonce = base64.decode(env.nonce)
+        nonce = base64.decode(env?.nonce ?? '')
     } catch (err) {
         throw new Error(`decode nonce: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -135,7 +137,7 @@ export function decryptBody(
 
     let ct: Uint8Array
     try {
-        ct = base64.decode(env.ciphertext)
+        ct = base64.decode(env.ciphertext ?? '')
     } catch (err) {
         throw new Error(`decode ciphertext: ${err instanceof Error ? err.message : String(err)}`)
     }

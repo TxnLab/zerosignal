@@ -306,22 +306,40 @@ func TestHealthzURL(t *testing.T) {
 // either of these to true re-bills the payer for a second ticket.
 func TestIsRetryableStatus(t *testing.T) {
 	for _, tc := range []struct {
+		status      int
+		code        string
+		shouldRetry string
+		want        bool
+	}{
+		{429, "", "", true},
+		{502, "", "", false},
+		{504, "", "", false},
+		{503, "", "", true},
+		{503, "no_operator", "", false},
+		{503, "no_pinned_operator", "", false},
+		{402, "wallet_unfunded", "", false},
+		{400, "bad_request", "", false},
+		{200, "", "", false},
+		// A proxy that says outranks the status rule, both ways.
+		{503, "no_tee_capacity", "false", false},
+		{502, "", "true", true},
+	} {
+		if got := isRetryableStatus(tc.status, tc.code, tc.shouldRetry); got != tc.want {
+			t.Errorf("isRetryableStatus(%d, %q, %q) = %v, want %v", tc.status, tc.code, tc.shouldRetry, got, tc.want)
+		}
+	}
+}
+
+// The pick-another-model hint follows the code, whatever status a proxy gives
+// it: no_operator is a 404 and no_pinned_operator a 400 today.
+func TestStatusHint_NoOperatorByCode(t *testing.T) {
+	o := &options{model: "m"}
+	for _, tc := range []struct {
 		status int
 		code   string
-		want   bool
-	}{
-		{429, "", true},
-		{502, "", false},
-		{504, "", false},
-		{503, "", true},
-		{503, "no_operator", false},
-		{503, "no_pinned_operator", false},
-		{402, "wallet_unfunded", false},
-		{400, "bad_request", false},
-		{200, "", false},
-	} {
-		if got := isRetryableStatus(tc.status, tc.code); got != tc.want {
-			t.Errorf("isRetryableStatus(%d, %q) = %v, want %v", tc.status, tc.code, got, tc.want)
+	}{{404, "no_operator"}, {400, "no_pinned_operator"}, {503, "no_operator"}} {
+		if got := statusHint(tc.status, tc.code, o); !strings.Contains(got, "pick another -model") {
+			t.Errorf("statusHint(%d, %q) = %q, want the pick-another-model hint", tc.status, tc.code, got)
 		}
 	}
 }

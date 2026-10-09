@@ -8,6 +8,8 @@ package keystore
 import (
 	"context"
 	"crypto/ed25519"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -32,7 +34,7 @@ const (
 	hdAddrSeq   = "4BNOVXVHYUK3MV6BLZ43QSXDQANK2QUIEN6M52TZVRLYOQ7KULSA7WSF2A"
 )
 
-func TestKeyStore_HD_MatchesClientVectors(t *testing.T) {
+func TestKeyStore_HD_MatchesClientAddresses(t *testing.T) {
 	cases := []struct{ phrase, addr string }{
 		{hdPhraseZero, hdAddrZero},
 		{hdPhraseSeq, hdAddrSeq},
@@ -48,12 +50,96 @@ func TestKeyStore_HD_MatchesClientVectors(t *testing.T) {
 	}
 }
 
+// The seed is PBKDF2 over the sentence string, so a phrase pasted with a double
+// space or line breaks must load the account its words name, not a new one.
+func TestKeyStore_HD_SeparatorsDoNotChangeTheAccount(t *testing.T) {
+	words := strings.Fields(hdPhraseSeq)
+	for _, sep := range []string{"  ", "\n", "\t", " \r\n "} {
+		addr, kind, err := DeriveAddress(strings.Join(words, sep))
+		if err != nil || kind != "xhd-24" || addr != hdAddrSeq {
+			t.Fatalf("sep %q: (%s, %s, %v), want %s", sep, addr, kind, err, hdAddrSeq)
+		}
+	}
+}
+
+// Before the rejoin a newline-separated phrase loaded the account of its own
+// spacing, and funds may sit there: both keys load, one listed per entry.
+func TestKeyStore_HD_LegacySpacingLoadsBothAddresses(t *testing.T) {
+	ctx := context.Background()
+	nl := strings.Join(strings.Fields(hdPhraseSeq), "\n")
+	legacy, ok := LegacySpacingAddress(nl)
+	if !ok || legacy == hdAddrSeq {
+		t.Fatalf("legacy address %q, %v: want one distinct from %s", legacy, ok, hdAddrSeq)
+	}
+	if _, ok := LegacySpacingAddress(hdPhraseSeq); ok {
+		t.Fatal("a single-spaced phrase derived a legacy address")
+	}
+
+	load := func(es ...MnemonicEntry) *KeyStore {
+		ks, err := New(ctx, staticProvider{entries: es})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ks
+	}
+	for _, tc := range []struct {
+		name   string
+		legacy bool
+		listed string
+	}{{"canonical entry", false, hdAddrSeq}, {"legacy entry", true, legacy}} {
+		ks := load(MnemonicEntry{Name: "HD", Mnemonic: nl, LegacySpacing: tc.legacy})
+		if got := ks.Addresses(); len(got) != 1 || got[0] != tc.listed {
+			t.Errorf("%s: Addresses = %v, want [%s]", tc.name, got, tc.listed)
+		}
+		// Each address signs with its own key: a swapped pair would sign
+		// without error and fail on chain.
+		for _, a := range []string{hdAddrSeq, legacy} {
+			sig, err := ks.SignBytes(ctx, a, []byte("m"))
+			if err != nil {
+				t.Fatalf("%s: %s not signable: %v", tc.name, a, err)
+			}
+			pk, err := types.DecodeAddress(a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ed25519.Verify(pk[:], []byte("m"), sig) {
+				t.Errorf("%s: %s signs with another address's key", tc.name, a)
+			}
+		}
+	}
+
+	// The surrounding whitespace a secret file carries is not spacing: a
+	// single-spaced phrase ending in a newline loads one key, and a legacy
+	// entry lists the address its trimmed text derives.
+	if ks := load(MnemonicEntry{Name: "HD", Mnemonic: hdPhraseSeq + "\n"}); len(ks.keys) != 1 {
+		t.Errorf("a trailing newline loaded %d keys, want 1", len(ks.keys))
+	}
+	if got := load(MnemonicEntry{Name: "HD", Mnemonic: "\n" + nl + "\n", LegacySpacing: true}).Addresses(); !slices.Equal(got, []string{legacy}) {
+		t.Errorf("padded legacy entry lists %v, want [%s]", got, legacy)
+	}
+
+	// The same phrase from an environment key, then a wallet naming the
+	// legacy address: that address was loaded unlisted, and the wallet's
+	// entry lists it.
+	ks := load(MnemonicEntry{Name: "env", Mnemonic: nl}, MnemonicEntry{Name: "wallet", Mnemonic: nl, LegacySpacing: true})
+	want := []string{hdAddrSeq, legacy}
+	slices.Sort(want)
+	if got := ks.Addresses(); !slices.Equal(got, want) {
+		t.Errorf("Addresses = %v, want %v", got, want)
+	}
+
+	// A single-spaced phrase loads one key.
+	if got := load(MnemonicEntry{Name: "HD", Mnemonic: hdPhraseSeq, LegacySpacing: true}).Addresses(); !slices.Equal(got, []string{hdAddrSeq}) {
+		t.Errorf("Addresses = %v, want [%s]", got, hdAddrSeq)
+	}
+}
+
 func TestKeyStore_HD_SignBytes_VerifiesVerbatim(t *testing.T) {
 	ks, err := New(context.Background(), staticProvider{entries: []MnemonicEntry{{Name: "HD", Mnemonic: hdPhraseZero}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg := []byte("hello hayai from an xHD key")
+	msg := []byte("hello zs from an xHD key")
 	sig, err := ks.SignBytes(context.Background(), hdAddrZero, msg)
 	if err != nil {
 		t.Fatalf("SignBytes: %v", err)

@@ -1,0 +1,134 @@
+{
+    "name": "@txnlab/zerosignal",
+    "version": "0.2.0",
+    "license": "Apache-2.0",
+    "description": "ZeroSignal payer SDK for TypeScript: routing, reserve, escrow, sealing, relay hops, streaming and receipt checks for private LLM inference on Algorand.",
+    "keywords": [
+        "zerosignal",
+        "private-inference",
+        "llm",
+        "openai",
+        "algorand",
+        "escrow",
+        "sdk"
+    ],
+    "engines": {
+        "node": ">=20.19"
+    },
+    "type": "module",
+    "sideEffects": false,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./routing": {
+            "types": "./dist/routing/index.d.ts",
+            "import": "./dist/routing/index.js"
+        },
+        "./catalog": {
+            "types": "./dist/catalog/index.d.ts",
+            "import": "./dist/catalog/index.js"
+        },
+        "./proto": {
+            "types": "./dist/proto/index.d.ts",
+            "import": "./dist/proto/index.js"
+        },
+        "./proto/*": {
+            "types": "./dist/proto/*.d.ts",
+            "import": "./dist/proto/*.js"
+        },
+        "./escrow-client": {
+            "types": "./dist/escrow/generated/ZeroSignalEscrowClient.d.ts",
+            "import": "./dist/escrow/generated/ZeroSignalEscrowClient.js"
+        },
+        "./accounts/algosdk": {
+            "types": "./dist/accounts/algosdk.d.ts",
+            "import": "./dist/accounts/algosdk.js"
+        },
+        "./accounts/mnemonic": {
+            "types": "./dist/accounts/mnemonic.d.ts",
+            "import": "./dist/accounts/mnemonic.js"
+        },
+        "./accounts/xhd": {
+            "types": "./dist/accounts/xhd.d.ts",
+            "import": "./dist/accounts/xhd.js"
+        },
+        "./node": {
+            "types": "./dist/node/index.d.ts",
+            "node": "./dist/node/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "imports": {
+        "#default-fetch": {
+            "types": "./dist/default-fetch.d.ts",
+            "bun": "./dist/default-fetch.js",
+            "deno": "./dist/default-fetch.js",
+            "node": "./dist/node/default-fetch.js",
+            "default": "./dist/default-fetch.js"
+        }
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/TxnLab/zerosignal.git",
+        "directory": "sdk"
+    },
+    "homepage": "https://github.com/TxnLab/zerosignal/tree/main/sdk#readme",
+    "bugs": {
+        "url": "https://github.com/TxnLab/zerosignal/issues"
+    },
+    "publishConfig": {
+        "access": "restricted"
+    },
+    "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build.node.json",
+        "gen:client": "./scripts/gen-escrow-client.sh src/escrow/generated/ZeroSignalEscrowClient.ts && node scripts/gen-escrow-abi.mjs src/escrow/generated/abi.ts",
+        "prepublishOnly": "pnpm test && pnpm build && pnpm test:dist",
+        "test": "vitest --run",
+        "test:dist": "node scripts/check-dist.mjs",
+        "test:watch": "vitest",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p test"
+    },
+    "dependencies": {
+        "@noble/ed25519": "2.1.0",
+        "@noble/hashes": "2.2.0",
+        "@scure/base": "2.2.0",
+        "@txnlab/zs-proto": "workspace:*",
+        "undici": "^7.30.0"
+    },
+    "peerDependencies": {
+        "algosdk": "^3.6.0",
+        "@algorandfoundation/algokit-utils": "^9.2.0",
+        "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
+        "@scure/bip39": "^2.2.0"
+    },
+    "peerDependenciesMeta": {
+        "@algorandfoundation/algokit-utils": {
+            "optional": true
+        },
+        "@algorandfoundation/xhd-wallet-api": {
+            "optional": true
+        },
+        "@scure/bip39": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@algorandfoundation/algokit-client-generator": "^6.0.1",
+        "@algorandfoundation/algokit-utils": "9.2.0",
+        "@algorandfoundation/xhd-wallet-api": "2.0.0-canary.1",
+        "@scure/bip39": "2.2.0",
+        "@types/node": "^22.10.0",
+        "algosdk": "3.6.0",
+        "typescript": "5.6.3",
+        "vitest": "3.2.6"
+    }
+}

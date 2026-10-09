@@ -1,0 +1,272 @@
+# THIS FILE IS MEASURED AND PUBLIC.
+#
+# dstack hashes it verbatim into RTMR3 before expanding `${VAR}` values:
+#
+#   NODE_CONFIG_YAML   Measured. It contains the node's public configuration.
+#   ${SECRETS}         Unmeasured. Only the variable names are measured.
+#
+# Keeping the config here lets every operator use the same release image.
+# Verifiers remove the editable image and config spans, then compare the
+# remaining text with a published release skeleton.
+#
+# Generate this file with `zs-node tee compose`. The committed image digest is
+# an all-zero placeholder because the file is embedded in that same image. The
+# command inserts the real release digest and validates later edits.
+#
+# Edit only:
+#
+#   1. `image:` when upgrading to another published release.
+#   2. The body of `NODE_CONFIG_YAML:`.
+#
+# Everything else is fixed, including comments, spacing, key order, and volume
+# names. Changing it still produces a valid deployment, but payers will reject
+# the node because its skeleton is unknown. If you need a different service,
+# mount, command, or other compose setting, request a release change.
+#
+# The node publishes this entire document at `/v1/zs/attestation`. Never put a
+# secret in `NODE_CONFIG_YAML`.
+#
+# Use the deployment command from README.md when possible. This reference shows
+# the flags that matter — `--no-dev-os` is required, `--listed` is strongly
+# recommended and cannot be added later:
+#
+#   phala deploy \
+#     --name zs-node-1 \
+#     --compose docker-compose.yaml \
+#     --image dstack-0.5.9 \
+#     --no-dev-os \
+#     --listed \
+#     --instance-type tdx.small \
+#     -e .env.secrets
+#
+# `--no-dev-os` is required. Without it, Phala may copy a local SSH public key
+# into the CVM as an authorized root key.
+#
+# `--listed` defaults to OFF and publishes your deployment to Phala's trust
+# center, where a payer can see Phala's own re-verification of the quote this
+# node serves. The browser client links payers there from the attestation badge;
+# without the flag that link goes nowhere. Like `--name`, it is force-new:
+# adding it later means a NEW CVM with a new app_id and gateway hostname, not a
+# software update. Confirm with `phala cvms get --cvm-id <name> --json`, and
+# expect `"listed": true`.
+
+services:
+  zs-node:
+    # Use the published release by digest, never by tag. A tag could change
+    # without changing the compose measurement. Do not override `command` or
+    # `entrypoint`; the release starts `/app/zs-node`, which reads
+    # NODE_CONFIG_YAML because `/app/config.yaml` is absent.
+    image: ghcr.io/txnlab/zs-node@sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+    volumes:
+      # Required for attestation. The node fails startup if the dstack guest
+      # agent socket is unavailable.
+      - /var/run/dstack.sock:/var/run/dstack.sock
+
+      # Persists the settlement ledger and cached evidence across restarts and
+      # in-place updates.
+      - zs-node-state:/data
+
+    ports:
+      - "9090:9090"
+
+    # Phala kills the CVM after about 180 seconds even if Compose requests more,
+    # so this is the real ceiling and it cannot be raised to fit a longer drain.
+    # The node's three drain stages below are additive and must finish INSIDE
+    # this value — they total 165s, leaving 5s to exit cleanly before Docker's
+    # SIGKILL and 15s before Phala's. Lengthen one stage and shorten another;
+    # letting the sum reach 170 kills the drain mid-flight, which is the exact
+    # outcome the drain exists to prevent.
+    stop_grace_period: 170s
+
+    # Mapping form is required for the multi-line config value.
+    environment:
+      # This whole block is measured and publicly readable. Put secrets only in
+      # the environment entries below it. If `${VAR}` does not resolve, fix the
+      # file passed to `phala deploy -e`; do not paste the value here.
+      NODE_CONFIG_YAML: |
+        # EDIT ONLY THIS BLOCK. Verifiers remove its body before hashing the
+        # release skeleton, so config changes do not require a new allowlist.
+        zs:
+          # Fill both `EDIT ME` sections. The placeholders fail at startup.
+          # Other node config may be added here as needed.
+          #
+          # Safe to tune: capacity, ticket TTL, refresh interval, models, and
+          # rates.
+          #
+          # Enforced for this attestation mode: dataflow, LLM base URL,
+          # debug_dump_errors, built-in network tools, and image routes.
+          #
+          # Required but not automatically enforced: drain timings,
+          # `0.0.0.0` listening, disabled TLS and IP sync, and `/data` paths.
+
+          # EDIT ME (1 of 2): copy these IDs from operator.zerosignal.ai.
+          # The node does not register itself, and zero is invalid.
+          operator_id: 0
+          node_id: 0
+
+          # The named volume keeps unsettled work durable across restarts.
+          settlement_db_path: /data/settlement.db
+
+          # The built-in tools are ON by default and are allowed here. A tool
+          # runs only when the CALLER lists it in the request's `tools[]`, so
+          # the payer decides per request whether a query or a URL leaves the
+          # enclave; the posture this node publishes describes the inference
+          # route. Uncomment to withhold them from every caller instead.
+          # `zs_get_time` computes locally and reaches nobody either way.
+          # builtin_tools:
+          #   web_search:
+          #     enabled: false
+          #   image_search:
+          #     enabled: false
+          #   web_read:
+          #     enabled: false
+
+          # EDIT ME (2 of 2): add every served model and its rates. Empty or
+          # unpriced models fail startup. Prefer `zs-node init`, which probes
+          # the upstream and writes current IDs, limits, and rates.
+          #
+          # Example shape:
+          #
+          #     models:
+          #       <model-id>:
+          #         pricing:
+          #           input_rate: 0.20   # USD per 1M input tokens
+          #           output_rate: 0.50  # USD per 1M output tokens
+          #         context:
+          #           context_window: 2000000
+          models: {}
+
+        llm:
+          provider: openai_passthrough
+          openai:
+            # The one upstream allowed to read prompts. TWO upstreams qualify,
+            # and both are evidence the node collects for itself rather than
+            # terms it takes on trust:
+            #
+            #   1. xAI (below). The node checks its zero-data-retention
+            #      response header on every reply, so the party the posture
+            #      block names is the party that read the prompt.
+            #   2. An upstream that ATTESTS ITS OWN ENCLAVE, verified by this
+            #      node — set `tee.upstream_attestation` below and point this
+            #      at the gateway. Today that is ACI/1
+            #      (https://inference.phala.com/v1).
+            #
+            # An aggregator such as OpenRouter is refused either way, even
+            # though the node already pins zero retention on every request to
+            # it. That pin is asserted, never observed, and it cannot cover the
+            # broker's own retention — a separate account setting the operator
+            # owns and no API exposes. The full reasoning is at
+            # https://docs.zerosignal.ai/concepts/confidential-compute
+            base_url: https://api.x.ai/v1
+
+            # TEE validation requires this to remain false because enabling it
+            # writes decrypted prompt content to stderr.
+            debug_dump_errors: false
+
+        tee:
+          mode: dstack-tdx
+
+          # The node decrypts inside the CVM and forwards only to the upstream
+          # above. This also forces `store: false`, so Responses API
+          # `previous_response_id` continuation is unavailable.
+          dataflow: attested_passthrough
+
+          # OMIT THE BLOCK BELOW unless the upstream above speaks ACI/1. It is
+          # what turns attested_passthrough from "one upstream I
+          # trust" into "one upstream I CHECK": at startup the node fetches the
+          # gateway's quote under a nonce it chose, replays the boot log,
+          # appraises the measured compose, follows the chain to Intel, pins the
+          # TLS key the quote commits to, and only then reads the model catalog
+          # through that pin. Any of it failing and the node EXITS — the
+          # appraisal is the claim it advertises. See ../../docs/tee.md.
+          #
+          # upstream_attestation:
+          #   protocol: aci/1
+          #
+          #   # WHO READS THE PROMPT. Refused empty, because an ACI gateway is
+          #   # a ROUTER: appraising it establishes which code read the prompt
+          #   # first, never who ran the weights. That endpoint fans out to
+          #   # several independent operators, so an empty list would send
+          #   # prompts you sealed for one party to all of them.
+          #   require_upstream_providers: ["phala"]
+          #
+          #   # A CONCESSION, NOT A SETTING, and it is published on your own
+          #   # evidence as `upstream_attestation.carve_outs` for a payer to
+          #   # read. dstack can be told to install an operator-held root key
+          #   # inside a CVM; our own nodes refuse all three channels outright,
+          #   # and Phala's gateway declares one, so an ACI node will not boot
+          #   # without naming it. Only real dstack channel names are accepted,
+          #   # so the list cannot overstate what you waived.
+          #   #
+          #   # NAMING ONE DOES NOT GUARANTEE YOU GET IT. The exemption is
+          #   # honoured only when the gateway's replayed `os-image-hash` is an
+          #   # image whose filesystem was enumerated and found to hold no sshd,
+          #   # getty or login — conceding one channel is bounded only if it is
+          #   # the only way in. On any other image, including the GPU line's
+          #   # dstack-nvidia-0.5.9, the concession is withheld and the boot
+          #   # refuses, naming the image. The fix is the scan, not a wider list.
+          #   #
+          #   # What you concede either way: dstack measures env NAMES and not
+          #   # VALUES, and RTMR3 records BOOT and not runtime. So a permitted
+          #   # root shell caps what a clean appraisal can mean.
+          #   allow_root_backdoor_env: ["DSTACK_ROOT_PUBLIC_KEY"]
+          #
+          #   # How often the whole appraisal is re-run from scratch. Shorter
+          #   # than your own evidence cadence on purpose: the gateway's routing
+          #   # table is mutable at runtime behind an admin token.
+          #   refresh_interval: 15m
+
+          attestation:
+            # dstack uses the local guest agent; no `nras_url` is needed.
+            # Refresh with the ephemeral sealing-key rotation and cache on the
+            # durable volume.
+            refresh_interval: 20m
+            evidence_cache_path: /data/attestation.json
+
+        server:
+          # The gateway reaches the container outside its loopback interface.
+          listen: "0.0.0.0:9090"
+
+          # These three are additive and total 165s, which must stay under the
+          # `stop_grace_period` above (170s) — Docker SIGKILLs there, so a sum
+          # that reaches it truncates paid work rather than draining it.
+          drain_grace: 10s
+          drain_timeout: 140s
+          shutdown_timeout: 15s
+
+      # dstack injects these encrypted values after measurement. The variable
+      # names are measured, but their values are not. Keep this list limited to
+      # secrets so it cannot become an unmeasured config override channel.
+      NODE_LLM_OPENAI_API_KEY: ${NODE_LLM_OPENAI_API_KEY}
+      NODE_IMAGE_LLM_OPENAI_API_KEY: ${NODE_IMAGE_LLM_OPENAI_API_KEY}
+      OPERATOR_SIGNING_MNEMONIC: ${OPERATOR_SIGNING_MNEMONIC}
+      # The cloud-secret-manager alternative to the mnemonic above. Declared
+      # here so reaching for it later is not a release change; leaving it unset
+      # is inert (empty means "no cloud secrets configured").
+      ZS_MNEMONIC_URLS: ${ZS_MNEMONIC_URLS}
+
+    restart: always
+
+volumes:
+  zs-node-state: {}
+
+# REGISTRATION ORDER
+#
+# The node cannot self-register and will not start without its on-chain
+# operator and node records. The node URL contains the Phala app ID, which is
+# created by the first deployment:
+#
+#   1. Deploy. A crash loop for the missing node record is expected.
+#   2. Copy `app_id` from the deployment output.
+#   3. At operator.zerosignal.ai, create the node with:
+#      https://<app-id>-9090.<gateway-domain>
+#   4. The next restart completes startup.
+#
+# Choose `--name` carefully. Renaming creates a new app ID and URL. In-place
+# updates with `phala deploy --cvm-id` preserve both while changing the compose
+# measurement.
+#
+# Always pass an explicit production `--image`. Phala has selected a dev image
+# by default in the past; dev and production images can produce equally valid
+# attestations, but only production images provide the required hardening.

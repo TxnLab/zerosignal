@@ -4,7 +4,7 @@
  */
 
 // Package selection holds the shared, transport-agnostic operator- and
-// path-selection policy used by every hayai "user" endpoint (the proxy and
+// path-selection policy used by every zs "user" endpoint (the proxy and
 // the client/ chat app). Lifting the policy here — rather than letting each
 // app reimplement it — is what guarantees they pick the same target and the
 // same relay hop, so the network's privacy and routing behavior is uniform.
@@ -109,7 +109,7 @@ type Operator struct {
 	// A missing entry is treated as unbounded by Fits.
 	ModelCapacities map[string]ModelCapacity `json:"model_capacities"`
 
-	// BuiltinTools is the set of hayai built-in tool type names the
+	// BuiltinTools is the set of zs built-in tool type names the
 	// operator advertises. nil means unknown capability — the tool
 	// partition treats such operators as "don't prefer, don't exclude".
 	BuiltinTools []string `json:"builtin_tools"`
@@ -163,8 +163,8 @@ type ModelCapacity struct {
 	// answer. That raise is now the ONLY ceiling (DefaultMaxOutputCeiling), so
 	// nothing reads this field and no selection outcome depends on it. Kept
 	// rather than removed because it is a serialized field of the descriptor the
-	// golden vectors pin and the proxy still populates it
-	// (proxy/internal/hayai/operator.go) — deprecate, don't remove.
+	// golden vectors pin and the Go payer SDK still populates it
+	// (proto/go/zs/operator.go) — deprecate, don't remove.
 	// omitempty (like Staging on Operator): absent reads as false.
 	ReasoningSupported bool `json:"reasoning_supported,omitempty"`
 	// ImageRateMicroUSDC / ImageEditRateMicroUSDC are the microUSDC price of one
@@ -201,7 +201,7 @@ type ModelCapacity struct {
 // it a tried-then-rejected candidate for every model — wasted reserve
 // round-trips plus a misleading operators_busy masking the real no_operator.
 //
-// This mirrors proxy/internal/hayai/operator.go::ServesModel byte-for-byte;
+// This mirrors proto/go/zs/operator.go::ServesModel byte-for-byte;
 // the two must agree or the proxy and client would disagree on eligibility.
 func (o Operator) ServesModel(model string) bool {
 	for _, m := range o.Models {
@@ -263,7 +263,7 @@ func (o Operator) SupportsAllBuiltinTools(needed []string) bool {
 // unbounded. The context-window check delegates to inject.FitsContextWindow so
 // proxy, node, and client agree byte-for-byte on what "fits" means.
 //
-// Mirrors proxy/internal/hayai/sizing.go::Fits.
+// Mirrors proto/go/zs/sizing.go::Fits.
 func Fits(op Operator, model string, inputTokens, maxOutputTokens uint64) bool {
 	mc, ok := op.ModelCapacities[model]
 	if !ok {
@@ -356,9 +356,7 @@ func EffectiveInputTokens(protoVersion string, inputTokens, inputTokensV2 uint64
 	return inputTokens
 }
 
-// Constants for DeriveMaxOutput's proportionate fallback. They mirror the
-// client's deriveMaxOutputTokens (client/src/stream/config.ts) so the two
-// implementations produce the same reservation for the same operator.
+// Constants for DeriveMaxOutput's fallbacks.
 const (
 	// MinDerivedMaxOutput floors the proportionate branch: the admission layer
 	// rejects max_output_tokens <= 0, so a degenerate context window (e.g. 32)
@@ -390,10 +388,9 @@ const (
 
 // DeriveMaxOutput computes a per-operator worst-case completion reservation for a
 // request that did NOT specify max_output_tokens, from the operator's declared
-// capacity. It mirrors the client's deriveMaxOutputTokens, and is the single
-// source of truth both the sizing filter (Constraints.MaxOutputUnspecified) and
-// the caller's reserve leg use — so what the filter admits and what the ticket
-// escrows never disagree. Three branches:
+// capacity. It is the single source of truth that both the sizing filter
+// (Constraints.MaxOutputUnspecified) and the caller's reserve leg use — so what
+// the filter admits and what the ticket escrows never disagree. Three branches:
 //
 //   - declaredMax > 0 → returned unchanged (the operator's advertised cap is
 //     authoritative; requesting more would just bounce off its own reserve gate);

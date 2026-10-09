@@ -1,4 +1,4 @@
-' Hayai escrow payment flow — open / settle / protest / refundInactive.
+' ZeroSignal escrow payment flow — open / settle / protest / refundInactive.
 ' Companion to proto/SPEC.md §3a (ticket lifecycle, settlement asset model,
 ' operator authentication, settlement windows) and §3b (slashing evidence).
 ' Contract methods sourced from proto/escrow/ZeroSignalEscrow.arc56.json.
@@ -27,7 +27,7 @@
 '      via depositMbr, not a per-turn cost.)
 
 @startuml flow-escrow-payment
-title Hayai escrow lifecycle — payment, settlement, protest, refund
+title ZeroSignal escrow lifecycle — payment, settlement, protest, refund
 
 autonumber "<b>[00]</b>"
 skinparam sequence {
@@ -39,7 +39,7 @@ skinparam sequence {
 }
 
 actor       "Payer\n(end-user wallet)"                        as Payer
-participant "Proxy\n(client-side signer,\nhayai_dispatch.go)" as Proxy
+participant "Proxy\n(client-side signer,\nproto/go/zs/dispatch.go)" as Proxy
 participant "Escrow App\nZeroSignalEscrow.arc56.json\n(Ticket + Operator + Node boxes)"   as Escrow
 participant "Serving Node\n(one node within an operator)\nreserve.go + tickets.go +\nreceipt.go + settlement worker" as Operator
 
@@ -131,7 +131,7 @@ Escrow --> Payer: USDC residual refund\n(box-MBR slot released to the payer's pr
 
 note right of Operator
   Operator's settlement driver acts as a watchdog only — it
-  waits hayai.settlement_watchdog_seconds (default 30s) before
+  waits zs.settlement_watchdog_seconds (default 30s) before
   considering a standalone fire. If the box is gone (proxy
   atomic-finalized first), it records the externally-finalized
   state via MarkSettling+MarkSettled and exits. Eager firing

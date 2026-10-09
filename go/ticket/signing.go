@@ -41,7 +41,7 @@ type BytesSigner interface {
 //     "who gets paid" and "who signed this promise".
 //
 // Note this is NOT interchangeable with go-algorand-sdk's
-// crypto.SignBytes (which prepends "MX" to the raw message). Hayai
+// crypto.SignBytes (which prepends "MX" to the raw message). ZeroSignal
 // ticket / receipt signatures are raw Ed25519 over a 32-byte sha256
 // digest of a domain-tagged canonical body — see ticket.go and
 // receipt.go. The signer must expose a raw Ed25519 sign operation, or

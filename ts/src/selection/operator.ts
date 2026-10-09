@@ -12,6 +12,8 @@
 // proto/ts); numeric fields are `number` since real operator ids / token
 // counts stay within JS's safe-integer range.
 
+import { usesTightInputBound } from '../wire/version.js'
+
 export interface ModelCapacity {
     // bounds input_tokens + max_output_tokens (0 = unbounded).
     context_window: number
@@ -98,7 +100,7 @@ export interface Operator {
     models: string[]
     // per-model sizing envelope keyed by model id.
     model_capacities: Record<string, ModelCapacity>
-    // advertised hayai built-in tool type names.
+    // advertised zs built-in tool type names.
     builtin_tools: string[]
 }
 
@@ -107,7 +109,7 @@ export interface Operator {
  * list means "serves nothing" — a node advertising zero models is not a routing
  * candidate for any model (matching the node's authoritative /v1/zs/details
  * contract). Deliberately does NOT wildcard on reachability. Mirrors
- * proxy/internal/hayai/operator.go::ServesModel.
+ * proto/go/zs/operator.go::ServesModel.
  */
 export function servesModel(op: Operator, model: string): boolean {
     return (op.models ?? []).includes(model)
@@ -154,7 +156,7 @@ export function fitsContextWindow(input: number, maxOutput: number, window: numb
 /**
  * Reports whether op can serve a request for model under its declared
  * capacity. No declared capacity for model ⇒ unbounded ⇒ true. Mirror of
- * proxy/internal/hayai/sizing.go::Fits.
+ * proto/go/zs/sizing.go::Fits.
  */
 export function fits(op: Operator, model: string, inputTokens: number, maxOutputTokens: number): boolean {
     const mc = op.model_capacities?.[model]
@@ -164,8 +166,8 @@ export function fits(op: Operator, model: string, inputTokens: number, maxOutput
     return true
 }
 
-// Constants for deriveMaxOutput's proportionate fallback. Mirror of
-// proto/go/selection/operator.go (and the client's own config.ts constants).
+// Constants for deriveMaxOutput's fallbacks. Mirror of
+// proto/go/selection/operator.go.
 /** Floors the proportionate branch so a degenerate context window still yields a
  *  positive reservation (the admission layer rejects max_output <= 0). */
 export const MIN_DERIVED_MAX_OUTPUT = 256
@@ -187,10 +189,9 @@ export const DEFAULT_MAX_OUTPUT_CEILING = 32768
 /**
  * deriveMaxOutput computes a per-operator worst-case completion reservation for a
  * request that did NOT specify max_output_tokens, from the operator's declared
- * capacity. Mirror of proto/go/selection/operator.go::DeriveMaxOutput (and
- * behaviorally the client's deriveMaxOutputTokens) — the single source of truth
- * the sizing filter (Constraints.max_output_unspecified) and the caller's reserve
- * leg both use. Three branches:
+ * capacity. Mirror of proto/go/selection/operator.go::DeriveMaxOutput — the
+ * single source of truth the sizing filter (Constraints.max_output_unspecified)
+ * and the caller's reserve leg both use. Three branches:
  *   - declaredMax > 0 → returned unchanged (the operator's advertised cap is
  *     authoritative);
  *   - else contextWindow > 0 → clamp(contextWindow/DENOM, MIN, baseCeiling);
@@ -213,6 +214,37 @@ export function deriveMaxOutput(contextWindow: number, declaredMax: number, base
         return proportionate
     }
     return baseCeiling
+}
+
+/** How a request states its max_output. Mirror of selection.MaxOutputSpec. */
+export interface MaxOutputSpec {
+    /** The caller omitted max_output_tokens and no per-model default applied: derive per operator. */
+    unspecified: boolean
+    /** The caller's max_output_tokens, used verbatim unless unspecified. */
+    flat: number
+    /** deriveMaxOutput's baseCeiling; every caller passes DEFAULT_MAX_OUTPUT_CEILING. */
+    ceiling: number
+}
+
+/**
+ * effectiveMaxOutput is the max_output a request charges one operator: the
+ * number the sizing filter admits on and the number the reserve leg escrows,
+ * which must agree because a disagreement surfaces only after escrow.open.
+ * Mirror of selection.EffectiveMaxOutput.
+ */
+export function effectiveMaxOutput(contextWindow: number, declaredMax: number, spec: MaxOutputSpec): number {
+    if (!spec.unspecified) return spec.flat
+    return deriveMaxOutput(contextWindow, declaredMax, spec.ceiling)
+}
+
+/**
+ * effectiveInputTokens is the input measurement an operator is filtered and
+ * sized on: the tighter v2 bound where protoVersion supports it, else v1.
+ * inputTokensV2 0 means not supplied. Mirror of selection.EffectiveInputTokens.
+ */
+export function effectiveInputTokens(protoVersion: string, inputTokens: number, inputTokensV2: number): number {
+    if (inputTokensV2 > 0 && usesTightInputBound(protoVersion)) return inputTokensV2
+    return inputTokens
 }
 
 /**

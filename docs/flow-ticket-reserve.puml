@@ -1,4 +1,4 @@
-' Hayai ticket-gated admission — reserve pre-flight + later consume.
+' ZeroSignal ticket-gated admission — reserve pre-flight + later consume.
 ' Companion to proto/SPEC.md §3a.
 '
 ' Reserve is the round-trip where the operator commits to a price and
@@ -15,7 +15,7 @@
 ' so a relay can't read the payer address inside presigned_open_txn.
 
 @startuml flow-ticket-reserve
-title Hayai admission — /v1/zs/reserve then consume on paying request
+title ZeroSignal admission — /v1/zs/reserve then consume on paying request
 
 autonumber "<b>[00]</b>"
 skinparam sequence {
@@ -26,14 +26,14 @@ skinparam sequence {
     NoteBorderColor #C0A000
 }
 
-participant "Proxy\nhayai_dispatch.go\n+ registryProvider + reserveClient + wallet" as Proxy
+participant "Proxy\nproto/go/zs/dispatch.go\n+ registryProvider + reserveClient + wallet" as Proxy
 participant "Node\nreserve.go + tickets.go + handlers.go +\nescrow client (ComposeOpenGroup)" as Node
 
 == Pre-flight: admission (tokenize -> pick operators -> reserve) ==
 
 Proxy -> Proxy: tokenize.EstimateWithRegistry(body)\n  -> input_tokens, max_output_tokens\n  (400 max_output_required if neither body nor default supplies one)
 
-Proxy -> Proxy: pickCandidates(ctx, model, body, sizing)\n  registryProvider.Operators(model) -> filter by hayai.Fits\n  -> affinity re-rank via ExtractInputToolCallIDs + affinity.Lookup\n  empty registry -> 503 no_operator\n  empty after size filter -> 400 context_length_exceeded\n  strict-affinity misfit -> 400 context_length_exceeded (affinity msg)
+Proxy -> Proxy: pickCandidates(ctx, model, body, sizing)\n  registryProvider.Operators(model) -> filter by zs.Fits\n  -> affinity re-rank via ExtractInputToolCallIDs + affinity.Lookup\n  empty registry -> 503 no_operator\n  empty after size filter -> 400 context_length_exceeded\n  strict-affinity misfit -> 400 context_length_exceeded (affinity msg)
 
 loop per candidate operator (break on 200 OK)
 
@@ -47,7 +47,7 @@ Node -> Node: Content-Type check (reserve.go) — sealed-only\n  != wire.SealedR
 
 Node -> Node: ephemeral.OpenReserveRequest(rawBody)\n  age-decrypt with the in-memory ephemeral identity (no node.key\n  anchor — SPEC §8), then json.Decode the plaintext ReserveRequest\n  unseal / decode failure -> 400 bad_body
 
-Node -> Node: handleReserve\n  validateReserveRequest: missing model / input_tokens /\n    max_output_tokens / proxy_recipient / payer_addr -> 400 invalid_reserve\n  age.ParseX25519Recipient(proxy_recipient) -> 400 invalid_proxy_recipient if malformed\n  algorand-address parse(payer_addr) -> 400 invalid_payer_addr if malformed\n  pricing = cfg.Hayai.ModelPricing[model]   (unknown -> 400 unsupported_model)\n  defense-in-depth: ModelContextWindows[model] gate -> 400 context_length_exceeded\n  baseMax = ceil(input_tokens*input_rate/1e6)\n          + ceil(max_output_tokens*output_rate/1e6)\n    (no output round-up — the 1000-token floor lives in min_price)\n  baseMax = max(baseMax, min_price)   (min_charge floor, SPEC §3a)\n  max_price = grossUpForFee(baseMax, protocolFeeBps)\n    (additive fee: operator rates are net; escrow covers base + worst-\n     case fee, the HAY-tier discount is refunded to the payer at settle)\n  (overflow -> 400 price_overflow)
+Node -> Node: handleReserve\n  validateReserveRequest: missing model / input_tokens /\n    max_output_tokens / proxy_recipient / payer_addr -> 400 invalid_reserve\n  age.ParseX25519Recipient(proxy_recipient) -> 400 invalid_proxy_recipient if malformed\n  algorand-address parse(payer_addr) -> 400 invalid_payer_addr if malformed\n  pricing = cfg.Zs.ModelPricing[model]   (unknown -> 400 unsupported_model)\n  defense-in-depth: ModelContextWindows[model] gate -> 400 context_length_exceeded\n  baseMax = ceil(input_tokens*input_rate/1e6)\n          + ceil(max_output_tokens*output_rate/1e6)\n    (no output round-up — the 1000-token floor lives in min_price)\n  baseMax = max(baseMax, min_price)   (min_charge floor, SPEC §3a)\n  max_price = grossUpForFee(baseMax, protocolFeeBps)\n    (additive fee: operator rates are net; escrow covers base + worst-\n     case fee, the HAY-tier discount is refunded to the payer at settle)\n  (overflow -> 400 price_overflow)
 
 Node -> Node: crypto/rand -> K_response (32 B), tid_raw (16 B)\n  ticket_id = base64.StdEncoding.EncodeToString(tid_raw)
 
@@ -71,12 +71,12 @@ Proxy -> Proxy: proto.UnwrapResponseKey(wrapped_response_key, ephemeral) -> K_re
 
 Proxy -> Proxy: escrow.DecodeOpenGroup(presigned_open_txn) -> SignedTxn[2]\n  retain gtxn[1]'s signature + group hash for atomic submission
 
-Proxy -> Proxy: stash {Ticket, K_response, ephemeral, PreSignedOpenGroup}\n  as ReservedTicket — bundle handed to runHayaiSealed so the\n  same identity unwraps both reserve-time K and response-time wrapped_key
+Proxy -> Proxy: stash {Ticket, K_response, ephemeral, PreSignedOpenGroup}\n  as ReservedTicket — bundle handed to runSealed so the\n  same identity unwraps both reserve-time K and response-time wrapped_key
 
 Proxy -> Proxy: validateTicketShape(ticket, op, req)\n  operator, model, input_tokens, max_output_tokens, stream, expires_at\n  mismatch -> try next candidate
 
 note right of Proxy
-  On 429 no_capacity: hayai.IsBusy -> move to next candidate
+  On 429 no_capacity: zs.IsBusy -> move to next candidate
   (unless AffinityStrict, which hard-fails on the pinned operator).
   Track the largest Retry-After hint for the final 503 fallback.
   All candidates exhausted -> 503 operators_busy + Retry-After.
@@ -129,7 +129,7 @@ group sealed request
 
   note right of Proxy
     On response (non-stream): verifyCommitK(ticket, K) at
-    hayai_dispatch.go checks sha256(K) == ticket.commit_k.
+    proto/go/zs/dispatch.go checks sha256(K) == ticket.commit_k.
     Mismatch -> 502 proxy_error (slashing evidence, SPEC §3b case (a)).
   end note
 

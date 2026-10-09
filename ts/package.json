@@ -1,8 +1,8 @@
 {
     "name": "@txnlab/zs-proto",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "license": "Apache-2.0",
-    "description": "ZeroSignal protocol primitives for TypeScript: envelope sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing, tokenize bounds, transient-error classification, and TEE attestation checks. Byte-compatible with the Go reference implementation via shared golden vectors.",
+    "description": "ZeroSignal protocol primitives for TypeScript: envelope sealing, AAD and canonical bytes, ticket and receipt signatures, operator selection, pricing, tokenize bounds, transient-error classification, routing-signal arithmetic, and TEE attestation checks. Byte-compatible with the Go reference implementation via shared golden vectors.",
     "keywords": [
         "zerosignal",
         "private-inference",
@@ -44,6 +44,10 @@
             "types": "./dist/selection/index.d.ts",
             "import": "./dist/selection/index.js"
         },
+        "./steering": {
+            "types": "./dist/steering/index.d.ts",
+            "import": "./dist/steering/index.js"
+        },
         "./imageprice": {
             "types": "./dist/imageprice/index.d.ts",
             "import": "./dist/imageprice/index.js"
@@ -68,6 +72,14 @@
             "types": "./dist/transient/index.d.ts",
             "import": "./dist/transient/index.js"
         },
+        "./escrow": {
+            "types": "./dist/escrow/index.d.ts",
+            "import": "./dist/escrow/index.js"
+        },
+        "./tools": {
+            "types": "./dist/tools/index.d.ts",
+            "import": "./dist/tools/index.js"
+        },
         "./testdata/*": "./dist/testdata/*",
         "./package.json": "./package.json"
     },
@@ -86,7 +98,7 @@
         "url": "https://github.com/TxnLab/zerosignal/issues"
     },
     "publishConfig": {
-        "access": "public"
+        "access": "restricted"
     },
     "scripts": {
         "build": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/testdata && cp ../testdata/*.json dist/testdata/ && cp -R ../testdata/attest dist/testdata/attest",

@@ -4,7 +4,7 @@ This is the wire specification for the encrypted-envelope layer between a ZeroSi
 
 **Status.** The protocol is in active development and the wire shape is not frozen. This document describes the current state. § 13 covers design rationale and peer designs.
 
-**Naming.** The protocol and product are **ZeroSignal**. Its short form `zs` is the only spelling on the wire: MIME types (`application/vnd.zs+json`), endpoint paths (`/v1/zs/*`), headers (`X-Zs-*`), SSE event names (`event: zs`), signing domains (`zs-ticket-v2\x00`) and built-in tool types (`zs_web_search`). The old project name, *hayai*, survives in implementation identifiers such as `proxy/internal/hayai/…`, `dispatchHayai` and `fetchHayaiDetails`, and in the text of one error message (`unknown hayai builtin tool type`, returned with code `unknown_builtin_tool`). None of these is an alternate protocol name; match on the code, never the message.
+**Naming.** The protocol and product are **ZeroSignal**. Its short form `zs` is the only spelling on the wire: MIME types (`application/vnd.zs+json`), endpoint paths (`/v1/zs/*`), headers (`X-Zs-*`), SSE event names (`event: zs`), signing domains (`zs-ticket-v2\x00`) and built-in tool types (`zs_web_search`). The old project name, *hayai*, survives in the changelog's history and in some consumer-side identifiers (the TUI's `fetchHayaiDetails`); it is not an alternate protocol name. Match errors on their code (for example `unknown_builtin_tool`), never on the message text.
 
 **Conventions.** The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** mark interoperability requirements. Wire names appear in `snake_case`; Go and TypeScript identifiers appear only in reference-implementation notes. Unless a paragraph says otherwise, “caller” means either a direct ZeroSignal client or the proxy acting for a plaintext OpenAI client. “Proxy” means only that local bridge, and “node” means a serving or relaying ZeroSignal node. Sections marked as design notes, rationale, operational guidance or deferred work are non-normative.
 
@@ -97,7 +97,7 @@ A reserve is bound to one specific operator at one specific price. Discovery (wh
 | Field | Type | Semantics |
 |---|---|---|
 | `model` | string | Model id the client will request. The operator must currently serve it: it appears in the operator's published `model_pricing` map, or is surfaced through `default_pricing` plus discovery. |
-| `input_count` | uint64 | Realistic **upper bound** on the request's input tokens; the input side of `max_price`. Computed as in "Input-token bound", with the version named in `input_bound_version`. The node clamps it ("Context-window cap/floor") and re-measures the decrypted body against it ("Inference-time input-budget enforcement"), so under-reserving cannot steal service. |
+| `input_count` | uint64 | Realistic **upper bound** on the request's input tokens; the input side of `max_price`. Computed as in "Input-token bound", with the version named in `input_bound_version`. The node caps it ("Context-window cap") and re-measures the decrypted body against it ("Inference-time input-budget enforcement"), so under-reserving cannot steal service. |
 | `max_output_count` | uint64 | Ceiling on output length. `max_price` is sized for this worst case; unused output is reconciled against the operator's signed usage receipt at settlement. |
 | `stream` | bool | Whether the paying request uses SSE. Recorded in the ticket; operators may plan capacity differently for streaming and buffered work. |
 | `proxy_recipient` | string | The caller's age public key (`age1…`). The node wraps `K_response` to it and returns the result as `wrapped_response_key`, so the caller can compute the request's `admission_tag` ("Sealed request envelope") and decrypt the response. Required when the node enforces admission tagging, which it always does in escrow mode. |
@@ -149,7 +149,7 @@ The image fields (and future video fields) are excluded from the canonical bytes
 
 **Validity window and clock skew.** The verifier recovers the Ed25519 public key from `payer_addr` and checks the signature. It then requires that `payer_issued_at` is not in the future and that `now ≤ payer_issued_at + 60s`, each with a **30s** skew tolerance. Consumer devices stamp `payer_issued_at`, so skewed clocks are expected. On a window failure, the `401 invalid_payer_sig` body carries `node_time=<unix>`, the node's own clock. The caller re-stamps `payer_issued_at` to it, re-signs and retries the reserve **once**, as in AWS SigV4.
 
-**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proxy/internal/hayai/reserve.go`) and client (`client/src/stream/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
+**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proto/go/zs/reserve.go`) and client (`client/src/stream/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
 
 **Replay set.** `proxy_recipient` is a fresh X25519 recipient per request, so it doubles as the anti-replay nonce. A node that enforces signatures keeps a bounded, TTL'd set of seen `proxy_recipient` values covering the `60s + 30s` window. It checks membership right after a successful verify, but **records a value only when a slot is successfully reserved**. A `401`, `415`, `429` or other refused request never consumes the nonce. A repeat within the window is refused `409 reserve_replayed`. Without this, a relay could replay a captured sealed body to fill a victim's slot cap and manufacture abandon strikes against an honest payer.
 
@@ -183,7 +183,7 @@ The image term moves both ways (smaller for a common paste, larger above 2048×2
 
 The estimator overcounts on purpose. An overestimate only widens the refund at settlement; an underestimate would truncate a tool loop or let a caller under-reserve. Because the bound is model-agnostic, unknown open models (Qwen, Gemma, Llama, …) can be reserved with no config change on either side.
 
-**Context-window cap/floor.** When the operator declares a `context_window` for the model (advertised on `/v1/zs/details`), the **node** clamps the caller's `input_count` on the issued ticket to `[min_input_count, context_window − max_output_count]`. The cap stops a caller reserving above the window; the floor raises a tiny claim. The node does **not** raise a realistic value to the ceiling. Under-reservation is caught at inference time instead (below). A model with no declared `context_window` skips the cap, so the caller's value passes through and the operator accepts the subsidy risk. The residual `max_price − amount_charged` is refunded to the payer at settlement through the contract's normal disbursement.
+**Context-window cap.** When the operator declares a `context_window` for the model (advertised on `/v1/zs/details`), the **node** caps the caller's `input_count` on the issued ticket at `context_window − max_output_count`, so a caller cannot reserve above the window. The node never raises `input_count`: a payer refuses a signed count above its own plus 10% (`input_count_bound`, "Payer-side price verification"), so any raise past that makes a short request unreservable. Nodes built before this rule floored `input_count` at an operator-set `min_input_count`, default 256, so payers floor their own count at 256 until those nodes are gone. Under-reservation is caught at inference time instead (below). A model with no declared `context_window` skips the cap, so the caller's value passes through and the operator accepts the subsidy risk. The residual `max_price − amount_charged` is refunded to the payer at settlement through the contract's normal disbursement.
 
 ### Inference-time input-budget enforcement
 
@@ -207,7 +207,7 @@ The ceiling is `32768` for **every** caller: the proxy's `fallback_max_output_to
 
 **Escrow cost.** The derived ceiling sets `max_output_count` and so `max_price`, which is USDC locked in escrow until settlement. At a `$6`/1M output rate, a derived `32768` locks about `$0.20` per turn; unused output is refunded at settlement. On the client the same number sets `modelFloorMicroUsdc`, which decides whether a model reads as affordable and feeds the low-balance blocker. This applies only to models whose operator declares no `max_output_tokens`, since a declared cap is used verbatim. `zs-node init`'s Sizing step and `zs-node doctor`'s missing-ceiling check push operators to declare one.
 
-This is **caller-side sizing**, not a wire change. The derived number rides `max_output_count`, and the node applies the same `context_window` fit check (§ 3a "Context-window cap/floor"). Deriving per operator lets a request reserve a right-sized ceiling on a small-window operator instead of routing away from it. The sizing filter and the escrow always agree because both call `DeriveMaxOutput` on the same inputs. The request is rejected before reserve with `400 max_output_required` (§ 10) only when the body omits the field, no per-model override exists and the global fallback is disabled (set to 0), because the node needs a concrete ceiling to compute `max_price`.
+This is **caller-side sizing**, not a wire change. The derived number rides `max_output_count`, and the node applies the same `context_window` fit check (§ 3a "Context-window cap"). Deriving per operator lets a request reserve a right-sized ceiling on a small-window operator instead of routing away from it. The sizing filter and the escrow always agree because both call `DeriveMaxOutput` on the same inputs. The request is rejected before reserve with `400 max_output_required` (§ 10) only when the body omits the field, no per-model override exists and the global fallback is disabled (set to 0), because the node needs a concrete ceiling to compute `max_price`.
 
 ### Response (success)
 
@@ -444,7 +444,7 @@ So before opening escrow, a payer-side peer (proxy or direct client) **recompute
 
 **Long-context tier.** When the operator advertises a long-context tier (§ 3c, § 3a "Rate derivation" → "Long-context (surcharge) tier"), `rate_bound` and `cache_read_bound` compare against the **high** advertised rates when the ticket's signed `input_count` reaches `long_context_threshold_tokens` (`IsLongContext`), and against the **base** rates below it. That is the same signed count the node priced with, so `max_price` stays an exact recompute. `long_context_ordering` also rejects an advertised tier whose high rates undercut the base. A ticket that signs the high rate onto a **sub-threshold** `input_count` is bounded against the **base** rate and rejected unless it also fits within base × `RateMaxMultiple`. An exactly-2× surcharge happens to fit that bound during a fleet rollover; any tier above 2× needs tier-aware verifiers deployed first.
 
-`long_context_tier` is what makes it safe to choose the comparand from the **signed** count. `input_count_bound` alone allows a signed count up to `reserveInputCount × (1 + 0.10)`. Near the cliff, a ≤10% count inflation would buy a **2× multiplier on the whole request**, and `rate_bound` would accept it, since an exactly-2× surcharge sits right on the base × `RateMaxMultiple` boundary. The tolerance exists to absorb tokenizer drift, not to buy a tier. So this check compares **tiers, not counts**: a signed `input_count` at or above the threshold is refused whenever the peer's own bound is below it. It cannot false-reject an honest node, because a node only ever clamps `input_count` **down**. (Its own `ReserveInputCount` call adds no headroom, and the only upward move is the `min_input_count` floor, far below any real threshold.) Like `input_count_bound`, it is skipped when the peer has no bound of its own (`reserveInputCount == 0`).
+`long_context_tier` is what makes it safe to choose the comparand from the **signed** count. `input_count_bound` alone allows a signed count up to `reserveInputCount × (1 + 0.10)`. Near the cliff, a ≤10% count inflation would buy a **2× multiplier on the whole request**, and `rate_bound` would accept it, since an exactly-2× surcharge sits right on the base × `RateMaxMultiple` boundary. The tolerance exists to absorb tokenizer drift, not to buy a tier. So this check compares **tiers, not counts**: a signed `input_count` at or above the threshold is refused whenever the peer's own bound is below it. It cannot false-reject an honest node, because a node only ever caps `input_count` **down**. (An older node's `min_input_count` floor, default 256, is far below any real threshold.) Like `input_count_bound`, it is skipped when the peer has no bound of its own (`reserveInputCount == 0`).
 
 **Fail-open.** A missing reference MUST NOT block an honest send:
 
@@ -467,14 +467,17 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 - `proto/go/pricing` (`ExpectedMaxPrice`, `ExpectedBaseMax`, `RateBasedMaxPrice`, `ReserveMinPrice`, `MinChargeFloor`, `AlgoTxnFloorMicroUSDC`, `GrossUpForFee`, `CeilInputCost`, `ChargeFor`, `ToolFeeReserveMicroUSDC`, `IsLongContext`, `VerifyTicketPrice`, `DefaultPolicy`), with TS mirror `proto/ts/src/pricing`, pinned by `proto/testdata/pricing_vectors.json`.
 - The **node prices with the same code the payer verifies with**: `node/internal/server/reserve.go` and `receipt.go::chargeFor` delegate to it.
 - `DefaultPolicy` is `RateMaxMultiple: 2.0`, `InputCountTolerance: 0.10` (the node's `input_budget_tolerance`), `FailOpen: true`.
-- Proxy: `proxy/internal/server/hayai_dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
-- Client: `client/src/stream/ticket-price-gate.ts`, called from `envelope-fetch.ts`, raises the `ticket_price_exceeded` blocker.
+- Proxy: `proto/go/zs/dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
+- Client: `verifyReservePrice` in `client/src/stream/envelope-fetch.ts` raises the `ticket_price_exceeded` blocker.
 
 ### Response (refusal)
 
 | Condition | Status | Body / Headers |
 |---|---|---|
 | Operator at capacity (`active tickets >= max_active_tickets`) | `429 Too Many Requests` | code `no_capacity`, OpenAI-shaped, with `Retry-After: <seconds>`. The value is small and fixed (~2s): a full pool is almost always active inference, and slots free as requests complete, so the wait is seconds, not the ticket TTL. |
+| This payer already holds its per-model concurrent-reserve cap | `429 Too Many Requests` | code `payer_slot_cap`, with `Retry-After`. Each refusal of a signed reserve is a strike against the payer's abuse budget, so re-asking earns a ban. Do not re-ask this operator. |
+| Per-IP or per-payer reserve rate limit exceeded | `429 Too Many Requests` | code `rate_limited`, with `Retry-After` and `X-RateLimit-Limit` when the limit is known. The answer holds for the rest of the window. |
+| Payer is in the abuse penalty box (persistent reserve-and-abandon, or repeated `payer_slot_cap` trips) | `429 Too Many Requests` | code `reserve_temporarily_banned`, with `Retry-After` (a minute to a day). Signed reserves only. |
 | Unknown or unpriced model, or a priced model the operator's upstream LLM backend isn't currently serving | `400` | code `unsupported_model` |
 | Operator's upstream LLM backend unreachable: it failed the node's periodic health probe (in this state the operator advertises zero models on `/v1/zs/details`) | `503 Service Unavailable` | code `provider_unavailable`. Transient: the proxy should try another operator and re-check `/v1/zs/details` before routing back. |
 | Plaintext request body (not `application/vnd.zs-reserve+json`) | `415 Unsupported Media Type` | code `bad_content_type`; the reserve is sealed-only (see "Endpoint" above) |
@@ -515,10 +518,11 @@ The box is created on the payer's **first** free open. Its MBR is charged **once
   - Cache only a positive answer: once created the box stays, but absence changes the moment the first free ticket opens.
   - Adding the term unconditionally also works, but leaves every payer holding an idle, withdrawable copy forever.
   - The term is smaller than one slot. Funding logic must be able to deposit a partial slot, or a pool at exactly N whole slots can never get its box.
+  - A wallet that can't afford the whole target funds whole slots first and drops the term for that pass; a later pass deposits it alone. With two or more slots the first free open still passes, since the term fits inside a spare slot.
   - Against an app that predates the quota, the method is absent and the term is `0`.
 - **It gives the free tier a real cost per identity.** Farming fresh payer addresses burns this amount *irrecoverably* per address. An attacker can still mint addresses, but each one now costs something.
 
-Enforcement is on chain (`open()` reverts with `daily free ticket limit reached`), so it holds across every node. That revert only comes after the node has signed the open group and handed it to the caller, killing the turn at submit time and stranding a reserve slot until the open watchdog reaps it. So the node also **pre-checks** the payer's allowance at reserve with the contract's read-only `freeTicketAllowance(payer)`, and refuses up front with `403 free_quota_exhausted`. (A reverted group fails in evaluation and is never committed, so no network fee is burned.) The pre-check is advisory: the contract stays the authority, and a node with a stale reading just lets through an open that then reverts. Paid reserves never consult it.
+Enforcement is on chain (`open()` reverts with `daily free ticket limit reached`), so it holds across every node. That revert only comes after the node has signed the open group and handed it to the caller, killing the turn at submit time and stranding a reserve slot until the ticket expires and is swept. So the node also **pre-checks** the payer's allowance at reserve with the contract's read-only `freeTicketAllowance(payer)`, and refuses up front with `403 free_quota_exhausted`. (A reverted group fails in evaluation and is never committed, so no network fee is burned.) The pre-check is advisory: the contract stays the authority, and a node with a stale reading just lets through an open that then reverts. Paid reserves never consult it.
 
 `freeTicketAllowance` returns `[remaining, windowEndsAt, capPerDay]` with window expiry already applied, so callers need no clock arithmetic. `windowEndsAt` is **always a real future timestamp**. With no window running, it reports the end of the window that would start now, never `0`, because a `0` would read as the epoch and look like "retry immediately". Callers must pass the payer's quota box as a box reference. A free `open()` (`max_price == 0`) must reference it too, or it fails on chain. A paid `open()` must not: the contract never touches the box there, and the reference would put the payer-derived box name (`q:` + payer public key, a stable payer pseudonym) on chain for nothing. The node composes `open()`, so it applies this split when it builds `presigned_open_txn`.
 
@@ -557,7 +561,7 @@ Reference: step 1 is `ticketStore.Peek`; step 5 runs `proto/go/escrow.VerifyOpen
 
 If the `open()` group did confirm on chain, the escrowed `max_price` sits in the ticket box with no operator claim coming, because the node keeps no settlement-ledger row for a request it refused. The payer recovers it with `refundInactive` after `D = expires_at + grace` ("Settlement windows" below).
 
-Reference: the proxy automates this with a **refund watchdog** (`proxy/internal/hayai/refund_watchdog.go`). It arms on every submitted `open()`, resolves when an atomic settle finalizes or a protest freezes the ticket, and otherwise fires `refundInactive` at `D + margin`. Before firing, it reads the ticket box. A box already gone (settled standalone) or frozen (arbitration owns it) is a no-op. A box whose own `expires_at + settlement_grace_seconds` is later than the locally computed fire time re-arms to the on-chain deadline instead of burning retries.
+Reference: the proxy automates this with a **refund watchdog** (`proto/go/zs/refund_watchdog.go`). It arms on every submitted `open()`, resolves when an atomic settle finalizes or a protest freezes the ticket, and otherwise fires `refundInactive` at `D + margin`. Before firing, it reads the ticket box. A box already gone (settled standalone) or frozen (arbitration owns it) is a no-op. A box whose own `expires_at + settlement_grace_seconds` is later than the locally computed fire time re-arms to the on-chain deadline instead of burning retries.
 
 #### Admission tag
 
@@ -728,7 +732,7 @@ OpenAI's Chat Completions and Responses APIs accept a top-level boolean `store`,
 
 **Operator override.** An operator that requires unconditional non-retention can add middleware that forces `store: false` whatever the caller sent; that is a few lines on top of `inject.DefaultStoreFalse`. The protocol does not require it, and doing it removes `previous_response_id` continuation for that operator's clients.
 
-Reference: `inject.DefaultStoreFalse`; the injection step in `proxy/internal/server/hayai_dispatch.go` (`dispatchHayai`); the injection step in `node/internal/server/handlers.go` (`handleStreamable`, right after `safety_identifier` injection); and `tui/main.go`, which sends `Store: openai.Bool(false)` by default and `true` with `--retain-upstream`.
+Reference: `inject.DefaultStoreFalse`; the injection step in `proto/go/zs/dispatch.go` (`Client.dispatch`); the injection step in `node/internal/server/handlers.go` (`handleStreamable`, right after `safety_identifier` injection); and `tui/main.go`, which sends `Store: openai.Bool(false)` by default and `true` with `--retain-upstream`.
 
 **`store: false` is not zero data retention, and where the upstream can express ZDR the node MUST take it.** `store` asks a provider not to keep the request *for the operator's own use*. It says nothing about the provider's separate audit or abuse retention, which on some upstreams is an unrelated setting. So a conformant node does not leave zero data retention to `store` or to the caller. Wherever the upstream offers a ZDR mechanism, the node applies it **by default, and what it advertises reflects what it applied**: a payer is never told a constraint is in force when it is not. The two mechanisms work in opposite directions, because the upstreams do, and `models[].retention` reports which one applies:
 
@@ -1427,7 +1431,7 @@ Two places where the demotion silently fails to apply:
 - **A routing *preference* is not an exemption.** A consumer holding a genuine session continuation (the upstream session lives in one operator's account, so any other operator 404s) MAY exempt that pin, since trading it away breaks correctness. Nothing weaker qualifies. A KV-cache-affinity or last-used-operator pin is a preference. Exempting it disables the demotion for a payer already bound to the contradicted operator for a whole multi-turn conversation: the payer the rule exists for, and the case where a substituted model is worth most to the operator. Both reference consumers exempt nothing.
 - **Wherever a fallback path represents a model by a single pre-chosen operator, the ordering has to be applied when that operator is CHOSEN.** A demotion pass over the candidate list cannot reach a model with one candidate, since there is nothing to reorder against. A cross-model fallback that queues one operator per model therefore bypasses the policy entirely, unless the choice itself skips a contradicting operator (falling back to the unfiltered pick when every eligible operator contradicts, per "demote, never exclude").
 
-This policy is local and vantage-specific: the verdict depends on which operators a given consumer has successfully probed. So it lives in each consumer's own routing layer, on purpose outside the shared selection policy and its golden vectors.
+This policy's input is local and vantage-specific: the verdict depends on which operators a given consumer has successfully probed. So it is applied in each consumer's own routing layer, on purpose outside the shared selection policy. The vote itself is shared: `steering.WeightsConsensus` (Go) and `weightsConsensus` (TS), pinned by `testdata/steering_vectors.json`, so the same evidence yields the same verdict in either implementation.
 
 `weights_registry_match` narrows the trust ceiling without removing it. A `matched` verdict adds an independent party, since the registry publishes that exact content digest. But it inherits the trust tier's weakness: an operator who can report a digest it does not serve can report one the registry happens to publish. Read the two fields together, and treat `mismatch` as a signal for human review, not evidence of fraud. A locally requantized copy, or a repository that re-uploaded an artifact after the operator pulled it, mismatches honestly.
 
@@ -1476,14 +1480,14 @@ A divergence between an advertised value and the eventual ticket is therefore no
 
 The asymmetry lets a coordinated `proto_version` bump announce "this generation introduces new envelope crypto" *without* forcing the constant to track every internal tag change. Filtering is a discovery-time signal; the domain tags remain the in-the-clear cryptographic separator. Reference: the tags are `AdmissionTagDomain`, `ticketSigningTag`, `receiptSigningTag` and `ephemeralSigningTag`.
 
-**Why this is on details, not in the ticket.** The version field decides whether a client reaches reserve at all. Carrying it on `/v1/zs/details` lets a proxy or client skip an incompatible peer before computing any sealed round-trip, escrow group or admission tag. The failure then surfaces as a discovery-layer 503 (`no_compatible_operator` from the reference proxy), not as a cryptographic decode failure mid-flight.
+**Why this is on details, not in the ticket.** The version field decides whether a client reaches reserve at all. Carrying it on `/v1/zs/details` lets a proxy or client skip an incompatible peer before computing any sealed round-trip, escrow group or admission tag. The failure then surfaces as a discovery-layer 400 (`no_compatible_operator` from the reference proxy), not as a cryptographic decode failure mid-flight.
 
 ### Reference implementation
 
 - `inject.OperatorDetails` / `inject.OperatorDetailsModel` (`inject/details.go`) — canonical response shape; both proxy and node import it.
 - `node/internal/server/handlers.go::handleDetails` — node-side handler that builds the response from the operator's advertised catalog (`Server.advertisedModels`: ids in `model_pricing`, plus upstream-discovered ids when `default_pricing` is set), with metadata hydrated from upstream discovery and overridden by `model_context_windows`, plus oracle and tool-registry state.
-- `proxy/internal/hayai/details.go::DetailsClient.Fetch` — proxy-side probe used by the operator-registry refresh loop.
-- `wire/version.go` and `ts/src/wire/version.ts` — version constants, parsing, compatibility, and minor capability gates. The proxy's major-version filter is `pickCandidates` in `proxy/internal/server/hayai_dispatch.go`.
+- `proto/go/zs/details.go::DetailsClient.Fetch` — Go payer SDK probe used by the operator-registry refresh loop.
+- `wire/version.go` and `ts/src/wire/version.ts` — version constants, parsing, compatibility, and minor capability gates. The proxy's major-version filter is `pickCandidates` in `proto/go/zs/dispatch.go`.
 
 ### On-chain reliability metrics
 
@@ -1618,7 +1622,7 @@ Adding, removing or reordering metric fields, or any protocol-wide global key, i
 
 ##### Reserved slots (the 32-byte reserve on OperatorRecord / NodeRecord / TicketRecord)
 
-Each of the three records was deployed with a raw 32-byte `arc4.StaticBytes<32>` blob (`reservedSlots` / `ReservedSlots`), zero-initialized at `createOperator` / `createNode` / `open()`. The blob is **slack** for adding small fields (uint8 enums, small counters, a single 32-byte digest) without a fresh deploy. A new field is carved *out of* the reserve, leaving a shorter residual at the same total length, so MBR and the per-box size never move. ARC-4 tuples are byte-packed with no alignment, so any width carves cleanly. Every carve must land in `proto/go/escrow`'s positional parser (`operators.go` / `nodes.go` / `tickets.go`) and its round-trip test in the same commit; those decode by byte offset, so a mismatch silently mis-decodes the box instead of failing loudly.
+Each of the three records was deployed with a raw 32-byte `arc4.StaticBytes<32>` blob (`reservedSlots` / `ReservedSlots`), zero-initialized at `createOperator` / `createNode` / `open()`. The blob is **slack** for adding small fields (uint8 enums, small counters, a single 32-byte digest) without a fresh deploy. A new field is carved *out of* the reserve, leaving a shorter residual at the same total length, so MBR and the per-box size never move. ARC-4 tuples are byte-packed with no alignment, so any width carves cleanly. Every carve must land in `proto/go/escrow`'s positional parser (`operators.go` / `nodes.go` / `tickets.go`) and its round-trip test, the TypeScript decoder in `proto/ts/src/escrow/records.ts`, and a regenerated `testdata/escrow_vectors.json` in the same commit; those decode by byte offset, so a mismatch silently mis-decodes the box instead of failing loudly.
 
 **`reservedSlots` is not the last field on `OperatorRecord` and `NodeRecord`.** `latency_samples` (uint64) was carved from the **tail end** of their reserve, so each reads `… reservedSlots: arc4.StaticBytes<24>, latencySamples: uint64`, with the 24-byte residual *ahead* of the carved field. (A tail carve cannot collide with a concurrent head carve on the same blob.) The obvious mental model, "the reserve is the tail", is therefore wrong for these two records:
 
@@ -1641,7 +1645,7 @@ Adding a real field beyond the reserved blob is a per-ticket MBR delta, so a fre
 - `OperatorRecord`: `status` as `arc4.Uint8`;
 - `NodeRecord`: `status` and `baseUrlLen` as `arc4.Uint8`.
 
-ARC-4 tuples are byte-packed with no alignment, so each narrowing saves its full width delta. The Go positional parsers (`tickets.go` / `operators.go` / `nodes.go`) read the narrow widths and widen back to `uint64`, so Go consumers are unaffected. The generated **TS** client decodes these fields as `number` rather than `bigint`; consumers that compare against `bigint` literals or need a `bigint` must adjust (e.g. `Number(record.baseUrlLen)`). Narrowing or widening any of these is a wire-format break under the usual coordination: update the contract struct, the Go parsers and round-trip tests, and this section in lockstep.
+ARC-4 tuples are byte-packed with no alignment, so each narrowing saves its full width delta. The Go positional parsers (`tickets.go` / `operators.go` / `nodes.go`) read the narrow widths and widen back to `uint64`, so Go consumers are unaffected. The generated **TS** client decodes these fields as `number` rather than `bigint`; consumers that compare against `bigint` literals or need a `bigint` must adjust (e.g. `Number(record.baseUrlLen)`). Narrowing or widening any of these is a wire-format break under the usual coordination: update the contract struct, the Go parsers and round-trip tests, the TypeScript decoders (`proto/ts/src/escrow/records.ts`) and escrow vectors, and this section in lockstep.
 
 ## 3d. ZeroSignal built-in tools (client opt-in)
 
@@ -1868,7 +1872,7 @@ The reference proxy and client do not send challenges yet.
 - `refresh_seconds` is **not the re-mint cadence**. A node re-mints on every ephemeral rotation (~20 min), far more often, so this is an upper bound on how long evidence may go unrefreshed.
 - A rule stated purely as "2 × `refresh_seconds`" is one the attested party sets for itself, with two one-field escapes: omitting the field (no cadence, so no check) and advertising a day (a two-day window). A verifier therefore applies its own absolute ceiling as a **minimum against** the advertised window. That ceiling can reject nothing honest: an accepted bundle must attest a live ephemeral, whose signed window is capped at `MaxEphemeralLifetime` + skew, so honest evidence is always far inside it.
 
-Reference: `EvidenceMaxAgeCeiling` (`proxy/internal/hayai/attestation.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
+Reference: `EvidenceMaxAgeCeiling` (`proto/go/zs/tee/verify.go`) / `EVIDENCE_MAX_AGE_CEILING_MS` (`client/src/operators/tee-verify.ts`), both `2 × MaxEphemeralLifetime`.
 
 **`collateral`: carried so a verifier can judge the quote while a PCCS is unreachable, and MUST NOT be preferred over one it can reach.** The field names and encodings mirror Intel's QVL collateral structure verbatim (`pck_crl_issuer_chain`, `root_ca_crl`, `pck_crl`, `tcb_info_issuer_chain`, `tcb_info`, `tcb_info_signature`, `qe_identity_issuer_chain`, `qe_identity`, `qe_identity_signature`). Binary members are hex, and `tcb_info` / `qe_identity` are the signed inner documents **byte-for-byte**: a re-marshal that only reorders keys invalidates Intel's signature, as for `app_compose`. Five rules:
 
@@ -1912,7 +1916,7 @@ This does **not** extend to routes the node picks. An image backend is one the o
 
 ### Verifier responsibilities
 
-A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proxy/internal/hayai/attestation.go::BundleVerifier.Verify`.
+A relying party (the proxy) verifies in this order. Each check has a canonical failure tag, stamped on the operator's status for telemetry. Reference: `proto/go/zs/tee/verify.go::BundleVerifier.Verify`.
 
 **Decoding the bundle.** Two verifiers given the same body MUST read the same values from it:
 
@@ -1981,10 +1985,21 @@ dstack extends RTMR3 with a runtime event log instead of publishing the measurem
 ```
 acc = 0x00 * 48
 for each event in event_log where event_type == 0x08000001:
+    refuse if event.event contains ":"
     payload = hex_decode(event.event_payload)
     digest  = SHA-384( le32(event_type) || ":" || event.event || ":" || payload )
     acc     = SHA-384( acc || digest )
 ```
+
+**A runtime event whose name contains a colon MUST be refused** (`ambiguous_event`). The digest fixes where the name starts but not where it ends, so with a colon allowed one extension can be written as another name and payload: any `0x3a` in a payload can move into the name along with the bytes before it, so a `compose-hash` whose payload begins with that byte replays exactly like an event named `compose-hash:` carrying the rest. An operator who retries a compose edit until its hash has such a byte could file the real hash under another name and have the app emit a `compose-hash` of its choosing (dstack 0.5.x's `EmitEvent` takes any name), which every verifier would read, since the first occurrence of a name is the one that counts. With the colon refused the split is unique: the runtime type's four bytes contain no `0x3a` and UTF-8 never puts one inside a multi-byte character. dstack's own event names contain no colon.
+
+The log is decoded exactly as Go's `encoding/json` fills `[]Event`, so that two verifiers read the same events or both refuse:
+
+- `null` is no events, and a `null` element is the zero event, which the replay skips.
+- Keys match fields under Unicode simple case folding (`ſ` matches `s`; `ı` and `İ` match nothing), and members apply in document order, the last winning and a `null` leaving the field unchanged.
+- An integer field is plain digits within `uint32`; `-0`, `3.0` and `1e3` are refused.
+- A lone surrogate, escaped in the log or in the bundle around it, decodes to U+FFFD.
+- Any other value of the wrong type, or nesting past 10000 levels counting the log's own array, refuses the log.
 
 `acc` MUST equal RTMR3 from the verified quote, else `measurement_mismatch`. Then `compose-hash` and `os-image-hash` are read off the **replayed** events. Both MUST be checked against a known-good reference, but **the two references have different shapes, and a single allowlist for both does not scale**:
 
@@ -2024,7 +2039,7 @@ An absent or empty `app_compose` **MUST NOT be reported as a compose check that 
 | `VerifyComposeHash` — the digest gate that makes the document safe to read | **yes**, one per language | yes, on every verifier that reads a preimage |
 | `VerifyAppCompose` — manifest version, runner, `allowed_envs`, root-backdoor names, pre-launch digest, platform toggles, `features`, `storage_fs` | **yes** | **yes** — both the proxy and the browser client call it |
 | Preset production OS-image list, proxy and browser client | **yes** | yes |
-| `docker_compose_file` template match — release skeleton + published image | **yes** | **yes.** Both consumers ship `EnforceComposeSkeleton` on with the published `zs-node` release lists populated — the proxy in its config defaults, the browser client as a bundled constant |
+| `docker_compose_file` template match — release skeleton + published image | **yes** | **yes.** Both consumers ship `EnforceComposeSkeleton` on with the published `zs-node` release lists populated — the Go SDK's default verifier and the proxy's config defaults from `attest`, the browser client as a bundled constant |
 
 With the skeleton rule in force, a passing verdict means what the field is named for, and the browser client reports `measurementChecks.compose` accordingly. Without it, a compose could measure nothing at all (`image: ${SOME_VAR}` yields a stable `compose_hash` over arbitrary code), and a clean `VerifyAppCompose` would mean only "nothing structurally disqualifying, workload unchecked". Implementations MUST honor two consequences:
 
@@ -2118,9 +2133,10 @@ The cost is that a request issued *before* the verifier's next refresh runs agai
 - `node/internal/tee/dstack.go::DstackProvider` — the `dstack-tdx` provider: guest-agent `POST /GetQuote` over the unix socket, plus the runtime event log the verifier replays.
 - `node/internal/server/attestation.go::handleAttestation` — node-side `GET /v1/zs/attestation` handler.
 - `proto/go/attest` + `proto/ts/src/attest` — the shared measurement arithmetic: TDX quote field access, the RTMR3 replay above, and `ReportData`. Golden-vectored against each other; see the note under "Measurement replay".
-- `proxy/internal/hayai/attestation.go` — proxy-side `AttestationClient`, `TEEVerifier` interface, and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
-- `proxy/internal/hayai/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
-- `proxy/internal/server/hayai_dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `dispatchHayai`'s `503 no_tee_capacity`.
+- `proto/go/zs/tee/verify.go` — Go payer SDK `Verifier` interface and `BundleVerifier`, which checks what no platform is trusted to check for itself (advertisement cross-check, ephemeral key binding, freshness, stub gating) and then dispatches on `mode`. Failure tags (`FailureKeyBindingMismatch`, `FailureStubNotAllowed`, …) match the `code` values § 10 uses.
+- `proto/go/zs/attestation_client.go::AttestationClient` — fetches the evidence bundle, directly or through the relay hop.
+- `proto/go/zs/fetcher.go::probeAttestation` — per-operator attestation probe + verify pass run after the existing details probe.
+- `proto/go/zs/dispatch.go::pickCandidates` — TEE-required filter; `pickResult.TEEBlocked` propagates to `Client.dispatch`'s `503 no_tee_capacity`.
 - See [`TEE.md`](./TEE.md) for the threat model, encryption layers, and trust shift.
 
 ## 3f. Transport privacy (single-hop operator-as-relay)
@@ -2330,7 +2346,7 @@ app pick identically.
     toggle.
   - When the only nodes serving a model are staging and the caller didn't opt
     in, the policy returns `staging_blocked` (distinct from "nobody serves this
-    model"), which the proxy surfaces as `503 no_production_operator`.
+    model"), which the proxy surfaces as `400 no_production_operator`.
   - It gates TARGET selection only. Staging nodes remain usable as relays, since
     a relay forwards bytes and runs no inference.
   - It is golden-vectored like the rest of the shared policy (`staging_*` cases
@@ -2409,7 +2425,7 @@ app pick identically.
 
   | Condition | Error | Notes |
   |---|---|---|
-  | `only` miss, or `order` with no fallbacks misses | `503 no_pinned_operator` | A pool-availability condition like `no_operator` / `no_tee_capacity`. The pin is well-formed (a malformed ref is skipped at parse time), so a retry can succeed once the pinned operator/node reappears. |
+  | `only` miss, or `order` with no fallbacks misses | `400 no_pinned_operator` | The pin is well-formed (a malformed ref is skipped at parse time) but names nothing available now. Not a 5xx: a pinned node returning is not something an automatic retry should wait on, so the caller drops or changes the pin. |
   | a `previous_response_id` continuation whose target the preferences exclude | `400 pin_conflicts_with_continuation` | A genuine client contradiction; retrying the same body never resolves it. |
   | `max_price` excludes everyone | `400 price_ceiling_exceeded` | |
   | `require_tools` with no capable operator | `503 no_tool_capacity` | § 10 |
@@ -2472,9 +2488,19 @@ app pick identically.
     `relay_build_request`), means the **relay** failed. The caller marks the
     relay down (deprioritizing it for the preference above) and retries through
     a different relay. It MUST NOT mark the *target* unreachable: the target was
-    never reached, so its status is unknown this cycle.
+    never reached, so its status is unknown this cycle. The caller's own
+    deadline or cancel after the relay accepted the connection charges neither
+    hop (§ 10); the probe still rotates past that relay.
   - `relay_upstream_unreachable` is the exception: the relay reached out but the
-    target was down, so it is a **target**-side signal.
+    target was down, so it is a claim about the **target**, not a relay
+    transport failure. One relay's view of the target proves little, since the
+    relay mesh can be partitioned, so a discovery probe rotates to another relay,
+    and the target is unreachable this cycle only when every relay that worked
+    said so. The claim still scores the relay, once the probe resolves: another
+    relay reaching the target in the same probe disproves it and counts against
+    the relay; two or more relays agreeing back each other up and are credited;
+    a lone claim is judged by whether the target was last seen reachable
+    (against the relay if so, credited if not).
   - Any other status is the target's own response, forwarded verbatim.
 
   This lets a flaky relay drop out of the candidate set without a healthy target
@@ -2575,7 +2601,7 @@ staging flag is carried into the shared policy as `selection.Operator.staging`.
     and slashes a percentage of its escrowed USDC stake to the treasury. It is a
     moderation action, not an automatic consequence of a reputation streak.
 
-  Reference: `proxy/internal/hayai/relay_reputation.go`, `RecordRelayOutcome`
+  Reference: `proto/go/zs/relay_reputation.go`, `RecordRelayOutcome`
   (forward outcomes) and `RecordRelayStaleEphemeral` (staleness faults).
 
 ### Privacy is the default
@@ -2666,12 +2692,12 @@ and `proto/ts` has no `inject` twin to mirror into.
 
 ### Reference implementation
 
-- `proto/go/inject/promptcachekey.go` — `DropPromptCacheKey`, applied pre-seal at the proxy's dispatch site (`proxy/internal/server/hayai_dispatch.go`).
+- `proto/go/inject/promptcachekey.go` — `DropPromptCacheKey`, applied pre-seal at the proxy's dispatch site (`proto/go/zs/dispatch.go`).
 - `proto/go/wire/envelope.go` — `RelayPath`, `RelayTargetHeader`, `RelayPathHeader`, `RelayMethodHeader` (mirrored in `proto/ts/src/wire/constants.ts`).
 - `proto/go/relay` — `BuildRequest` (relay indirection builder), `IsAllowedInnerPath` (the allow-list / SSRF boundary), mirrored in `proto/ts/src/relay`.
 - `proto/go/selection` — `SelectTargets`, `SelectRelay`, the affinity-key derivation helpers, mirrored in `proto/ts/src/selection`; pinned across implementations by `proto/testdata/selection_vectors.json`.
 - `node/internal/server` — the `/v1/zs/relay` handler + the node-local cached operator directory.
-- `proxy/internal/server` / `proxy/internal/hayai` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
+- `proto/go/zs/handler` / `proto/go/zs` — the `zs.privacy` knob and relay indirection at the inference, reserve, and discovery call sites.
 
 ## 4. Request format
 
@@ -2882,7 +2908,7 @@ A frame is terminal when it is either:
 
 A consumer that treats an error frame as "stop reading" therefore turns every post-admission failure into an unverifiable, uncontestable charge.
 
-**Reference implementation.** `proto/go/wire/stream_terminal.go` (`ClassifyStreamFrame`, `StreamErrorMessage`) and `proto/ts/src/wire/streamTerminal.ts` (`classifyStreamFrame`, `streamErrorMessage`), pinned against each other by `proto/testdata/stream_vectors.json` (regenerate: `cd proto/go && go test ./wire -run TestStreamTerminalVectors -update`). The classification is shared rather than re-derived per consumer because it is a payer-safety property, and two implementations answering it differently is exactly the failure above. Consumers: `proxy/internal/server/sse.go::forwardRawStream` (drain-vs-cancel on client disconnect, armed by `buildHayaiFrameFactory`) and the reference client's stream pipeline.
+**Reference implementation.** `proto/go/wire/stream_terminal.go` (`ClassifyStreamFrame`, `StreamErrorMessage`) and `proto/ts/src/wire/streamTerminal.ts` (`classifyStreamFrame`, `streamErrorMessage`), pinned against each other by `proto/testdata/stream_vectors.json` (regenerate: `cd proto/go && go test ./wire -run TestStreamTerminalVectors -update`). The classification is shared rather than re-derived per consumer because it is a payer-safety property, and two implementations answering it differently is exactly the failure above. Consumers: `proto/go/zs/sse.go::forwardRawStream` (drain-vs-cancel on client disconnect, armed by `buildFrameFactory`) and the reference client's stream pipeline.
 
 #### 5.3.1 Node-originated status events (ZeroSignal tool rounds)
 
@@ -3193,16 +3219,24 @@ Two invariants bound this:
   price, payer-scoped, busy). That is the real error, and the caller gets it
   immediately.
 - A sweep can only run **pre-payment**. Once `escrow.open` has committed, the
-  only retryable failure is a relay-generated hop error. That proves the target
-  never received the envelope and so never consumed the ticket, so the
-  byte-identical sealed request may be re-sent through a different relay. An
-  ambiguous post-payment failure (a target-side `504`, a transport error) is
-  **not** retried: the node may be mid-generation, and a second submission would
-  collide with a ticket already consumed.
+  only failure a caller **may** retry is a relay-generated hop error: the relay
+  asserts it never forwarded the envelope, so the byte-identical sealed request
+  may be re-sent through a different relay. Nothing authenticates that claim; a
+  relay that forwarded anyway costs the payer the turn (the second submission
+  hits a consumed ticket), not a second charge. An ambiguous post-payment
+  failure (a target-side `504`, a transport error) must **not** be retried: the
+  node may be mid-generation, and a second submission would collide with a
+  ticket already consumed. Neither reference port resends after payment today;
+  this bounds any that does.
 
 Reference: the status set is `proto/go/transient`'s `retryableStatuses`. The
 classifier is `proto/go/transient`, mirrored in `proto/ts/src/transient` and
-golden-vectored in `proto/testdata/transient_vectors.json`.
+golden-vectored in `proto/testdata/transient_vectors.json`. Two more predicates
+there decide what a coded response permits: `RetryableBusyCode` (only
+`no_capacity` of the four reserve `429` codes may be re-asked; an absent or
+unknown code may not) and `RetryableAfterPayment` (only a relay hop code). The
+fixture's `code_cases` table gives all three answers for every code a node or
+relay emits.
 
 Attribution follows the same verdict. A relay-generated code faults the relay,
 and a `relay_upstream_unreachable` claim is treated differentially (§ 3f).
@@ -3215,7 +3249,7 @@ refines the verdict with it (`transient.NarrowRelayed`):
 
 | Evidence | Charged to | Why |
 |---|---|---|
-| The **caller's own** cancel or deadline fired | **neither** | Says nothing about either hop. Checked first, because it is otherwise indistinguishable from a dial failure and would charge a relay for a socket the caller tore down. |
+| The **caller's own** cancel or deadline fired | **neither** | Says nothing about either hop. Checked first, because it is otherwise indistinguishable from a dial failure and would charge a relay for a socket the caller tore down. A caller that can see the relay never accepted the connection (the Go discovery probe can; a browser cannot) treats its own *deadline* there as a connect timeout and charges the relay, since a probe's deadline is shorter than its transport's dial timeout. |
 | No response at all (transport failure) | **relay** | The socket the caller opened was the relay's; there is no marker to be missing. |
 | `X-Zs-Relay-Hop` absent and the status is *front-door shaped* (`425`, `429`, `500`, `502`, `503`, `520`, `521`, `522`, `523`, `525`–`527`) | **relay** | A relay marks every response its handler produces. This one is unmarked, and the status says the request never reached that handler: the shape a relay's own edge produces when it is down, refusing, or failing ahead of the handler. |
 | `X-Zs-Relay-Hop` absent, but the status means *took too long* (`408`, `504`, `524`) | **neither** | "Relay wedged" and "relay waiting on a slow target" are indistinguishable (note below). |
@@ -3296,31 +3330,32 @@ puts it in the same differential path rather than a new one.
 | Sealed request with unknown/expired/consumed `ticket_id` | 402 `invalid_request_error`, `ticket_invalid` | Ticket expired before payment arrived, or replay detected — obtain a fresh ticket. |
 | Sealed request whose inner-header `reply_to_public_key` is not the ticket's reserve-time `proxy_recipient` | 402 `invalid_request_error`, `reply_to_mismatch` | Caller must reuse the reserve-time ephemeral identity as the envelope's reply-to (§ 4). Checked before `Consume`, so the ticket survives — re-send with the correct identity. |
 | Sealed request whose body `model` differs from the ticket's reserved model | 400 `invalid_request_error`, `model_mismatch` | Sealed, with a zero-cost receipt, so the escrow settles at zero. Reserve for the model you intend to call — the ticket's model, not the body's, determines the rates and limits. |
-| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. |
+| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. |
 | Second `escrow.settle` call from the same side as the pending claim, with args that differ from it | On-chain revert `same side cannot re-claim with different args` | Caller-logic bug: only the counterparty of the pending claim can answer it with different args. A same-side re-claim with byte-for-byte matching args is a no-op (§ 3a "Settlement windows"). See "Settle outcomes" below. |
 | Second `escrow.settle` call from the counterparty, with args that differ from the pending claim | No revert; the ticket transitions to `STATUS_FROZEN` | The counterparty disagreed with the first side's claim. It proceeds to off-chain arbitration, and the first claim stays on-chain as the disputed reference. |
 | `escrow.settle` broadcast after `ticket.expires_at + ticket.settlement_grace_seconds` (both unix seconds) | On-chain revert `settle after refund deadline` | Neither party acked in time. The operator force-finalizes a pending operator claim via `escrow.settleLapsed`; the payer recovers funds via `escrow.refundInactive` when no operator claim is pending. |
 | `escrow.settleLapsed` broadcast while `pendingBy != OPERATOR` | On-chain revert `only operator claims can lapse into settle` | `settleLapsed` finalizes operator-initiated pending claims only. If the payer posted the pending claim and the operator never responded, the payer uses `refundInactive` instead. |
 | `Require-TEE` request when no operator survives the TEE filter (every otherwise-fitting candidate has `op.IsTEEAttested() == false`) | `503 service_unavailable`, `no_tee_capacity` | Proxy refuses; client should retry on a TEE-recovery cadence (typically the operator's `attestation.refresh_interval`). Distinct from `no_operator` and `operators_busy` — see § 3e. |
-| No operator serves the requested model (none registered, or all filtered by sizing) | `503 service_unavailable`, `no_operator` | Proxy-authored; pick a different model or retry later. |
-| Every otherwise-eligible node serving the model is flagged `staging` and the caller didn't opt in (§ 3f "Staging gate") | `503 service_unavailable`, `no_production_operator` | Proxy-authored; enable `allow_staging` to reach them, or pick a different model. |
+| No operator serves the requested model | `404 invalid_request_error`, `no_operator` | Proxy-authored; pick a different model. OpenAI's status for a model it doesn't serve. |
+| Every otherwise-eligible node serving the model is flagged `staging` and the caller didn't opt in (§ 3f "Staging gate") | `400 invalid_request_error`, `no_production_operator` | Proxy-authored; enable `allow_staging` to reach them, or pick a different model. |
 | Every otherwise-eligible node serving the model has a signing account below the 5 ALGO spendable floor, or a strict tool-affinity pin or a `previous_response_id` pin resolves to one (§ 3f "Signer-funding gate") | `503 service_unavailable`, `no_funded_operator` | Proxy-authored; clears when an operator tops up its signing account. Retry later; for an unpinned request, a different model; for a pinned one, a new conversation. |
 | A model is served but every candidate's reserve was refused for capacity (all 429'd) | `503 service_unavailable`, `operators_busy` | Proxy-authored after exhausting candidates; transient, retry shortly. |
 | Every candidate was unreachable through *infrastructure* (a transient-shaped status carrying **no** protocol `error.code`, per the status set above, or a transport failure) and none ever refused the request, after the full retry budget above | `503 service_unavailable`, `operators_unreachable` | Proxy-authored. Distinct from `operators_busy` on purpose: the pool is not at capacity but unreachable, and reporting congestion invites an immediate retry storm during a fleet-wide restart. `Retry-After` lands past a typical node restart. |
 | Node is shutting down (graceful drain) | `/v1/zs/reserve`: `503 server_error`, `node_draining`; new relay circuits: `503 server_error`, `relay_busy` | Node-authored. Tickets already issued are still honored for a short grace window; a *new* reservation is refused so the payer's escrow isn't opened against a node about to exit. A draining node also advertises zero models, so peers route away on their next probe. |
-| No candidate speaks a compatible `proto_version` major (all wire-incompatible, § 3c) | `503 service_unavailable`, `no_compatible_operator` | Proxy-authored; the fleet hasn't upgraded to this build's generation. |
+| No candidate speaks a compatible `proto_version` major (all wire-incompatible, § 3c) | `400 invalid_request_error`, `no_compatible_operator` | Proxy-authored; the fleet hasn't upgraded to this build's generation, and a retry won't change that. |
 | Every candidate lacked a verified, unexpired ephemeral recipient (mandatory FS, § 8) | `503 service_unavailable`, `no_ephemeral_capacity` | Proxy-authored after exhausting candidates; transient (nodes mid-rotation). |
 | Privacy mode on but no eligible relay for the target (§ 3f) | `503 service_unavailable`, `no_relay_available` | Proxy refuses rather than route direct (which would leak the client IP). |
 | Node has no fresh ephemeral to advertise / seal against | `/v1/zs/details`: `503 service_unavailable`, `no_fresh_ephemeral`; `/v1/zs/reserve`: `503 server_error`, `node_ephemeral_unavailable` | Node-authored; transient (mid-rotation or just-restarted). Proxy treats as operator-unavailable and tries another. |
 | `GET /v1/zs/attestation` on a node whose attestation refresh has not yet succeeded | `503 service_unavailable`, `attestation_unavailable` | Cold start; node-authored. The proxy treats this the same as a non-attested operator for routing. |
 | `GET /v1/zs/attestation` on a node whose evidence is older than `2 × refresh_interval` | `503 service_unavailable`, `stale_attestation` | Refresh wedged on the node side; same routing consequence as `attestation_unavailable`. |
 | `GET /v1/zs/attestation` on a node that does not run in TEE mode | `404 invalid_request_error`, `attestation_disabled` | Defensive — should not happen if the proxy reads `tee.mode` from `/v1/zs/details` first. |
-| Payer's `open()` app-call was seen in the mempool (admission proceeded speculatively) but never confirmed on-chain (see "`open_unconfirmed`" below) | Streaming: node cancels inference and emits a sealed OpenAI error frame with `code=payment_verification_failed`, message prefixed `open_unconfirmed:`. Settle-side (non-streaming, or any case the watchdog didn't catch): the operator's settlement driver marks the ledger entry terminally `failed` immediately (no retry budget burned); no client-visible signal, since the response was already returned. | Streaming clients see `payment_verification_failed` with the `open_unconfirmed` reason and know they will not be billed: no settle was made, and the `open()` never moved any funds, so no refund is needed either. On the non-streaming path the proxy never gets a receipt; since the `open()` never confirmed, the payer's funds were never escrowed and no `refundInactive` is needed. |
+| Payer's `open()` app-call was seen in the mempool (admission proceeded speculatively) but never confirmed on-chain (see "`open_unconfirmed`" below) | The node cancels inference on every ticket-gated request kind (chat, responses, image generation and edit) and sends no receipt. Streaming: a sealed OpenAI error frame with `code=payment_verification_failed`, message prefixed `open_unconfirmed:`. Non-streaming: a sealed `402 invalid_request_error`, `payment_verification_failed`, same message, in place of the response. The node checks for the cancel after the upstream call returns, whatever it returned, so a reply finishing in the same instant is withheld. Settle-side (any case the watchdog didn't catch): the operator's settlement driver marks the ledger entry terminally `failed` immediately (no retry budget burned); no client-visible signal, since the response was already returned. | The client sees `payment_verification_failed` with the `open_unconfirmed` reason and knows it will not be billed: no receipt was sent, so no settle can be made. The `open()` normally never moved funds; if it confirms anyway (another algod's pool can still hold the group), the payer recovers `max_price` with `refundInactive` after `expires_at + grace`, as for any unsettled ticket. **Re-reserve**; the ticket is consumed. Content already streamed before the cancel stays with the client. In the settle-side case the payer's own settle also reverts; nothing was escrowed, so nothing is billed. |
 
 **Settle outcomes are not client errors.** The four settle rows above are
 on-chain outcomes of settlement, which runs after admission. None is surfaced to
-the HTTP client as an error code; the `402 payment_verification_failed` refusal
-is admission-time only. A reverted settle is logged by its sender, and the ticket
+the HTTP client as an error code. A `402 payment_verification_failed` comes from
+admission or, on a buffered reply, from the open-confirmation watchdog
+(`open_unconfirmed` below), never from settlement. A reverted settle is logged by its sender, and the ticket
 then resolves via `settleLapsed` or `refundInactive`. A frozen ticket has no
 on-chain resolution: its funds stay locked pending off-chain arbitration. The only client-visible
 effect is on the reported ALGO fee total, which does not include the payer's
@@ -3334,15 +3369,37 @@ synthesized bytes. Other structured upstream errors (e.g.
 `context_length_exceeded`) keep their own code and, non-streaming, are forwarded
 byte-identical.
 
+**`X-Should-Retry`.** Every error response the reference proxy writes, and every
+stream it opens, carries `X-Should-Retry: true` or `false`. A stream is always
+`false`: it is past the escrow open, and a node can open one under a failed
+status, which a client reads before the stream. OpenAI's SDKs read the header
+in place of their status rule (resend any 408, 409, 429 or 5xx). It is `true`
+only when a new turn could plausibly succeed (the SDK's `Error.Retryable`,
+pinned by `testdata/error_retry_vectors.json`) **and** escrow was not opened:
+after the open, an automatic resend is a second payment the payer did not
+choose, so a paid failure, its passed-through node error included, is always
+`false`. The proxy sets the header over any value a node sent.
+
 **`open_unconfirmed`.** Typically a balance shift between mempool admission and
 block production drops the group. It is detected in one of two ways:
-- Mid-inference, for streaming requests, by the node's open-confirmation
-  watchdog. Algod returns "transaction not found" for a txid this same algod
-  node previously had in its pool. Algod keeps recently committed txns in cache
-  for tens of rounds, so a 404 is unambiguous evidence that the txn dropped
-  without confirming.
+- Mid-inference, on every ticket-gated request kind, by the node's
+  open-confirmation watchdog. After each block, algod re-checks every pending
+  group against the new ledger state and drops those that now fail. The pending
+  lookup then keeps answering 200 with the rejection in `pool-error` for as long
+  as algod remembers it; that is the drop signal. That memory holds a fixed
+  number of recent rejections, not a fixed time, and an algod restart or
+  catchup clears it. Once it is gone the lookup returns "transaction not found"
+  instead, the fallback signal: this algod had the txn in its pool (assuming
+  the node polls one algod instance), and algod's lookup still finds a
+  committed transaction for `MaxTxnLife` (1,000) rounds after it commits, so a
+  404 during inference means the open did not commit there. An open that
+  already carries `pool-error` at admission is refused there (402
+  `payment_verification_failed`) before inference starts.
+  Both signals describe one algod's pool, not the network, which is why a
+  payer still holds the `refundInactive` recourse above.
 - Operator-side at settle time, when `escrow.settle` reverts with
-  `ticket not found` because the ticket box was never created.
+  `ticket not found` because the ticket box was never created. This is the
+  backstop for whatever the watchdog misses.
 
 ## 11. Versioning
 

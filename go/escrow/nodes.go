@@ -118,6 +118,9 @@ func parseNodeRecord(operatorID, nodeID uint64, data []byte) (*NodeRecord, error
 	if baseURLLen > BaseURLMax {
 		return nil, fmt.Errorf("node %d/%d baseUrlLen %d exceeds %d", operatorID, nodeID, baseURLLen, BaseURLMax)
 	}
+	// Invalid UTF-8 is kept as raw bytes here; the TS decoder refuses the box
+	// instead, since a JS string can't carry them. No vector covers it: JSON
+	// rewrites the bytes to U+FFFD, so the two sides would compare equal.
 	baseURL := strings.TrimRight(string(data[34:34+baseURLLen]), "\x00")
 
 	rec := &NodeRecord{

@@ -1327,9 +1327,7 @@ func buildRelayCases() []relayCase {
 // The default_ceiling_* rows are the routing-parity pin: proxy and client both
 // pass DefaultMaxOutputCeiling, so these are the numbers that must match between
 // them for the sizing filter and the reserve leg to agree about the same
-// operator. They are also the rows the client's hand-rolled copy
-// (client/src/stream/config.ts) is checked against by hand — it does not import
-// the shared function, so nothing but this table keeps it honest.
+// operator.
 func buildDeriveCases() []deriveCase {
 	cases := []deriveCase{
 		// Neither declared → flat base ceiling.
@@ -1363,7 +1361,7 @@ func buildDeriveCases() []deriveCase {
 func buildVectors() *selectionVectorsFile {
 	return &selectionVectorsFile{
 		Version: 4,
-		Comment: "Cross-impl parity vectors for the hayai operator/relay selection policy. " +
+		Comment: "Cross-impl parity vectors for the zs operator/relay selection policy. " +
 			"Regenerate via: cd proto/go && go test ./selection -run TestSelectionVectors -update. " +
 			"Loaded by proto/go/selection/vectors_test.go and proto/ts/test/selection-vectors.test.ts.",
 		TargetCases: buildTargetCases(),

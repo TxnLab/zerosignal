@@ -13,10 +13,10 @@ import "time"
 // operator's settlement sweep, and any tool reporting on a stuck ticket all ask
 // the same question and must not answer it differently.
 //
-// Not the only implementation in the tree, though: client/'s ticket-reconciler
-// (TypeScript) encodes the same table for the browser payer. escrow has no
-// proto/ts mirror and no golden vectors, so nothing enforces their agreement —
-// a change here should be checked against it by hand.
+// proto/ts/src/escrow/classify.ts is its TypeScript mirror, pinned to this one
+// by testdata/escrow_vectors.json — change both and regenerate the vectors.
+// client/'s ticket-reconciler still carries its own unpinned copy of this table
+// until it adopts @txnlab/zs-proto/escrow, so check it by hand meanwhile.
 //
 // The two deadline calls are disjoint by construction — refundInactive asserts
 // 'ticket not refundable' against an operator-side claim, settleLapsed asserts

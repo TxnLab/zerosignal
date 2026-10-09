@@ -25,7 +25,7 @@ const (
 	EndpointImageEdits      = "/v1/images/edits"
 )
 
-// Affinity policy values, equal to the proxy's hayai.AffinityPolicy strings.
+// Affinity policy values, equal to the proxy's zs.AffinityPolicy strings.
 const (
 	AffinityPrefer = "prefer"
 	AffinityStrict = "strict"
@@ -84,7 +84,7 @@ type Constraints struct {
 	// AllowStaging includes nodes whose on-chain `staging` flag is set (see
 	// Operator.Staging) in target selection. Default false: staging nodes are
 	// dropped, so the standard routing path never targets a node its operator is
-	// still testing. The proxy sets it from `hayai.allow_staging` (config /
+	// still testing. The proxy sets it from `zs.allow_staging` (config /
 	// --allow-staging); the client from the Model Routing "allow staging" toggle.
 	// omitempty is correct — the false default matches the Go zero value, and the
 	// TS mirror reads an absent field as false.
@@ -92,7 +92,7 @@ type Constraints struct {
 	// RequestedTools is the set of zs_* tool types the request asks for.
 	// Operators advertising all of them are partitioned ahead of the rest.
 	RequestedTools []string `json:"requested_tools"`
-	// ImageToolGenBudget / ImageToolEditBudget are the per-request hayai
+	// ImageToolGenBudget / ImageToolEditBudget are the per-request zs
 	// image-tool budgets (max_n) the caller declared (proxy: from the body's
 	// tool_budgets; client: from its image-tool setting). When > 0, operators
 	// whose chosen model publishes the matching in-loop image-tool factor are
@@ -134,7 +134,7 @@ type Constraints struct {
 	// false — the opposite. Read it through FallbacksAllowed, never directly.
 	// As a plain bool, a caller who set Order and forgot the field silently
 	// converted a preference into a hard pin, surfacing as ProviderPinBlocked →
-	// 503 no_pinned_operator rather than a route; nothing caught it, because
+	// 400 no_pinned_operator rather than a route; nothing caught it, because
 	// the vectors only cover cases where the field was written explicitly. nil
 	// now means "caller said nothing" and resolves to true, matching the TS
 	// mirror's `?? true`.
@@ -246,7 +246,7 @@ type TargetResult struct {
 }
 
 // SelectTargets reproduces the proxy's candidate-selection policy as a pure
-// function. Order of operations matches proxy/internal/server/hayai_dispatch.go
+// function. Order of operations matches proto/go/zs/dispatch.go
 // ::pickCandidates exactly: model eligibility → caller only/ignore filter →
 // sizing → image-factor → wire-version → TEE → staging exclusion → signer
 // funding → caller max_price filter → price sort → built-in-tool partition (or hard filter when RequireTools) →
@@ -481,7 +481,7 @@ func SelectTargets(ops []Operator, c Constraints, preferred *Operator) TargetRes
 		}
 	}
 
-	// 9b. In-loop image-tool partition. When the request budgets a hayai image
+	// 9b. In-loop image-tool partition. When the request budgets a zs image
 	//     tool, partition operators whose chosen model publishes the matching
 	//     in-loop factor AHEAD of those that don't. PREFER, not filter — a model
 	//     served only by toolless operators stays selectable for a text turn.
@@ -892,8 +892,9 @@ func exceedsCeiling(rate, ceiling float64) bool {
 // blocked, firewalled), and vice-versa. Such a caller MUST feed Reachable from
 // its OWN direct evidence of forwarding through the node — never from target
 // reachability alone — or the preferred tier fills with un-relay-able nodes and
-// the genuinely-usable relays sink into the fallback tier. See the client's
-// relay-health verdict (operators/relay-health.ts) for that derivation.
+// the genuinely-usable relays sink into the fallback tier. See the TS SDK's
+// RelayHealthStore (the sticky verdict) and the client app's
+// operators/relay-decision.ts (where it overrides the catalog hint).
 //
 // Determinism for golden vectors comes from sorting the chosen pool by id and
 // indexing with seed: pool[seed % len]. In production the caller supplies a

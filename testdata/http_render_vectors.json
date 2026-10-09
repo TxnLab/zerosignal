@@ -1,0 +1,1262 @@
+{
+  "errors": [
+    {
+      "kind": "internal",
+      "code": "bad_image_edit_request",
+      "message": "msg for bad_image_edit_request",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for bad_image_edit_request\",\"type\":\"invalid_request_error\",\"code\":\"bad_image_edit_request\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "bad_image_request",
+      "message": "msg for bad_image_request",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for bad_image_request\",\"type\":\"invalid_request_error\",\"code\":\"bad_image_request\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "build_request",
+      "message": "msg for build_request",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for build_request\",\"type\":\"proxy_error\",\"code\":\"build_request\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "canceled",
+      "message": "msg for canceled",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 999,
+      "status": 499,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for canceled\",\"type\":\"proxy_error\",\"code\":\"canceled\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "context_length_exceeded",
+      "message": "msg for context_length_exceeded",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for context_length_exceeded\",\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "free_quota_exhausted",
+      "message": "msg for free_quota_exhausted",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 403,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for free_quota_exhausted\",\"type\":\"invalid_request_error\",\"code\":\"free_quota_exhausted\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "max_output_required",
+      "message": "msg for max_output_required",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for max_output_required\",\"type\":\"invalid_request_error\",\"code\":\"max_output_required\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "mbr_pool_exhausted",
+      "message": "msg for mbr_pool_exhausted",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 429,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for mbr_pool_exhausted\",\"type\":\"rate_limit_exceeded\",\"code\":\"mbr_pool_exhausted\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "mbr_pool_underfunded",
+      "message": "msg for mbr_pool_underfunded",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 402,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for mbr_pool_underfunded\",\"type\":\"insufficient_quota\",\"code\":\"mbr_pool_underfunded\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "missing_model",
+      "message": "msg for missing_model",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 86400000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for missing_model\",\"type\":\"invalid_request_error\",\"code\":\"missing_model\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_compatible_operator",
+      "message": "msg for no_compatible_operator",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_compatible_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_compatible_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_ephemeral_capacity",
+      "message": "msg for no_ephemeral_capacity",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_ephemeral_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_ephemeral_capacity\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_flusher",
+      "message": "msg for no_flusher",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 1500,
+      "status": 500,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_flusher\",\"type\":\"proxy_error\",\"code\":\"no_flusher\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_funded_operator",
+      "message": "msg for no_funded_operator",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_funded_operator\",\"type\":\"service_unavailable\",\"code\":\"no_funded_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_operator",
+      "message": "msg for no_operator",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 404,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_pinned_operator",
+      "message": "msg for no_pinned_operator",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_pinned_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_pinned_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_production_operator",
+      "message": "msg for no_production_operator",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_production_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_production_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_relay_available",
+      "message": "msg for no_relay_available",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_relay_available\",\"type\":\"service_unavailable\",\"code\":\"no_relay_available\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_tee_capacity",
+      "message": "msg for no_tee_capacity",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 999,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_tee_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_tee_capacity\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_tool_capacity",
+      "message": "msg for no_tool_capacity",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for no_tool_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_tool_capacity\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operator_inconsistent_response",
+      "message": "msg for operator_inconsistent_response",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for operator_inconsistent_response\",\"type\":\"proxy_error\",\"code\":\"operator_inconsistent_response\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operator_ticket_reuse",
+      "message": "msg for operator_ticket_reuse",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 7000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for operator_ticket_reuse\",\"type\":\"bad_gateway\",\"code\":\"operator_ticket_reuse\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operator_unsealed_response",
+      "message": "msg for operator_unsealed_response",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for operator_unsealed_response\",\"type\":\"proxy_error\",\"code\":\"operator_unsealed_response\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operators_busy",
+      "message": "msg for operators_busy",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for operators_busy\",\"type\":\"service_unavailable\",\"code\":\"operators_busy\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operators_unreachable",
+      "message": "msg for operators_unreachable",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 86400000,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for operators_unreachable\",\"type\":\"service_unavailable\",\"code\":\"operators_unreachable\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "pin_conflicts_with_continuation",
+      "message": "msg for pin_conflicts_with_continuation",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for pin_conflicts_with_continuation\",\"type\":\"invalid_request_error\",\"code\":\"pin_conflicts_with_continuation\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "price_ceiling_exceeded",
+      "message": "msg for price_ceiling_exceeded",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for price_ceiling_exceeded\",\"type\":\"invalid_request_error\",\"code\":\"price_ceiling_exceeded\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "read_upstream",
+      "message": "msg for read_upstream",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 1500,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for read_upstream\",\"type\":\"proxy_error\",\"code\":\"read_upstream\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "registry",
+      "message": "msg for registry",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for registry\",\"type\":\"proxy_error\",\"code\":\"registry\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "response_handler",
+      "message": "msg for response_handler",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for response_handler\",\"type\":\"proxy_error\",\"code\":\"response_handler\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "spend_cap_exceeded",
+      "message": "msg for spend_cap_exceeded",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 0,
+      "status": 402,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for spend_cap_exceeded\",\"type\":\"insufficient_quota\",\"code\":\"spend_cap_exceeded\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "stream_interrupted",
+      "message": "msg for stream_interrupted",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for stream_interrupted\",\"type\":\"proxy_error\",\"code\":\"stream_interrupted\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "stream_setup",
+      "message": "msg for stream_setup",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for stream_setup\",\"type\":\"proxy_error\",\"code\":\"stream_setup\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "ticket_price_rejected",
+      "message": "msg for ticket_price_rejected",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 999,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for ticket_price_rejected\",\"type\":\"bad_gateway\",\"code\":\"ticket_price_rejected\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "tokenize",
+      "message": "msg for tokenize",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for tokenize\",\"type\":\"proxy_error\",\"code\":\"tokenize\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "unsupported_tool",
+      "message": "msg for unsupported_tool",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for unsupported_tool\",\"type\":\"invalid_request_error\",\"code\":\"unsupported_tool\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "upstream_error",
+      "message": "msg for upstream_error",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 7000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for upstream_error\",\"type\":\"bad_gateway\",\"code\":\"upstream_error\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "upstream_unreachable",
+      "message": "msg for upstream_unreachable",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for upstream_unreachable\",\"type\":\"proxy_error\",\"code\":\"upstream_unreachable\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "wallet_open",
+      "message": "msg for wallet_open",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for wallet_open\",\"type\":\"proxy_error\",\"code\":\"wallet_open\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "wallet_unfunded",
+      "message": "msg for wallet_unfunded",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 86400000,
+      "status": 402,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for wallet_unfunded\",\"type\":\"insufficient_quota\",\"code\":\"wallet_unfunded\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "wrap_request",
+      "message": "msg for wrap_request",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"msg for wrap_request\",\"type\":\"proxy_error\",\"code\":\"wrap_request\"}}\n"
+    },
+    {
+      "kind": "invalid_request",
+      "code": "unlisted_invalid_request",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"invalid_request_error\",\"code\":\"unlisted_invalid_request\"}}\n"
+    },
+    {
+      "kind": "context_exceeded",
+      "code": "unlisted_context_exceeded",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"invalid_request_error\",\"code\":\"unlisted_context_exceeded\"}}\n"
+    },
+    {
+      "kind": "no_route",
+      "code": "unlisted_no_route",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"service_unavailable\",\"code\":\"unlisted_no_route\"}}\n"
+    },
+    {
+      "kind": "busy",
+      "code": "unlisted_busy",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"service_unavailable\",\"code\":\"unlisted_busy\"}}\n"
+    },
+    {
+      "kind": "unreachable",
+      "code": "unlisted_unreachable",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"service_unavailable\",\"code\":\"unlisted_unreachable\"}}\n"
+    },
+    {
+      "kind": "price_rejected",
+      "code": "unlisted_price_rejected",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"invalid_request_error\",\"code\":\"unlisted_price_rejected\"}}\n"
+    },
+    {
+      "kind": "funds",
+      "code": "unlisted_funds",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 403,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"invalid_request_error\",\"code\":\"unlisted_funds\"}}\n"
+    },
+    {
+      "kind": "spend_cap",
+      "code": "unlisted_spend_cap",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 402,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"insufficient_quota\",\"code\":\"unlisted_spend_cap\"}}\n"
+    },
+    {
+      "kind": "operator_fault",
+      "code": "unlisted_operator_fault",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"bad_gateway\",\"code\":\"unlisted_operator_fault\"}}\n"
+    },
+    {
+      "kind": "upstream",
+      "code": "unlisted_upstream",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"bad_gateway\",\"code\":\"unlisted_upstream\"}}\n"
+    },
+    {
+      "kind": "interrupted",
+      "code": "unlisted_interrupted",
+      "message": "m",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"bad_gateway\",\"code\":\"unlisted_interrupted\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "unlisted_internal",
+      "message": "m",
+      "retryable": true,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 500,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "true"
+      },
+      "body": "{\"error\":{\"message\":\"m\",\"type\":\"proxy_error\",\"code\":\"unlisted_internal\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "registry",
+      "message": "a \u003cb\u003e \u0026 c \u2028 d \u2029 e \"q\" \t\b\f",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"a \\u003cb\\u003e \\u0026 c \\u2028 d \\u2029 e \\\"q\\\" \\t\\b\\f\",\"type\":\"proxy_error\",\"code\":\"registry\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "",
+      "message": "no code",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
+      "status": 500,
+      "headers": {
+        "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"no code\",\"type\":\"proxy_error\"}}\n"
+    }
+  ],
+  "usage": [
+    {
+      "name": "full",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDE=",
+      "amount_charged": 1000000,
+      "actual_input_count": 120,
+      "actual_output_count": 48,
+      "max_price": 1100000,
+      "min_price": 0,
+      "op": 7,
+      "node": 2,
+      "owner_addr": "OWNERADDR",
+      "open_fees": 1000,
+      "settle_fees": 2000,
+      "algo_usd": 0.2134,
+      "fee_bps": 1000,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "120",
+        "x-zs-actual-output-count": "48",
+        "x-zs-algo-usd-rate": "0.2134",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "1000",
+        "x-zs-fees-microalgos": "3000",
+        "x-zs-fees-usd": "$0.000640",
+        "x-zs-inference-amount": "1000000",
+        "x-zs-inference-amount-usd": "$1.000000",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1100000",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "2",
+        "x-zs-operator-id": "7",
+        "x-zs-operator-owner-addr": "OWNERADDR",
+        "x-zs-platform-fee-microusdc": "100000",
+        "x-zs-refund-microusdc": "0",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDE=",
+        "x-zs-total-debit-microusdc": "1100000",
+        "x-zs-total-debit-usd": "$1.100000"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDE=\",\"operator_id\":7,\"node_id\":2,\"operator_owner_addr\":\"OWNERADDR\",\"actual_input_count\":120,\"actual_output_count\":48,\"inference\":{\"amount\":1000000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1},\"max_price_amount\":1100000,\"algo_fees_microalgos\":3000,\"algo_fees_usd\":0.0006402000000000001,\"algo_usd_rate\":0.2134,\"fee\":{\"fee_bps\":1000,\"discount_bps\":0,\"platform_fee_microusdc\":100000,\"refund_microusdc\":0,\"total_debit_microusdc\":1100000,\"total_debit_usd\":1.1}}"
+    },
+    {
+      "name": "rate unknown",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDI=",
+      "amount_charged": 500,
+      "actual_input_count": 3,
+      "actual_output_count": 1,
+      "max_price": 9000,
+      "min_price": 100,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "O",
+      "open_fees": 0,
+      "settle_fees": 0,
+      "algo_usd": 0,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "3",
+        "x-zs-actual-output-count": "1",
+        "x-zs-fees-microalgos": "0",
+        "x-zs-inference-amount": "500",
+        "x-zs-inference-amount-usd": "$0.000500",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "9000",
+        "x-zs-min-price-amount": "100",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-operator-owner-addr": "O",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDI="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDI=\",\"operator_id\":1,\"node_id\":1,\"operator_owner_addr\":\"O\",\"actual_input_count\":3,\"actual_output_count\":1,\"inference\":{\"amount\":500,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.0005},\"max_price_amount\":9000,\"min_price_amount\":100,\"algo_fees_microalgos\":0}"
+    },
+    {
+      "name": "nothing charged, ids unset",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDM=",
+      "amount_charged": 0,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 5000,
+      "min_price": 5000,
+      "op": 0,
+      "node": 0,
+      "owner_addr": "",
+      "open_fees": 0,
+      "settle_fees": 0,
+      "algo_usd": 0,
+      "fee_bps": 250,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "250",
+        "x-zs-fees-microalgos": "0",
+        "x-zs-inference-amount": "0",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "5000",
+        "x-zs-min-price-amount": "5000",
+        "x-zs-platform-fee-microusdc": "0",
+        "x-zs-refund-microusdc": "5000",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDM=",
+        "x-zs-total-debit-microusdc": "0"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDM=\",\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":0,\"currency\":\"USDC\",\"decimals\":6},\"max_price_amount\":5000,\"min_price_amount\":5000,\"algo_fees_microalgos\":0,\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":5000,\"total_debit_microusdc\":0}}"
+    },
+    {
+      "name": "zero fee rate known",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDQ=",
+      "amount_charged": 200000,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 500000,
+      "min_price": 0,
+      "op": 3,
+      "node": 9,
+      "owner_addr": "",
+      "open_fees": 0,
+      "settle_fees": 0,
+      "algo_usd": 1,
+      "fee_bps": 0,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "1",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "0",
+        "x-zs-fees-microalgos": "0",
+        "x-zs-fees-usd": "$0.000000",
+        "x-zs-inference-amount": "200000",
+        "x-zs-inference-amount-usd": "$0.200000",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "500000",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "9",
+        "x-zs-operator-id": "3",
+        "x-zs-platform-fee-microusdc": "0",
+        "x-zs-refund-microusdc": "300000",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDQ=",
+        "x-zs-total-debit-microusdc": "200000",
+        "x-zs-total-debit-usd": "$0.200000"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDQ=\",\"operator_id\":3,\"node_id\":9,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":200000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.2},\"max_price_amount\":500000,\"algo_fees_microalgos\":0,\"algo_usd_rate\":1,\"fee\":{\"fee_bps\":0,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":300000,\"total_debit_microusdc\":200000,\"total_debit_usd\":0.2}}"
+    },
+    {
+      "name": "tiny rate",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDU=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 10,
+      "min_price": 0,
+      "op": 4,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 5,
+      "settle_fees": 0,
+      "algo_usd": 1.234e-7,
+      "fee_bps": 333,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "0.0000001234",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "333",
+        "x-zs-fees-microalgos": "5",
+        "x-zs-fees-usd": "$0.000000",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "10",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "4",
+        "x-zs-platform-fee-microusdc": "0",
+        "x-zs-refund-microusdc": "9",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDU=",
+        "x-zs-total-debit-microusdc": "1",
+        "x-zs-total-debit-usd": "$0.000001"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDU=\",\"operator_id\":4,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":10,\"algo_fees_microalgos\":5,\"algo_fees_usd\":6.170000000000001e-13,\"algo_usd_rate\":1.234e-7,\"fee\":{\"fee_bps\":333,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":9,\"total_debit_microusdc\":1,\"total_debit_usd\":0.000001}}"
+    },
+    {
+      "name": "rounding",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDY=",
+      "amount_charged": 1234567,
+      "actual_input_count": 99999,
+      "actual_output_count": 77777,
+      "max_price": 2000000,
+      "min_price": 1,
+      "op": 12,
+      "node": 3,
+      "owner_addr": "OWNER12",
+      "open_fees": 7,
+      "settle_fees": 3,
+      "algo_usd": 0.123456789,
+      "fee_bps": 250,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "99999",
+        "x-zs-actual-output-count": "77777",
+        "x-zs-algo-usd-rate": "0.123456789",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "250",
+        "x-zs-fees-microalgos": "10",
+        "x-zs-fees-usd": "$0.000001",
+        "x-zs-inference-amount": "1234567",
+        "x-zs-inference-amount-usd": "$1.234567",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "2000000",
+        "x-zs-min-price-amount": "1",
+        "x-zs-node-id": "3",
+        "x-zs-operator-id": "12",
+        "x-zs-operator-owner-addr": "OWNER12",
+        "x-zs-platform-fee-microusdc": "30864",
+        "x-zs-refund-microusdc": "734569",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDY=",
+        "x-zs-total-debit-microusdc": "1265431",
+        "x-zs-total-debit-usd": "$1.265431"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDY=\",\"operator_id\":12,\"node_id\":3,\"operator_owner_addr\":\"OWNER12\",\"actual_input_count\":99999,\"actual_output_count\":77777,\"inference\":{\"amount\":1234567,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1.234567},\"max_price_amount\":2000000,\"min_price_amount\":1,\"algo_fees_microalgos\":10,\"algo_fees_usd\":0.00000123456789,\"algo_usd_rate\":0.123456789,\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":30864,\"refund_microusdc\":734569,\"total_debit_microusdc\":1265431,\"total_debit_usd\":1.265431}}"
+    },
+    {
+      "name": "large rate",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDc=",
+      "amount_charged": 999999999,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 999999999,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 1000000,
+      "settle_fees": 0,
+      "algo_usd": 12345678.9,
+      "fee_bps": 10000,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "12345678.9",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "10000",
+        "x-zs-fees-microalgos": "1000000",
+        "x-zs-fees-usd": "$12345678.900000",
+        "x-zs-inference-amount": "999999999",
+        "x-zs-inference-amount-usd": "$999.999999",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "999999999",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-platform-fee-microusdc": "999999999",
+        "x-zs-refund-microusdc": "0",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDc=",
+        "x-zs-total-debit-microusdc": "1999999998",
+        "x-zs-total-debit-usd": "$1999.999998"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDc=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":999999999,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":999.999999},\"max_price_amount\":999999999,\"algo_fees_microalgos\":1000000,\"algo_fees_usd\":12345678.9,\"algo_usd_rate\":12345678.9,\"fee\":{\"fee_bps\":10000,\"discount_bps\":0,\"platform_fee_microusdc\":999999999,\"refund_microusdc\":0,\"total_debit_microusdc\":1999999998,\"total_debit_usd\":1999.999998}}"
+    },
+    {
+      "name": "dollar tie down to even",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDg=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 15625,
+      "settle_fees": 0,
+      "algo_usd": 0.5,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "0.5",
+        "x-zs-fees-microalgos": "15625",
+        "x-zs-fees-usd": "$0.007812",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDg="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDg=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":15625,\"algo_fees_usd\":0.0078125,\"algo_usd_rate\":0.5}"
+    },
+    {
+      "name": "dollar tie up to even",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMDk=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 46875,
+      "settle_fees": 0,
+      "algo_usd": 0.5,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "0.5",
+        "x-zs-fees-microalgos": "46875",
+        "x-zs-fees-usd": "$0.023438",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDk="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDk=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":46875,\"algo_fees_usd\":0.0234375,\"algo_usd_rate\":0.5}"
+    },
+    {
+      "name": "dollars past 1e21",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMTA=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 3000000,
+      "settle_fees": 0,
+      "algo_usd": 5.7885281e+21,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-algo-usd-rate": "5788528100000000000000",
+        "x-zs-fees-microalgos": "3000000",
+        "x-zs-fees-usd": "$17365584300000000606208.000000",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTA="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTA=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":3000000,\"algo_fees_usd\":1.73655843e+22,\"algo_usd_rate\":5.7885281e+21}"
+    },
+    {
+      "name": "operator without node",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMTE=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 5,
+      "node": 0,
+      "owner_addr": "",
+      "open_fees": 0,
+      "settle_fees": 0,
+      "algo_usd": 0,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-fees-microalgos": "0",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-operator-id": "5",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTE="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTE=\",\"operator_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0}"
+    },
+    {
+      "name": "node without operator",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMTI=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 0,
+      "node": 5,
+      "owner_addr": "",
+      "open_fees": 0,
+      "settle_fees": 0,
+      "algo_usd": 0,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-fees-microalgos": "0",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "5",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTI="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTI=\",\"node_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0}"
+    }
+  ]
+}

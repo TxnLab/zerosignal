@@ -31,6 +31,162 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-09 — releases are private again
+
+`TxnLab/zerosignal` is private, and new releases follow it. `@txnlab/zs-proto` and
+`@txnlab/zerosignal` publish with restricted access and no provenance, so installing either
+needs an npm token that reads the `@txnlab` scope. The Go module needs
+`GOPRIVATE=github.com/TxnLab/*` and git credentials for the repo. `go/v0.1.0` and `go/v0.1.1`
+stay public on the Go module proxy.
+
+### 2026-10-08 — the TypeScript SDK runs a paid turn
+
+`@txnlab/zerosignal` gains `Client`, the twin of the Go SDK's `zs.Client`. `Client.create`
+builds the payer from a `Config` with a `registry`; the SDK builds no operator discovery of its
+own yet. `stream(request)` routes, reserves, pays, seals and streams one turn and yields its
+events in Go's order, with the names and fields `sdk_vocabulary_vectors.json` pins. Its `wait()`
+resolves when the escrow submit returns, not when it lands, and `payment.committed` fires when
+algod accepts the open group, on both sides. `waitSettles` and `close` drain and stop the
+Client. `zs.fetch` (`openAIFetch`) serves the Go handler's POST routes as a fetch function for
+an OpenAI client built on `FETCH_BASE_URL`, with the same `X-Zs-*` usage headers, opt-in
+`zs.usage` frame and error shapes; the catalog GET routes are not ported. Two behaviours have
+no Go counterpart: `Request.admitNode` lets a host refuse a node before anything is sealed to
+it, asked again on each sweep and after an ephemeral self-heal; and a streamed answer that
+stalls ends with `StreamIdleTimeoutError` (by default 300 s to the first byte, 60 s between
+bytes, 300 s while a node-run tool works; `Config.streamIdle: false` turns it off).
+
+### 2026-10-06 — a recovery phrase's separators no longer pick the account
+
+Go's keystore (`DeriveAddress`, `New`) now rejoins a phrase's words with single spaces before
+deriving it. A 24-word xHD phrase with a double space, a tab or line breaks between words used
+to pass the word-by-word check and then load a different account, because BIP-39 seeds PBKDF2
+with the sentence string itself; it now loads the account its words name, the one the client
+derives. Funds may sit at the old address, so the keystore also loads the key the phrase's own
+spacing derives, logs a warning naming both addresses, and lists only one of them in
+`Addresses`: the canonical one, or, for an entry marked `MnemonicEntry.LegacySpacing`, the old
+one. A wallet imported between 2026-06-15 and 2026-10-03 stored the phrase as typed and
+recorded the old address; it marks its entry so, opens as before and keeps paying as the
+address it recorded (`keystore.LegacySpacingAddress`). A key from the environment lists the
+canonical address, so a deployment that auto-picks its only key moves to it, while one naming
+the old address (a node's signing address) still finds it. A 25-word phrase separated by tabs
+or line breaks, refused before, now loads. `@txnlab/zerosignal/accounts/xhd` loads a 24-word
+phrase as Go does, or derives the same account from the phrase's 32 bytes of entropy; it
+refuses a full-width word that NFKD normalization would turn into a BIP-39 word, as Go's exact
+lookup does. `@txnlab/zerosignal/accounts/algosdk` and `/accounts/mnemonic` load a
+25-word phrase as Go does, splitting on Go's `unicode.IsSpace` set; `account_vectors.json`
+holds Go's outcome, signatures and a signed transaction for each case.
+
+### 2026-10-05 — the ephemeral key verdict is shared
+
+`@txnlab/zerosignal/catalog` gains `checkEphemeralAdvertisement`, a port of the Go SDK's probe
+check: after the signature, binding and window checks it refuses a recipient that is not an
+age X25519 key (outcome `unparseable`), as Go's `age.ParseX25519Recipient` does, and it flags a
+verified block older than the freshness target so the relay that served it can be charged.
+A field of the wrong type is `rejected`, as Go's typed decode refuses it; a string expiry
+would otherwise sign the same bytes and never expire. `@txnlab/zs-proto`'s `verifyEphemeral`
+now reads `ephemeral_sig` as Go's non-strict `base64.StdEncoding` does, skipping CR and LF and
+ignoring the unused bits before the padding, so a block Go accepts no longer fails closed in
+TypeScript. `ephemeral_verdict_vectors.json` holds Go's verdict on each case. The Go module now
+requires `filippo.io/age` v1.3.2, whose bech32 decoder folds ASCII only, matching the build the
+vectors were generated with.
+
+### 2026-10-04 — the SDK checks and completes the node's settle group
+
+`@txnlab/zerosignal` gains `completeSettleGroup`: it decodes the node's pre-signed atomic
+settle group, runs `verifySettleGroup` (a port of Go's `VerifySettleGroup`, in Go's order),
+and only then has the payer sign the ack, returning the group bytes for algod. A refusal is a
+`SettleGroupRejectedError` whose `field` matches Go's `Field`; decode and signer failures are
+plain errors, so a caller can tell a node contradicting its own receipt from a transport fault.
+Go's `VerifySettleGroup` now also refuses a payer ack carrying a note (`payer.note`), a lease
+(`payer.lease`), any field outside an app call (`payer.foreignFields`), or an argument past
+`settle()`'s twelve (`payer.args`), as the open check does for the transfer; the honest
+composer sets none of them. `escrow_group_vectors.json`
+(version 2) adds a `settle` section with every per-member guard exercised on both halves.
+
+### 2026-10-04 — the SDK checks and completes the node's open group
+
+`@txnlab/zerosignal` gains `completeOpenGroup`: it decodes the node's pre-signed open group,
+runs `verifyOpenGroup` (a check-for-check port of Go's `VerifyOpenGroup`), and only then has
+the payer sign the USDC transfer, returning the group bytes for algod. Go's `VerifyOpenGroup`
+and `VerifyOpenAppCall` now return an `*OpenGroupRejectedError` whose `Field` names the check
+that refused (`payer.rekeyTo`, `open.maxPrice`, …); `Error()` is unchanged. Both sides now
+refuse a payer transfer carrying any field outside an asset transfer (`payer.foreignFields`).
+The TS group-id check hashes each member in canonical form, as algod does, so an explicitly
+encoded zero is judged the same way on both sides. `escrow_group_vectors.json` holds Go's
+verdict on a real `ComposeOpenGroup` group and on one variant per guard, and both sides are
+tested against it.
+
+### 2026-10-04 — the price verifiers agree at the uint64 edge
+
+- `verifyTicketPrice` (`@txnlab/zs-proto/pricing`) recomputes `max_price` exactly, in bigint,
+  and treats a recompute Go cannot represent in uint64 as Go does: skipped under `failOpen`,
+  a `max_price` violation (want 0) otherwise. It had compared an inexact float and always
+  refused.
+- A non-integer count, rate, `min_price`, `max_price`, fee or image-tool budget is refused as
+  `max_price` under every policy. It had thrown a `RangeError`. Go cannot hold one, and
+  fail-open must not skip it: a budget built from an operator's fractional tool rate would
+  otherwise switch the check off.
+- Go's `ceil(x/d)` in `pricing` (`CeilInputCost`, and the products behind `ExpectedMaxPrice`)
+  and `imageprice` no longer wraps when `x` is within `d` of the uint64 limit. It priced such
+  an amount at about 0; TS, in bigint, never wrapped. No real ticket comes near.
+- `pricing_vectors.json` (version 4) gains a `verify` section: Go's verdict on 56 tickets,
+  covering every check, every boundary and each overflow guard. Both verifiers are tested
+  against it.
+
+### 2026-10-04 — a discovery probe rotates past `relay_upstream_unreachable`
+
+`DetailsClient.Fetch` returns a relay's `relay_upstream_unreachable` as a new
+`*RelayUpstreamUnreachableError` rather than a plain target-side error, and a 2xx body it
+can't read or decode as a `*DetailsBodyError`. The discovery probe now rotates to another
+relay on the first, scoring the claim with `RecordRelayUpstreamUnreachable`, and marks the
+target down only when every relay that worked said so. A relay that carried a 2xx with a
+bad body is credited. The client's probe already did both; SPEC § 3f says so now.
+A claim is scored once the probe resolves, not as it arrives: disproved by another relay
+in the same probe it counts against the relay, corroborated by another it is credited,
+and alone it is judged by the target's last-seen reachability as before.
+
+A relayed probe ended by the caller's cancel, or by its own deadline after the relay
+accepted the connection, is a `*RelayHopError` with `CallerAborted` set, and charges the
+relay nothing (SPEC § 10); it was recorded unreachable and given a strike. A deadline or
+cancel while reading a body is no longer a `*DetailsBodyError`. A cancelled probe leaves
+the target's reachability as it was, where it used to mark the target down.
+
+### 2026-10-04 — the TEE verifier is its own package, `zs/tee`
+
+The evidence verifier and the Intel collateral cache moved out of `zs` into
+`github.com/TxnLab/zerosignal/go/zs/tee`. Behavior is unchanged; the names moved:
+
+- `zs.TEEVerifier` is `tee.Verifier`. Its `Verify`, and `DstackVerifier.Verify`, take a
+  `tee.Node` (operator id, node id, verified ephemeral recipient) in place of a `zs.Operator`;
+  `Operator.TEENode()` builds it.
+- `zs.DefaultTEEVerifier` is `tee.DefaultVerifier`. `BundleVerifier`, `DstackVerifier`,
+  `Verdict`, the `Failure*` and `VerifierID*` tags, `DefaultComposePolicy`,
+  `EvidenceMaxAgeCeiling`, `PersistCollateral`, `MeasurementTrusted`, `VerifyTDXQuoteChain*`
+  and the collateral errors keep their names under `tee.`.
+- `AttestationClient` stays in `zs`: it rides the relay hop, which is `zs`'s.
+- New exports: `tee.CollateralTimeout`, and `tee.UseCollateralLogger`, which `zs.New` calls
+  with the caller's `Config.Logger`.
+
+`Config.TEEVerifier` keeps its name and its default; only its type is now `tee.Verifier`.
+
+### 2026-10-03 — a `SpendGuard` hears how a ticket ended on chain
+
+`zs.SpendGuard.Settle` and `Release` were called at most once per reserved ticket, from the
+request. Now the refund watchdog and the ticket reconciler call them too, from their own
+goroutines, once a ticket ends on chain. Both Release on a refund they submitted. The
+reconciler also Settles a lapse it submitted, at the operator's claim, and Releases a ticket
+whose journaled receipt the request already settled. A call can repeat, can follow an earlier
+resolution, and can name a ticket this process never reserved. A guard that adds every
+`Settle` to its total now double-counts. Key the reservations by ticket id and count only the
+first resolution, as the proxy's guard does.
+
+### 2026-10-03 — one error message no longer names the old project
+
+`tools.ErrUnknownBuiltinTool` now reads "unknown zs builtin tool type" (was "unknown hayai
+builtin tool type"). A node returns that text as the message of its `unknown_builtin_tool`
+error, so a client sees the new wording once the node takes this release. The code is
+unchanged; match on it, never on the message.
+
 ### 2026-10-01 — public module and package names
 
 The Go module is now `github.com/TxnLab/zerosignal/go` (was `github.com/TxnLab/hayai-proto/go`)

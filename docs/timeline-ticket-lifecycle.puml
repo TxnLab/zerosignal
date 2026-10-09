@@ -1,4 +1,4 @@
-' Hayai ticket lifecycle on a time axis (ZeroSignalEscrow.algo.ts, SPEC §3a/§3b).
+' ZeroSignal ticket lifecycle on a time axis (ZeroSignalEscrow.algo.ts, SPEC §3a/§3b).
 ' Companion to the sequence-oriented flow-escrow-payment.puml. Units on the time
 ' axis are unix seconds (compared against Global.latestTimestamp on-chain).
 '
@@ -34,7 +34,7 @@
 '                     watchdog race).
 '                     Operator-side settlement driver acts as a watchdog
 '                     fallback only — fires standalone after
-'                     hayai.settlement_watchdog_seconds (default 30s) if
+'                     zs.settlement_watchdog_seconds (default 30s) if
 '                     the proxy never broadcast.
 '   [E] expires_at    unix-second boundary (TicketRecord.expiresAt); no new
 '                     inference admitted. settle() / protest() still legal

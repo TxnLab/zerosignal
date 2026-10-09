@@ -13,7 +13,7 @@
 // domain-tagged canonical body.
 //
 // Note this is NOT compatible with go-algorand-sdk's crypto.SignBytes
-// (which prepends "MX" to the raw message). Hayai signatures are raw
+// (which prepends "MX" to the raw message). ZeroSignal signatures are raw
 // Ed25519 over a 32-byte sha256 digest; the signer must expose a raw
 // Ed25519 sign operation, or accept the precomputed digest without
 // further framing. A wallet whose sign-bytes / sign-data flow tags or

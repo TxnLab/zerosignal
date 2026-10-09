@@ -59,7 +59,7 @@ func ExtractRequestedBuiltinTools(body []byte) []string {
 }
 
 // ImageToolBudgets carries the per-request image-tool budgets a client
-// declares on a /v1/responses body to opt the hayai image tools in:
+// declares on a /v1/responses body to opt the zs image tools in:
 //
 //	"tool_budgets": {
 //	  "zs_image_generation": { "max_n": 4 },
@@ -140,6 +140,34 @@ func ExtractResponseToolCallIDs(body []byte) []string {
 	var out []string
 	for _, ch := range peek.Choices {
 		for _, tc := range ch.Message.ToolCalls {
+			if tc.ID != "" {
+				out = append(out, tc.ID)
+			}
+		}
+	}
+	return out
+}
+
+// ExtractStreamToolCallIDs is ExtractResponseToolCallIDs for one decrypted
+// chat-completions stream chunk: the tool_calls[].id values in its choices'
+// deltas. A tool call's id rides only its first chunk; later chunks carry
+// argument fragments without one.
+func ExtractStreamToolCallIDs(frameData []byte) []string {
+	var peek struct {
+		Choices []struct {
+			Delta struct {
+				ToolCalls []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(frameData, &peek); err != nil {
+		return nil
+	}
+	var out []string
+	for _, ch := range peek.Choices {
+		for _, tc := range ch.Delta.ToolCalls {
 			if tc.ID != "" {
 				out = append(out, tc.ID)
 			}

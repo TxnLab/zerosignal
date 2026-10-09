@@ -91,6 +91,8 @@ interface HostileCase {
     name: string
     why: string
     log: string
+    /** Set when Go's ParseEventLog refused the log; nothing below is then pinned. */
+    parse_error: string
     /** '' when Go's replay succeeded. */
     replay_error: string
     rtmr3_hex: string
@@ -983,10 +985,31 @@ describe('attest hostile logs', () => {
         expect(vectors.hostile.some((c) => c.name.includes('0X'))).toBe(true)
         expect(vectors.hostile.some((c) => c.replay_error !== '')).toBe(true)
         expect(vectors.hostile.some((c) => c.replay_error === '')).toBe(true)
+        expect(vectors.hostile.some((c) => c.parse_error !== '')).toBe(true)
+        expect(vectors.hostile.some((c) => c.name === 'null element' && c.parse_error === '')).toBe(true)
+    })
+
+    // A raw lone surrogate can't ride Go's vectors, so this one is TS-side:
+    // it is what JSON.parse leaves in event_log after unescaping the bundle,
+    // where Go's decode has already made it U+FFFD. Paired with an escape
+    // inside the log, it would otherwise decode to a character Go never sees.
+    it('reads a lone surrogate from the bundle as Go does', () => {
+        const raw = `[{"imr":3,"event_type":134217729,"event":"\uD800\\udc00","event_payload":"aa"}]`
+        expect(runtimeMeasurements(parseEventLog(raw))).toEqual({ '��': 'aa' })
     })
 
     for (const c of vectors.hostile) {
         it(`replays like Go: ${c.name}`, () => {
+            if (c.parse_error !== '') {
+                let code: string | undefined
+                try {
+                    parseEventLog(c.log)
+                } catch (e) {
+                    code = (e as AttestError).code
+                }
+                expect(code, c.why).toBe(c.parse_error)
+                return
+            }
             const events = parseEventLog(c.log)
 
             if (c.replay_error !== '') {

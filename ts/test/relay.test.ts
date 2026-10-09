@@ -45,7 +45,7 @@ describe('relay transport binding (mirror of proto/go/relay)', () => {
             '/v1/zs/relay?x=y', // ...even with a query
             '/v1/models/',
             '/v1/models/a/b',
-            '/v1/models/../hayai/reserve',
+            '/v1/models/../zs/reserve',
             '/v1/chat/completions/../admin',
             '/v1/chat/completions/../admin?q=1', // traversal survives a query suffix
             '/admin',

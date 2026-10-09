@@ -73,7 +73,7 @@ func TestRewriteBuiltinToolsChat_PassesThroughUserFunctions(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 	if len(names) != 0 {
-		t.Fatalf("expected no hayai names, got %+v", names)
+		t.Fatalf("expected no zs names, got %+v", names)
 	}
 	// Byte-identical when no rewrite occurs.
 	if string(got) != string(body) {
@@ -110,7 +110,7 @@ func TestRewriteBuiltinToolsChat_MixedEntriesRewriteOnlyBuiltin(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 	if len(names) != 1 {
-		t.Fatalf("expected 1 hayai name, got %+v", names)
+		t.Fatalf("expected 1 zs name, got %+v", names)
 	}
 	// Both tools should be function-typed after rewrite.
 	var out struct {
@@ -312,10 +312,10 @@ func TestChatStitcher_ToolCallOnlyIteration(t *testing.T) {
 	for _, f := range frames {
 		classes = append(classes, s.Observe([]byte(f)))
 	}
-	// Expect: unknown (empty delta), tool_call_hayai (x3), terminal.
+	// Expect: unknown (empty delta), tool_call_builtin (x3), terminal.
 	// The name "zs_web_search" is in builtinNames so all three tool-call
 	// fragments (including argument-only ones, which look up the stored
-	// name from the first fragment) classify as hayai.
+	// name from the first fragment) classify as zs.
 	wantTailClass := []FrameClassification{FrameUnknown, FrameToolCallBuiltin, FrameToolCallBuiltin, FrameToolCallBuiltin, FrameTerminal}
 	for i, w := range wantTailClass {
 		if classes[i] != w {
@@ -795,7 +795,7 @@ func TestTrimChatContentDeltaLeadingSpace_Tolerates(t *testing.T) {
 // assistant message must replay extra_content verbatim on the tool_call or
 // Gemini 3 rejects the next iteration with a 400 "missing thought_signature".
 func TestChatStitcher_ExtraContentRoundTrips(t *testing.T) {
-	s := NewChatToolCallStitcher(nil) // exercises AssistantMessage() directly — the reconstruction path the loop uses on a hayai-tool round
+	s := NewChatToolCallStitcher(nil) // exercises AssistantMessage() directly — the reconstruction path the loop uses on a zs-tool round
 	frames := []string{
 		`{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"function-call-1","type":"function","function":{"name":"web_search"},"extra_content":{"google":{"thought_signature":"CjIBjz1rXz<opaque>"}}}]}}]}`,
 		`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"algo\"}"}}]}}]}`,

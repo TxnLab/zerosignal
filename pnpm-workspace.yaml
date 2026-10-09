@@ -1,0 +1,7 @@
+# ts/ and sdk/ release in lockstep from one commit, so sdk/ depends on ts/ as
+# `workspace:*`: pnpm publishes that as the exact version, never a range. Two
+# implementations that must agree byte-for-byte on AAD layout have no business
+# behind a semver range.
+packages:
+  - ts
+  - sdk

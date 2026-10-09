@@ -61,7 +61,7 @@ The pipeline is `client | tui → (proxy, for the tui only — client talks dire
 
 **Response path:** the node forwards the upstream response **verbatim** (sealed) — reasoning deltas (`reasoning_content`, `reasoning`, `response.reasoning_text.delta`, `response.reasoning_summary_text.delta`) are recognized only to classify frames for TTFT/billing, never dropped. The only frame ever dropped from the client stream is a node-injected standalone usage-only chunk. The proxy does **no** response-body content mutation (it unseals, verifies `body_hash`/receipt, forwards).
 
-**The one reasoning strip in transit — `dropReasoningItems` (node):** applied **only** when building the next **server-side tool-loop** iteration's `input[]` (after a built-in hayai tool runs), and **only when the bound model is not a reasoning model**. It is `/v1/responses` tool-loop-only, never affects a plain single-shot turn, and is **client-safe**: the live stream still carries reasoning to the client; only the *model-facing replay between tool iterations* is withheld. (Complementary, not a strip: the responses→chat translator skips `reasoning` items when targeting a Chat-only upstream — Chat has no reasoning-item shape — but preserves the open assistant turn.)
+**The one reasoning strip in transit — `dropReasoningItems` (node):** applied **only** when building the next **server-side tool-loop** iteration's `input[]` (after a zs built-in tool runs), and **only when the bound model is not a reasoning model**. It is `/v1/responses` tool-loop-only, never affects a plain single-shot turn, and is **client-safe**: the live stream still carries reasoning to the client; only the *model-facing replay between tool iterations* is withheld. (Complementary, not a strip: the responses→chat translator skips `reasoning` items when targeting a Chat-only upstream — Chat has no reasoning-item shape — but preserves the open assistant turn.)
 
 ---
 
@@ -77,6 +77,6 @@ The pipeline is `client | tui → (proxy, for the tui only — client talks dire
 |---|---|---|
 | `client/` | `messagesToWireInput` / `assistantOutputMessage` | `client/src/state/conversation/response-item.ts:356-394, 413-508`; stateless invariant at `client/src/operators/dispatch-candidates.ts:282-288` |
 | `tui/` | `runResponsesTurn` / `printStreamResponse` | `tui/main.go:512-643, 3213-3450`; reasoning carve-out `tui/main.go:3252-3254, 3772-3773` |
-| transit | `inject.*` mutators | `proto/go/inject/{store,tools,routing,safety,stream_options}.go`; proxy `proxy/internal/server/hayai_dispatch.go:105-125`; node `node/internal/server/handlers.go:1135-1186`; `dropReasoningItems` `node/internal/server/tool_loop.go:641-679` |
+| transit | `inject.*` mutators | `proto/go/inject/{store,tools,routing,safety,stream_options}.go`; proxy `proto/go/zs/dispatch.go::Client.dispatch`; node `node/internal/server/handlers.go:1135-1186`; `dropReasoningItems` `node/internal/server/tool_loop.go:641-679` |
 
 See also [`operator-node-selection.md`](./operator-node-selection.md) for routing, and [`../SPEC.md`](../SPEC.md) for the wire format and retention rules.

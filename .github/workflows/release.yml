@@ -1,20 +1,30 @@
 name: Release
 
-# Stages the TypeScript package on npm when a `ts/vX.Y.Z` tag is pushed. Go
-# needs no job: a `go/vX.Y.Z` tag is itself the release, fetched through the
-# module proxy on first `go get` (as `@vX.Y.Z`) — provided go/go.mod declares
-# this repo's path.
+# Stages the TypeScript packages on npm: `@txnlab/zs-proto` when a `ts/vX.Y.Z`
+# tag is pushed, `@txnlab/zerosignal` (the SDK) on an `sdk/vX.Y.Z` tag. The two
+# release in lockstep (`make check-lockstep`), so both tags go on one commit. Go
+# needs no job: a `go/vX.Y.Z` tag is itself the release, requested as `@vX.Y.Z`,
+# provided go/go.mod declares this repo's path. While the repo is private,
+# consumers fetch it from GitHub directly (`GOPRIVATE`), not the module proxy.
 #
-# This workflow can only STAGE. Its trusted-publisher entry on npmjs.com allows
-# `npm stage publish` alone, so nothing it uploads is installable until a
-# maintainer approves it with 2FA (`npm stage approve <id>`, or the package's
-# "Staged Packages" tab). A compromised workflow, dependency, or token can
-# therefore never ship a release by itself. Trusted publishing (OIDC) means
-# there is no NPM_TOKEN secret to rotate.
+# This workflow can only STAGE. Each package's trusted-publisher entry on
+# npmjs.com allows `npm stage publish` alone, so nothing it uploads is
+# installable until a maintainer approves it with 2FA (`npm stage approve <id>`,
+# or the package's "Staged Packages" tab). A compromised workflow, dependency,
+# or token can therefore never ship a release by itself. Trusted publishing
+# (OIDC) means there is no NPM_TOKEN secret to rotate. An entry can only be
+# added to a package that exists, so a new package's first version is
+# published by hand before its first tag.
+#
+# Both packages are private (`--access restricted`) while this repo is. npm
+# generates provenance only for a public package built in a public repo, so
+# neither job asks for one. Going public means restoring
+# `--provenance --access public`, `publishConfig.access: public`, and the
+# `public` expected by both "Package metadata names this repo" steps, together.
 
 on:
   push:
-    tags: ['ts/v*']
+    tags: ['ts/v*', 'sdk/v*']
 
 permissions:
   contents: read
@@ -24,7 +34,7 @@ jobs:
     name: Publish TypeScript package
     # This tree also lives in the private predecessor repo, which must never
     # publish from it.
-    if: github.repository == 'TxnLab/zerosignal'
+    if: github.repository == 'TxnLab/zerosignal' && startsWith(github.ref_name, 'ts/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -42,7 +52,7 @@ jobs:
           cache-dependency-path: go/go.sum
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10.34.0
           run_install: false
@@ -53,7 +63,7 @@ jobs:
           node-version: "22"
           registry-url: https://registry.npmjs.org
           cache: pnpm
-          cache-dependency-path: ts/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       # `npm stage` needs npm >= 11.15.0 (and Node >= 22.14, which "22"
       # resolves to); Node 22 bundles npm 10.
@@ -68,9 +78,9 @@ jobs:
             exit 1
           fi
 
-      # Provenance is rejected unless repository.url names the repo that built
-      # it, and a restricted publishConfig would publish privately — fail here,
-      # with a readable message, rather than at the registry.
+      # The trusted-publisher entry names this repo, so repository.url must too,
+      # and a public publishConfig would contradict the --access restricted
+      # below — fail here, with a readable message, rather than at the registry.
       - name: Package metadata names this repo
         run: |
           url="$(node -p "require('./ts/package.json').repository.url")"
@@ -80,8 +90,8 @@ jobs:
             echo "ts/package.json repository.url is $url, want $want" >&2
             exit 1
           fi
-          if [ "$access" != "public" ]; then
-            echo "ts/package.json publishConfig.access is '$access', want public" >&2
+          if [ "$access" != "restricted" ]; then
+            echo "ts/package.json publishConfig.access is '$access', want restricted" >&2
             exit 1
           fi
           if ! grep -qx "module github.com/${GITHUB_REPOSITORY}/go" go/go.mod; then
@@ -108,4 +118,114 @@ jobs:
             *-*) dist_tag=next ;;
             *)   dist_tag=latest ;;
           esac
-          npm stage publish --provenance --access public --tag "$dist_tag"
+          npm stage publish --provenance=false --access restricted --tag "$dist_tag"
+
+  publish-sdk:
+    name: Publish SDK package
+    if: github.repository == 'TxnLab/zerosignal' && startsWith(github.ref_name, 'sdk/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Not go-version-file — see ci.yml for why. make test runs the Go suite,
+      # which generates the vectors both TypeScript suites read.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.34.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Update npm
+        run: npm install -g npm@^11.15.0
+
+      - name: Tag matches package version
+        run: |
+          want="sdk/v$(node -p "require('./sdk/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match sdk/package.json ($want)" >&2
+            exit 1
+          fi
+
+      - name: Package metadata names this repo
+        run: |
+          url="$(node -p "require('./sdk/package.json').repository.url")"
+          access="$(node -p "require('./sdk/package.json').publishConfig?.access ?? ''")"
+          want="git+https://github.com/${GITHUB_REPOSITORY}.git"
+          if [ "$url" != "$want" ]; then
+            echo "sdk/package.json repository.url is $url, want $want" >&2
+            exit 1
+          fi
+          if [ "$access" != "restricted" ]; then
+            echo "sdk/package.json publishConfig.access is '$access', want restricted" >&2
+            exit 1
+          fi
+
+      # Equal version strings don't prove the published zs-proto is the ts/ this
+      # job tests against: ts/ can change without a version bump. Only the
+      # ts/ tag on this very commit does. The checkout fetched no tags, so ask
+      # the remote; an annotated tag's ^{} line is the commit it points at.
+      - name: zs-proto is tagged on this commit
+        run: |
+          tag="ts/v$(node -p "require('./ts/package.json').version")"
+          refs="$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+          peeled="$(printf '%s\n' "$refs" | awk -v r="refs/tags/$tag^{}" '$2 == r {print $1}')"
+          plain="$(printf '%s\n' "$refs" | awk -v r="refs/tags/$tag" '$2 == r {print $1}')"
+          sha="${peeled:-$plain}"
+          if [ "$sha" != "$GITHUB_SHA" ]; then
+            echo "$tag is at '${sha:-nothing}', not this commit ($GITHUB_SHA): tag both on one commit" >&2
+            exit 1
+          fi
+
+      # make test builds ts/ (the SDK compiles against ts/dist), then builds the
+      # SDK and checks the built package as a consumer resolves it.
+      - name: Vet, typecheck, and run the full test suite
+        run: make vet typecheck test
+
+      # The SDK depends on `@txnlab/zs-proto` as `workspace:*`, which npm would
+      # publish literally. `pnpm pack` writes the exact version instead, so the
+      # job publishes the tarball rather than the source directory, packing the
+      # dist make test built and checked.
+      - name: Pack
+        working-directory: sdk
+        run: pnpm pack --pack-destination "$RUNNER_TEMP"
+
+      # The SDK must name the zs-proto release it was built and tested with.
+      - name: Packed dependency is the lockstep zs-proto
+        run: |
+          want="$(node -p "require('./ts/package.json').version")"
+          got="$(tar -xzOf "$RUNNER_TEMP"/txnlab-zerosignal-*.tgz package/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).dependencies['@txnlab/zs-proto']")"
+          if [ "$got" != "$want" ]; then
+            echo "packed @txnlab/zs-proto is '$got', want $want" >&2
+            exit 1
+          fi
+
+      # npm runs no lifecycle scripts for a tarball, so the SDK's
+      # prepublishOnly (which needs the source tree) can't run here.
+      - name: Stage for approval
+        working-directory: sdk
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *-*) dist_tag=next ;;
+            *)   dist_tag=latest ;;
+          esac
+          npm stage publish "$RUNNER_TEMP"/txnlab-zerosignal-*.tgz --provenance=false --access restricted --tag "$dist_tag"

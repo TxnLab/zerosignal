@@ -54,6 +54,13 @@ const (
 	TEEModeDstackTDX = "dstack-tdx"
 )
 
+// KnownTEEModes returns every TEE mode this package defines, TEEModeNone first.
+// The cross-impl vectors enumerate from here, and a test fails when a TEEMode*
+// constant is missing from it. The slice is the caller's own.
+func KnownTEEModes() []string {
+	return []string{TEEModeNone, TEEModeStub, TEEModeNvidiaCCTDX, TEEModeNvidiaCCSEVSNP, TEEModeDstackTDX}
+}
+
 // TEEAdvertisement is the compact "this operator is TEE-capable"
 // advertisement carried inside OperatorDetails on GET /v1/zs/details.
 // It tells a discoverer (1) which TEE platform the node claims to run

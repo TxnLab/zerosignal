@@ -6,11 +6,12 @@
 // Operator/relay selection policy. Mirror of proto/go/selection/select.go —
 // keep in lockstep; pinned by proto/testdata/selection_vectors.json.
 
-import { protoVersionCompatible, usesTightInputBound } from '../wire/version.js'
+import { protoVersionCompatible } from '../wire/version.js'
 import {
     type Operator,
     type OperatorRef,
-    deriveMaxOutput,
+    effectiveInputTokens,
+    effectiveMaxOutput,
     fits,
     operatorRefMatches,
     servesModel,
@@ -25,7 +26,7 @@ export const ENDPOINT_RESPONSES = '/v1/responses' as const
 export const ENDPOINT_IMAGES = '/v1/images/generations' as const
 export const ENDPOINT_IMAGE_EDITS = '/v1/images/edits' as const
 
-// Affinity policy values, equal to the proxy's hayai.AffinityPolicy strings.
+// Affinity policy values, equal to the proxy's zs.AffinityPolicy strings.
 export const AFFINITY_PREFER = 'prefer' as const
 export const AFFINITY_STRICT = 'strict' as const
 export const AFFINITY_NONE = 'none' as const
@@ -69,13 +70,13 @@ export interface Constraints {
     // include nodes whose on-chain `staging` flag is set (Operator.staging) in
     // target selection. Default/absent ⇒ false: staging nodes are dropped, so
     // the standard routing path never targets a node still being tested. Set
-    // from the Model Routing "allow staging" toggle (client) / hayai.allow_staging
+    // from the Model Routing "allow staging" toggle (client) / zs.allow_staging
     // (proxy). Optional + omitempty: absent reads as false (Go omits the zero).
     allow_staging?: boolean
     // zs_* tool types the request asks for; operators advertising all of
     // them are partitioned ahead of the rest. null/undefined ⇒ none.
     requested_tools: string[] | null
-    // per-request hayai image-tool budgets (max_n). When > 0, operators whose
+    // per-request zs image-tool budgets (max_n). When > 0, operators whose
     // chosen model publishes the matching in-loop image-tool factor are
     // partitioned ahead of those that don't — a ranking preference, not a hard
     // filter (a model served only by toolless operators stays selectable). See
@@ -210,8 +211,8 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     let fitList: Operator[] = []
     const sizingMisses: SizingMiss[] = []
     for (const op of pool) {
-        const eff = effectiveMaxOutput(op, c)
-        if (fits(op, c.model, effectiveInputTokens(op, c), eff)) {
+        const eff = opMaxOutput(op, c)
+        if (fits(op, c.model, opInputTokens(op, c), eff)) {
             fitList.push(op)
             continue
         }
@@ -335,7 +336,7 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
         }
     }
 
-    // 9b. In-loop image-tool partition. When the request budgets a hayai image
+    // 9b. In-loop image-tool partition. When the request budgets a zs image
     //     tool, partition operators whose chosen model publishes the matching
     //     in-loop factor ahead of those that don't. PREFER, not filter (a model
     //     served only by toolless operators stays selectable). OR-of-budgeted-
@@ -427,8 +428,8 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     const preferredFits = fits(
         preferred,
         c.model,
-        effectiveInputTokens(preferred, c),
-        effectiveMaxOutput(preferred, c),
+        opInputTokens(preferred, c),
+        opMaxOutput(preferred, c),
     )
     // A broke preferred node yields under prefer (fitList already excludes it)
     // and blocks under strict with the funding cause, not affinity_blocked. The
@@ -460,32 +461,24 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     return { operators: out, diagnostics }
 }
 
-/**
- * effectiveMaxOutput is the max_output the sizing filter charges op with: the
- * flat request-level max_output_tokens, unless the caller left it unspecified
- * (max_output_unspecified), in which case it's the per-operator derivation from
- * op's declared capacity (deriveMaxOutput). An operator with no declared capacity
- * derives from zero window/max (i.e. the flat ceiling), but `fits` short-circuits
- * such operators to "unbounded" before the value is consulted. The caller's
- * reserve leg computes the identical value per operator, so the filter and the
- * escrowed max_output never disagree. Mirror of select.go::effectiveMaxOutput.
- */
-/**
- * Picks the input measurement to filter `op` on. v2 only where the operator
- * advertises support for it, mirroring the caller-side gate in the reserve leg
- * (usesTightInputBound) so the filter and the escrow agree on the same number
- * for the same operator.
- */
-function effectiveInputTokens(op: Operator, c: Constraints): number {
-    const v2 = c.input_tokens_v2 ?? 0
-    if (v2 > 0 && usesTightInputBound(op.proto_version)) return v2
-    return c.input_tokens
+/** The input measurement op is filtered on. Mirror of select.go::effectiveInputTokens. */
+function opInputTokens(op: Operator, c: Constraints): number {
+    return effectiveInputTokens(op.proto_version, c.input_tokens, c.input_tokens_v2 ?? 0)
 }
 
-function effectiveMaxOutput(op: Operator, c: Constraints): number {
-    if (!c.max_output_unspecified) return c.max_output_tokens
+/**
+ * The max_output the sizing filter charges op with. An operator with no
+ * declared capacity derives from a zero window and max (the flat ceiling), but
+ * `fits` treats it as unbounded before the value is consulted. Mirror of
+ * select.go::effectiveMaxOutput.
+ */
+function opMaxOutput(op: Operator, c: Constraints): number {
     const mc = op.model_capacities?.[c.model]
-    return deriveMaxOutput(mc?.context_window ?? 0, mc?.max_output_tokens ?? 0, c.max_output_ceiling ?? 0)
+    return effectiveMaxOutput(mc?.context_window ?? 0, mc?.max_output_tokens ?? 0, {
+        unspecified: c.max_output_unspecified ?? false,
+        flat: c.max_output_tokens,
+        ceiling: c.max_output_ceiling ?? 0,
+    })
 }
 
 /** Sort key for an advertised USD/1M rate: 0 ("undeclared") sorts last. Mirror
@@ -699,8 +692,9 @@ function exceedsCeiling(rate: number, ceiling: number): boolean {
  * Such a caller MUST feed `reachable` from its OWN direct evidence of forwarding
  * through the node — never from target reachability alone — or the preferred tier
  * fills with un-relay-able nodes and the usable relays sink into the fallback
- * tier. See client `operators/relay-health.ts` (the sticky verdict) and
- * `operators/relay-decision.ts` (where it overrides the catalog hint).
+ * tier. See the TS SDK's `RelayHealthStore` (the sticky verdict) and the
+ * client app's `operators/relay-decision.ts` (where it overrides the catalog
+ * hint).
  *
  * Returns null when no operator qualifies; the caller MUST hard-fail the
  * request rather than route direct (un-relayed) — that would defeat the

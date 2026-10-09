@@ -43,7 +43,8 @@ func PreserveThinking(body []byte, d Dialect) ([]byte, error) {
 	}
 
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// A null body decodes without error into a nil map, which a write panics on.
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return body, nil
 	}
 	if _, ok := obj["thinking"]; ok {

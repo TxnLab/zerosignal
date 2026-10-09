@@ -11,7 +11,42 @@
 
 import type { Ticket } from '../ticket/index.js'
 import { UsageType } from '../ticket/index.js'
-import { expectedMaxPrice, isLongContext, minChargeFloor, usdRateToMicroUSDCPer1M } from './pricing.js'
+import { isLongContext, minChargeFloor, usdRateToMicroUSDCPer1M } from './pricing.js'
+
+const U64_MAX = (1n << 64n) - 1n
+
+// Go's ceilMulDiv: refuses when the PRODUCT overflows uint64, not the quotient.
+function ceilMulDivU64(a: bigint, b: bigint, d: bigint): bigint | null {
+  if (a === 0n || b === 0n) return 0n
+  if (a * b > U64_MAX) return null
+  return (a * b + d - 1n) / d
+}
+
+// Go's ExpectedMaxPrice, stage for stage, in exact arithmetic: null where Go
+// returns an overflow error. expectedMaxPrice in pricing.ts returns a number,
+// which past 2^53 is no longer exact and so can't stand in for this.
+function expectedMaxPriceExact(
+  inputCount: number,
+  maxOutputCount: number,
+  inputRate: number,
+  outputRate: number,
+  minPrice: number,
+  extraBase: number,
+  feeBps: number,
+): bigint | null {
+  const inputCost = ceilMulDivU64(BigInt(inputCount), BigInt(inputRate), 1_000_000n)
+  const outputCost = ceilMulDivU64(BigInt(maxOutputCount), BigInt(outputRate), 1_000_000n)
+  if (inputCost === null || outputCost === null) return null
+  const rateBased = inputCost + outputCost
+  if (rateBased > U64_MAX) return null
+  let base = rateBased + BigInt(extraBase)
+  if (base > U64_MAX) return null
+  if (BigInt(minPrice) > base) base = BigInt(minPrice)
+  if (feeBps === 0) return base
+  const fee = ceilMulDivU64(base, BigInt(feeBps), 10_000n)
+  if (fee === null || base + fee > U64_MAX) return null
+  return base + fee
+}
 
 /**
  * Operator's published pricing for a model, from /v1/zs/details. Missing or
@@ -253,12 +288,37 @@ export function verifyTicketPrice(
 
   // max_price — internal consistency (exact). Recompute from the ticket's own
   // signed rates/counts + the on-chain fee.
-  const wantMax = expectedMaxPrice(t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, imageToolBudget, feeBps)
-  if (t.max_price !== wantMax) {
+  //
+  // Go can't hold a fraction in a uint64, so it never reaches this point with
+  // one. Here one can arrive, e.g. a budget built from an operator's fractional
+  // tool rate. Refusing it under every policy keeps fail-open's skip for Go's
+  // overflow alone, so a price nobody can recompute isn't waved through.
+  if (![t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, t.max_price, imageToolBudget, feeBps].every(Number.isInteger)) {
     return {
       check: 'max_price',
       field: 'max_price',
-      want: wantMax,
+      want: 0,
+      got: t.max_price,
+      detail: 'max_price cannot be recomputed from inputs that are not whole numbers',
+    }
+  }
+  const wantMax = expectedMaxPriceExact(t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, imageToolBudget, feeBps)
+  if (wantMax === null) {
+    if (!pol.failOpen) {
+      return {
+        check: 'max_price',
+        field: 'max_price',
+        want: 0,
+        got: t.max_price,
+        detail: 'max_price recompute overflowed',
+      }
+    }
+    // fail-open: cannot recompute the ceiling; skip it, still run the rate checks
+  } else if (BigInt(t.max_price) !== wantMax) {
+    return {
+      check: 'max_price',
+      field: 'max_price',
+      want: Number(wantMax),
       got: t.max_price,
       detail: 'max_price does not match rates x counts grossed up by the protocol fee',
     }
@@ -285,9 +345,11 @@ export function verifyTicketPrice(
     // tier — a 2x multiplier on the entire request, which rate_bound then waves
     // through because an exactly-2x surcharge sits precisely on the base *
     // rateMaxMultiple boundary. So check the TIER, not the count: an honest node
-    // only ever clamps input_count DOWN, so a sub-threshold request can never
-    // legitimately come back tiered. Skipped when the caller has no bound of its
-    // own (reserveInputCount === 0), same as input_count_bound.
+    // only ever caps input_count DOWN (an older node's min_input_count floor,
+    // default 256, is orders of magnitude below any real threshold), so a
+    // sub-threshold request can never legitimately come back tiered. Skipped
+    // when the caller has no bound of its own (reserveInputCount === 0), same
+    // as input_count_bound.
     if (
       reserveInputCount > 0 &&
       isLongContext(t.input_count, adv.longContextThresholdTokens) &&

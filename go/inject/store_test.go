@@ -83,6 +83,8 @@ func TestDefaultStoreFalse_NonObjectPassthrough(t *testing.T) {
 		`42`,
 		`not json`,
 		``,
+		// Decodes without error into a nil map.
+		`null`,
 	}
 	for _, c := range cases {
 		got, err := DefaultStoreFalse([]byte(c))
@@ -218,7 +220,7 @@ func TestForceStoreFalse_NonJSONUnchanged(t *testing.T) {
 	// Same contract as DefaultStoreFalse: an upstream rejects these
 	// outright, so there is no `store` shape to set and no plaintext
 	// for any provider to retain.
-	for _, in := range []string{"", "not json", `["an","array"]`, `"a string"`} {
+	for _, in := range []string{"", "not json", `["an","array"]`, `"a string"`, `null`} {
 		out, err := ForceStoreFalse([]byte(in))
 		if err != nil {
 			t.Errorf("ForceStoreFalse(%q): %v", in, err)

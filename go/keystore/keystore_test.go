@@ -72,6 +72,26 @@ func TestKeyStore_LoadsAcrossProviders(t *testing.T) {
 	}
 }
 
+// Signer names the chosen address and signs with the keystore's key for it.
+func TestKeyStore_Signer(t *testing.T) {
+	mn, addr := freshMnemonic(t)
+	ks, err := New(context.Background(), staticProvider{entries: []MnemonicEntry{{Name: "A", Mnemonic: mn}}})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	s := ks.Signer(addr)
+	if s.Address() != addr || !s.HasAccount(s.Address()) {
+		t.Errorf("Signer(%s).Address() = %s, held = %v", addr, s.Address(), s.HasAccount(s.Address()))
+	}
+	sig, err := s.SignBytes(context.Background(), s.Address(), []byte("msg"))
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		t.Errorf("SignBytes = %d bytes, %v", len(sig), err)
+	}
+	if other := ks.Signer("OTHER"); other.HasAccount(other.Address()) {
+		t.Error("a Signer for an address the keystore lacks claims to hold it")
+	}
+}
+
 func TestKeyStore_SkipsEmptyAndNilProviders(t *testing.T) {
 	mn, addr := freshMnemonic(t)
 	ks, err := New(context.Background(),
@@ -133,7 +153,7 @@ func TestKeyStore_SignBytes_VerifiesAgainstAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg := []byte("hello hayai")
+	msg := []byte("hello zs")
 	sig, err := ks.SignBytes(context.Background(), addr, msg)
 	if err != nil {
 		t.Fatalf("SignBytes: %v", err)

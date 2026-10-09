@@ -7,7 +7,7 @@
 // backends (the OS environment, AWS Secrets Manager, GCP Secret Manager,
 // Azure Key Vault) and exposes a single signer surface that handles raw
 // transactions, AtomicTransactionComposer-shaped signing, and raw
-// sign-bytes payloads (the form hayai tickets / receipts use — see
+// sign-bytes payloads (the form zs tickets / receipts use — see
 // proto/ticket/ticket.go and proto/ticket/receipt.go, where the caller
 // hands the signer a precomputed sha256 digest of a domain-tagged
 // canonical body).
@@ -43,6 +43,12 @@ import "context"
 type MnemonicEntry struct {
 	Name     string
 	Mnemonic string
+	// LegacySpacing makes the address a 24-word phrase's own spacing derives
+	// the entry's address, as every phrase loaded before 2026-10-06 did. A
+	// wallet imported with irregular spacing recorded that address and holds
+	// its funds there. The other address of the pair is loaded alongside it
+	// either way, signable but not listed (see KeyStore.Addresses).
+	LegacySpacing bool
 }
 
 // SecretProvider is the seam between the keystore and an arbitrary

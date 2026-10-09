@@ -32,6 +32,12 @@ package wire_test
 //
 // so any framing divergence on either side fails on that side.
 //
+// The file also carries one reserve response, sealed by SealReserveResponse
+// (plain age, no ResponseSealer), because a node seals it in Go and only the TS
+// client opens it. The opposite direction — TS-sealed requests, reserve
+// requests and responses that Go must open — is ts_sealed_vectors.json, opened
+// by ts_sealed_vectors_test.go.
+//
 // WHY A SEPARATE FILE FROM vectors.json: sealing draws a fresh nonce per call
 // and age-wrapping is randomized, so these artifacts are not reproducible from
 // their inputs. ticket/vectors_test.go asserts whole-file byte equality against
@@ -121,6 +127,12 @@ type sealedVectorsFile struct {
 	// Sealed metadata. SealHeader deliberately does NOT advance the frame
 	// counter, so these are sealed between frames 1 and 2 below to pin that.
 	Headers []sealedHeaderVector `json:"headers"`
+
+	// A sealed 200 reserve response, age-sealed to AgeRecipient. A node seals
+	// this in Go and the chat client opens it in TS, so it needs a fixture of
+	// its own: it carries the presigned open() group naming the payer.
+	ReserveResponsePlaintextHex string `json:"reserve_response_plaintext_hex"`
+	ReserveResponseEnvelopeJSON string `json:"reserve_response_envelope_json"`
 }
 
 // buildSealedVectors seals a fresh set of artifacts. Only called under -update.
@@ -209,6 +221,15 @@ func buildSealedVectors(t *testing.T) *sealedVectorsFile {
 		})
 	}
 
+	reservePlaintext := []byte(`{"ticket_id":"TKT-SEALED-001","presigned_open_txn":"sealed-vector-group"}`)
+	reserveEnvelope, err := wire.SealReserveResponse(reservePlaintext, recipient)
+	if err != nil {
+		t.Fatalf("seal reserve response: %v", err)
+	}
+
+	// Still version 1: the reserve fields are additive, and the published
+	// fixture's consumers (the client imports it from the npm package) check
+	// the version, so a bump would break them for no schema change.
 	return &sealedVectorsFile{
 		Version: 1,
 		Comment: "Cross-impl sealed-framing fixture. Captured (not derived): nonces and the " +
@@ -227,6 +248,9 @@ func buildSealedVectors(t *testing.T) *sealedVectorsFile {
 		BodyEnvelopeJSON: string(envelope),
 		Frames:           frames,
 		Headers:          headers,
+
+		ReserveResponsePlaintextHex: hex.EncodeToString(reservePlaintext),
+		ReserveResponseEnvelopeJSON: string(reserveEnvelope),
 	}
 }
 
@@ -258,6 +282,24 @@ func verifySealedVectors(t *testing.T, v *sealedVectorsFile) {
 		}
 		if !bytes.Equal(got[:], key[:]) {
 			t.Fatalf("unwrapped key = %x, want %x", got, key)
+		}
+	})
+
+	t.Run("reserve_response", func(t *testing.T) {
+		id, err := age.ParseX25519Identity(v.AgeIdentity)
+		if err != nil {
+			t.Fatalf("parse age_identity: %v", err)
+		}
+		want, err := hex.DecodeString(v.ReserveResponsePlaintextHex)
+		if err != nil || len(want) == 0 {
+			t.Fatalf("decode reserve_response_plaintext_hex (len %d): %v", len(want), err)
+		}
+		got, err := wire.OpenReserveResponse([]byte(v.ReserveResponseEnvelopeJSON), id)
+		if err != nil {
+			t.Fatalf("open committed reserve response: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("reserve response plaintext = %q, want %q", got, want)
 		}
 	})
 

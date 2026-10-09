@@ -393,4 +393,20 @@ describe('verifyTicketPrice: null-vs-undefined on optional advertised fields', (
     adv.longContextThresholdTokens = null as unknown as undefined
     expect(verify(validTicket(), adv)).toBeNull()
   })
+
+  // No uint64 is fractional, so none of these can be recomputed. Fail-open must
+  // not skip them, or an operator's fractional tool rate would turn the check
+  // off; and the answer is a verdict, not a RangeError from BigInt.
+  it('refuses a non-integer price input under every policy, without throwing', () => {
+    const t = validTicket()
+    for (const [name, args] of [
+      ['max_price', [{ ...t, max_price: 4040.5 }, FEE_BPS, 0]],
+      ['input_count', [{ ...t, input_count: 1000.5 }, FEE_BPS, 0]],
+      ['image tool budget', [t, FEE_BPS, 0.5]],
+      ['fee', [t, Number.NaN, 0]],
+    ] as const) {
+      const [tk, fee, budget] = args
+      expect(verifyTicketPrice(tk, validAdvertised(), fee, 1000, budget, defaultPolicy())?.check, name).toBe('max_price')
+    }
+  })
 })

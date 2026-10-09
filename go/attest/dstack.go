@@ -75,6 +75,17 @@ var (
 	// wrong 48-byte value indistinguishable from a correct one.
 	ErrUndecodablePayload = errors.New("attest: event log has an undecodable event payload")
 
+	// ErrAmbiguousEvent means a runtime event's name contains a colon.
+	// The hardware extends SHA-384(type ":" name ":" payload), which
+	// says where the name starts but not where it ends, so a colon lets
+	// one extension be written as another name and payload with the
+	// same digest. An operator whose compose hash happens to start with
+	// a colon byte could then file the real one as "compose-hash:" and
+	// have a later event supply a "compose-hash" of its choosing; the
+	// replay would match and both verifiers would read the false one.
+	// dstack's own names contain none.
+	ErrAmbiguousEvent = errors.New("attest: runtime event name contains a colon")
+
 	// ErrZeroRTMR means the quote's RTMR3 is all zero, which no
 	// genuinely measured CVM produces. Comparing against it would let
 	// an all-zero replay pass.
@@ -147,6 +158,9 @@ func ReplayRTMR3(events []Event) (value []byte, extends int, err error) {
 	for i, e := range events {
 		if e.EventType != DstackRuntimeEventType {
 			continue
+		}
+		if strings.Contains(e.Event, ":") {
+			return nil, extends, fmt.Errorf("%w: event %d (%q)", ErrAmbiguousEvent, i, e.Event)
 		}
 		payload, decErr := hex.DecodeString(strings.TrimPrefix(e.EventPayload, "0x"))
 		if decErr != nil {
