@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { subscribe, unsubscribe } from 'node:diagnostics_channel'
 import type { LookupAddress } from 'node:dns'
 import { createServer, type Server } from 'node:http'
 import { createRequire } from 'node:module'
 import {
     type AddressInfo,
+    type Socket,
     createServer as createNetServer,
     getDefaultAutoSelectFamily,
     setDefaultAutoSelectFamily,
@@ -90,29 +92,42 @@ describe('nodeFetch', () => {
     // A rebind: the name answers with an allowed address, then with loopback.
     // The socket dials the answer the guard judged, never asking again, so
     // the loopback server is never reached. 0.0.0.1 is an address Go allows
-    // and no host can be dialed at, so the dial fails at once.
+    // and no host answers at. macOS refuses the dial at once; Linux since 5.3
+    // routes 0.0.0.0/8 and waits on the SYN, so a signal bounds the wait there,
+    // and the address is read off the socket rather than the dial's error.
     it('dials the address it judged, with no second resolution', async () => {
         const calls: string[] = []
+        const dialed: string[] = []
         let hits = 0
         const counting = createServer((_, res) => {
             hits++
             res.end('reached')
         })
+        const onSocket = (msg: unknown) => {
+            ;(msg as { socket: Socket }).socket.on('lookup', (_err: unknown, address: string) => dialed.push(address))
+        }
         await new Promise<void>((r) => counting.listen(0, '127.0.0.1', r))
+        subscribe('net.client.socket', onSocket)
         try {
             const resolve = (host: string, _: unknown, cb: (err: NodeJS.ErrnoException | null, a: LookupAddress[]) => void) => {
                 calls.push(host)
                 cb(null, [{ address: calls.length === 1 ? '0.0.0.1' : '127.0.0.1', family: 4 }])
             }
             const p = (counting.address() as AddressInfo).port
-            const err = (await nodeFetch({ resolve })(`http://rebind.example:${p}/`).then(
+            const err = (await nodeFetch({ resolve })(`http://rebind.example:${p}/`, {
+                signal: AbortSignal.timeout(1_000),
+            }).then(
                 () => expect.fail('the fetch reached a server'),
                 (e: unknown) => e,
-            )) as { cause?: unknown }
-            expect((err.cause as { address?: unknown }).address).toBe('0.0.0.1')
+            )) as { name?: string; cause?: { address?: unknown } }
+            if (err.name !== 'TimeoutError') {
+                expect(err.cause?.address).toBe('0.0.0.1')
+            }
+            expect(dialed).toEqual(['0.0.0.1'])
             expect(calls).toEqual(['rebind.example'])
             expect(hits).toBe(0)
         } finally {
+            unsubscribe('net.client.socket', onSocket)
             await new Promise<void>((r) => counting.close(() => r()))
         }
     })
