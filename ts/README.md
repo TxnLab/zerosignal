@@ -19,6 +19,9 @@ This package ships primitives only. It does no chain access, discovery, or reque
 pnpm add @txnlab/zs-proto
 ```
 
+The package is private for now: the install needs an npm token that can read the `@txnlab`
+scope, in your user-level `~/.npmrc`.
+
 ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@noble/ciphers`,
 `@noble/ed25519`, `@noble/hashes`, `@scure/base`, `age-encryption`.
 

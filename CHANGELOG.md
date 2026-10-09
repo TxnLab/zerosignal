@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-09 — releases are private again
+
+`TxnLab/zerosignal` is private, and new releases follow it. `@txnlab/zs-proto` and
+`@txnlab/zerosignal` publish with restricted access and no provenance, so installing either
+needs an npm token that reads the `@txnlab` scope. The Go module needs
+`GOPRIVATE=github.com/TxnLab/*` and git credentials for the repo. `go/v0.1.0` and `go/v0.1.1`
+stay public on the Go module proxy.
+
 ### 2026-10-08 — the TypeScript SDK runs a paid turn
 
 `@txnlab/zerosignal` gains `Client`, the twin of the Go SDK's `zs.Client`. `Client.create`

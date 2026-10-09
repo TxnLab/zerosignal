@@ -86,7 +86,7 @@
         "url": "https://github.com/TxnLab/zerosignal/issues"
     },
     "publishConfig": {
-        "access": "public"
+        "access": "restricted"
     },
     "scripts": {
         "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.build.node.json",

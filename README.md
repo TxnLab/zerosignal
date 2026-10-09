@@ -167,7 +167,8 @@ number, all three tags on the same commit.
 2. Tag that commit `go/vX.Y.Z`, `ts/vX.Y.Z` and `sdk/vX.Y.Z`, then push exactly those three:
    `git push origin go/vX.Y.Z ts/vX.Y.Z sdk/vX.Y.Z`. GitHub starts no workflow for a push of
    more than three tags, so don't use `--tags`.
-3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`).
+3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`,
+   with the private-repo setup below).
    Each of the `ts/v*` and `sdk/v*` tags runs [`release.yml`](./.github/workflows/release.yml),
    which runs the full test suite and **stages** that npm package. It does not publish it.
    The SDK is staged from its `pnpm pack` tarball, which pins `@txnlab/zs-proto` at `X.Y.Z`,
@@ -178,11 +179,22 @@ number, all three tags on the same commit.
    If the zs-proto job failed, reject the staged SDK too.
 
 A new package needs a one-time setup before its first tag: npmjs.com lets a trusted publisher be
-added only to a package that exists, so publish its first version by hand, then add a trusted
-publisher for `TxnLab/zerosignal`'s `release.yml` that may only stage.
+added only to a package that exists, so publish its first version by hand with
+`pnpm publish --access restricted` (pnpm, because `npm publish` would ship a `workspace:*`
+dependency literally), then add a trusted publisher for `TxnLab/zerosignal`'s `release.yml` that
+may only stage.
+
+While this repo is private, so are new releases. Both npm packages publish with
+`--access restricted` and no provenance (npm generates provenance only for a public package from a
+public repo), and installing them needs a token that reads the `@txnlab` scope. The Go module
+needs `GOPRIVATE=github.com/TxnLab/*` and git credentials for `TxnLab/zerosignal`. `go/v0.1.0`
+and `go/v0.1.1` predate this and stay public on the Go module proxy. Going public means flipping
+the repo, `publishConfig.access` in both `package.json` files, the `--access` and `--provenance`
+flags in `release.yml`, and the access value its two metadata checks expect, together.
 
 Under 0.x a minor bump is a breaking change and a patch bump is not. Never move or delete a
-pushed `go/v*` tag: the Go checksum database has already recorded it.
+pushed `go/v*` tag: every consumer's `go.sum` has recorded its hash, so a moved tag fails their
+builds with a checksum mismatch.
 
 ## License
 
