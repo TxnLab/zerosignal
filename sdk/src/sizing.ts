@@ -8,7 +8,7 @@
 // of proto/go/zs/sizing.go and dispatch.go's reserveInputCount.
 
 import { bodyDrivesServerSideToolGrowth } from '@txnlab/zs-proto/inject'
-import { effectiveInputTokens, effectiveMaxOutput as effectiveMaxOutputOf, fitsContextWindow } from '@txnlab/zs-proto/selection'
+import { effectiveInputTokens, effectiveMaxOutput as effectiveMaxOutputOf, fitsContextWindowFor } from '@txnlab/zs-proto/selection'
 import {
     BOUND_VERSION_1,
     BOUND_VERSION_2,
@@ -68,7 +68,7 @@ export function fits(op: Pick<Operator, 'modelCapacities' | 'protoVersion'>, req
     if (mc === undefined) return true
     const maxOut = effectiveMaxOutput(op, req)
     const input = effectiveInputTokens(op.protoVersion, req.inputTokens, req.inputTokensV2)
-    if (!fitsContextWindow(input, maxOut, mc.contextWindow)) return false
+    if (!fitsContextWindowFor(op.protoVersion, input, maxOut, mc.contextWindow)) return false
     if (mc.maxOutputTokens > 0 && maxOut > mc.maxOutputTokens) return false
     return true
 }

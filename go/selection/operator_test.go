@@ -11,6 +11,31 @@ import (
 	"github.com/TxnLab/zerosignal/go/selection"
 )
 
+// TestFitsContextWindowFor_NearUint64Max covers the arithmetic the shared
+// vectors cannot reach, since TS numbers stop well short of it: a ceiling whose
+// 3x would overflow admits any input, and just under it the product is exact.
+func TestFitsContextWindowFor_NearUint64Max(t *testing.T) {
+	const max = ^uint64(0)
+	cases := []struct {
+		name                     string
+		input, maxOutput, window uint64
+		want                     bool
+	}{
+		{"3x the ceiling overflows", max, 1, max, true},
+		{"3x the ceiling is exactly max", max, 1, max/3 + 1, true},
+		{"at 3x a ceiling just under it", max - 3, 1, max / 3, true},
+		{"one past 3x that ceiling", max - 2, 1, max / 3, false},
+	}
+	for _, c := range cases {
+		if got := selection.FitsContextWindowFor("9.11", c.input, c.maxOutput, c.window); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	if selection.FitsContextWindowFor("9.10", max, 1, max) {
+		t.Error("a pre-9.11 operator was offered input past its window")
+	}
+}
+
 // TestServesModel_EmptyServesNothing pins the eligibility rule shared byte-for-
 // byte with proto/go/zs/operator.go and proto/ts servesModel: an empty
 // Models list serves NOTHING regardless of Reachable (no wildcard), and a

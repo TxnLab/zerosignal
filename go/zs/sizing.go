@@ -6,7 +6,6 @@
 package zs
 
 import (
-	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/selection"
 )
 
@@ -80,11 +79,12 @@ func (req SizingRequest) effectiveInputTokens(op Operator) uint64 {
 // than restated so the value admitted here and the value the reserve loop
 // escrows cannot drift apart:
 //   - InputTokens+maxOut ≤ ContextWindow (overflow-safe; 0 means unset /
-//     unbounded — matches the missing-entry semantics)
+//     unbounded — matches the missing-entry semantics), widened for a node
+//     that defers fit to its upstream
 //   - maxOut ≤ MaxOutputTokens (skipped when the cap is zero)
 //
-// The context-window check delegates to inject.FitsContextWindow so
-// proxy and node agree on the same fit rule byte-for-byte. This mirrors
+// The context-window check delegates to selection.FitsContextWindowFor so
+// the shared filter and this reserve leg apply one rule. This mirrors
 // selection.SelectTargets' sizing step (Fits + effectiveMaxOutput).
 func Fits(op Operator, req SizingRequest) bool {
 	mc, ok := op.ModelCapacities[req.Model]
@@ -92,7 +92,7 @@ func Fits(op Operator, req SizingRequest) bool {
 		return true
 	}
 	maxOut := EffectiveMaxOutput(op, req)
-	if !inject.FitsContextWindow(req.effectiveInputTokens(op), maxOut, mc.ContextWindow) {
+	if !selection.FitsContextWindowFor(op.ProtoVersion, req.effectiveInputTokens(op), maxOut, mc.ContextWindow) {
 		return false
 	}
 	if mc.MaxOutputTokens > 0 && maxOut > mc.MaxOutputTokens {

@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/inject"
+	"github.com/TxnLab/zerosignal/go/tokenize"
 	"github.com/TxnLab/zerosignal/go/wire"
 )
 
@@ -260,8 +261,8 @@ func (o Operator) SupportsAllBuiltinTools(needed []string) bool {
 
 // Fits reports whether op can serve a request for model under its declared
 // ModelCapacity. Operators with no declared capacity for model are treated as
-// unbounded. The context-window check delegates to inject.FitsContextWindow so
-// proxy, node, and client agree byte-for-byte on what "fits" means.
+// unbounded. The context-window check is FitsContextWindowFor, shared with the
+// SDKs' reserve leg so every payer applies one rule.
 //
 // Mirrors proto/go/zs/sizing.go::Fits.
 func Fits(op Operator, model string, inputTokens, maxOutputTokens uint64) bool {
@@ -269,13 +270,38 @@ func Fits(op Operator, model string, inputTokens, maxOutputTokens uint64) bool {
 	if !ok {
 		return true
 	}
-	if !inject.FitsContextWindow(inputTokens, maxOutputTokens, mc.ContextWindow) {
+	if !FitsContextWindowFor(op.ProtoVersion, inputTokens, maxOutputTokens, mc.ContextWindow) {
 		return false
 	}
 	if mc.MaxOutputTokens > 0 && maxOutputTokens > mc.MaxOutputTokens {
 		return false
 	}
 	return true
+}
+
+// FitsContextWindowFor is inject.FitsContextWindow plus the deferral a node
+// advertising wire.DefersFitToUpstream applies. Input bounds run about twice a
+// real tokenizer on prose, so the plain window check refuses a chat at about
+// half the real window. Such a node instead forwards a request whose reserve
+// sits at the input ceiling (window − maxOutput) while the bound stays within
+// tokenize.CeilingForwardFactor × that ceiling, and the upstream decides. The
+// node's own cap adds its input-budget tolerance to the ceiling; this one
+// leaves it out, because the caller cannot see the operator's setting. The
+// escrow does not grow: the reserve is clamped to the ceiling either way.
+//
+// protoVersion is the operator's ADVERTISED version.
+func FitsContextWindowFor(protoVersion string, input, maxOutput, window uint64) bool {
+	if inject.FitsContextWindow(input, maxOutput, window) {
+		return true
+	}
+	if window <= maxOutput || !wire.DefersFitToUpstream(protoVersion) {
+		return false
+	}
+	ceil := window - maxOutput
+	if ceil > ^uint64(0)/tokenize.CeilingForwardFactor {
+		return true
+	}
+	return input <= tokenize.CeilingForwardFactor*ceil
 }
 
 // MaxOutputSpec is the request-level half of the effective-max_output rule:

@@ -144,6 +144,16 @@ func deriveConstraints(inputTokens, baseCeiling uint64) selection.Constraints {
 	return c
 }
 
+// deferralOps is one node that defers fit to its upstream (9.11) and one that
+// does not (9.10), both declaring a 4000-token window.
+func deferralOps() []selection.Operator {
+	defers, judges := baseOp(1, "A"), baseOp(2, "B")
+	defers.ProtoVersion, judges.ProtoVersion = "9.11", "9.10"
+	caps := map[string]selection.ModelCapacity{"m1": {ContextWindow: 4000}}
+	defers.ModelCapacities, judges.ModelCapacities = caps, caps
+	return []selection.Operator{defers, judges}
+}
+
 func buildTargetCases() []targetCase {
 	cases := []targetCase{
 		{
@@ -1128,6 +1138,9 @@ func buildTargetCases() []targetCase {
 			Name: "derive_declared_over_proportionate_block",
 			Operators: func() []selection.Operator {
 				op2 := baseOp(2, "B")
+				// Pre-9.11, so the window check alone decides and the block
+				// stays a test of the derivation (FitsContextWindowFor).
+				op2.ProtoVersion = "9.10"
 				op2.ModelCapacities = map[string]selection.ModelCapacity{"m1": {ContextWindow: 4096, MaxOutputTokens: 4000}}
 				return []selection.Operator{baseOp(1, "A"), op2, baseOp(3, "C")}
 			}(),
@@ -1142,6 +1155,7 @@ func buildTargetCases() []targetCase {
 			Name: "derive_default_ceiling_headroom_block",
 			Operators: func() []selection.Operator {
 				op2 := baseOp(2, "B")
+				op2.ProtoVersion = "9.10" // as above
 				op2.ModelCapacities = map[string]selection.ModelCapacity{"m1": {ContextWindow: 40000}}
 				return []selection.Operator{baseOp(1, "A"), op2, baseOp(3, "C")}
 			}(),
@@ -1172,6 +1186,50 @@ func buildTargetCases() []targetCase {
 				return []selection.Operator{baseOp(1, "A"), op2, baseOp(3, "C")}
 			}(),
 			Constraints: deriveConstraints(31000, 8192),
+		},
+		{
+			// A node that defers fit to its upstream (9.11) is offered an input
+			// bound past its ceiling (4000 − 1000 = 3000) up to 3x that ceiling;
+			// a 9.10 node with the same window is not. The bound runs about twice
+			// a real tokenizer, so the plain check refuses at half the window.
+			Name:      "fit_deferred_within_forward_cap",
+			Operators: deferralOps(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.MaxOutputTokens = 8000, 1000
+				return c
+			}(),
+		},
+		{
+			// Exactly 3x the ceiling still fits (inclusive)...
+			Name:      "fit_deferred_at_forward_cap",
+			Operators: deferralOps(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.MaxOutputTokens = 9000, 1000
+				return c
+			}(),
+		},
+		{
+			// ...and one token past it is a miss on both.
+			Name:      "fit_deferred_past_forward_cap",
+			Operators: deferralOps(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.MaxOutputTokens = 9001, 1000
+				return c
+			}(),
+		},
+		{
+			// A window no larger than max_output leaves no input ceiling to
+			// defer at, so the deferring node refuses too.
+			Name:      "fit_deferred_needs_an_input_ceiling",
+			Operators: deferralOps(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.MaxOutputTokens = 1, 4000
+				return c
+			}(),
 		},
 	}
 

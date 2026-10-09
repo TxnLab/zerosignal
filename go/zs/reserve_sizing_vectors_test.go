@@ -280,6 +280,12 @@ func sizingFitCases() []sizingVecFit {
 		{Name: "a 9.2 operator is charged v2", Op: op(sizingVecTight, sizingVecCapOf(1000, 0)), Sizing: v2(flat(900, 200), 500)},
 		{Name: "an unset v2 falls back to v1", Op: op(sizingVecTight, sizingVecCapOf(1000, 0)), Sizing: flat(900, 200)},
 		{Name: "an unparseable version is charged v1", Op: op("nine", sizingVecCapOf(1000, 0)), Sizing: v2(flat(900, 200), 500)},
+		{Name: "a deferring operator takes 3x its input ceiling", Op: op("9.11", sizingVecCapOf(1000, 0)), Sizing: flat(1800, 400)},
+		{Name: "a deferring operator refuses one past 3x", Op: op("9.11", sizingVecCapOf(1000, 0)), Sizing: flat(1801, 400)},
+		{Name: "a pre-9.11 operator refuses past the window", Op: op("9.10", sizingVecCapOf(1000, 0)), Sizing: flat(1800, 400)},
+		{Name: "a deferring operator needs an input ceiling", Op: op("9.11", sizingVecCapOf(400, 0)), Sizing: flat(1, 400)},
+		{Name: "a deferring operator is measured on v2", Op: op("9.11", sizingVecCapOf(1000, 0)), Sizing: v2(flat(5000, 400), 1800)},
+		{Name: "a deferring operator defers on a derived output", Op: op("9.11", sizingVecCapOf(40_000, 0)), Sizing: derive(90_000)},
 		{Name: "a model named like an Object property", Op: sizingVecOp{ID: 1, ModelCapacities: map[string]sizingVecCap{"m": {ContextWindow: 10}}}, Sizing: sizingVecRequest{Model: "constructor", InputTokens: 100, MaxOutputTokens: 100}},
 	}
 	for i := range cases {

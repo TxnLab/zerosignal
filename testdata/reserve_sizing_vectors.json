@@ -415,6 +415,174 @@
       "fits": false
     },
     {
+      "name": "a deferring operator takes 3x its input ceiling",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.11",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 1000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 1800,
+        "maxOutputTokens": 400,
+        "inputTokensV2": 0,
+        "deriveMaxOutput": false,
+        "maxOutputCeiling": 0
+      },
+      "effective_max_output": 400,
+      "fits": true
+    },
+    {
+      "name": "a deferring operator refuses one past 3x",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.11",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 1000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 1801,
+        "maxOutputTokens": 400,
+        "inputTokensV2": 0,
+        "deriveMaxOutput": false,
+        "maxOutputCeiling": 0
+      },
+      "effective_max_output": 400,
+      "fits": false
+    },
+    {
+      "name": "a pre-9.11 operator refuses past the window",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.10",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 1000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 1800,
+        "maxOutputTokens": 400,
+        "inputTokensV2": 0,
+        "deriveMaxOutput": false,
+        "maxOutputCeiling": 0
+      },
+      "effective_max_output": 400,
+      "fits": false
+    },
+    {
+      "name": "a deferring operator needs an input ceiling",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.11",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 400,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 1,
+        "maxOutputTokens": 400,
+        "inputTokensV2": 0,
+        "deriveMaxOutput": false,
+        "maxOutputCeiling": 0
+      },
+      "effective_max_output": 400,
+      "fits": false
+    },
+    {
+      "name": "a deferring operator is measured on v2",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.11",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 1000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 5000,
+        "maxOutputTokens": 400,
+        "inputTokensV2": 1800,
+        "deriveMaxOutput": false,
+        "maxOutputCeiling": 0
+      },
+      "effective_max_output": 400,
+      "fits": true
+    },
+    {
+      "name": "a deferring operator defers on a derived output",
+      "op": {
+        "id": 1,
+        "protoVersion": "9.11",
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "modelCapacities": {
+          "m": {
+            "contextWindow": 40000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0
+          }
+        }
+      },
+      "sizing": {
+        "model": "m",
+        "inputTokens": 90000,
+        "maxOutputTokens": 32768,
+        "inputTokensV2": 0,
+        "deriveMaxOutput": true,
+        "maxOutputCeiling": 32768
+      },
+      "effective_max_output": 10000,
+      "fits": true
+    },
+    {
       "name": "a model named like an Object property",
       "op": {
         "id": 1,
