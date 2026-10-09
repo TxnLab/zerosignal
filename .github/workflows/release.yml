@@ -52,7 +52,7 @@ jobs:
           cache-dependency-path: go/go.sum
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10.34.0
           run_install: false
@@ -141,7 +141,7 @@ jobs:
           cache-dependency-path: go/go.sum
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10.34.0
           run_install: false
