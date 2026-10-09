@@ -10,11 +10,11 @@ Privacy-first, OpenAI-compatible inference network. A **ZeroSignal client** [`ag
    │                                                                  │
    │  Encrypts requests, opens escrow, ack-settles. Two common forms: │
    │                                                                  │
-   │   • A ZeroSignal-aware app (webapp, agent SDK, daemon) that      │
-   │     speaks the protocol directly.                                │
-   │   • The proxy daemon, which exposes a vanilla OpenAI /v1 surface │
-   │     and bridges plaintext clients (tui, OpenAI SDKs, LM Studio,  │
-   │     test harnesses) into the protocol on their behalf.           │
+   │   • A ZeroSignal-aware app (web app, agent, daemon) built on a   │
+   │     payer SDK: @txnlab/zerosignal (TS) or go/zs (Go).            │
+   │   • The proxy daemon, built on go/zs, which exposes a vanilla    │
+   │     OpenAI /v1 surface and bridges plaintext clients (tui,       │
+   │     OpenAI SDKs, LM Studio, test harnesses) into the protocol.   │
    └────────────────────┬───────────────────────────┬─────────────────┘
                         │                           │
             Payment+open atomic group,              │  age-encrypted
@@ -51,15 +51,16 @@ User and operator documentation lives at [docs.zerosignal.ai](https://docs.zeros
 
 ## What's in this repo
 
-The protocol specification and its two reference implementations. They are kept
-byte-compatible by shared golden vectors.
+The protocol specification, its two reference implementations, and the payer SDK built on each.
+The implementations are kept byte-compatible by shared golden vectors.
 
 The system around it: **`zs-proxy`** is a localhost, single-user (payer) daemon that exposes a
-plain OpenAI `/v1` surface and speaks the protocol on the caller's behalf. **`zs-node`** is the
-operator daemon: it decrypts envelopes, forwards them to an upstream LLM, signs usage receipts,
-and settles on chain. The **`ZeroSignalEscrow`** contract holds the operator and node registry
-and per-ticket escrow. The **ZeroSignal web app** speaks the protocol directly from the browser
-using the TypeScript package below. Source paths such as `proxy/internal/...` or
+plain OpenAI `/v1` surface and speaks the protocol on the caller's behalf through the Go payer
+SDK, `go/zs`. **`zs-node`** is the operator daemon: it decrypts envelopes, forwards them to an
+upstream LLM, signs usage receipts, and settles on chain; it uses the protocol packages but not
+`zs`. The **`ZeroSignalEscrow`** contract holds the operator and node registry and per-ticket
+escrow. The **ZeroSignal web app** speaks the protocol directly from the browser and runs each
+turn through the TypeScript payer SDK, `@txnlab/zerosignal`. Source paths such as `proxy/internal/...` or
 `client/src/...` that appear in SPEC.md and `docs/` refer to those implementations.
 
 ### Specification
@@ -98,7 +99,10 @@ The canonical implementation; it generates every golden vector.
 | `wallet` | A payer's local wallet: generate or import a recovery phrase, held in the OS keychain or a passphrase-encrypted file, shared by every zerosignal program on the machine. Feeds `keystore` through `Wallet.Provider`; `LoadPayer` loads it with the environment's keys and picks a `zs.Signer`. |
 | `httpx` | A tuned, shared `http.Transport` for node↔node and payer↔node calls, with a private-address dial guard. |
 | `gcplog` | `slog` attribute names for Google Cloud Logging. |
-| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts. Used by `zs-proxy`. |
+| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts. Used by `zs-proxy`, the TUI's `-direct` mode, and `cmd/zschat`. |
+| `zs/handler` | The OpenAI-compatible HTTP surface over a `zs.Client`: chat completions, responses, the emulated `/v1/completions`, image generation and edits, model discovery, `/v1/zs/details`. |
+| `zs/tee` | Verifies a node's published attestation evidence: the bundle checks every platform shares, the dstack TDX verifier, and the process-wide Intel collateral cache. |
+| `zs/tokenize` | The safe input-token upper bound a payer reserves against. |
 | `cmd/releasenotes` | Release-notes generator used by the `zs-proxy` and `zs-node` release builds. |
 | `cmd/zschat` | One chat-completions prompt through `zs`, streamed to stdout: the smallest complete payer. |
 
@@ -111,13 +115,17 @@ Subpaths: `wire`, `ticket`, `selection`, `pricing`, `imageprice`, `tokenize`, `t
 
 Wire-shaped types use snake_case property names matching the JSON wire format, so `JSON.stringify(envelope)` produces the bytes the Go side emits — no field-rename layer. Function names are camelCase.
 
-Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (transaction composition, box reads, group verification).
+Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (box reads, and checking and completing the node-built
+open and settle groups), which the TypeScript SDK below carries instead (`sdk/src/escrow/`).
 
 ### TypeScript SDK — [`sdk/`](./sdk/), npm package `@txnlab/zerosignal`
 
-The twin of `go/zs`, in development. It holds the shared API vocabulary (events, error kinds,
-config and its defaults, network presets) and the ports a host app implements (signer, storage,
-cache, logger, clock, fetch); the client is being ported from the chat app. It depends on
+The twin of `go/zs`, released in lockstep with it; the ZeroSignal web app runs on it. It holds the
+payer client (routing, reserve, escrow `open` / settle, sealing, relay hops, streaming, receipt
+checks), the shared API vocabulary (events, error kinds, config and its defaults, network
+presets), and the ports a host app implements (signer, storage, cache, logger, clock, fetch).
+Unlike `go/zs` it builds no operator discovery of its own: the host supplies one as
+`Config.registry`, which `Client` requires. It depends on
 `@txnlab/zs-proto` at exactly its own version and re-exports it under
 `@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
 `testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).
@@ -149,7 +157,8 @@ changes on purpose, with `make update-sealed-vectors` and `make update-ts-sealed
 
 ```bash
 pnpm install               # one workspace: ts/ and sdk/
-make test                  # vector-generator check + Go suite + ts and sdk suites
+make test                  # guards (check-vector-generators, check-no-hayai, check-lockstep,
+                           # check-escrow-client) + Go suite + ts suite + sdk typecheck/test/build/test:dist
 make vet typecheck
 make verify-vectors        # read-only: every fixture matches current Go output; Go opens the TS-sealed one
 make update-vectors        # regenerate fixtures after an intentional format change

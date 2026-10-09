@@ -43,7 +43,7 @@ Out of Phase 1 you get **a price-ordered list of nodes that can actually serve m
 
 ### Phase 2 — app-side: responsiveness banding
 
-Now the metrics enter. The proxy (`pickCandidates` → `bandByResponsiveness`, `proto/go/zs/dispatch.go`) and client (`resolveDispatchCandidates`, `client/src/operators/dispatch-candidates.ts`) compute a **combined expected response time** per candidate — additive, all in milliseconds:
+Now the metrics enter. The Go SDK (`pickCandidates` → `bandByResponsiveness`, `proto/go/zs/dispatch.go`) and the TS SDK (`orderCandidates` → `bandByResponsiveness`, `proto/sdk/src/routing/{order,banding}.ts`, called by the client's `resolveDispatchCandidates` in `client/src/operators/dispatch-candidates.ts`) compute a **combined expected response time** per candidate — additive, all in milliseconds:
 
 ```
 score = network_RTT      # client-observed target-aggregate EWMA, counted only when samples >= 2
@@ -51,7 +51,7 @@ score = network_RTT      # client-observed target-aggregate EWMA, counted only w
       + decode_term      # 32 / tokensPerSecEwma * 1000  (on-chain co-signed tokens/sec)
 ```
 
-(`responsivenessTerms`, `proto/go/zs/dispatch.go`, mirrored at `dispatch-candidates.ts::responsivenessTerms`.) An unknown term is not dropped: it is shrunk to the candidate-set median, because a dropped term adds 0 and would read as infinitely fast.
+(`responsivenessTerms`, `proto/go/zs/dispatch.go`, mirrored at `proto/sdk/src/routing/banding.ts::responsivenessTerms`.) An unknown term is not dropped: it is shrunk to the candidate-set median, because a dropped term adds 0 and would read as infinitely fast.
 
 - **RTT** — *your own* observed round-trip to that target, EWMA(α=0.3), gated on ≥2 samples so one noisy measurement can't reorder.
 - **TTFT** — on-chain `NodeRecord.latencyEwmaMs`, weight 1, added straight in ms. Makes a fast GPU node outrank a marginally-cheaper CPU one.
@@ -107,7 +107,7 @@ pick   = seeded draw over weights          # fresh crypto-random seed per reques
 | Metric | Source | Trust / scope | Read into routing at |
 |---|---|---|---|
 | **RTT** | Measured by *you* on clean, pre-inference round-trips: the `/v1/zs/details` discovery probe and the reserve POST. EWMA(α=0.3), stale after 5 min, min 2 samples. In-memory only, never persisted or shared. | Vantage-specific, live | `relay_latency.go` (Go SDK) / `routing/latency.ts` (TS SDK) |
-| **TTFT** (`latencyEwmaMs`) | On-chain, co-signed, EWMA(N=10) of time-to-first-token over settled tickets. Per-node aggregate **across served models** (a hardware-speed proxy). | Trustworthy but coarse | `fetcher.go` ≈ L826 (proxy) / `adaptNodeFields` in `operators.ts` ≈ L163 (client) |
+| **TTFT** (`latencyEwmaMs`) | On-chain, co-signed, EWMA(N=10) of time-to-first-token over settled tickets. Per-node aggregate **across served models** (a hardware-speed proxy). | Trustworthy but coarse | `proto/go/zs/fetcher.go` (Go SDK) / `adaptNodeFields` in `client/src/algorand/operators.ts` (client) |
 | **tok/s** (`tokensPerSecEwma`) | On-chain, co-signed, EWMA(N=10) of decode throughput, sampled only on streamed settles with a decode window. Per-node aggregate across served models (decode rate is model-size-dominated → noisiest term). | Trustworthy but coarsest | same as TTFT |
 
 Both on-chain metrics live on the **`NodeRecord`** box (per node), not the `OperatorRecord` — the operator rollup is the sum across its nodes. They're hardware-speed proxies, not per-model figures.
@@ -148,8 +148,8 @@ This is symmetric by design: the proxy is a **localhost single-user (payer) proc
 
 | Concern | Shared (proto) | Proxy (Go) | Client (TS) |
 |---|---|---|---|
-| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `proto/go/zs/operator.go`, `proto/go/zs/sizing.go`, `proto/go/zs/dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, used by `operators/dispatch-candidates.ts` |
-| Responsiveness banding | — (app-side only) | `proto/go/zs/dispatch.go::responsivenessTerms,bandByResponsiveness` (`decodeNormTokens=32`, `targetResponsivenessBandMS=500`) | `operators/dispatch-candidates.ts::responsivenessTerms,bandByResponsiveness` (`DECODE_NORM_TOKENS=32`, `TARGET_RESPONSIVENESS_BAND_MS=500`) |
+| Target select (filter+price) | `proto/go/selection/select.go::SelectTargets` / `operator.go::ServesModel,Fits,lessByPrice` | mirrored in `proto/go/zs/operator.go`, `proto/go/zs/sizing.go`, `proto/go/zs/dispatch.go::pickCandidates` | `@txnlab/zs-proto/selection` `selectTargets`, via `proto/sdk/src/routing/seed.ts::selectTargetsForOperator`, called by the client's `operators/dispatch-candidates.ts` |
+| Responsiveness banding | — (app-side only) | `proto/go/zs/dispatch.go::responsivenessTerms,bandByResponsiveness` (`decodeNormTokens=32`, `targetResponsivenessBandMS=500`) | `proto/sdk/src/routing/banding.ts::responsivenessTerms,bandByResponsiveness` (`DECODE_NORM_TOKENS=32`, `TARGET_RESPONSIVENESS_BAND_MS=500`), run by `routing/order.ts::orderCandidates` |
 | Relay eligibility (diversity) | `proto/go/selection/select.go::EligibleRelays,SelectRelay,diverseSubnet` | (consumes the shared fn) | (consumes the shared fn) |
 | Relay weighted pick | — (app-side only) | `proto/go/zs/relayrouter.go::SelectRelayHopWeighted,weightedRelayPick` (`latencyWeightBiasMS=50`, `latencyFloorFraction=0.15`) | `proto/sdk/src/routing/relay.ts::selectRelayHopWeighted,weightedPick`; orchestrated by the client's `operators/relay-decision.ts::resolveRelayDecision` |
 | Latency EWMA store | — | `proto/go/zs/relay_latency.go` (α=0.3, stale 5m, min 2) | `proto/sdk/src/routing/latency.ts` (same constants) |

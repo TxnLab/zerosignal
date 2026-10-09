@@ -2778,8 +2778,8 @@ func (s *Client) recordRelayOutcome(hop *RelayHop, ok bool) {
 // on. Separating it from a dial timeout needs an httptrace GotConn hook on the
 // forward hot path; not worth it until the strikes are observed.
 //
-// ctx.Err() != nil is also exactly the TS predicate (envelope-fetch.ts passes
-// init.signal?.aborted on its inference leg). Keep the two in step — charging
+// ctx.Err() != nil is also exactly the TS predicate (sdk/src/sealed.ts passes
+// signal?.aborted on its inference leg). Keep the two in step — charging
 // different hops for the same outcome is the drift this evidence struct exists
 // to prevent.
 func relayEvidence(ctx context.Context, hop *RelayHop, header http.Header) transient.RelayEvidence {
@@ -4341,7 +4341,7 @@ func streamAPIFor(endpoint string) wire.StreamAPI {
 // DELIBERATE, narrow exception to the proxy's no-content rule: an error
 // envelope is control-plane, NOT prompt or completion content, and the proxy
 // is a single-user process the payer runs for themselves. Prompt and
-// completion content stay unlogged. See proxy/AGENTS.md.
+// completion content stay unlogged. See AGENTS.md "Privacy and logging".
 //
 // Do NOT reimplement the shape matching here. It is also the terminal-frame
 // predicate behind the receipt-tail drain (SPEC § 5.3 "Consuming the

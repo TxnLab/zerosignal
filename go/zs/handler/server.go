@@ -182,7 +182,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			// own OpenAI-shaped error envelope (or a forwarded operator error
 			// envelope), which is control-plane, never prompt/completion
 			// content, so it sits inside the proxy's error-logging carve-out
-			// (AGENTS.md). Full request/response dumps stay gated behind
+			// (AGENTS.md "Privacy and logging"). Full request/response dumps stay gated behind
 			// -debug-bodies.
 			level = slog.LevelWarn
 			attrs = append(attrs, errorReasonAttrs(rw.errBody)...)

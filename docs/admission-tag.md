@@ -257,7 +257,7 @@ frame; the outer `RequestEnvelope` is a single `ciphertext` field.
 | Peek-verify-consume ordering | `node/internal/server/admission.go` — `Server.refuseEnvelope` (true == refused), called from the three admission sites in `handlers.go` |
 | Ticket store | `node/internal/server/tickets.go` — `ticketStore.Peek` returns `PeekedTicket` (key + reserve-time recipient) in one lock acquisition |
 | Proxy tag computation | `proto/go/zs/dispatch.go` — `runSealed`, before `WrapRequestWithIdentity` |
-| TS parity | `proto/ts/src/wire/admission.ts` — `computeAdmissionTag`; client call site `client/src/stream/envelope-fetch.ts` |
+| TS parity | `proto/ts/src/wire/admission.ts` — `computeAdmissionTag`; TS payer SDK call site `proto/sdk/src/seal.ts` — `sealRequest` |
 
 Go↔TS parity is pinned by the `admission_tag` golden vector in `proto/testdata/vectors.json`.
 

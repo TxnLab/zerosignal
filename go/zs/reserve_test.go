@@ -303,7 +303,7 @@ func TestHTTPReserveClient_BadSigRejected(t *testing.T) {
 // wraps a DIFFERENT key in wrapped_response_key. The ticket signature still
 // verifies, so only the commit_k↔wrapped-key binding catches the fraud —
 // before the caller composes/submits open() and burns tx fees. Mirrors the
-// client's LZ7 (envelope-fetch.ts).
+// TS SDK's reserve-time check (sdk/src/reserve.ts).
 func TestHTTPReserveClient_CommitKMismatchRejected(t *testing.T) {
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
