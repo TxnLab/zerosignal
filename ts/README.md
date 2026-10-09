@@ -11,7 +11,12 @@ every signed or AAD-bound payload. The authoritative wire spec is
 [`SPEC.md`](https://github.com/TxnLab/zerosignal/blob/main/SPEC.md); the Go module is
 [`go/`](https://github.com/TxnLab/zerosignal/tree/main/go).
 
-This package ships primitives only. It does no chain access, discovery, or request orchestration.
+This package ships primitives only. Chain access and request orchestration (routing, reserve,
+escrow `open` / settle, sealing, relay hops, streaming, receipt checks) are in the payer SDK,
+[`@txnlab/zerosignal`](https://github.com/TxnLab/zerosignal/tree/main/sdk), which builds on this
+package. Operator discovery is in the Go SDK
+([`go/zs`](https://github.com/TxnLab/zerosignal/tree/main/go/zs)); a TypeScript host supplies its
+own to `@txnlab/zerosignal`.
 
 ## Install
 
@@ -82,7 +87,9 @@ For higher-assurance setups, terminate envelopes in a worker / iframe whose JS h
 Not ported (intentionally): the Go file-IO identity loader, the Go `ZeroEphemeralIdentity` wipe,
 the Go `algo`, `algod`, and `keystore` packages, the node-side half of `tools` (request rewriters,
 the tool loop, markup recovery), and the chain-access half of `escrow` (transaction composition,
-box reads, group verification).
+box reads, group verification). `@txnlab/zerosignal` carries that half: its `escrow` module
+(`sdk/src/escrow/open.ts`, `settle.ts`, `group.ts`, `algod.ts`) checks and completes the open and
+settle groups a node builds and reaches the escrow app over algod.
 
 ## Cross-implementation byte parity
 

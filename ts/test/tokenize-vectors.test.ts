@@ -17,7 +17,25 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { inputTokenBound, inputTokenBoundV2, reserveInputCount } from '../src/tokenize/index.js'
+import {
+  CEILING_FORWARD_FACTOR,
+  inputTokenBound,
+  inputTokenBoundV2,
+  reserveInputCount,
+} from '../src/tokenize/index.js'
+
+// A caller predicting a 9.11 node's refusal compares against this factor, so a
+// change on one side only makes the prediction wrong with nothing else noticing.
+// Read from the Go source because a constant has no golden vector.
+describe('CEILING_FORWARD_FACTOR', () => {
+  it('matches Go tokenize.CeilingForwardFactor', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url))
+    const goSrc = fs.readFileSync(path.resolve(here, '../../go/tokenize/bound.go'), 'utf8')
+    const m = /^const CeilingForwardFactor = (\d+)$/m.exec(goSrc)
+    expect(m, 'CeilingForwardFactor not found in go/tokenize/bound.go').not.toBeNull()
+    expect(CEILING_FORWARD_FACTOR).toBe(Number(m![1]))
+  })
+})
 
 interface InputBoundCase {
   name: string

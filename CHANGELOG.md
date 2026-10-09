@@ -288,6 +288,37 @@ caller. Consumers gain a new refusal code and lose one.
 
 ---
 
+## 9.11 — the upstream decides context fit (minor)
+
+A node no longer refuses a prompt as too long as soon as its input-token bound passes the
+budget. The bound prices the reserve and runs about 2× a real tokenizer on prose. Using it as a
+fit verdict refused honest chats at about 44% of a 160K window (32K output reserve, default 10%
+tolerance), before any client compaction could trigger.
+
+When the reserve is already at the model's ceiling (`context_window − max_output_count`), a 9.11
+node forwards a body over budget while its bound stays within `tokenize.CeilingForwardFactor`
+(3) × the budget, and lets the upstream's tokenizer decide. Above that it refuses
+`context_length_exceeded`. The factor bounds the operator's exposure when its declared window is
+smaller than the backend's real one. Pricing is unchanged: the reserve is still clamped, so
+escrow is the same. An upstream too-long rejection is normalized to `context_length_exceeded`
+and is zero-cost on a plain request. Under enforcement, a request forwarded at the ceiling is not
+offered the node's built-in tools; the caller's own function tools pass through.
+
+One refund changes: a non-streaming tool-loop request the upstream rejects after completed
+rounds now bills those rounds' reported usage, as the streaming loop already did. It used to
+settle at zero, which gave a prompt built to overflow on round two its first round free.
+
+Callers ask `wire.DefersFitToUpstream(proto_version)` and compare against
+`CeilingForwardFactor` (mirrored in TS as `CEILING_FORWARD_FACTOR`). Nothing in this module calls
+either yet: the proxy and SDK still pre-filter operators with `selection.Fits` on the bound
+before reserving, so for their users the early refusal happens there instead. Only the web
+client, which sizes without that pre-filter, reaches the forwarding path today. Relaxing
+`Fits` for 9.11 nodes is the follow-up. Mixed versions are safe in
+both directions. A caller that predicts the old refusal against a 9.11 node only compacts early.
+A caller that sends to a pre-9.11 node gets that node's zero-cost refusal, as before.
+
+---
+
 ## 9.10 — the posture is bound into `report_data` (minor, but BREAKING for `dstack-tdx`)
 
 The bundle's `posture` block was a self-report bound to nothing, and verifiers checked it only

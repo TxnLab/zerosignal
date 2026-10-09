@@ -178,8 +178,10 @@ export interface Config {
 
     /**
      * The network-facing parts: operator discovery, the reserve call, and
-     * escrow. The Client builds each absent one; a supplied one is used as
-     * is, so the settings only a built part reads (discovery, reserveTimeout,
+     * escrow. The registry is required: this SDK builds no discovery of its
+     * own yet, so `Client.create` refuses a config without one. The Client
+     * builds an absent reserve client or wallet; a supplied part is used as
+     * is, so the settings only a built part reads (reserveTimeout,
      * allowPrivateHosts) do not reach it. A supplied registry lists staging
      * nodes, as Go's does: routing holds them out as targets unless
      * allowStaging, and the relay pool keeps them.

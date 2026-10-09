@@ -149,7 +149,7 @@ The image fields (and future video fields) are excluded from the canonical bytes
 
 **Validity window and clock skew.** The verifier recovers the Ed25519 public key from `payer_addr` and checks the signature. It then requires that `payer_issued_at` is not in the future and that `now ≤ payer_issued_at + 60s`, each with a **30s** skew tolerance. Consumer devices stamp `payer_issued_at`, so skewed clocks are expected. On a window failure, the `401 invalid_payer_sig` body carries `node_time=<unix>`, the node's own clock. The caller re-stamps `payer_issued_at` to it, re-signs and retries the reserve **once**, as in AWS SigV4.
 
-**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proto/go/zs/reserve.go`) and client (`client/src/stream/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
+**A signing caller MUST implement this one-shot `node_time` resync.** Without it, every reserve from a device more than the skew tolerance off gets `401`. `proxy_recipient` is regenerated per reserve, so a fresh reserve after any hard failure has a new digest and nonce. Reference: the proxy (`proto/go/zs/reserve.go`) and the TS SDK (`proto/sdk/src/reserve.ts`) re-stamp to `node_time`, re-sign, re-seal and retry once; a persistent rejection then surfaces as `invalid_payer_sig` instead of looping.
 
 **Replay set.** `proxy_recipient` is a fresh X25519 recipient per request, so it doubles as the anti-replay nonce. A node that enforces signatures keeps a bounded, TTL'd set of seen `proxy_recipient` values covering the `60s + 30s` window. It checks membership right after a successful verify, but **records a value only when a slot is successfully reserved**. A `401`, `415`, `429` or other refused request never consumes the nonce. A repeat within the window is refused `409 reserve_replayed`. Without this, a relay could replay a captured sealed body to fill a victim's slot cap and manufacture abandon strikes against an honest payer.
 
@@ -191,11 +191,16 @@ Because the reserve is realistic rather than worst case, the node checks actual 
 
 The node measures with **the version the caller declared** in `input_bound_version`, not its own newest bound. The versions differ in the image term, which moves both ways: a v1 caller reserves 2805 tokens for a 4096×4096 image that v2 measures at ~11k. Measuring with v2 would therefore reject a correctly sized v1 request just because the node upgraded. An omitted or zero field means version 1. A node rejects an unimplemented `input_bound_version` at **reserve** time (`invalid_reserve`), not mid-flight after payment. A caller sizes with v2 only against a target that advertises support (`wire.UsesTightInputBound`): sizing v2 against a node that measures v1 fails closed with `input_budget_exceeded`, while sizing v1 against a v2 node merely over-reserves. When support cannot be established, the caller uses v1.
 
-- **Plain request over budget** → rejected before any upstream call with a sealed **zero-cost** error. Settlement refunds the reserve in full, so the caller pays only network fees and the operator only gas. An honest caller cannot hit this, since it sized the reserve from the same body. The code gives the cause: `input_budget_exceeded` when the measured bound is below the model's ceiling (a genuine under-declaration), or `context_length_exceeded` when it also exceeds `context_window − max_output_count` (the prompt cannot fit the model, whatever the reserve).
-- **Tool loop over budget** → the loop stops at the budget boundary. The node forces a final synthesis (`tool_choice: "none"`) instead of another tool round, so the user still gets an answer from the tool results so far. Tool-loop billing is the aggregate across iterations, so this is checked before every iteration after the first.
+- **Plain request over budget** → the outcome depends on whether the reserve is already at the model's ceiling, `context_window − max_output_count`:
+  - **Reserve at the ceiling, bound within `tokenize.CeilingForwardFactor` (3) × the budget** (since 9.11) → **forwarded**, not rejected. The bound is a pricing estimate that runs about 2–2.6× a real tokenizer on prose and code, so it cannot say whether a prompt fits; the upstream's own tokenizer decides. A prompt it refuses as too long comes back as `context_length_exceeded` (the node normalizes the runtimes' differing shapes to that code) and is **zero-cost** on a plain request. Before 9.11 the node rejected here once the bound passed the budget, which refused honest chats at well under half the real window. A caller predicts which behaviour applies with `wire.DefersFitToUpstream`. The reference proxy and SDK still drop an operator whose bound plus `max_output_count` exceeds its window before reserving (`selection.Fits`), so today only a caller that sizes without that pre-filter (the web client) reaches this path; relaxing the pre-filter for 9.11 nodes is a selection change, golden-vectored Go↔TS.
+  - **Reserve at the ceiling, bound beyond 3× the budget** → rejected `context_length_exceeded`. The factor bounds what the operator can be made to serve. A forwarded prompt the upstream accepts can bill more input than the reserve when the operator's declared `context_window` is smaller than the backend's real one, and the payer's charge is clamped to escrow, so the operator absorbs the excess. Content that tokenizes far better than prose (whitespace runs, `\uXXXX`-escaped non-Latin text) reaches this cap before the real window.
+  - **Reserve below the ceiling** → rejected `input_budget_exceeded`, or `context_length_exceeded` when the bound also exceeds the ceiling. An honest caller sized the reserve from the same body, and any bound past the ceiling was clamped to it, so it cannot land here.
+
+  A rejection is a sealed **zero-cost** error: settlement refunds the reserve in full, so the caller pays only network fees and the operator only gas.
+- **Tool loop over budget** → the loop stops at the budget boundary. The node forces a final synthesis (`tool_choice: "none"`) instead of another tool round, so the user still gets an answer from the tool results so far. Tool-loop billing is the aggregate across iterations, so this is checked before every iteration after the first. Under enforcement, a request **forwarded at the ceiling** is not offered the node's built-in tools (they are removed from `tools[]` before the upstream call; caller-defined function tools are kept): its first round alone can use the whole window, so a second round would bill past the reserve. When a later round is rejected by the upstream, the rounds already completed are billed from their reported usage, on streaming and non-streaming requests alike.
 - **Chain rule** → a `previous_response_id` request whose reserved `input_count` is below `context_window − max_output_count` is rejected `chain_reserve_insufficient`. The caller must reserve the worst case for history the node cannot see.
 
-Enforcement is controlled by `zs.reserve.enforce_input_budget`, default **on**. It protects the operator from under-declared `input_count`, and it never false-rejects a plain turn, because the node measures with the caller's own bound. Turning it **off** suits a trusted single-user node, or "monitor mode": over-budget requests are served, logged and counted on `zs_reserve_input_budget_over_total`. The node logs a startup WARN when it is off. Models with no declared `context_window` remain an operator subsidy either way.
+Enforcement is controlled by `zs.reserve.enforce_input_budget`, default **on**. It protects the operator from under-declared `input_count`. Below the ceiling it never false-rejects a plain turn, because the node measures with the caller's own bound; at the ceiling it defers fit to the upstream up to the forward factor. Turning it **off** suits a trusted single-user node, or "monitor mode": over-budget requests are served, logged and counted on `zs_reserve_input_budget_over_total`. The node logs a startup WARN when it is off. Models with no declared `context_window` remain an operator subsidy either way.
 
 `max_output_count` is not estimated. It is read from the body's `max_tokens`, `max_completion_tokens` or `max_output_tokens`. If the body has none, the caller (proxy or client) uses a configured per-model override, or else **derives a ceiling per operator** from that operator's declared capacity:
 
@@ -207,7 +212,7 @@ The ceiling is `32768` for **every** caller: the proxy's `fallback_max_output_to
 
 **Escrow cost.** The derived ceiling sets `max_output_count` and so `max_price`, which is USDC locked in escrow until settlement. At a `$6`/1M output rate, a derived `32768` locks about `$0.20` per turn; unused output is refunded at settlement. On the client the same number sets `modelFloorMicroUsdc`, which decides whether a model reads as affordable and feeds the low-balance blocker. This applies only to models whose operator declares no `max_output_tokens`, since a declared cap is used verbatim. `zs-node init`'s Sizing step and `zs-node doctor`'s missing-ceiling check push operators to declare one.
 
-This is **caller-side sizing**, not a wire change. The derived number rides `max_output_count`, and the node applies the same `context_window` fit check (§ 3a "Context-window cap"). Deriving per operator lets a request reserve a right-sized ceiling on a small-window operator instead of routing away from it. The sizing filter and the escrow always agree because both call `DeriveMaxOutput` on the same inputs. The request is rejected before reserve with `400 max_output_required` (§ 10) only when the body omits the field, no per-model override exists and the global fallback is disabled (set to 0), because the node needs a concrete ceiling to compute `max_price`.
+This is **caller-side sizing**, not a wire change. The derived number rides `max_output_count`, and the node caps `input_count` against the same `context_window` (§ 3a "Context-window cap"). Deriving per operator lets a request reserve a right-sized ceiling on a small-window operator instead of routing away from it. The sizing filter and the escrow always agree because both call `DeriveMaxOutput` on the same inputs. The request is rejected before reserve with `400 max_output_required` (§ 10) only when the body omits the field, no per-model override exists and the global fallback is disabled (set to 0), because the node needs a concrete ceiling to compute `max_price`.
 
 ### Response (success)
 
@@ -468,7 +473,7 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 - The **node prices with the same code the payer verifies with**: `node/internal/server/reserve.go` and `receipt.go::chargeFor` delegate to it.
 - `DefaultPolicy` is `RateMaxMultiple: 2.0`, `InputCountTolerance: 0.10` (the node's `input_budget_tolerance`), `FailOpen: true`.
 - Proxy: `proto/go/zs/dispatch.go::verifyReservePrice`. A violation skips that operator like a capacity rejection; if every operator is rejected on price, the proxy returns `502 ticket_price_rejected`.
-- Client: `verifyReservePrice` in `client/src/stream/envelope-fetch.ts` raises the `ticket_price_exceeded` blocker.
+- TS SDK: `verifyReservePrice` in `proto/sdk/src/reserve-price.ts` raises the `ticket_price_exceeded` blocker.
 
 ### Response (refusal)
 
@@ -1198,7 +1203,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
   "max_tool_iterations": 4,
   "tool_headroom_per_iteration": 4000,
   "version": "0.21.0+abc1234 [2026-05-03T12:00:00Z]",
-  "proto_version": "9.10",
+  "proto_version": "9.11",
   "config_hash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 }
 ```
@@ -1221,7 +1226,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
 | `models[].long_context_input_rate_usd_per_1m` | float | **Advertised** high-tier input rate, USD per 1,000,000, applied when `input_count ≥ long_context_threshold_tokens`. Present (even at `0`) **only** when a threshold is advertised. It is `≥` the base `input_rate_usd_per_1m`: a surcharge, since the node rejects a tier that undercuts its base. |
 | `models[].long_context_output_rate_usd_per_1m` | float | **Advertised** high-tier output rate, USD per 1,000,000. Same conventions; `≥` the base `output_rate_usd_per_1m`. |
 | `models[].long_context_cache_read_rate_usd_per_1m` | float | **Advertised** high-tier cached-read rate, USD per 1,000,000, with the same absent-vs-`0` rule as `cache_read_rate_usd_per_1m`. Present **only** when the high tier discounts cached reads (strictly below the high `input_rate`). See "Cached-read rates" below. |
-| `models[].context_window` | uint64 | Per-model capacity ceiling. The node rejects a reserve with `input_count + max_output_count > context_window` as `400 context_length_exceeded`. Zero or omitted means no declared cap. See "`context_window` with a long-context tier" below. |
+| `models[].context_window` | uint64 | Per-model capacity ceiling. The node caps a reserve's `input_count` at `context_window − max_output_count` and rejects `max_output_count ≥ context_window` as `400 context_length_exceeded` (§ 3a "Context-window cap"). Zero or omitted means no declared cap. See "`context_window` with a long-context tier" below. |
 | `models[].max_output_tokens` | uint64 | Optional per-model output ceiling, tighter than `context_window`. Zero or omitted means no separate output cap. |
 | `models[].input_modalities` | []string | Content kinds the model accepts (`"text"`, `"image"`, `"audio"`, `"video"`). Nil means undeclared: clients should treat it as text-only for filtering, but the node's reserve handler is the authoritative gate. |
 | `models[].output_modalities` | []string | Content kinds the model produces. Same conventions. |
@@ -1243,7 +1248,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
 | `max_tool_iterations` | int | Cap on chat→tool→chat loops per tool-bearing request. A caller sizes a tool-carrying reserve's `input_count` as `body_bound + max_tool_iterations × tool_headroom_per_iteration` (§ 3a "Input-token bound"), so the escrow covers the input a tool loop accumulates. Omitted when no registry is loaded. |
 | `tool_headroom_per_iteration` | uint64 | Input-token headroom per tool-loop iteration that the operator recommends, sized from its tools' typical result size (e.g. `web_read`'s byte cap). Advisory: a mismatch changes only the reserve size, never correctness, since the node's inference-time input-budget check reconciles actual usage. Omitted/`0` on older nodes; callers then use a built-in default (4000). |
 | `version` | string | Node build identification, `<release>+<commit>[-dirty] [<commit-time>]`. Informational only: clients MUST NOT parse it, nor compare it semantically, to drive routing or settlement, which stay driven by ticket-pinned values. See "Build version" below. |
-| `proto_version` | string | Wire-protocol generation, `<major>.<minor>` (currently `"9.10"`). **Parsed by clients**, unlike `version`. Compatibility is **major equality**: a peer (proxy or direct client) drops an operator whose major differs from its own build's. Minor differences MUST NOT cause filtering. 9.9 and 9.10 are the two minor bumps that are not backwards-compatible: 9.8 and 9.9 verifiers refuse each other's `dstack-tdx` evidence, as do 9.9 and 9.10 (§ 3e verifier step 6). That refusal comes from the evidence check, not from comparing versions. An absent value reads as `"1.0"`, so a node that omits the field falls out of a current peer's candidate set by major inequality. See "Protocol version negotiation" below. |
+| `proto_version` | string | Wire-protocol generation, `<major>.<minor>` (currently `"9.11"`). **Parsed by clients**, unlike `version`. Compatibility is **major equality**: a peer (proxy or direct client) drops an operator whose major differs from its own build's. Minor differences MUST NOT cause filtering. 9.9 and 9.10 are the two minor bumps that are not backwards-compatible: 9.8 and 9.9 verifiers refuse each other's `dstack-tdx` evidence, as do 9.9 and 9.10 (§ 3e verifier step 6). That refusal comes from the evidence check, not from comparing versions. An absent value reads as `"1.0"`, so a node that omits the field falls out of a current peer's candidate set by major inequality. See "Protocol version negotiation" below. |
 | `config_hash` | string | `"sha256:<hex>"` fingerprint of the operator's **policy** config: what the node serves and at what price. Nodes with the same policy advertise the same hash, and it changes when any policy field does. Advisory: clients MUST NOT drive routing or settlement from it. See "Policy fingerprint" below. |
 
 **Ephemeral recipient.**
@@ -1466,9 +1471,9 @@ A divergence between an advertised value and the eventual ticket is therefore no
 
 `proto_version` advertises the wire-protocol generation a node speaks. Unlike the rest of the details payload, which is *advisory*, `proto_version` **drives routing**: a proxy or direct client filters out operators whose advertised major differs from its own build's constant, before any reserve round-trip.
 
-**Shape.** `<major>.<minor>` strings, currently `"9.10"`. Both segments are non-negative integers. A major alone (`"9"`) decodes as major-only. A patch suffix (`"9.8.1"`) is tolerated; compatibility still consults only the major segment.
+**Shape.** `<major>.<minor>` strings, currently `"9.11"`. Both segments are non-negative integers. A major alone (`"9"`) decodes as major-only. A patch suffix (`"9.8.1"`) is tolerated; compatibility still consults only the major segment.
 
-**Compatibility rule.** Major equality. A proxy or client with `wire.ProtoVersion = "9.10"` accepts operators advertising `"9.0"`, `"9.5"`, or `"9.999.x"`. It rejects a different or unparseable major. Minor-version capability checks are separate and fail closed when a feature requires them.
+**Compatibility rule.** Major equality. A proxy or client with `wire.ProtoVersion = "9.11"` accepts operators advertising `"9.0"`, `"9.5"`, or `"9.999.x"`. It rejects a different or unparseable major. Minor-version capability checks are separate and fail closed when a feature requires them.
 
 **Missing field.** An absent `proto_version` decodes to `"1.0"`, so the major-equality filter drops the node from a current peer's candidate set, along with every other incompatible generation, without any per-operator config: the node is skipped at discovery.
 
@@ -3365,9 +3370,14 @@ settle fee when that settle is submitted after the response or fails to submit.
 vendor-specific one, which the client can't map. On the non-streaming path the
 node **synthesizes** a clean `provider_overloaded` body rather than forwarding
 the upstream's verbatim error, so the receipt's `body_hash` covers the
-synthesized bytes. Other structured upstream errors (e.g.
-`context_length_exceeded`) keep their own code and, non-streaming, are forwarded
-byte-identical.
+synthesized bytes. The node synthesizes the same way, with the same `body_hash`
+rule, for two more cases. An upstream rejection that says the prompt is too
+long becomes `context_length_exceeded` whatever shape the runtime sent it in
+(vLLM's numeric code, llama.cpp's own type, a bare message). And when there are no
+upstream bytes to forward, which is every provider error on a non-streaming
+tool-loop request, the node builds the body from the error's status, type and
+code. Other structured upstream errors on a plain request keep their own code
+and, non-streaming, are forwarded byte-identical.
 
 **`X-Should-Retry`.** Every error response the reference proxy writes, and every
 stream it opens, carries `X-Should-Retry: true` or `false`. A stream is always
@@ -3403,9 +3413,9 @@ block production drops the group. It is detected in one of two ways:
 
 ## 11. Versioning
 
-Version negotiation occurs at discovery, as defined in § 3c “Protocol version negotiation”; the current `proto_version` is `"9.10"`. The envelope has no inline version field. Peers with the same major remain compatible, while capabilities introduced by a minor version are used only when their specific version gate passes. An absent or unparseable version never implies capability support.
+Version negotiation occurs at discovery, as defined in § 3c “Protocol version negotiation”; the current `proto_version` is `"9.11"`. The envelope has no inline version field. Peers with the same major remain compatible, while capabilities introduced by a minor version are used only when their specific version gate passes. An absent or unparseable version never implies capability support.
 
-Minor versions are additive and need not introduce a gate. For example, 9.3 added long-context pricing fields, 9.4 added built-in-tool `action` fields (§ 5.3.1), 9.5 added the `dstack-tdx` attestation mode with its `event_log` / `posture` evidence fields (§ 3e), 9.6 added the `app_compose` preimage beside them, 9.7 added the optional `collateral` set beside that, and 9.8 added the optional `upstream_attestation` block, all of which older peers can ignore. 9.9 and 9.10 are the exceptions: 9.8 and 9.9 verifiers refuse each other's dstack-tdx nodes, as do 9.9 and 9.10 (§ 3e, verifier step 6). Within a compatible major, implementations are otherwise expected to track the same revision of this spec.
+Minor versions are additive and need not introduce a gate. For example, 9.3 added long-context pricing fields, 9.4 added built-in-tool `action` fields (§ 5.3.1), 9.5 added the `dstack-tdx` attestation mode with its `event_log` / `posture` evidence fields (§ 3e), 9.6 added the `app_compose` preimage beside them, 9.7 added the optional `collateral` set beside that, 9.8 added the optional `upstream_attestation` block, and 9.11 changed when a node refuses an over-budget prompt at the context ceiling (§ 3a; gate `wire.DefersFitToUpstream`), all of which older peers can ignore. 9.9 and 9.10 are the exceptions: 9.8 and 9.9 verifiers refuse each other's dstack-tdx nodes, as do 9.9 and 9.10 (§ 3e, verifier step 6). Within a compatible major, implementations are otherwise expected to track the same revision of this spec.
 
 **Before stability.** The wire shape is not frozen. Incompatible changes may be made in place while the protocol remains in active development.
 

@@ -726,11 +726,11 @@ func (c *HTTPReserveClient) reserveAttempt(
 	// (already signature-verified) ticket. Run it BEFORE the caller composes
 	// and submits open() so a node that committed sha256(K_real) but wrapped a
 	// different K can't make us burn tx fees + lock escrow on a request its own
-	// admission tag will then reject. This mirrors the client's LZ7
-	// (client/src/stream/envelope-fetch.ts) and the proxy's own response-time
-	// verifyCommitK (dispatch.go) — same base64(sha256(K)) ==
-	// ticket.commit_k comparison, using the shared ticket.CommitResponseKey
-	// primitive. SPEC §3a.
+	// admission tag will then reject. This mirrors the TS SDK's reserve-time
+	// check (sdk/src/reserve.ts, via verifyCommitK in sdk/src/verify.ts) and
+	// this package's response-time verifyCommitK (dispatch.go) — same
+	// base64(sha256(K)) == ticket.commit_k comparison, using the shared
+	// ticket.CommitResponseKey primitive. SPEC §3a.
 	if commit := ticket.CommitResponseKey(key); base64.StdEncoding.EncodeToString(commit[:]) != parsed.Ticket.CommitK {
 		return nil, errors.New("reserve commit_k mismatch: wrapped_response_key does not hash to ticket.commit_k")
 	}

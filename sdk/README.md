@@ -219,6 +219,59 @@ and body; the SDK sets those two headers and strips the node's `X-Zs-*` ones.
 the `fundingUrl` a `wallet_unfunded` error points at. It reads the network and logger off the
 Client unless the options set them, and the hint shows only on mainnet.
 
+### Sizing
+
+A turn sizes each candidate against that operator's declared capacity before reserving with it.
+The functions are exported and mirror the Go SDK's sizing (`sizing.go`, plus `reserveInputCount`
+in `dispatch.go`), pinned by `reserve_sizing_vectors.json`, so a host that
+estimates a reserve or explains a no-fit gets the numbers dispatch uses. A `SizingRequest` holds
+the model, the v1 and v2 input bounds, and either a flat `maxOutputTokens` or `deriveMaxOutput`
+with its `maxOutputCeiling`.
+
+- `capacityOf(op, model)` is the operator's `ModelCapacity` for the model, or `undefined` when
+  it declares none.
+- `effectiveMaxOutput(op, req)` is the max_output that operator's reserve escrows.
+- `fits(op, req)` is whether the input bound plus that max_output fits the operator's context
+  window and the max_output its cap. An operator that declares no capacity for the model fits
+  any request.
+- `maxDeclaredOutput(ops, model)` is the largest `maxOutputTokens` any of `ops` declares, or 0
+  when one of them declares none: one uncapped operator leaves no ceiling to clamp a request
+  to. A turn reads it over the operators it could route to, before any reserve, and reports a
+  clamp as `max_output.clamped`.
+- `reserveInputCount(op, model, body, maxOutputTokens)` is the `input_count` the reserve
+  commits to, with the `boundVersion` it measured by (v2 for an operator whose protocol
+  version uses the tight bound). It is the body's bound, plus tool-loop headroom when the body
+  carries server-side tools (`DEFAULT_TOOL_HEADROOM_PER_ITERATION` per iteration for an
+  operator that declares none), floored at `RESERVE_MIN_INPUT_COUNT` and capped to the window.
+  A body carrying `previous_response_id` can't be measured, so it reserves all of the window
+  the output leaves.
+
+### Reserve retries and busy nodes
+
+A reserve that fails for infrastructure reasons is retried before anything is paid, in two
+layers, each mirroring the Go SDK's:
+
+- **One candidate.** `reserveWithTransientRetry` asks the same node up to `INNER_ATTEMPTS`
+  (3) times, on `@txnlab/zs-proto/transient`'s inner delay schedule or a longer `Retry-After`,
+  and through a different relay each time when the request is relayed. With no relay left to
+  rotate to it stops rather than go direct. A stale ephemeral key is re-probed once per
+  candidate. Each retry emits `reserve.retrying`, and a rotation `relay.hop`. A relay is
+  charged with a failure only when the verdict names it, or when a later relay reaches the
+  same node; no reserve credits a relay.
+- **The whole list.** When every candidate failed transiently and none refused, the turn
+  walks the list again, up to `SWEEPS` passes in all, within `Config.retryBudget` (60 s by
+  default). `Config.sweepDelay` replaces the wait schedule.
+
+A busy node is the one refusal that clears by itself. A `429` raises `BusyError`, whose
+`retryable` comes from `retryableBusyCode`: only `no_capacity` is worth re-asking, and
+re-asking after `payer_slot_cap` costs the payer a penalty strike. When a candidate was busy
+with a retryable code and no candidate refused for a reason waiting can't fix (a hard
+refusal, a size rejection, no eligible relay), the turn re-sweeps up to `BUSY_RETRIES` (2)
+more times, starting only within `BUSY_RETRY_BUDGET_MS` (8 s) of dispatch. `busyRetryWait`
+picks the wait: `BUSY_RETRY_DELAY_MS` (1 s), or a node's `Retry-After` clamped to
+`BUSY_RETRY_MAX_DELAY_MS` (3 s) when that is longer; `Config.sweepDelay` replaces both. A
+pool still full at the end fails `operators_busy` with the longest hint as its retry-after.
+
 ## Routing stores
 
 `@txnlab/zerosignal/routing` holds the payer's own routing signals: `RelayReputationStore`,

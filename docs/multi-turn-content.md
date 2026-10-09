@@ -75,7 +75,7 @@ The pipeline is `client | tui → (proxy, for the tui only — client talks dire
 
 | Surface | Replay logic | Key lines |
 |---|---|---|
-| `client/` | `messagesToWireInput` / `assistantOutputMessage` | `client/src/state/conversation/response-item.ts:356-394, 413-508`; stateless invariant at `client/src/operators/dispatch-candidates.ts:282-288` |
+| `client/` | `messagesToWireInput` / `assistantReplay` | `client/src/state/conversation/response-item.ts:921-959, 1032-1160`; stateless invariant at `client/src/operators/dispatch-candidates.ts:477-483` |
 | `tui/` | `runResponsesTurn` / `printStreamResponse` | `tui/main.go:512-643, 3213-3450`; reasoning carve-out `tui/main.go:3252-3254, 3772-3773` |
 | transit | `inject.*` mutators | `proto/go/inject/{store,tools,routing,safety,stream_options}.go`; proxy `proto/go/zs/dispatch.go::Client.dispatch`; node `node/internal/server/handlers.go:1135-1186`; `dropReasoningItems` `node/internal/server/tool_loop.go:641-679` |
 
