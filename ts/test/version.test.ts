@@ -13,7 +13,9 @@ import {
     LEGACY_PROTO_VERSION,
     PROTO_VERSION,
     RELAY_HOP_HEADER_MIN_VERSION,
+    UPSTREAM_FIT_VERDICT_MIN_VERSION,
     bootstrapProtoVersion,
+    defersFitToUpstream,
     protoVersionAtLeast,
     protoVersionCompatible,
     publishesAppCompose,
@@ -126,6 +128,20 @@ describe('publishesAppCompose', () => {
     // drifted BELOW PROTO_VERSION would be inert and one ABOVE it would make
     // this build's own nodes read as withholding — neither shows up above.
     it('covers this build', () => expect(publishesAppCompose(PROTO_VERSION)).toBe(true))
+})
+
+describe('defersFitToUpstream', () => {
+    const capable = [UPSTREAM_FIT_VERDICT_MIN_VERSION, '9.11', '9.12', '10.0', '9.11.2']
+    // A string comparison admits '9.2' ('9.2' > '9.11' lexically) and refuses
+    // '10.0'; those two rows are what catch it.
+    const notCapable = ['9.10', '9.2', '9', '1.0', '', undefined, null, 'garbage']
+    for (const v of capable) {
+        it(`${v} defers fit`, () => expect(defersFitToUpstream(v)).toBe(true))
+    }
+    for (const v of notCapable) {
+        it(`${String(v)} refuses on the bound`, () => expect(defersFitToUpstream(v)).toBe(false))
+    }
+    it('covers this build', () => expect(defersFitToUpstream(PROTO_VERSION)).toBe(true))
 })
 
 // Regression pin for the seeding trap. Callers seed an UNPROBED peer's

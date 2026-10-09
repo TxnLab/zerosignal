@@ -22,6 +22,14 @@ export const IMAGE_DEFAULT_HEIGHT_PX = 2048
 export const IMAGE_DEFAULT_DETAIL = 'high'
 
 /**
+ * Mirrors proto/go/tokenize.CeilingForwardFactor. A 9.11+ node forwards a body
+ * over budget whose reserve is at the model's ceiling only while its bound is
+ * at most this times the budget, and refuses it context_length_exceeded above
+ * that (SPEC §3a). A caller predicting the refusal compares against it.
+ */
+export const CEILING_FORWARD_FACTOR = 3
+
+/**
  * Safe upper bound on the input tokens a request body will consume:
  * ceil(textBytes / 2) + imageTileTokens + FLAT_MARGIN, where textBytes
  * excludes the bytes of any image-URL strings (scored by the tile formula

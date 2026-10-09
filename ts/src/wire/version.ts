@@ -15,7 +15,7 @@
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-export const PROTO_VERSION = '9.10' as const
+export const PROTO_VERSION = '9.11' as const
 
 // LEGACY_PROTO_VERSION is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -163,6 +163,31 @@ export const TIGHT_INPUT_BOUND_MIN_VERSION = '9.2' as const
  */
 export function usesTightInputBound(protoVersion: string | undefined | null): boolean {
     return protoVersionAtLeast(protoVersion, TIGHT_INPUT_BOUND_MIN_VERSION)
+}
+
+/**
+ * The first PROTO_VERSION at which a node stops treating the input-token bound
+ * as the context-fit verdict. When the reserve is already at the model's
+ * ceiling, the node forwards a body over budget and leaves fit to the
+ * upstream's tokenizer, as long as its bound stays within
+ * CEILING_FORWARD_FACTOR × the budget (SPEC §3a).
+ */
+export const UPSTREAM_FIT_VERDICT_MIN_VERSION = '9.11' as const
+
+/**
+ * Whether a node advertising `protoVersion` forwards an over-budget body at the
+ * ceiling (up to CEILING_FORWARD_FACTOR × the budget) rather than refusing as
+ * soon as the bound passes the budget, the ceiling × (1 + input_budget_tolerance).
+ * A caller uses it to decide which refusal to predict before sending.
+ *
+ * A false negative is only wasteful: the caller compacts a prompt early, as it
+ * does for every pre-9.11 node. A false positive sends a prompt that an old node
+ * refuses, which is also zero-cost but loses the turn. Fails closed via
+ * protoVersionAtLeast, so an unparseable or bootstrap-seeded version reads as
+ * the old behaviour.
+ */
+export function defersFitToUpstream(protoVersion: string | undefined | null): boolean {
+    return protoVersionAtLeast(protoVersion, UPSTREAM_FIT_VERDICT_MIN_VERSION)
 }
 
 /**

@@ -45,6 +45,18 @@ const (
 	imageDefaultHeightPx = 2048
 )
 
+// CeilingForwardFactor bounds what a 9.11+ node forwards when a reserve is
+// already at the model's ceiling (context_window − max_output) and the body's
+// bound is over budget (SPEC §3a). The bound runs ~2–2.6x a real tokenizer on
+// prose and code, so an honest chat that fills the window lands under 3x and
+// is forwarded for the upstream's tokenizer to judge. Above it the node refuses
+// context_length_exceeded. The cap is what keeps the operator's exposure
+// bounded when its declared context_window is smaller than the backend's real
+// one: forwarded input can then exceed the reserve, and the payer's charge is
+// clamped to escrow. A caller predicting the node's refusal reads this same
+// constant (proto/ts mirrors it).
+const CeilingForwardFactor = 3
+
 // Bound versions. The version a caller sizes its reserve with rides on the
 // reserve request (ReserveRequest.InputBoundVersion) and the node enforces with
 // that same version, because v2 is not uniformly smaller than v1: it is tighter

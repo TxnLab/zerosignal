@@ -27,7 +27,7 @@ import (
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-const ProtoVersion = "9.10"
+const ProtoVersion = "9.11"
 
 // LegacyProtoVersion is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -217,6 +217,29 @@ const TightInputBoundMinVersion = "9.2"
 // bootstrap-seeded version returns false and the caller keeps sizing with v1.
 func UsesTightInputBound(protoVersion string) bool {
 	return ProtoVersionAtLeast(protoVersion, TightInputBoundMinVersion)
+}
+
+// UpstreamFitVerdictMinVersion is the first ProtoVersion at which a node stops
+// treating the input-token bound as the context-fit verdict. When the reserve is
+// already at the model's ceiling (context_window − max_output), the node
+// forwards a body over budget and leaves fit to the upstream's tokenizer, as
+// long as its bound stays within tokenize.CeilingForwardFactor × the budget
+// (SPEC §3a).
+const UpstreamFitVerdictMinVersion = "9.11"
+
+// DefersFitToUpstream reports whether a node advertising protoVersion forwards
+// an over-budget body at the ceiling (up to tokenize.CeilingForwardFactor × the
+// budget) rather than refusing as soon as the bound passes the budget, the
+// ceiling × (1 + input_budget_tolerance).
+//
+// A caller uses it to decide which refusal to predict before sending. A false
+// negative is only wasteful: the caller compacts a prompt early, as it does for
+// every pre-9.11 node. A false positive sends a prompt that an old node refuses,
+// which is also zero-cost but loses the turn. Fails closed via
+// ProtoVersionAtLeast, so an unparseable or bootstrap-seeded version reads as
+// the old behaviour.
+func DefersFitToUpstream(protoVersion string) bool {
+	return ProtoVersionAtLeast(protoVersion, UpstreamFitVerdictMinVersion)
 }
 
 // AppComposeMinVersion is the first ProtoVersion at which a dstack-tdx

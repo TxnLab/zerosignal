@@ -157,6 +157,38 @@ func TestPublishesAppCompose(t *testing.T) {
 	}
 }
 
+func TestDefersFitToUpstream(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{UpstreamFitVerdictMinVersion, true},
+		{"9.11", true},
+		{"9.12", true},
+		{"10.0", true},
+		{"9.11.2", true},
+		{"9.10", false},
+		// A string comparison admits "9.2" ("9.2" > "9.11" lexically) and
+		// refuses "10.0"; these two rows are what catch it.
+		{"9.2", false},
+		{"9", false},
+		{"1.0", false},
+		{"", false},
+		{"garbage", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.version, func(t *testing.T) {
+			if got := DefersFitToUpstream(tc.version); got != tc.want {
+				t.Fatalf("DefersFitToUpstream(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+	if !DefersFitToUpstream(ProtoVersion) {
+		t.Fatalf("DefersFitToUpstream(ProtoVersion=%q) = false — this build's own nodes "+
+			"would be predicted to refuse at the old threshold", ProtoVersion)
+	}
+}
+
 // TestAppComposeGateCoversThisBuild pins the gate to the constant it
 // gates on. A hand-typed min-version that drifted BELOW ProtoVersion
 // would be inert (everything current passes) and one ABOVE it would
