@@ -205,6 +205,22 @@ Under 0.x a minor bump is a breaking change and a patch bump is not. Never move 
 pushed `go/v*` tag: every consumer's `go.sum` has recorded its hash, so a moved tag fails their
 builds with a checksum mismatch.
 
+### When zs-node releases
+
+Each verifier trusts only the zs-node releases compiled into it, so a node on a release a payer
+doesn't list counts as unattested there: it still serves requests that need no TEE, but none that
+do. Each node tag runs zs-node's `release-allowlist.yml`, which opens two pull requests:
+
+- **Here.** It appends the release's image and its two compose skeletons (CPU, and GPU with
+  sealed local models) to `go/attest/releases.go`, and regenerates `ts/src/attest/trust-lists.ts`
+  from it, which `TestTrustListTwinVectors` requires. If a pull request arrives with only
+  `releases.go` changed (a node tag cut before the workflow gained that step), regenerate by hand
+  with `cd go && go test ./attest -run TestTrustListTwinVectors -update-trust-lists`. Once it
+  merges, cut a release here and bump zs-proxy's pin.
+- **In the web app.** It appends the same values to the app's own copy of the list, which reaches
+  payers on the app's next deploy. That copy is what the app trusts until it verifies with this
+  SDK; from then on a node release reaches it the way it reaches zs-proxy.
+
 ## License
 
 Apache-2.0 — see [`LICENSE`](./LICENSE).

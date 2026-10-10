@@ -31,6 +31,25 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-10 — the TypeScript SDK verifies TEE evidence itself (0.3.0)
+
+`@txnlab/zerosignal/tee` is the twin of `zs/tee`: `BundleVerifier` and `DstackVerifier` run
+Go's checks in Go's order, pinned by `tee_verdict_vectors.json` for a given outcome of the Intel
+chain check. `defaultVerifier()` trusts the OS images and zs-node releases in `go/attest`, now
+generated into `@txnlab/zs-proto/attest` (`trustedComposeSkeletons`, `trustedNodeImages`,
+`trustedDstackOSImages`), and checks the quote against Intel's PCK chain with `@phala/dcap-qvl`
+0.6.1, a new runtime dependency loaded on first use. Its collateral comes from Phala's PCCS
+mirror by default rather than Intel's PCS, since a browser cannot reach Intel's; `pccs.ts` lists
+how its error handling and cache differ from Go's. `fetchAttestation` and `probeAttestation`
+port Go's attestation fetch and probe for a host's registry, and `Config.teeVerifier` resolves as
+Go's `TEEVerifier` does (`ResolvedConfig.teeVerifier` is new, so a hand-built `ResolvedConfig`
+needs it). `TEEStatus` gains a display-only `detail`.
+
+Both SDKs now clamp a bundle's `refresh_seconds` to the evidence ceiling before doubling it. A
+cadence that overflowed the nanosecond product could narrow the freshness window to nanoseconds
+and refuse the node; any cadence past the ceiling now gets the 80-minute ceiling, as SPEC § 3e
+step 2 says.
+
 ### 2026-10-09 — the payer's fit filter defers to a 9.11 node
 
 `selection.Fits`, and the reserve-leg `Fits` in both SDKs, go through

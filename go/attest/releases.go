@@ -31,9 +31,10 @@ package attest
 // this file (TestTrustListTwinVectors), and that test fails while it is stale.
 //
 // ENTRIES ARE APPENDED BY zs-node's release-allowlist.yml on every version
-// tag, above the marker at the end of each literal. It opens a pull request
-// rather than pushing to the base branch, so the values arrive through a human
-// merge; only the hand-copy step is automated.
+// tag, above the marker at the end of each literal, and the same pull request
+// regenerates the TypeScript twin. It opens a pull request rather than pushing
+// to the base branch, so the values arrive through a merge; only the hand-copy
+// step is automated.
 //
 // THAT IS A REVIEWED PATH ONLY WITH A RULESET on this repository's default
 // branch requiring a reviewed pull request, with NO bypass for the GitHub App
@@ -43,13 +44,17 @@ package attest
 // acts as the user who minted it and inherits that user's admin bypass,
 // exempting from review precisely the credential the review exists to contain.
 // Adding the App to the bypass list undoes this, and nothing here can detect
-// it. MEASURED 2026-10-03: no such ruleset exists here yet, and the App must
-// not be installed until one does.
+// it. MEASURED 2026-10-10: the `main` ruleset exists and the App is not on its
+// bypass list, but it requires ZERO approving reviews, so the App could merge
+// its own pull request once the required checks pass. Until
+// required_approving_review_count is at least 1, those checks are all that
+// bound it.
 //
-// To add one by hand, compute a release's two values with
+// To add one by hand, compute a release's values with
 // `go run ./cmd/release-allowlist print -image <ref>` in the zs-node repo (the
 // image ref is an input there, not something it derives), or read them off
-// `zs-proxy tee inspect --file <that release's compose>`.
+// `zs-proxy tee inspect --file <that release's compose>`, then regenerate the
+// twin with `go test ./attest -run TestTrustListTwinVectors -update-trust-lists`.
 //
 // THE TWO LISTS ARE SEPARATE BECAUSE THEY MOVE APART. A release that changes
 // only the binary yields a new image digest and the SAME skeleton, since the
