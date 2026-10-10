@@ -26,7 +26,7 @@ This repo is the protocol **and** the payer SDK. The Go SDK is `go/zs` (with `zs
 
 Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/`](./testdata/): Go generates it and both suites replay it. Change one side and the other in the same commit, then regenerate with the owning test's `-update` flag or `make update-vectors`. `make update-vectors` covers most fixtures but not all: the sealed vectors have their own `update-sealed-vectors` / `update-ts-sealed-vectors` targets and change only on purpose, and `tokenize_corpus.json` comes from a Python generator. `make test` runs both suites plus `check-vector-generators`, `check-no-hayai`, `check-lockstep` and `check-escrow-client`.
 
-**Protocol packages** (`go/<pkg>` ↔ `ts/src/<pkg>`, `@txnlab/zs-proto/<pkg>`), each pinned by its own fixture: `ticket` (`vectors.json`), `selection`, `steering`, `transient`, `pricing`, `imageprice` (`image_vectors.json`), `tokenize`, `tools`, `inject` (`details_`, `dialect_`, `payer_mutator_`, `tool_growth_vectors.json`), `wire` (`sealed_`, `stream_vectors.json`), `attest` (`attest_`, `compose_vectors.json`), and `escrow` box decoding plus `Classify` ↔ `classify` (`escrow_vectors.json`).
+**Protocol packages** (`go/<pkg>` ↔ `ts/src/<pkg>`, `@txnlab/zs-proto/<pkg>`), each pinned by its own fixture: `ticket` (`vectors.json`), `selection`, `steering`, `transient`, `pricing`, `imageprice` (`image_vectors.json`), `tokenize`, `tools`, `inject` (`details_`, `dialect_`, `payer_mutator_`, `tee_bundle_`, `tool_growth_vectors.json`), `wire` (`sealed_`, `stream_vectors.json`), `attest` (`attest_`, `collateral_`, `compose_vectors.json`), and `escrow` box decoding plus `Classify` ↔ `classify` (`escrow_vectors.json`).
 
 **SDK pairs:**
 

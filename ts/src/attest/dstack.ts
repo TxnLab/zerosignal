@@ -1136,6 +1136,9 @@ function decodeNonce(s: unknown): Uint8Array | null {
  * kept rather than stripped, so JSON.parse refuses it as Go does.
  *
  * Throws a TypeError on invalid UTF-8 and a SyntaxError on invalid JSON.
+ *
+ * It does not check field types. decodeEvidenceBundle in
+ * @txnlab/zs-proto/inject does, refusing what Go's decode refuses.
  */
 export function parseEvidenceBundle(body: Uint8Array | ArrayBuffer): unknown {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body))
