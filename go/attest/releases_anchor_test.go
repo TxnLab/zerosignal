@@ -152,6 +152,7 @@ func TestReleaseLists_FreshSlicePerCall(t *testing.T) {
 	for name, fn := range map[string]func() []string{
 		"TrustedComposeSkeletons": TrustedComposeSkeletons,
 		"TrustedNodeImages":       TrustedNodeImages,
+		"TrustedDstackOSImages":   TrustedDstackOSImages,
 	} {
 		a := fn()
 		if len(a) == 0 {
@@ -185,6 +186,12 @@ func TestReleaseLists_EntryShapes(t *testing.T) {
 		check("TrustedNodeImages", ref)
 		if !strings.HasPrefix(ref, "ghcr.io/txnlab/zs-node@sha256:") || !isDigestPinnedRef(ref) {
 			t.Errorf("image %q is not a digest-pinned ghcr.io/txnlab/zs-node reference, the only form a compose can carry", ref)
+		}
+	}
+	for _, d := range TrustedDstackOSImages() {
+		check("TrustedDstackOSImages", d)
+		if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(d) {
+			t.Errorf("OS image %q is not 64 lowercase hex, the shape the replayed os-image-hash has", d)
 		}
 	}
 }

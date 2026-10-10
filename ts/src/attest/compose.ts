@@ -309,9 +309,10 @@ export function zeroSignalSecretEnvNames(): readonly string[] {
  *
  * It lives here rather than being spelled out in the browser client and again in
  * the proxy, because the two would then assert the same rules in two places and
- * execute them in none. The per-RELEASE data (which zs-node image digests are
- * published) is deliberately NOT here: that list moves on each consumer's own
- * cadence, exactly like the trusted OS-image list.
+ * execute them in none. The per-RELEASE data (which zs-node releases are
+ * published) is NOT in this policy: it ships beside it as
+ * `trustedComposeSkeletons()` and `trustedNodeImages()` (`trust-lists.ts`,
+ * generated from the Go lists), and a caller adds it explicitly.
  *
  * WHAT A CLEAN RESULT FROM *THIS POLICY ALONE* DOES NOT ESTABLISH, because the
  * distinction is easy to lose: the module implements the template match over
@@ -323,11 +324,9 @@ export function zeroSignalSecretEnvNames(): readonly string[] {
  *
  * THAT IS A PROPERTY OF THIS FUNCTION, NOT OF THE FLEET. Both shipped consumers
  * supply the release lists and set the flag: zs-proxy from its config defaults,
- * and this repo's browser client from `tee-allowlist.ts`. The lists live there
- * rather than here because they move on each consumer's own release cadence,
- * exactly like the trusted OS-image list — so a library caller that takes this
- * policy verbatim gets the weaker check, and needs to say so rather than
- * inherit the fleet's reputation for it.
+ * and the browser client from its `tee-allowlist.ts`. A library caller that
+ * takes this policy verbatim gets the weaker check, and needs to say so rather
+ * than inherit the fleet's reputation for it.
  *
  * A consumer supplying the lists sets the flag in the same change. Setting one
  * without the other is a defect the policy check reports

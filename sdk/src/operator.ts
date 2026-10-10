@@ -13,6 +13,7 @@ import { isKnownRetention } from '@txnlab/zs-proto/inject'
 import type { ModelCapacity as SelectionModelCapacity, Operator as SelectionOperator } from '@txnlab/zs-proto/selection'
 
 import { NoEphemeralError } from './reserve.js'
+import type { VerdictDetail } from './tee/types.js'
 import type { NodeRef } from './types.js'
 
 /** One advertised built-in tool. */
@@ -84,6 +85,8 @@ export interface TEEStatus {
     /** '' when verified. */
     failureTag: string
     attestedModelIds?: string[] | undefined
+    /** What the verifier saw, for display. Never a routing input; Go logs it instead. */
+    detail?: VerdictDetail | undefined
 }
 
 export interface Operator {

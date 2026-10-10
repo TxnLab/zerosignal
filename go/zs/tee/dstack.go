@@ -313,9 +313,8 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// so ordering cannot change who routes, but a node on a dev image whose
 	// compose also violates policy should be told about the dev image — it
 	// is the more fundamental fault and the one config.example.yaml is
-	// written around. This also matches the client's 4a-then-4b ordering
-	// (client/src/operators/tee-verify.ts), which matters because the two
-	// are supposed to be readable as one policy.
+	// written around. The TypeScript twin (sdk/src/tee/dstack.ts) keeps
+	// the same order, so the two report the same fault on the same node.
 	//
 	// AN ABSENT DOCUMENT IS A REFUSAL under the release match, and a skip
 	// without it. That split is the whole reason this branch is not simply
@@ -417,7 +416,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 // checkPosture judges the bound posture block: first for internal coherence
 // (an incoherent block is a node misreporting itself), then, for a
 // named_upstream posture, whether the upstream it names is one a payer can
-// hold to its claim (inject.NamedUpstreamAdmissible — shared with client/ so
+// hold to its claim (inject.NamedUpstreamAdmissible — shared with the TS SDK so
 // the two verifiers cannot disagree about which upstreams are acceptable).
 //
 // An ABSENT posture is accepted: the field is optional on the wire and

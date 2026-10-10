@@ -1,6 +1,6 @@
 {
     "name": "@txnlab/zerosignal",
-    "version": "0.2.3",
+    "version": "0.3.0",
     "license": "Apache-2.0",
     "description": "ZeroSignal payer SDK for TypeScript: routing, reserve, escrow, sealing, relay hops, streaming and receipt checks for private LLM inference on Algorand.",
     "keywords": [
@@ -31,6 +31,10 @@
         "./catalog": {
             "types": "./dist/catalog/index.d.ts",
             "import": "./dist/catalog/index.js"
+        },
+        "./tee": {
+            "types": "./dist/tee/index.d.ts",
+            "import": "./dist/tee/index.js"
         },
         "./proto": {
             "types": "./dist/proto/index.d.ts",
@@ -100,6 +104,7 @@
     "dependencies": {
         "@noble/ed25519": "2.1.0",
         "@noble/hashes": "2.2.0",
+        "@phala/dcap-qvl": "0.6.1",
         "@scure/base": "2.2.0",
         "@txnlab/zs-proto": "workspace:*",
         "undici": "^7.30.0"

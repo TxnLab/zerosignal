@@ -13,7 +13,9 @@ package attest
 // node appraises its own ACI/1 UPSTREAM with it. Those are different questions
 // about the same fleet of guest images, and two Go copies reaching different
 // verdicts on identical evidence is the failure the shared attest module
-// exists to prevent. `zs-proxy`'s defaultTrustedOSImages delegates here;
+// exists to prevent. `zs-proxy`'s defaultTrustedOSImages delegates here, and
+// proto/ts/src/attest/trust-lists.ts is generated from it
+// (TestTrustListTwinVectors fails while that file is stale);
 // client/src/operators/tee-allowlist.ts is the one remaining hand-copy, kept
 // honest by the shared policy vector.
 //
@@ -27,9 +29,11 @@ package attest
 // THIS VALUE IS ON NO AUTOMATION. It moves when Phala ships a guest image, and
 // nothing anywhere notices a stale entry: the deploy succeeds, the quote
 // verifies, and payers route elsewhere with nothing logged. Re-read it from
-// `phala os-images` and update the other two copies in the same change:
+// `phala os-images`, regenerate the TypeScript twin
+// (`go test ./attest -run TestTrustListTwinVectors -update-trust-lists`), and
+// update the other two copies in the same change:
 // client/src/operators/tee-allowlist.ts (TRUSTED_OS_IMAGES — the browser's own,
-// since proto/ts holds no copy) and node/internal/tee/dstackprobe.sh's
+// until the client takes the SDK's list) and node/internal/tee/dstackprobe.sh's
 // ds_os_image_hash. The first of those is pinned against this list through
 // testdata/compose_vectors.json's shared_policy.trusted_os_images; the shell
 // script is pinned by nothing.

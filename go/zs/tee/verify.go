@@ -53,19 +53,12 @@ import (
 // payer has on evidence age.
 //
 // THE LITERAL IS DELIBERATE — do not rewrite it as
-// 2*ticket.MaxEphemeralLifetime. The twin in
-// client/src/operators/tee-verify.ts is a hand-written millisecond
-// literal (client/ pins a published @txnlab/zs-proto, so it cannot
-// import this package's constants), and a derived value here would
-// track a MaxEphemeralLifetime change on its own while the TypeScript
-// side sat still — two verifiers disagreeing, both suites green.
-// TestEvidenceMaxAgeCeilingCoversEphemeralWindow fails instead, which
-// is the prompt to move both by hand.
-//
-// Mirrors EVIDENCE_MAX_AGE_CEILING_MS in
-// client/src/operators/tee-verify.ts. Not golden-vectored: the
-// TypeScript twin lives in client/, not proto/ts, so there is nothing
-// here to vector it against.
+// 2*ticket.MaxEphemeralLifetime. The twin, EVIDENCE_MAX_AGE_CEILING_MS
+// in sdk/src/tee/tags.ts, is a hand-written millisecond literal, and a
+// derived value here would track a MaxEphemeralLifetime change on its
+// own while the TypeScript side sat still — two verifiers disagreeing,
+// both suites green. TestEvidenceMaxAgeCeilingCoversEphemeralWindow
+// fails instead, which is the prompt to move both by hand.
 const EvidenceMaxAgeCeiling = 80 * time.Minute
 
 // Verifier failure tags. These are the canonical tags proto/SPEC.md §3e
@@ -318,18 +311,16 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 	// the check — the rotation period is a node-side setting and this
 	// is the only place the payer bounds evidence age themselves.
 	//
-	// The `advertisedMaxAge > 0` guard is doing two jobs, and the second
-	// is not obvious: it subsumes the RefreshSeconds > 0 check, and it
-	// catches the int64 OVERFLOW. RefreshSeconds is a plain int decoded
-	// from operator-controlled JSON, so ~4.6e9 makes the nanosecond
-	// product wrap negative — which would sail past a bare `<` and pin
-	// maxAge negative, failing every bundle from that node. Fail-closed
-	// either way, but the TypeScript twin computes in float64 and lands
-	// on the ceiling, so without this the two verifiers return opposite
-	// verdicts on one bundle.
+	// RefreshSeconds is a plain int decoded from operator-controlled JSON,
+	// so it is clamped to the ceiling before it is doubled: any cadence that
+	// long already earns the ceiling, and the nanosecond product can then
+	// never wrap. Unclamped, ~4.6e9 wrapped negative and 2197108676271213
+	// wrapped to a 1024ns window, refusing a node SPEC §3e step 2 gives the
+	// ceiling. A cadence of zero or less is no cadence, and gets the
+	// ceiling too.
 	maxAge := EvidenceMaxAgeCeiling
-	if advertisedMaxAge := 2 * time.Duration(bundle.RefreshSeconds) * time.Second; advertisedMaxAge > 0 && advertisedMaxAge < maxAge {
-		maxAge = advertisedMaxAge
+	if refresh := min(bundle.RefreshSeconds, int(EvidenceMaxAgeCeiling/time.Second)); refresh > 0 {
+		maxAge = min(maxAge, 2*time.Duration(refresh)*time.Second)
 	}
 	if skew := time.Since(bundle.GeneratedAt); skew > maxAge || skew < -maxAge {
 		verdict.FailureTag = FailureStaleEvidence

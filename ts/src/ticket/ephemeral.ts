@@ -255,11 +255,14 @@ export function verifyEphemeral(
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
-// decodeGoStdBase64 reads base64 as Go's base64.StdEncoding does, which is not
-// strict: it skips CR and LF wherever they fall, and ignores the unused low
-// bits of the last character before the padding. @scure/base refuses both, so
-// without this a block Go seals to would fail closed here.
-function decodeGoStdBase64(s: string): Uint8Array {
+/**
+ * decodeGoStdBase64 reads base64 as Go's base64.StdEncoding does, which is not
+ * strict: it skips CR and LF wherever they fall, and ignores the unused low
+ * bits of the last character before the padding. @scure/base refuses both, so
+ * without this a block Go seals to would fail closed here. It requires the
+ * padding Go requires, which atob does not. Throws on anything Go refuses.
+ */
+export function decodeGoStdBase64(s: string): Uint8Array {
     let t = s.replace(/[\r\n]/g, '')
     const pad = t.endsWith('==') ? 2 : t.endsWith('=') ? 1 : 0
     const last = t.length - pad - 1

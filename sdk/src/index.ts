@@ -11,6 +11,7 @@
 export * from './ack.js'
 export * from './admit.js'
 export * from './affinity.js'
+export * from './attestation.js'
 export * from './client.js'
 export * from './config.js'
 export * from './decode.js'

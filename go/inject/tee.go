@@ -844,7 +844,9 @@ func decodeExact[T any](data []byte, v *T, keys map[string]bool, fix func(map[st
 }
 
 // UnmarshalJSON decodes a bundle so that the Go and TypeScript verifiers
-// reach the same verdict from the same bytes.
+// reach the same verdict from the same bytes. The TypeScript twin is
+// decodeEvidenceBundle in proto/ts/src/inject/tee.ts, and
+// testdata/tee_bundle_vectors.json pins which bodies each refuses.
 //
 // It refuses a body that is not valid UTF-8. Both decoders replace invalid
 // bytes with U+FFFD, but Go writes one per bad byte and TextDecoder one per

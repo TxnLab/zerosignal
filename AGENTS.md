@@ -26,7 +26,7 @@ This repo is the protocol **and** the payer SDK. The Go SDK is `go/zs` (with `zs
 
 Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/`](./testdata/): Go generates it and both suites replay it. Change one side and the other in the same commit, then regenerate with the owning test's `-update` flag or `make update-vectors`. `make update-vectors` covers most fixtures but not all: the sealed vectors have their own `update-sealed-vectors` / `update-ts-sealed-vectors` targets and change only on purpose, and `tokenize_corpus.json` comes from a Python generator. `make test` runs both suites plus `check-vector-generators`, `check-no-hayai`, `check-lockstep` and `check-escrow-client`.
 
-**Protocol packages** (`go/<pkg>` ↔ `ts/src/<pkg>`, `@txnlab/zs-proto/<pkg>`), each pinned by its own fixture: `ticket` (`vectors.json`), `selection`, `steering`, `transient`, `pricing`, `imageprice` (`image_vectors.json`), `tokenize`, `tools`, `inject` (`details_`, `dialect_`, `payer_mutator_`, `tool_growth_vectors.json`), `wire` (`sealed_`, `stream_vectors.json`), `attest` (`attest_`, `compose_vectors.json`), and `escrow` box decoding plus `Classify` ↔ `classify` (`escrow_vectors.json`).
+**Protocol packages** (`go/<pkg>` ↔ `ts/src/<pkg>`, `@txnlab/zs-proto/<pkg>`), each pinned by its own fixture: `ticket` (`vectors.json`), `selection`, `steering`, `transient`, `pricing`, `imageprice` (`image_vectors.json`), `tokenize`, `tools`, `inject` (`details_`, `dialect_`, `payer_mutator_`, `tee_bundle_`, `tool_growth_vectors.json`), `wire` (`sealed_`, `stream_vectors.json`), `attest` (`attest_`, `collateral_`, `compose_vectors.json`), and `escrow` box decoding plus `Classify` ↔ `classify` (`escrow_vectors.json`).
 
 **SDK pairs:**
 
@@ -48,11 +48,13 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `go/escrow` group checks | `sdk/src/escrow/{open,settle}.ts` | `escrow_group_vectors.json` |
 | `zs/decode.go` | `sdk/src/decode.ts` | `stream_events_vectors.json` |
 | `zs/operator.go` | `sdk/src/operator.ts` | `operator_vectors.json` |
+| `probeAttestation` (`zs/fetcher.go`), `zs/attestation_client.go` | `sdk/src/attestation.ts` | the `probe_attestation` block of `operator_vectors.json` (the 256 KiB body cap is tested per language) |
 | `zs/retry.go` `Error.Retryable` | `sdk/src/codes.ts` | `error_retry_vectors.json` |
 | `zs/handler` render, `/v1/completions` | `sdk/src/fetch/*` | `http_render_`, `completions_vectors.json` |
 | `go/httpx` private-target guard | `sdk/src/privateip.ts` | `private_target_vectors.json` |
 | `go/keystore` accounts | `sdk/src/accounts/*` | `account_vectors.json` |
 | `go/zs` declarations (events, error kinds, Config defaults) | `sdk/src/{events,errors,config}.ts` | `sdk_vocabulary_vectors.json` (generated from the Go const decls) |
+| `zs/tee` `BundleVerifier` / `DstackVerifier`, the TEE evidence verdict (chain step stubbed) | `sdk/src/tee/` | `tee_verdict_vectors.json` |
 
 **Mirrored but unpinned** — no fixture compares the two, so the comment headers and per-language tests are all that hold them together. Treat a change here as two changes and test both:
 - `zs/dispatch.go` `pickCandidates` ↔ `sdk/src/pick.ts`, and the dispatch loop ↔ `sdk/src/dispatch.ts`.

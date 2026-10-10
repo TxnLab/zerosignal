@@ -28,6 +28,8 @@ import {
     memoryStorage,
 } from './ports.js'
 import { MAX_TIMER_MS } from './sleep.js'
+import { defaultVerifier } from './tee/defaults.js'
+import type { Verifier } from './tee/types.js'
 import type { AffinityPolicy, Privacy } from './types.js'
 
 /** Affinity configures continuation pinning. */
@@ -123,7 +125,15 @@ export interface Config {
     allowPrivacyOverride?: boolean
     /** These models route only to attested nodes. */
     requireTeeModels?: string[]
-    /** Checks no attestation evidence: every node counts as unattested. */
+    /**
+     * Checks the attestation evidence nodes publish; defaultVerifier() when
+     * absent, built once per Client since its Intel collateral cache is what
+     * an outage falls back on. The SDK has no registry of its own yet, so it
+     * never calls this itself: the host's registry reads
+     * client.config.teeVerifier and passes it to probeAttestation.
+     */
+    teeVerifier?: Verifier
+    /** Checks no attestation evidence: every node counts as unattested. Overrides teeVerifier. */
     disableTee?: boolean
 
     affinity?: Partial<Affinity>
@@ -213,6 +223,8 @@ export interface ResolvedConfig {
     allowPrivacyOverride: boolean
     requireTeeModels: string[]
     disableTee: boolean
+    /** undefined exactly when disableTee. */
+    teeVerifier: Verifier | undefined
     affinity: Affinity
     maxOutputCeiling: number
     maxOutputByModel: Record<string, number>
@@ -316,7 +328,10 @@ export function resolveConfig(c: Config): ResolvedConfig {
     }
     const disableTee = c.disableTee ?? false
     const requireTeeModels = c.requireTeeModels ?? []
-    if (disableTee && requireTeeModels.length > 0) {
+    const logger = c.logger ?? discardLogger
+    // As Go's DefaultVerifier, on the wall clock rather than Config.clock.
+    const teeVerifier = disableTee ? undefined : (c.teeVerifier ?? defaultVerifier({ log: logger }))
+    if (teeVerifier === undefined && requireTeeModels.length > 0) {
         warnings.push(
             `requireTeeModels ${JSON.stringify(requireTeeModels)} have no route: TEE verification is off, so no node counts as attested`,
         )
@@ -354,6 +369,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         allowPrivacyOverride: c.allowPrivacyOverride ?? false,
         requireTeeModels,
         disableTee,
+        teeVerifier,
         affinity: {
             policy,
             ttl: orDefault(c.affinity?.ttl, defaults.affinity.ttl),
@@ -390,7 +406,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         },
         storage: c.storage ?? memoryStorage(),
         cache: c.cache ?? memoryCache(clock),
-        logger: c.logger ?? discardLogger,
+        logger,
         clock,
         fetch,
         inferenceFetch,

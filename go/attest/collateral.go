@@ -62,11 +62,8 @@ import (
 // rollback window is nearly always the full width, not the narrow one
 // the shape suggests.
 //
-// Mirrors EMBEDDED_COLLATERAL_MAX_AGE_MS in
-// client/src/operators/tee-verify.ts. Not golden-vectored: the
-// TypeScript twin lives in client/, not proto/ts, so there is nothing
-// here to vector it against. If that predicate ever moves into proto/ts,
-// vectors follow.
+// Mirrors EMBEDDED_COLLATERAL_MAX_AGE_MS in proto/ts/src/attest/collateral.ts;
+// testdata/collateral_vectors.json pins the two.
 const EmbeddedCollateralMaxAge = 14 * 24 * time.Hour
 
 // CollateralArtifact names one of the four documents a DCAP verifier
@@ -303,7 +300,10 @@ func parsePEMChain(chain string) ([]*x509.Certificate, error) {
 // signed CRL that predates the revocation of its own PCK certificate.
 // Checking the newest of them would let the other three be anything.
 //
-// Mirrors collateralFreshEnough in client/src/operators/tee-verify.ts.
+// Mirrors collateralFreshEnough in proto/ts/src/attest/collateral.ts, pinned
+// by testdata/collateral_vectors.json down to how issuedAt and crlThisUpdate
+// read a date: a TypeScript reader that dated a document this one refuses
+// would accept a set this one falls back from.
 func CollateralFreshEnough(c *inject.TEECollateral, now time.Time, maxAge time.Duration) bool {
 	if !c.Complete() {
 		return false
