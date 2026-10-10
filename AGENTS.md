@@ -60,6 +60,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 - `zs/relay_latency.go` ↔ `routing/latency.ts`: the float EWMAs aren't vectored.
 - `zs/malicious_nodes.go` ↔ `routing/exclusion.ts`.
 - `zs/refund_watchdog.go` ↔ `sdk/src/refund-watchdog.ts`: only the `classify` it calls is pinned.
+- `zs/tee` `BundleVerifier` / `DstackVerifier` ↔ `sdk/src/tee/`, the TEE evidence verdict: its inputs (bundle decode, collateral freshness, the aux binding, the trust lists) are vectored, the verdict is not.
 
 An escrow `open()` / `settle()` argument change also touches the hand-written group verifiers (`sdk/src/escrow/open.ts` `OPEN_METHOD_SIGNATURE`, and `go/escrow`'s checks). Regenerate `escrow_group_vectors.json` (`go test ./escrow -run TestGroupVectors -update`) along with `pnpm gen:client`.
 

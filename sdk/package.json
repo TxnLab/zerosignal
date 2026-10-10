@@ -32,6 +32,10 @@
             "types": "./dist/catalog/index.d.ts",
             "import": "./dist/catalog/index.js"
         },
+        "./tee": {
+            "types": "./dist/tee/index.d.ts",
+            "import": "./dist/tee/index.js"
+        },
         "./proto": {
             "types": "./dist/proto/index.d.ts",
             "import": "./dist/proto/index.js"
