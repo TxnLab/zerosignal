@@ -102,19 +102,15 @@ export class BundleVerifier implements Verifier {
 
         // Freshness: 2x the node's own cadence, never wider than the ceiling,
         // and absolute, because a future generated_at defeats a one-sided
-        // bound forever. Nanoseconds and int64 wrapping, as Go computes it: a
-        // refresh_seconds large enough to wrap negative falls to the ceiling
-        // through the > 0 test, as SPEC § 3e step 2 specifies. A product that
-        // wraps to a small POSITIVE value (2197108676271213 seconds wraps to
-        // 1024ns) is not caught: the window is far narrower than SPEC's
-        // min(2 x refresh_seconds, ceiling) and the node is refused. That
-        // fails closed and is a known divergence from SPEC, kept so the two
-        // verifiers reach one verdict.
+        // bound forever. The cadence is clamped to the ceiling before it is
+        // doubled, as Go does so its int64 product cannot wrap; a cadence of
+        // zero or less gets the ceiling.
         if (generatedAt === null) return fail(FailureTag.StaleEvidence)
         let maxAge = EVIDENCE_MAX_AGE_CEILING_NS
-        if (Number.isInteger(bundle.refresh_seconds)) {
-            const advertisedMaxAge = BigInt.asIntN(64, 2n * BigInt(bundle.refresh_seconds) * 1_000_000_000n)
-            if (advertisedMaxAge > 0n && advertisedMaxAge < maxAge) maxAge = advertisedMaxAge
+        const refresh = Math.min(bundle.refresh_seconds, EVIDENCE_MAX_AGE_CEILING_MS / 1000)
+        if (Number.isInteger(refresh) && refresh > 0) {
+            const advertisedMaxAge = 2n * BigInt(refresh) * 1_000_000_000n
+            if (advertisedMaxAge < maxAge) maxAge = advertisedMaxAge
         }
         const skew = epochNanosFromMillis(this.now()) - generatedAt
         if (skew > maxAge || skew < -maxAge) return fail(FailureTag.StaleEvidence)

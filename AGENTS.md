@@ -53,6 +53,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `go/httpx` private-target guard | `sdk/src/privateip.ts` | `private_target_vectors.json` |
 | `go/keystore` accounts | `sdk/src/accounts/*` | `account_vectors.json` |
 | `go/zs` declarations (events, error kinds, Config defaults) | `sdk/src/{events,errors,config}.ts` | `sdk_vocabulary_vectors.json` (generated from the Go const decls) |
+| `zs/tee` `BundleVerifier` / `DstackVerifier`, the TEE evidence verdict (chain step stubbed) | `sdk/src/tee/` | `tee_verdict_vectors.json` |
 
 **Mirrored but unpinned** — no fixture compares the two, so the comment headers and per-language tests are all that hold them together. Treat a change here as two changes and test both:
 - `zs/dispatch.go` `pickCandidates` ↔ `sdk/src/pick.ts`, and the dispatch loop ↔ `sdk/src/dispatch.ts`.
@@ -60,7 +61,6 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 - `zs/relay_latency.go` ↔ `routing/latency.ts`: the float EWMAs aren't vectored.
 - `zs/malicious_nodes.go` ↔ `routing/exclusion.ts`.
 - `zs/refund_watchdog.go` ↔ `sdk/src/refund-watchdog.ts`: only the `classify` it calls is pinned.
-- `zs/tee` `BundleVerifier` / `DstackVerifier` ↔ `sdk/src/tee/`, the TEE evidence verdict: its inputs (bundle decode, collateral freshness, the aux binding, the trust lists) are vectored, the verdict is not.
 
 An escrow `open()` / `settle()` argument change also touches the hand-written group verifiers (`sdk/src/escrow/open.ts` `OPEN_METHOD_SIGNATURE`, and `go/escrow`'s checks). Regenerate `escrow_group_vectors.json` (`go test ./escrow -run TestGroupVectors -update`) along with `pnpm gen:client`.
 

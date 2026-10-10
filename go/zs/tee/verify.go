@@ -311,24 +311,16 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 	// the check — the rotation period is a node-side setting and this
 	// is the only place the payer bounds evidence age themselves.
 	//
-	// The `advertisedMaxAge > 0` guard is doing two jobs, and the second
-	// is not obvious: it subsumes the RefreshSeconds > 0 check, and it
-	// catches a product that wraps NEGATIVE. RefreshSeconds is a plain int
-	// decoded from operator-controlled JSON, so ~4.6e9 makes the nanosecond
-	// product wrap below zero, which would sail past a bare `<` and pin
-	// maxAge negative, failing every bundle from that node. With the guard
-	// that node gets the ceiling, as SPEC §3e step 2 specifies.
-	//
-	// The guard does NOT handle a product that wraps to a small POSITIVE
-	// value: 2197108676271213 seconds wraps to a 1024ns window. That window
-	// is far narrower than SPEC §3e step 2's min(2 × refresh_seconds,
-	// ceiling), so the node's bundles are refused. It fails closed, and it
-	// is a known divergence from SPEC. The TypeScript twin
-	// (sdk/src/tee/verify.ts) wraps to int64 the same way, so the two still
-	// reach one verdict.
+	// RefreshSeconds is a plain int decoded from operator-controlled JSON,
+	// so it is clamped to the ceiling before it is doubled: any cadence that
+	// long already earns the ceiling, and the nanosecond product can then
+	// never wrap. Unclamped, ~4.6e9 wrapped negative and 2197108676271213
+	// wrapped to a 1024ns window, refusing a node SPEC §3e step 2 gives the
+	// ceiling. A cadence of zero or less is no cadence, and gets the
+	// ceiling too.
 	maxAge := EvidenceMaxAgeCeiling
-	if advertisedMaxAge := 2 * time.Duration(bundle.RefreshSeconds) * time.Second; advertisedMaxAge > 0 && advertisedMaxAge < maxAge {
-		maxAge = advertisedMaxAge
+	if refresh := min(bundle.RefreshSeconds, int(EvidenceMaxAgeCeiling/time.Second)); refresh > 0 {
+		maxAge = min(maxAge, 2*time.Duration(refresh)*time.Second)
 	}
 	if skew := time.Since(bundle.GeneratedAt); skew > maxAge || skew < -maxAge {
 		verdict.FailureTag = FailureStaleEvidence
