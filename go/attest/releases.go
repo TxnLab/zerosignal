@@ -19,13 +19,16 @@ package attest
 // skeleton digest is COMPUTED in zs-node's deploy/dstack package
 // (ReleaseComposeSkeletonDigest, bound to the embedded compose by
 // TestSkeletonDigestIsTheReleaseValue); this list and the browser client's
-// src/operators/tee-allowlist.ts are COPIES of it. Nothing compares them — the
-// release workflow only ever appends, so a value that drifts stays drifted, and
-// between a compose edit in zs-node and the next tag they are legitimately out
-// of step. A release added to one consumer but not the other — or a compose
+// src/operators/tee-allowlist.ts are COPIES of it. Nothing compares those two —
+// the release workflow only ever appends, so a value that drifts stays drifted,
+// and between a compose edit in zs-node and the next tag they are legitimately
+// out of step. A release added to one consumer but not the other — or a compose
 // edited without updating either — refuses every node running it, silently:
 // the deploy succeeds, the quote verifies, and payers route elsewhere with
 // nothing logged on the operator's side.
+//
+// proto/ts/src/attest/trust-lists.ts is not a third copy: it is GENERATED from
+// this file (TestTrustListTwinVectors), and that test fails while it is stale.
 //
 // ENTRIES ARE APPENDED BY zs-node's release-allowlist.yml on every version
 // tag, above the marker at the end of each literal. It opens a pull request

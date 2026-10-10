@@ -107,6 +107,7 @@ update-vectors:
 	cd go && $(GO) test ./wire       -run TestStreamTerminalVectors -update
 	cd go && $(GO) test ./attest     -run TestVectors               -update
 	cd go && $(GO) test ./attest     -run TestComposeVectors        -update-compose
+	cd go && $(GO) test ./attest     -run TestTrustListTwinVectors  -update-trust-lists
 	cd go && $(GO) test ./escrow     -run TestEscrowVectors         -update
 	cd go && $(GO) test ./escrow     -run TestGroupVectors          -update
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update

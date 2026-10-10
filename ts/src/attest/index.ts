@@ -5,3 +5,4 @@
 
 export * from './dstack.js'
 export * from './compose.js'
+export * from './trust-lists.js'
