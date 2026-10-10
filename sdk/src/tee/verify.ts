@@ -44,7 +44,9 @@ export interface BundleVerifierOptions {
 
 /**
  * Checks everything about an evidence bundle that does not depend on which TEE
- * produced it, then hands the rest to the platform verifier.
+ * produced it, then hands the rest to the platform verifier. Built bare it
+ * has the real chain step but trusts no guest image, so every dstack quote is
+ * refused; defaultVerifier builds the one a payer runs.
  */
 export class BundleVerifier implements Verifier {
     private readonly allowStub: boolean

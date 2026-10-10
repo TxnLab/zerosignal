@@ -48,6 +48,7 @@ import {
     NoUsableCarriedCollateralError,
     StaleCollateralRejectedError,
 } from './errors.js'
+import { carriedChainVerifier, pccsChainVerifier } from './pccs.js'
 import { ACCEPTED_TCB_STATUS, FailureTag } from './tags.js'
 import type {
     CarriedChainVerifier,
@@ -76,15 +77,16 @@ export interface DstackVerifierOptions {
     composePolicy: ComposePolicy
     /**
      * Verifies the quote against Intel's chain with collateral the verifier
-     * obtained. There is no default yet: without one every quote is refused
-     * as vendor_chain_invalid.
+     * obtained. Absent means pccsChainVerifier(), as Go's nil field means the
+     * real verification.
      */
     verifyChain?: QuoteChainVerifier
     /**
      * Verifies the quote against the node's carried collateral, the last
-     * resort. The completeness and age checks always run before it, as Go's
-     * VerifyTDXQuoteChainCarried runs them, so a host cannot reach the node's
-     * documents without them. The default refuses every carried set.
+     * resort. Absent means carriedChainVerifier(). The completeness and age
+     * checks always run before it, as Go's VerifyTDXQuoteChainCarried runs
+     * them, so a host cannot reach the node's documents without them; so does
+     * a refusal of an aborted call.
      */
     verifyChainCarried?: CarriedChainVerifier
     log?: Logger
@@ -115,8 +117,9 @@ export class DstackVerifier {
         this.trustedOSImages = opts.trustedOSImages
         this.trustedComposeHashes = opts.trustedComposeHashes ?? []
         this.composePolicy = opts.composePolicy
-        this.verifyChain = opts.verifyChain ?? noChainVerifier
-        this.verifyChainCarried = guardCarried(opts.verifyChainCarried ?? noCarriedVerifier, opts.now ?? Date.now)
+        const now = opts.now ?? Date.now
+        this.verifyChain = opts.verifyChain ?? pccsChainVerifier({ now })
+        this.verifyChainCarried = guardCarried(opts.verifyChainCarried ?? carriedChainVerifier({ now }), now)
         this.log = opts.log ?? discardLogger
     }
 
@@ -431,6 +434,12 @@ function guardCarried(
     now: Clock,
 ): (quote: Uint8Array, collateral: TEECollateral | undefined, signal?: AbortSignal) => Promise<ChainResult> {
     return async (quote, collateral, signal) => {
+        // Go's carried path refuses a cancelled context in its getter. Here
+        // the rung is a host seam that may ignore the signal, so the refusal
+        // is made before it is reached.
+        if (signal?.aborted === true) {
+            throw new NoUsableCarriedCollateralError('the caller aborted before the last resort')
+        }
         if (!collateralComplete(collateral)) {
             throw new NoUsableCarriedCollateralError('the bundle carries no complete collateral set')
         }
@@ -461,12 +470,4 @@ function causedBy(err: unknown, cls: abstract new (...args: never[]) => Error): 
         e = e instanceof Error ? e.cause : undefined
     }
     return false
-}
-
-function noChainVerifier(): Promise<ChainResult> {
-    return Promise.reject(new Error('tee: no quote chain verifier configured'))
-}
-
-function noCarriedVerifier(): Promise<ChainResult> {
-    return Promise.reject(new NoUsableCarriedCollateralError('no carried-collateral verifier configured'))
 }

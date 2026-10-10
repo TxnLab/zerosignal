@@ -78,6 +78,30 @@ for (const [sub, fn] of [
     if (typeof m[fn] !== 'function') fail(`${pkg.name}/${sub} exports no ${fn}`)
 }
 
+// The TEE chain step imports @phala/dcap-qvl lazily, so nothing above loads
+// it. It is CommonJS: check it loads under this runtime's ESM loader, then that
+// the dist's own loader reaches verify (a wrong interop shape would surface as
+// "is not a function", not as the library refusing a junk quote).
+{
+    const qvlMod = await import('@phala/dcap-qvl')
+    const qvl = qvlMod.default ?? qvlMod
+    for (const fn of ['verify', 'getCollateral']) {
+        if (typeof qvl[fn] !== 'function') fail(`@phala/dcap-qvl exports no ${fn} function`)
+    }
+    // The collateral cache keys by these; without them every quote goes uncached.
+    if (typeof qvl.Quote?.parse !== 'function') fail('@phala/dcap-qvl exports no Quote.parse')
+    for (const fn of ['getFmspc', 'getCa']) {
+        if (typeof qvl.intel?.[fn] !== 'function') fail(`@phala/dcap-qvl exports no intel.${fn}`)
+    }
+    const { carriedChainVerifier } = await import(`${pkg.name}/tee`)
+    if (typeof carriedChainVerifier !== 'function') fail(`${pkg.name}/tee exports no carriedChainVerifier`)
+    const refused = await carriedChainVerifier()(new Uint8Array(8), {}).then(
+        () => 'passed',
+        (e) => String(e?.message ?? e),
+    )
+    if (refused !== 'Failed to decode quote') fail(`the dist's dcap-qvl verify gave ${refused}, want the library's own refusal`)
+}
+
 try {
     const outcome = await resolveConfig({ signer, network: testnet() })
         .fetch(url)

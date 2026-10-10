@@ -14,7 +14,19 @@
 // the verifier together, as a payer meets them.
 
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+// Every case injects both chain seams. Were one left out, the real verifier
+// would fetch; this makes that a loud failure rather than a network call.
+vi.mock('@phala/dcap-qvl', () => ({
+    default: {
+        PHALA_PCCS_URL: 'https://unreachable.invalid',
+        getCollateral: () => Promise.reject(new Error('a verdict vector reached dcap-qvl getCollateral')),
+        verify: () => {
+            throw new Error('a verdict vector reached dcap-qvl verify')
+        },
+    },
+}))
 
 import {
     type ComposePolicy,

@@ -22,7 +22,27 @@
 
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// A verifier built without a chain seam gets the real one, which fetches. The
+// library is mocked for the whole file so no case can reach the network, and
+// it fails loudly when a case reaches it without meaning to.
+const qvl = vi.hoisted(() => ({
+    PHALA_PCCS_URL: 'https://default.example',
+    getCollateral: (async () => ({})) as (url: string, quote: Uint8Array) => Promise<unknown>,
+    verify: (() => ({ status: '', advisory_ids: [] })) as (
+        q: Uint8Array,
+        c: unknown,
+        nowSecs: number,
+    ) => { status: string; advisory_ids: string[] },
+}))
+vi.mock('@phala/dcap-qvl', () => ({ default: qvl }))
+beforeEach(() => {
+    qvl.getCollateral = vi.fn(() => Promise.reject(new Error('test reached dcap-qvl getCollateral')))
+    qvl.verify = vi.fn(() => {
+        throw new Error('test reached dcap-qvl verify')
+    })
+})
 
 import {
     type ComposePolicy,
@@ -700,9 +720,33 @@ describe('BundleVerifier: dstack platform checks', () => {
         expect(v.failureTag).toBe('vendor_chain_invalid')
     })
 
-    it('refuses every quote when no chain verifier is configured', async () => {
-        // There is no default chain verifier in the SDK yet; absent must not
-        // read as "the chain is fine".
+    it('uses the real chain verifier when none is configured', async () => {
+        // As Go's nil VerifyChain means VerifyTDXQuoteChain: absent must
+        // neither skip the chain nor refuse every quote.
+        const getCollateral = vi.fn(async (_url: string, _q: Uint8Array) => ({ from: 'pccs' }))
+        const verifyQuote = vi.fn((_q: Uint8Array, _c: unknown, _n: number) => ({
+            status: 'UpToDate',
+            advisory_ids: [] as string[],
+        }))
+        qvl.getCollateral = getCollateral
+        qvl.verify = verifyQuote
+        const v = await new BundleVerifier({
+            trustedOSImages: [OS_IMAGE],
+            trustedComposeHashes: [COMPOSE_HASH],
+            composePolicy: shapeOnlyPolicy(),
+            now: () => NOW_MS,
+        }).verify(advert(), bundle(), node())
+        expect(v.pass, v.failureTag).toBe(true)
+        expect(getCollateral).toHaveBeenCalledOnce()
+        expect(getCollateral.mock.calls[0]![0]).toBe('https://default.example')
+        expect(verifyQuote.mock.calls[0]![1]).toEqual({ from: 'pccs' })
+    })
+
+    it('refuses a quote the default chain verifier refuses', async () => {
+        qvl.getCollateral = vi.fn(async () => ({}))
+        qvl.verify = vi.fn(() => {
+            throw new Error('signature does not verify')
+        })
         const v = await new BundleVerifier({
             trustedOSImages: [OS_IMAGE],
             trustedComposeHashes: [COMPOSE_HASH],
@@ -723,8 +767,8 @@ describe('BundleVerifier: dstack platform checks', () => {
 
     it('reports OUR collateral outage as its own tag, not as forged evidence', async () => {
         // Collapsing the two stamps "invalid evidence" on the whole fleet
-        // during one PCS outage. No carried verifier is configured, so the
-        // default last resort refuses and the outage is what is reported.
+        // during one PCS outage. The bundle carries no collateral, so the
+        // last resort has nothing to verify and the outage is what is reported.
         const v = await verify(bundle(), { verifyChain: async () => outage() })
         expect(v.failureTag).toBe('collateral_unreachable')
     })
@@ -786,9 +830,11 @@ describe('BundleVerifier: dstack platform checks', () => {
         expect(v.failureTag).toBe('collateral_unreachable')
     })
 
-    it('treats a caller abort during the chain step as the outage', async () => {
+    it('treats a caller abort during the chain step as the outage, and passes nothing on the last resort', async () => {
         // Go's chain check sees a cancelled fetch as ErrCollateralUnavailable,
-        // so the node's own collateral is still consulted.
+        // and its carried check refuses the same cancelled context. The host's
+        // carried verifier here ignores the signal, so only the guard in front
+        // of it can make that refusal.
         const ac = new AbortController()
         let carriedCalled = false
         const v = await carriedVerify(
@@ -806,6 +852,21 @@ describe('BundleVerifier: dstack platform checks', () => {
             },
             ac.signal,
         )
+        expect(carriedCalled).toBe(false)
+        expect(v.pass).toBe(false)
+        expect(v.failureTag).toBe('collateral_unreachable')
+    })
+
+    it('reaches the last resort when the caller has not aborted', async () => {
+        // The control for the case above: the same outage, no abort.
+        let carriedCalled = false
+        const v = await carriedVerify(CARRIED_NOW_MS, {}, {
+            verifyChain: async () => outage(),
+            verifyChainCarried: async () => {
+                carriedCalled = true
+                return { tcbStatus: 'UpToDate', advisoryIds: [] }
+            },
+        }, new AbortController().signal)
         expect(carriedCalled).toBe(true)
         expect(v.pass, v.failureTag).toBe(true)
     })
@@ -1248,7 +1309,22 @@ describe('BundleVerifier: carried-collateral guard', () => {
         }
     })
 
-    it('refuses every carried set when the host supplies no carried verifier', async () => {
+    it('uses the real carried verifier when the host supplies none', async () => {
+        // As Go's nil VerifyChainCarried means VerifyTDXQuoteChainCarried.
+        const verifyQuote = vi.fn((_q: Uint8Array, _c: unknown, _n: number) => ({
+            status: 'UpToDate',
+            advisory_ids: [] as string[],
+        }))
+        qvl.verify = verifyQuote
+        const own = freshCollateral()
+        const v = await carriedVerify(CARRIED_NOW_MS, { collateral: own }, { verifyChain: async () => outage() })
+        expect(v.pass, v.failureTag).toBe(true)
+        expect(verifyQuote.mock.calls[0]![1]).toStrictEqual(own)
+        expect(verifyQuote.mock.calls[0]![2]).toBe(Math.floor(CARRIED_NOW_MS / 1000))
+        expect(qvl.getCollateral).not.toHaveBeenCalled()
+    })
+
+    it('refuses a carried set the default carried verifier refuses', async () => {
         const v = await carriedVerify(CARRIED_NOW_MS, {}, { verifyChain: async () => outage() })
         expect(v.failureTag).toBe('collateral_unreachable')
     })

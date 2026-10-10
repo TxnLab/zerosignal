@@ -108,7 +108,7 @@ export interface ChainResult {
  * collateral refused the quote during an outage, and any other error for a
  * quote that does not verify. It must also throw for a pass that consulted no
  * collateral at all: that verdict skipped the revocation and TCB checks, which
- * Go refuses in requireCollateralFetched.
+ * Go refuses in requireCollateralFetched. pccsChainVerifier is the real one.
  */
 export type QuoteChainVerifier = (quote: Uint8Array, signal?: AbortSignal) => Promise<ChainResult>
 
@@ -118,7 +118,7 @@ export type QuoteChainVerifier = (quote: Uint8Array, signal?: AbortSignal) => Pr
  * path without having decided to accept node-supplied criteria. DstackVerifier
  * calls it only with a complete set whose documents are inside
  * EMBEDDED_COLLATERAL_MAX_AGE_MS, so an implementation verifies and need not
- * repeat those checks.
+ * repeat those checks. carriedChainVerifier is the real one.
  */
 export type CarriedChainVerifier = (
     quote: Uint8Array,
