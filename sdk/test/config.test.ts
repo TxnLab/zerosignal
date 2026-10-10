@@ -25,6 +25,7 @@ import {
     testnet,
 } from '../src/index.js'
 import { TargetBackoffStore } from '../src/routing/backoff.js'
+import { BundleVerifier, type Verifier } from '../src/tee/index.js'
 import { defaultFetch as browserDefaultFetch } from '../src/default-fetch.js'
 
 const signer: Signer = {
@@ -330,5 +331,26 @@ describe('resolveConfig', () => {
         expect(resolveConfig({ ...base, disableTee: true, requireTeeModels: ['m'] }).warnings).toHaveLength(1)
         expect(resolveConfig({ ...base, disableTee: true }).warnings).toEqual([])
         expect(resolveConfig({ ...base, requireTeeModels: ['m'] }).warnings).toEqual([])
+    })
+
+    // Go's resolution: DisableTEE wins, an unset verifier is the default one.
+    describe('the TEE verifier', () => {
+        const supplied: Verifier = { verify: async () => ({ pass: true, failureTag: '', verifierId: 'x', attestedAt: 0 }) }
+
+        it('is the default verifier when none is given', () => {
+            const a = resolveConfig(base).teeVerifier
+            expect(a).toBeInstanceOf(BundleVerifier)
+            // One per resolution: its collateral cache is the Client's own.
+            expect(resolveConfig(base).teeVerifier).not.toBe(a)
+        })
+
+        it('is the one given', () => {
+            expect(resolveConfig({ ...base, teeVerifier: supplied }).teeVerifier).toBe(supplied)
+        })
+
+        it('is none when TEE is disabled, whatever was given', () => {
+            expect(resolveConfig({ ...base, disableTee: true }).teeVerifier).toBeUndefined()
+            expect(resolveConfig({ ...base, disableTee: true, teeVerifier: supplied }).teeVerifier).toBeUndefined()
+        })
     })
 })

@@ -48,6 +48,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `go/escrow` group checks | `sdk/src/escrow/{open,settle}.ts` | `escrow_group_vectors.json` |
 | `zs/decode.go` | `sdk/src/decode.ts` | `stream_events_vectors.json` |
 | `zs/operator.go` | `sdk/src/operator.ts` | `operator_vectors.json` |
+| `probeAttestation` (`zs/fetcher.go`), `zs/attestation_client.go` | `sdk/src/attestation.ts` | the `probe_attestation` block of `operator_vectors.json` (the 256 KiB body cap is tested per language) |
 | `zs/retry.go` `Error.Retryable` | `sdk/src/codes.ts` | `error_retry_vectors.json` |
 | `zs/handler` render, `/v1/completions` | `sdk/src/fetch/*` | `http_render_`, `completions_vectors.json` |
 | `go/httpx` private-target guard | `sdk/src/privateip.ts` | `private_target_vectors.json` |

@@ -272,6 +272,7 @@
   "defaults": {
     "affinityMax": 1024,
     "affinityTtlMs": 600000,
+    "attestationFetchTimeoutMs": 2000,
     "concurrentSlots": 10,
     "detailsConcurrency": 24,
     "detailsFetchTimeoutMs": 2000,
