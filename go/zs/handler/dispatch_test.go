@@ -1745,8 +1745,10 @@ func TestDispatch_RequireTEE_ReprobeToUnattestedKeyIsRefused(t *testing.T) {
 		replyPlaintext: []byte(`{"ok":true}`),
 	})
 	healed := op.operator
-	healed.TEE = &zs.TEEStatus{Mode: "dstack-tdx"}
-	op.operator.TEE = &zs.TEEStatus{Mode: "dstack-tdx", Verified: true}
+	// Verified on its new key, but on no published release: refused all the
+	// same, so a re-check of the pass alone would let it through.
+	healed.TEE = &zs.TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true}
+	op.operator.TEE = &zs.TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true, ComposeReleaseChecked: true}
 	op.operator.EphemeralRecipient = nil
 	op.operator.EphemeralRecipientPubkey = ""
 	op.operator.EphemeralExpiry = 0

@@ -29,7 +29,11 @@ const EVIDENCE_MAX_AGE_CEILING_NS = BigInt(EVIDENCE_MAX_AGE_CEILING_MS) * NANOS_
 const GO_ZERO_TIME_NS = -62135596800n * 1_000_000_000n
 
 export interface BundleVerifierOptions {
-    /** Dev pipelines only: pass a stub bundle. Production leaves it false. */
+    /**
+     * Dev pipelines only: pass a stub bundle. Production leaves it false. A
+     * stub pass is verified but never attested: it carries no
+     * measurementChecks, so it does not route requireTee traffic.
+     */
     allowStub?: boolean
     /** Handed to the dstack branch; see DstackVerifierOptions. */
     trustedComposeHashes?: readonly string[]

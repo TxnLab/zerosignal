@@ -132,6 +132,15 @@ type verdictExpect struct {
 	VerifierID       string   `json:"verifier_id"`
 	AttestedModelIDs []string `json:"attested_model_ids"`
 	CarriedCalled    bool     `json:"carried_called"`
+	// MeasurementChecks is null on a refusal and on a stub pass. Routing
+	// reads it, so the two verifiers must agree on it as on the pass itself.
+	MeasurementChecks *verdictChecks `json:"measurement_checks"`
+}
+
+type verdictChecks struct {
+	OSImage        bool `json:"os_image"`
+	ComposeRelease bool `json:"compose_release"`
+	ComposeHash    bool `json:"compose_hash"`
 }
 
 // verdictFailureTags maps the TypeScript FailureTag key to the Go constant.
@@ -317,13 +326,17 @@ func replayVerdictCase(f *verdictVectorsFile, c verdictCase) (verdictExpect, err
 		NodeID:                   nodeID,
 		EphemeralRecipientPubkey: c.Node.EphemeralRecipientPubkey,
 	})
-	return verdictExpect{
+	got := verdictExpect{
 		Pass:             verdict.Pass,
 		FailureTag:       &verdict.FailureTag,
 		VerifierID:       verdict.VerifierID,
 		AttestedModelIDs: verdict.AttestedModelIDs,
 		CarriedCalled:    called,
-	}, nil
+	}
+	if c := verdict.MeasurementChecks; c != nil {
+		got.MeasurementChecks = &verdictChecks{OSImage: c.OSImage, ComposeRelease: c.ComposeRelease, ComposeHash: c.ComposeHash}
+	}
+	return got, nil
 }
 
 func verdictComposePolicy(p verdictPolicy) (attest.ComposePolicy, error) {
@@ -443,11 +456,24 @@ func checkVerdictCoverage(t *testing.T, cases []verdictCase) {
 	ids := map[string]bool{}
 	names := map[string]bool{}
 	var called, notCalled bool
+	// The three shapes of a pass routing tells apart: on a release, without
+	// one, and with no checks at all.
+	var releasePass, noReleasePass, uncheckedPass bool
 	for _, c := range cases {
 		if names[c.Name] {
 			t.Errorf("duplicate case name %q", c.Name)
 		}
 		names[c.Name] = true
+		switch m := c.Expect.MeasurementChecks; {
+		case !c.Expect.Pass && m != nil:
+			t.Errorf("%s: a refusal carries measurement checks", c.Name)
+		case c.Expect.Pass && m == nil:
+			uncheckedPass = true
+		case c.Expect.Pass && m.ComposeRelease:
+			releasePass = true
+		case c.Expect.Pass:
+			noReleasePass = true
+		}
 		if c.Expect.FailureTag != nil {
 			tags[*c.Expect.FailureTag] = true
 		}
@@ -470,6 +496,10 @@ func checkVerdictCoverage(t *testing.T, cases []verdictCase) {
 	}
 	if !called || !notCalled {
 		t.Errorf("the carried rung must be both reached and refused: called=%v notCalled=%v", called, notCalled)
+	}
+	if !releasePass || !noReleasePass || !uncheckedPass {
+		t.Errorf("passes must cover a release match, no release match and no checks: %v %v %v",
+			releasePass, noReleasePass, uncheckedPass)
 	}
 }
 
@@ -695,13 +725,18 @@ func (fx *verdictFixture) base(name string) verdictCase {
 		Collateral: "absent",
 		NowUnixMs:  fx.issuedMs + time.Minute.Milliseconds(),
 		Expect: verdictExpect{
-			Pass:             true,
-			FailureTag:       tagp(""),
-			VerifierID:       VerifierIDDstack,
-			AttestedModelIDs: modelIDs(capturedModels()),
+			Pass:              true,
+			FailureTag:        tagp(""),
+			VerifierID:        VerifierIDDstack,
+			AttestedModelIDs:  modelIDs(capturedModels()),
+			MeasurementChecks: baseChecks(),
 		},
 	}
 }
+
+// baseChecks is what base's pass rests on: the trusted image and the pinned
+// compose hash, with the release match off.
+func baseChecks() *verdictChecks { return &verdictChecks{OSImage: true, ComposeHash: true} }
 
 func tagp(tag string) *string { return &tag }
 
@@ -948,6 +983,7 @@ func (fx *verdictFixture) cases() []verdictCase {
 			want.VerifierID = VerifierIDDstack
 			if want.Pass {
 				want.AttestedModelIDs = modelIDs(models)
+				want.MeasurementChecks = baseChecks()
 			}
 			c.Expect = want
 		})
@@ -1039,8 +1075,12 @@ func (fx *verdictFixture) cases() []verdictCase {
 	add(fx.base("compose_pin_matching_release_match_off"), func(c *verdictCase) {
 		c.Policy.ComposePolicy = "none"
 	})
-	measured("compose_pin_empty_release_match_on", release([]string{}), none)
-	measured("compose_pin_matching_release_match_on", release([]string{measuredHash}), none)
+	measured("compose_pin_empty_release_match_on", release([]string{}), func(c *verdictCase) {
+		c.Expect.MeasurementChecks = &verdictChecks{OSImage: true, ComposeRelease: true}
+	})
+	measured("compose_pin_matching_release_match_on", release([]string{measuredHash}), func(c *verdictCase) {
+		c.Expect.MeasurementChecks = &verdictChecks{OSImage: true, ComposeRelease: true, ComposeHash: true}
+	})
 	measured("compose_pin_not_matching_release_match_on", release([]string{strings.Repeat("aa", 32)}), func(c *verdictCase) {
 		c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
 	})

@@ -382,8 +382,11 @@ func (s *Server) handleDetails(w http.ResponseWriter, r *http.Request) {
 //     time, so it's current to within one refresh interval.
 //   - models, builtin_tools, node_version, max_tool_iterations come
 //     from each operator's own /v1/zs/details probe.
-//   - tee.{mode,verified} comes from the proxy's attestation verdict
-//     (TEE.Verified mirrors the bit routing already filters on).
+//   - tee.{mode,verified,attested} comes from the proxy's attestation
+//     verdict. attested is the bit routing filters on (zs.TEEStatus.Attested:
+//     a pass that also matched a trusted OS image and a published compose
+//     release); verified is the pass alone, so a node can be verified and
+//     still not attested.
 //
 // AgeRecipient is intentionally omitted — also public, but no current
 // consumer of this endpoint needs it.
@@ -467,6 +470,7 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 	type teeEntry struct {
 		Mode     string `json:"mode,omitempty"`
 		Verified bool   `json:"verified"`
+		Attested bool   `json:"attested"`
 		// No omitempty: null (no verified list) and [] (the node attested an
 		// empty catalog) are different answers, and omitempty would collapse
 		// both into an absent key.
@@ -602,7 +606,7 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 		var tee *teeEntry
 		if op.TEE != nil {
 			tee = &teeEntry{Mode: op.TEE.Mode, Verified: op.TEE.Verified,
-				AttestedModelIDs: op.TEE.AttestedModelIDs}
+				Attested: op.TEE.Attested(), AttestedModelIDs: op.TEE.AttestedModelIDs}
 		}
 		m := op.Metrics
 		out.Operators = append(out.Operators, operatorEntry{

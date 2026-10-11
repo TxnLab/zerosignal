@@ -357,7 +357,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				"no operator advertises a compatible wire protocol version ("+wire.ProtoVersion+")"))
 		case pick.TEEBlocked:
 			// Required TEE attestation — none of the otherwise-fitting
-			// operators have a current passing verdict. 503 (not 400)
+			// operators is attested (Operator.IsTEEAttested). 503 (not 400)
 			// because this is a pool-availability failure: the request
 			// is well-formed, the proxy just has nothing attested to
 			// route it to right now. Distinct from no_operator so the

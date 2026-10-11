@@ -99,17 +99,32 @@ export interface OperatorMetrics {
     revenue30dUsdc?: number | undefined
 }
 
-/** The payer's own verdict on the node's attestation evidence. */
+/**
+ * The payer's own verdict on the node's attestation evidence. Mirrors Go's
+ * zs.TEEStatus; isTeeAttested is the routing answer read from it.
+ */
 export interface TEEStatus {
     mode: string
     /** Unix milliseconds: when the verified evidence was generated. */
     attestedAt: number
     verifierId: string
+    /** The verdict passed. Not by itself attested: see isTeeAttested. */
     verified: boolean
     /** '' when verified. */
     failureTag: string
+    /**
+     * The verdict's measurementChecks.osImage and .composeRelease: the guest
+     * image matched a trusted production image, and the compose matched a
+     * published zs-node release. Copied as the verdict reports them, and false
+     * when it carries none (a refusal, a stub, a verifier that reports none);
+     * isTeeAttested reads them only beside verified. Required rather than
+     * optional so a host building its own status has to answer them, since
+     * leaving them out reads as unattested.
+     */
+    osImageChecked: boolean
+    composeReleaseChecked: boolean
     attestedModelIds?: string[] | undefined
-    /** What the verifier saw, for display. Never a routing input; Go logs it instead. */
+    /** What the verifier saw, for display; Go logs it instead. Routing reads the two checks above, never this. */
     detail?: VerdictDetail | undefined
 }
 
@@ -174,8 +189,19 @@ export function refOf(o: Pick<Operator, 'id' | 'nodeId'>): NodeRef {
     return { op: o.id, node: o.nodeId }
 }
 
+/**
+ * isTeeAttested is whether a node counts as TEE-attested for routing: its
+ * verdict passed AND rested on both reference checks. Mirrors Go's
+ * TEEStatus.Attested, pinned by operator_vectors.json.
+ *
+ * A pass alone is the weaker claim "real confidential hardware running SOME
+ * measured software". The verifier's compose policy refuses an unrecognized
+ * release today, so the two usually coincide, but that is a verifier setting
+ * and the gate must not move with it.
+ */
 export function isTeeAttested(o: Pick<Operator, 'tee'>): boolean {
-    return o.tee?.verified === true
+    const t = o.tee
+    return t?.verified === true && t.osImageChecked === true && t.composeReleaseChecked === true
 }
 
 export function servesImageGen(c: ModelCapacity): boolean {

@@ -82,6 +82,8 @@ interface Expected {
     verifier_id: string
     attested_model_ids: string[] | null
     carried_called: boolean
+    /** null on a refusal and on a stub pass; routing reads it. */
+    measurement_checks: { os_image: boolean; compose_release: boolean; compose_hash: boolean } | null
 }
 
 interface VerdictVectors {
@@ -200,12 +202,17 @@ async function replay(c: VerdictCase): Promise<Expected> {
         nodeId: BigInt(c.node.node_id),
         ephemeralRecipientPubkey: c.node.ephemeral_recipient_pubkey,
     })
+    const checks = verdict.detail?.measurementChecks
     return {
         pass: verdict.pass,
         failure_tag: verdict.failureTag,
         verifier_id: verdict.verifierId,
         attested_model_ids: verdict.attestedModelIds ?? null,
         carried_called: carriedCalled,
+        measurement_checks:
+            checks === undefined
+                ? null
+                : { os_image: checks.osImage, compose_release: checks.composeRelease, compose_hash: checks.composeHash },
     }
 }
 

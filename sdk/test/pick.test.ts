@@ -157,7 +157,15 @@ function request(over: Partial<PickRequest> = {}): PickRequest {
 }
 
 const ids = (ops: readonly Operator[]) => ops.map((o) => `${o.id}/${o.nodeId}`)
-const attested = { mode: 'stub', attestedAt: 0, verifierId: 'builtin', verified: true, failureTag: '' }
+const attested = {
+    mode: 'dstack-tdx',
+    attestedAt: 0,
+    verifierId: 'dstack-tdx',
+    verified: true,
+    failureTag: '',
+    osImageChecked: true,
+    composeReleaseChecked: true,
+}
 
 describe('routableIgnoringSize', () => {
     const cases: [string, Partial<Operator>, { allowStaging?: boolean; excluded?: boolean; requireTee?: boolean; prefs?: Partial<RoutingPreferences> }, boolean][] = [
@@ -168,6 +176,7 @@ describe('routableIgnoringSize', () => {
         ['operator speaking a different wire generation', { protoVersion: '1.0' }, {}, false],
         ['TEE required and the operator is not attested', {}, { requireTee: true }, false],
         ['TEE required and the operator is attested', { tee: attested }, { requireTee: true }, true],
+        ['TEE required and the pass matched no published release', { tee: { ...attested, composeReleaseChecked: false } }, { requireTee: true }, false],
         ['signing account one microAlgo below the routing floor', { signerSpendableMicroAlgos: MIN_SIGNER_SPENDABLE_MICROALGOS - 1 }, {}, false],
         ['signing account exactly at the routing floor', { signerSpendableMicroAlgos: MIN_SIGNER_SPENDABLE_MICROALGOS }, {}, true],
         ["caller's provider.ignore excludes it", {}, { prefs: { ignore: [ref(7)] } }, false],
@@ -429,6 +438,10 @@ describe('pickCandidates', () => {
 
             res = await pick(pinned(op(7, { tee: attested })), { requireTee: true })
             expect(ids(res.operators)).toEqual(['7/1'])
+
+            // A pass on no published release is not attested, so it still overrides the pin.
+            res = await pick(pinned(op(7, { tee: { ...attested, composeReleaseChecked: false } })), { requireTee: true })
+            expect(res.teeBlocked).toBe(true)
 
             res = await pick(pinned(op(7, { signerSpendableMicroAlgos: 0 })), { prefs: prefs({ only: [ref(9)] }) })
             expect(res.pinConflict).toBe(true)

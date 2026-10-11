@@ -33,7 +33,7 @@ interface Scenario {
         reachable: boolean
         staging: boolean
         signer_spendable_microalgos: number | null
-        tee_verified: boolean | null
+        tee: { verified: boolean; os_image_checked: boolean; compose_release_checked: boolean } | null
     }
     details: unknown
     fields: unknown
@@ -69,9 +69,17 @@ function operatorOf(sc: Scenario): Operator {
         staging: n.staging,
         signerSpendableMicroAlgos: n.signer_spendable_microalgos ?? undefined,
         tee:
-            n.tee_verified === null
+            n.tee === null
                 ? undefined
-                : { mode: 'dstack-tdx', attestedAt: 0, verifierId: 'builtin', verified: n.tee_verified, failureTag: '' },
+                : {
+                      mode: 'dstack-tdx',
+                      attestedAt: 0,
+                      verifierId: 'builtin',
+                      verified: n.tee.verified,
+                      failureTag: '',
+                      osImageChecked: n.tee.os_image_checked,
+                      composeReleaseChecked: n.tee.compose_release_checked,
+                  },
         ...detailsFieldsOf(details),
     })
 }
@@ -115,10 +123,16 @@ describe('operator helpers', () => {
         expect(refOf(testOperator())).toEqual({ op: 7, node: 2 })
     })
 
-    it('counts only a passing verdict as attested', () => {
-        const tee = { mode: 'dstack-tdx', attestedAt: 0, verifierId: 'builtin', failureTag: '' }
+    // The vectors pin the conjunction against Go; this pins that a status
+    // missing the two checks, as a host's untyped object would be, fails
+    // closed rather than reading undefined as passing.
+    it('counts a verdict as attested only on a pass that rested on both checks', () => {
+        const tee = { mode: 'dstack-tdx', attestedAt: 0, verifierId: 'dstack-tdx', failureTag: '' }
+        const both = { osImageChecked: true, composeReleaseChecked: true }
         expect(isTeeAttested(testOperator())).toBe(false)
-        expect(isTeeAttested(testOperator({ tee: { ...tee, verified: false } }))).toBe(false)
-        expect(isTeeAttested(testOperator({ tee: { ...tee, verified: true } }))).toBe(true)
+        expect(isTeeAttested(testOperator({ tee: { ...tee, ...both, verified: false } }))).toBe(false)
+        expect(isTeeAttested(testOperator({ tee: { ...tee, ...both, verified: true } }))).toBe(true)
+        const unchecked = { tee: { ...tee, verified: true } } as unknown as Pick<Operator, 'tee'>
+        expect(isTeeAttested(unchecked)).toBe(false)
     })
 })

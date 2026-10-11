@@ -26,9 +26,10 @@ export interface Node {
 }
 
 /**
- * The outcome of one verification. Mirrors tee.Verdict: pass is the routing
- * bit, failureTag is '' exactly when pass is true, and attestedModelIds is
- * set only on a passing dstack verdict.
+ * The outcome of one verification. Mirrors tee.Verdict: pass and
+ * detail.measurementChecks are the routing inputs (isTeeAttested needs both),
+ * failureTag is '' exactly when pass is true, and attestedModelIds is set only
+ * on a passing dstack verdict.
  */
 export interface Verdict {
     pass: boolean
@@ -42,15 +43,27 @@ export interface Verdict {
      * verified list.
      */
     attestedModelIds?: string[]
-    /** What the verifier saw, for display. Never a routing input. */
+    /**
+     * What the verifier saw. Display only, except measurementChecks, which
+     * routing reads through probeAttestation's TEEStatus.
+     */
     detail?: VerdictDetail
 }
 
-/** Display detail. Go logs these instead; a browser has nowhere else to put them. */
+/**
+ * What the verifier saw. Go logs most of these instead; a browser has nowhere
+ * else to put them. measurementChecks is the exception: Go carries it on
+ * tee.Verdict.MeasurementChecks, and both SDKs gate routing on it.
+ */
 export interface VerdictDetail {
     /** Recovered from the event-log replay, never read off a self-reported field. */
     measurements?: Measurements
-    /** Which reference checks a passing dstack verdict rested on. */
+    /**
+     * Which reference checks a passing dstack verdict rested on; absent on a
+     * refusal and on a stub pass. A routing input: a node is attested only
+     * when osImage and composeRelease are both true (isTeeAttested). Pinned
+     * against Go by tee_verdict_vectors.json.
+     */
     measurementChecks?: MeasurementChecks
     /** Intel's TCB status for the platform, from the chain step. */
     tcbStatus?: string
@@ -77,7 +90,12 @@ export interface MeasurementChecks {
     composeHash: boolean
 }
 
-/** Verifies an evidence bundle against an advertisement. Mirrors tee.Verifier. */
+/**
+ * Verifies an evidence bundle against an advertisement. Mirrors tee.Verifier.
+ * A pass routes as attested only when it also sets detail.measurementChecks
+ * with osImage and composeRelease true, so an implementation that leaves them
+ * out verifies nodes that requireTee traffic never reaches.
+ */
 export interface Verifier {
     verify(
         advertised: TEEAdvertisement,

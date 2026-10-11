@@ -121,8 +121,9 @@ type Node struct {
 	EphemeralRecipientPubkey string
 }
 
-// Verdict is the outcome of a single Verifier.Verify call. Pass is
-// the routing-relevant bit; FailureTag is empty iff Pass is true and
+// Verdict is the outcome of a single Verifier.Verify call. Pass and
+// MeasurementChecks are the routing inputs (zs.TEEStatus.Attested needs
+// both); FailureTag is empty iff Pass is true and
 // otherwise carries one of the Failure* constants. AttestedAt is the
 // bundle's GeneratedAt — surfaced so the caller can stamp it on the
 // operator's zs.TEEStatus regardless of the pass/fail outcome (the
@@ -148,6 +149,31 @@ type Verdict struct {
 	// models. Nil means there is no verified list (a refusal, a stub
 	// bundle, or a verifier that produces none).
 	AttestedModelIDs []string
+
+	// MeasurementChecks says which reference checks a passing dstack verdict
+	// rested on. Nil on any refusal and on a stub pass, which compared no
+	// measurement against anything.
+	//
+	// A routing input, not a diagnostic: Pass alone says "real confidential
+	// hardware running SOME measured software", and zs counts a node as
+	// attested only when this also shows the OS image and the compose release
+	// checked (zs.TEEStatus.Attested).
+	MeasurementChecks *MeasurementChecks
+}
+
+// MeasurementChecks records which allowlists a passing verdict was matched
+// against. The TypeScript twin is MeasurementChecks in sdk/src/tee/types.ts,
+// carried on Verdict.detail there.
+type MeasurementChecks struct {
+	// OSImage: os-image-hash matched a trusted production guest image.
+	OSImage bool
+	// ComposeRelease: the compose document matched a published zs-node
+	// release (ComposePolicy.EnforceComposeSkeleton). False when the release
+	// match is off, where a hand-pinned compose hash identified the workload
+	// instead.
+	ComposeRelease bool
+	// ComposeHash: compose-hash matched a configured whole-document pin.
+	ComposeHash bool
 }
 
 // Verifier verifies an evidence bundle against an advertisement.
@@ -158,7 +184,10 @@ type Verdict struct {
 // Implementations MUST always populate VerifierID on the returned
 // Verdict and SHOULD populate AttestedAt from bundle.GeneratedAt
 // regardless of whether Pass is true. Pass=false MUST come with a
-// non-empty FailureTag drawn from the Failure* constants.
+// non-empty FailureTag drawn from the Failure* constants. A pass routes
+// as attested only when it also sets MeasurementChecks with OSImage and
+// ComposeRelease true, so an implementation that leaves it nil verifies
+// nodes that Require-TEE traffic never reaches.
 type Verifier interface {
 	Verify(ctx context.Context, advertised inject.TEEAdvertisement, bundle inject.TEEEvidenceBundle, node Node) Verdict
 }
@@ -174,6 +203,8 @@ type Verifier interface {
 //  2. Stub-mode short-circuit — bundle.Stub == true passes only when
 //     AllowStub is true (dev). Production deployments leave AllowStub
 //     false; stub bundles are then rejected with FailureStubNotAllowed.
+//     A stub pass is verified but never attested: it carries no
+//     MeasurementChecks, so it does not route Require-TEE traffic.
 //  3. Dispatch on bundle.Mode — dstack-tdx reaches DstackVerifier;
 //     nvidia-cc-tdx / nvidia-cc-snp return FailureVerifierNotImpl until
 //     VCEK chain + NRAS EAT verification land. The interface shape does
@@ -372,11 +403,13 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 			Log:                  v.Log,
 		}
 		verdict.VerifierID = VerifierIDDstack
-		if tag := dv.Verify(ctx, bundle, op); tag != "" {
+		var checks MeasurementChecks
+		if tag := dv.verify(ctx, bundle, op, &checks); tag != "" {
 			verdict.FailureTag = tag
 			return verdict
 		}
 		verdict.Pass = true
+		verdict.MeasurementChecks = &checks
 		// dv.Verify returned "", so VerifyAux matched this list. Built
 		// non-nil even when empty; see Verdict.AttestedModelIDs.
 		ids := make([]string, 0, len(bundle.AppModels))

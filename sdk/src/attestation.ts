@@ -16,6 +16,8 @@
 //    Go's registry stores a cycle its deadline cut short, so the caller still
 //    records a status: registry/probe.ts records fetchFailedStatus.
 //  - The status carries the verdict's display detail, which Go logs instead.
+//    The measurement checks inside it are also copied to osImageChecked and
+//    composeReleaseChecked, which is where routing reads them in both SDKs.
 //  - An evidence URL that Go's url.Parse refuses but WHATWG URL accepts (such
 //    as "/%zz") is fetched here and fetch_failed in Go. Where the bundle comes
 //    from changes nothing it has to prove, so this is left alone.
@@ -29,7 +31,7 @@ import {
 } from '@txnlab/zs-proto/inject'
 
 import { readLimited } from './http.js'
-import type { Operator, TEEStatus } from './operator.js'
+import { type Operator, type TEEStatus, isTeeAttested } from './operator.js'
 import { type Fetch, type Logger, discardLogger } from './ports.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import { FailureTag, VERIFIER_ID_BUILTIN } from './tee/tags.js'
@@ -208,15 +210,32 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
             failure_tag: verdict.failureTag,
         })
     }
-    return {
+    const checks = verdict.detail?.measurementChecks
+    const status: TEEStatus = {
         mode: p.advertised.mode,
         attestedAt: verdict.attestedAt,
         verifierId: verdict.verifierId,
         verified: verdict.pass,
         failureTag: verdict.failureTag,
+        osImageChecked: checks?.osImage === true,
+        composeReleaseChecked: checks?.composeRelease === true,
         ...(verdict.attestedModelIds !== undefined && { attestedModelIds: verdict.attestedModelIds }),
         ...(verdict.detail !== undefined && { detail: verdict.detail }),
     }
+    if (verdict.pass && !isTeeAttested({ tee: status })) {
+        // Without this a pass that routing refuses is silent: a stub node, or a
+        // verifier with a compose-hash pin and the release match off, verifies
+        // cleanly and then never receives requireTee traffic.
+        log.warn('operator attestation passed but is not attested for routing', {
+            operator_id: op.id,
+            node_id: op.nodeId,
+            ...relay,
+            mode: p.advertised.mode,
+            os_image_checked: status.osImageChecked,
+            compose_release_checked: status.composeReleaseChecked,
+        })
+    }
+    return status
 }
 
 /**
@@ -230,6 +249,8 @@ export function fetchFailedStatus(advertised: TEEAdvertisement): TEEStatus {
         verifierId: VERIFIER_ID_BUILTIN,
         verified: false,
         failureTag: FailureTag.FetchFailed,
+        osImageChecked: false,
+        composeReleaseChecked: false,
     }
 }
 

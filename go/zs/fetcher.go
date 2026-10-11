@@ -1175,6 +1175,9 @@ func relayLogAttr(hop *RelayHop) slog.Attr {
 //   - Verify fails → op.TEE.Verified=false, FailureTag from verdict.
 //   - All checks pass → op.TEE.Verified=true, FailureTag empty.
 //
+// The verdict's measurement checks are copied whatever the outcome; a pass
+// that carries none (a stub) leaves them false, so it is not Attested.
+//
 // Verification failures don't mark the operator unreachable — the
 // reserve / dispatch path still works for non-TEE traffic; only
 // TEE-required requests filter this operator out.
@@ -1215,6 +1218,10 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 		FailureTag:       verdict.FailureTag,
 		AttestedModelIDs: verdict.AttestedModelIDs,
 	}
+	if c := verdict.MeasurementChecks; c != nil {
+		op.TEE.OSImageChecked = c.OSImage
+		op.TEE.ComposeReleaseChecked = c.ComposeRelease
+	}
 	if !verdict.Pass {
 		log.Warn("operator attestation verification failed",
 			slog.Uint64("operator_id", op.ID),
@@ -1222,6 +1229,18 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 			relayLogAttr(hop),
 			slog.String("mode", advertised.Mode),
 			slog.String("failure_tag", verdict.FailureTag),
+		)
+	} else if !op.TEE.Attested() {
+		// Without this a pass that routing refuses is silent: a stub node, or
+		// a verifier configured with a compose-hash pin and the release match
+		// off, verifies cleanly and then never receives Require-TEE traffic.
+		log.Warn("operator attestation passed but is not attested for routing",
+			slog.Uint64("operator_id", op.ID),
+			slog.Uint64("node_id", op.NodeID),
+			relayLogAttr(hop),
+			slog.String("mode", advertised.Mode),
+			slog.Bool("os_image_checked", op.TEE.OSImageChecked),
+			slog.Bool("compose_release_checked", op.TEE.ComposeReleaseChecked),
 		)
 	}
 }

@@ -6,11 +6,13 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -152,6 +154,54 @@ func TestJoinAttestationURL(t *testing.T) {
 	}
 }
 
+// A pass routing refuses would otherwise be silent: the node verifies and then
+// never receives Require-TEE traffic. The TS twin is the matching test in
+// sdk/test/attestation.test.ts.
+func TestProbeAttestation_WarnsOnAPassThatIsNotAttested(t *testing.T) {
+	const msg = "operator attestation passed but is not attested for routing"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"mode":"dstack-tdx","generated_at":"2026-10-01T00:00:00Z","refresh_seconds":1200}`))
+	}))
+	defer srv.Close()
+	details := inject.OperatorDetails{TEE: &inject.TEEAdvertisement{Mode: inject.TEEModeDstackTDX}}
+
+	for _, tc := range []struct {
+		name     string
+		checks   *tee.MeasurementChecks
+		wantWarn bool
+	}{
+		{"attested", &tee.MeasurementChecks{OSImage: true, ComposeRelease: true}, false},
+		{"no published release", &tee.MeasurementChecks{OSImage: true, ComposeHash: true}, true},
+		{"untrusted OS image", &tee.MeasurementChecks{ComposeRelease: true}, true},
+		{"no checks, as a stub", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logged bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			s := &ChainOperatorSource{TEEVerifier: &stubTEEVerifier{verdict: tee.Verdict{
+				Pass: true, VerifierID: tee.VerifierIDDstack, MeasurementChecks: tc.checks,
+			}}}
+			op := Operator{ID: 7, NodeID: 2, BaseURL: srv.URL, EphemeralRecipientPubkey: "age1recipient"}
+			s.probeAttestation(context.Background(), &op, details, NewAttestationClient(srv.Client(), 5*time.Second), nil, log)
+
+			if got := strings.Contains(logged.String(), msg); got != tc.wantWarn {
+				t.Fatalf("warned = %v, want %v; log: %s", got, tc.wantWarn, logged.String())
+			}
+			if tc.wantWarn {
+				var rec map[string]any
+				if err := json.Unmarshal(logged.Bytes(), &rec); err != nil {
+					t.Fatalf("decode log line: %v", err)
+				}
+				wantOS := tc.checks != nil && tc.checks.OSImage
+				wantRelease := tc.checks != nil && tc.checks.ComposeRelease
+				if rec["os_image_checked"] != wantOS || rec["compose_release_checked"] != wantRelease {
+					t.Fatalf("log attrs = %v", rec)
+				}
+			}
+		})
+	}
+}
+
 func TestOperator_IsTEEAttested(t *testing.T) {
 	cases := []struct {
 		name string
@@ -159,8 +209,12 @@ func TestOperator_IsTEEAttested(t *testing.T) {
 		want bool
 	}{
 		{"nil TEE", Operator{}, false},
-		{"verified", Operator{TEE: &TEEStatus{Verified: true}}, true},
+		{"verified on both checks", Operator{TEE: &TEEStatus{Verified: true, OSImageChecked: true, ComposeReleaseChecked: true}}, true},
+		{"verified on the OS image only", Operator{TEE: &TEEStatus{Verified: true, OSImageChecked: true}}, false},
+		{"verified on the compose release only", Operator{TEE: &TEEStatus{Verified: true, ComposeReleaseChecked: true}}, false},
+		{"verified with no checks, as a stub", Operator{TEE: &TEEStatus{Verified: true}}, false},
 		{"populated but not verified", Operator{TEE: &TEEStatus{Verified: false, FailureTag: tee.FailureKeyBindingMismatch}}, false},
+		{"refused, whatever the checks say", Operator{TEE: &TEEStatus{OSImageChecked: true, ComposeReleaseChecked: true}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -20,6 +20,7 @@ import {
     joinAttestationUrl,
     probeAttestation,
 } from '../src/attestation.js'
+import { isTeeAttested } from '../src/operator.js'
 import type { RelayHop } from '../src/routing/index.js'
 import type { Node, Verdict, Verifier } from '../src/tee/index.js'
 
@@ -36,6 +37,7 @@ interface ProbeScenario {
         verifier_id: string
         attested_at_ms: number
         attested_model_ids: string[] | null
+        measurement_checks: { os_image: boolean; compose_release: boolean; compose_hash: boolean } | null
     } | null
     endpoint_status: number
     endpoint_body: string
@@ -45,6 +47,7 @@ interface ProbeScenario {
     request_relay_target: string
     verified_node: { operatorId: number; nodeId: number; ephemeralRecipientPubkey: string } | null
     want: unknown
+    attested: boolean
 }
 
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/operator_vectors.json', import.meta.url), 'utf8')) as {
@@ -116,6 +119,15 @@ describe('probe_attestation vectors', () => {
                       verifierId: sc.verdict.verifier_id,
                       attestedAt: sc.verdict.attested_at_ms,
                       ...(sc.verdict.attested_model_ids !== null && { attestedModelIds: sc.verdict.attested_model_ids }),
+                      ...(sc.verdict.measurement_checks !== null && {
+                          detail: {
+                              measurementChecks: {
+                                  osImage: sc.verdict.measurement_checks.os_image,
+                                  composeRelease: sc.verdict.measurement_checks.compose_release,
+                                  composeHash: sc.verdict.measurement_checks.compose_hash,
+                              },
+                          },
+                      }),
                   })
         const advertised =
             sc.advertised === null
@@ -149,7 +161,11 @@ describe('probe_attestation vectors', () => {
                 ? null
                 : { operatorId: Number(node.operatorId), nodeId: Number(node.nodeId), ephemeralRecipientPubkey: node.ephemeralRecipientPubkey },
         ).toEqual(sc.verified_node)
-        expect(got === undefined ? null : { ...got, attestedModelIds: got.attestedModelIds ?? null }).toStrictEqual(sc.want)
+        // detail is display data Go does not carry; the checks it held are
+        // compared through osImageChecked and composeReleaseChecked.
+        const status = got === undefined ? null : (({ detail: _d, ...rest }) => rest)(got)
+        expect(status === null ? null : { ...status, attestedModelIds: status.attestedModelIds ?? null }).toStrictEqual(sc.want)
+        expect(isTeeAttested({ tee: got })).toBe(sc.attested)
     })
 })
 
@@ -180,6 +196,24 @@ describe('probeAttestation', () => {
         const { verifier } = stubVerifier({ ...PASS, detail })
         const got = await probeAttestation({ operator, advertised, verifier, fetch: answering(200, BUNDLE).fetch })
         expect(got?.detail).toBe(detail)
+    })
+
+    it('warns about a pass that routing will not count as attested, and not about one it will', async () => {
+        const warn = vi.fn()
+        const log = { debug() {}, info() {}, warn, error() {} }
+        const fetch = answering(200, BUNDLE).fetch
+        const both = { detail: { measurementChecks: { osImage: true, composeRelease: true, composeHash: false } } }
+        await probeAttestation({ operator, advertised, verifier: stubVerifier({ ...PASS, ...both }).verifier, fetch, log })
+        expect(warn).not.toHaveBeenCalled()
+        await probeAttestation({ operator, advertised, verifier: stubVerifier(PASS).verifier, fetch, log })
+        expect(warn.mock.calls[0]![0]).toBe('operator attestation passed but is not attested for routing')
+        expect(warn.mock.calls[0]![1]).toMatchObject({ os_image_checked: false, compose_release_checked: false })
+        // The release check alone is not enough either.
+        const releaseOnly = { detail: { measurementChecks: { osImage: false, composeRelease: true, composeHash: false } } }
+        await probeAttestation({ operator, advertised, verifier: stubVerifier({ ...PASS, ...releaseOnly }).verifier, fetch, log })
+        expect(warn).toHaveBeenCalledTimes(2)
+        expect(warn.mock.calls[1]![0]).toBe('operator attestation passed but is not attested for routing')
+        expect(warn.mock.calls[1]![1]).toMatchObject({ os_image_checked: false, compose_release_checked: true })
     })
 
     it("reports no time for Go's zero time, which a node with no bundle advertises", async () => {

@@ -82,7 +82,9 @@ export interface Operator {
     // most recent /v1/zs/details probe succeeded. Relay-eligibility signal
     // only — servesModel no longer consults it.
     reachable: boolean
-    // current passing confidential-mode attestation verdict.
+    // current passing confidential-mode attestation verdict that rested on both
+    // measurement checks (trusted OS image, published compose release); the
+    // payer SDK's isTeeAttested decides it.
     tee_attested: boolean
     // on-chain `staging` flag (NodeRecord.staging): a node held out of
     // production target selection. selectTargets drops it unless

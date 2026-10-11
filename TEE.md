@@ -226,7 +226,7 @@ The full per-component breakdown lives in the implementation plan and the operat
   }
   ```
 
-  Mode values: `none` (default), `stub` (dev only), `dstack-tdx`, `nvidia-cc-tdx`, `nvidia-cc-snp`. Stub mode produces a deterministic, well-formed-but-untrusted bundle so the verifier pipeline is exercisable on a developer laptop.
+  Mode values: `none` (default), `stub` (dev only), `dstack-tdx`, `nvidia-cc-tdx`, `nvidia-cc-snp`. Stub mode produces a deterministic, well-formed-but-untrusted bundle so the verifier pipeline is exercisable on a developer laptop. A payer that allows stubs marks such a node verified but never attested, so it does not route `Require-TEE` traffic.
 
   **`dstack-tdx` is the only mode implemented end to end**, and the examples here lead with it for that reason. It is CPU-only: it carries no `gpu_eat`, makes no NRAS call, and publishes an `event_log` (and, since 9.6, the `app_compose` preimage) so a verifier recovers the compose and OS-image measurements by replaying the log against the hardware-signed RTMR3. The two `nvidia-cc-*` rungs are specified below and refused at startup by the node; their verifier branch returns `verifier_not_implemented`. See `proto/SPEC.md` § 3e for the normative wire shape.
 
@@ -254,7 +254,7 @@ The full per-component breakdown lives in the implementation plan and the operat
 
 - **Verifier interface** — `tee.Verifier` (`proto/go/zs/tee`), with `BundleVerifier` as its implementation. The interface exists so a `LocalNvtrustVerifier` or alternative-vendor implementation lands as a config switch, not a refactor.
 - **Capability cache** — `Operator.TEE *TEEStatus` carrying mode, last-attested timestamp, verifier name, and (on failure) a tagged failure reason for telemetry. Verifier failures demote the operator to non-TEE for routing purposes.
-- **Routing filter** — when a request carries `X-Zs-Require-TEE: nvidia-cc` (or an equivalent proxy-side policy fires), `pickCandidates` filters to operators with `Operator.IsTEEAttested()` — `TEE != nil && TEE.Verified`. `Verified` is the routing-relevant bit; `TEE.FailureTag` carries the verdict tag for telemetry and is empty exactly when `Verified` is true. No survivor → `503 no_tee_capacity`. Silent fallback is forbidden.
+- **Routing filter** — when a request carries `X-Zs-Require-TEE: nvidia-cc` (or an equivalent proxy-side policy fires), `pickCandidates` filters to operators with `Operator.IsTEEAttested()` — `TEE.Attested()`: `Verified && OSImageChecked && ComposeReleaseChecked`. The two checks are the verdict's `tee.MeasurementChecks` (the guest image matched a trusted production image, the compose matched a published zs-node release), so a pass missing either one is not attested: a stub, or a compose matched only by a hand-pinned `trusted_compose_hashes` entry with the release match off. `TEE.FailureTag` carries the verdict tag for telemetry and is empty exactly when `Verified` is true. No survivor → `503 no_tee_capacity`. Silent fallback is forbidden.
 
 ### 9.3 Off-chain advertising
 

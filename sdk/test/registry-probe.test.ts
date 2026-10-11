@@ -45,7 +45,15 @@ const outcomeVectors = JSON.parse(
     cases: { name: string; outcome: ProbeOutcome; prior: VectorState; want: VectorState & { record_reachable: boolean | null } }[]
 }
 
-const TEE: TEEStatus = { mode: 'dstack', attestedAt: 0, verifierId: 'dstack-tdx', verified: true, failureTag: '' }
+const TEE: TEEStatus = {
+    mode: 'dstack',
+    attestedAt: 0,
+    verifierId: 'dstack-tdx',
+    verified: true,
+    failureTag: '',
+    osImageChecked: true,
+    composeReleaseChecked: true,
+}
 
 // Go's zero values arrive as unset fields, as a fresh chain row has them.
 function operatorOf(s: VectorState, nowMs: number): Operator {
@@ -640,7 +648,14 @@ describe('NodeProber attestation', () => {
             { to: host(R2), target: host(T), path: '/v1/zs/attestation', relayed: true },
         ])
         expect(v.nodes).toEqual([{ operatorId: 42n, nodeId: 7n, ephemeralRecipientPubkey: FRESH.advertisement.ephemeral_age_pubkey }])
-        expect(ops[0]!.tee).toMatchObject({ mode: 'dstack-tdx', verified: true, attestedAt: 5, detail: PASS.detail })
+        expect(ops[0]!.tee).toMatchObject({
+            mode: 'dstack-tdx',
+            verified: true,
+            attestedAt: 5,
+            osImageChecked: true,
+            composeReleaseChecked: true,
+            detail: PASS.detail,
+        })
     })
 
     it('fetches no evidence without a verifier, and clears a carried verdict', async () => {
@@ -683,7 +698,15 @@ describe('NodeProber attestation', () => {
         const op = node(T, { tee: { ...TEE } })
         await p.enrichSubset([op], null, ac.signal)
         expect(op.reachable).toBe(true)
-        expect(op.tee).toEqual({ mode: 'dstack-tdx', attestedAt: 0, verifierId: 'builtin', verified: false, failureTag: 'fetch_failed' })
+        expect(op.tee).toEqual({
+            mode: 'dstack-tdx',
+            attestedAt: 0,
+            verifierId: 'builtin',
+            verified: false,
+            failureTag: 'fetch_failed',
+            osImageChecked: false,
+            composeReleaseChecked: false,
+        })
         expect(lines.some((l) => l.msg === 'operator attestation probe failed')).toBe(true)
     })
 

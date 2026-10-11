@@ -932,8 +932,13 @@ func TestEnrich_TEEAdvertisedAndVerified(t *testing.T) {
 	if got.TEE.VerifierID != tee.VerifierIDBuiltin {
 		t.Errorf("VerifierID = %q, want %q", got.TEE.VerifierID, tee.VerifierIDBuiltin)
 	}
-	if !got.IsTEEAttested() {
-		t.Errorf("IsTEEAttested should be true after successful verification")
+	// A stub pass compared no measurement against anything, so it verifies
+	// and still does not count as attested.
+	if got.TEE.OSImageChecked || got.TEE.ComposeReleaseChecked {
+		t.Errorf("a stub pass reports measurement checks: %+v", got.TEE)
+	}
+	if got.IsTEEAttested() {
+		t.Errorf("IsTEEAttested = true for a stub pass with no measurement checks")
 	}
 }
 

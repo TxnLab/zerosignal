@@ -372,9 +372,16 @@ verified ephemeral key, calls
 `probeAttestation` with that row, the details' `tee` advertisement, `client.config.teeVerifier`,
 a `fetch`, and the probe's relay hop and timeout, and sets the `TEEStatus` it returns on the
 operator. That is `undefined` when the node advertises no TEE or verification is off; evidence
-that could not be fetched gives `verified: false` with `failureTag: 'fetch_failed'`. Routing reads
-only `verified` (`isTeeAttested`, which `requireTee` and `Config.requireTeeModels` filter on);
-`detail` is for display. A caller's abort is rethrown rather than recorded.
+that could not be fetched gives `verified: false` with `failureTag: 'fetch_failed'`.
+
+Routing reads `isTeeAttested`, which `requireTee` and `Config.requireTeeModels` filter on. A node
+is attested only when `verified` is true **and** both `osImageChecked` and
+`composeReleaseChecked` are: the guest image matched a trusted production image, and the compose
+matched a published zs-node release. `probeAttestation` copies the two from the verdict's
+`detail.measurementChecks`. A pass that carries no checks, such as a stub, is not attested. Go's
+`TEEStatus.Attested` applies the same rule, pinned by `operator_vectors.json`. A host that builds
+its own `TEEStatus` must set both fields, and leaving them `false` reads as unattested. The rest
+of `detail` is for display. A caller's abort is rethrown rather than recorded.
 
 ## Escrow app client
 

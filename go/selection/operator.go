@@ -73,7 +73,10 @@ type Operator struct {
 	Reachable bool `json:"reachable"`
 
 	// TEEAttested reports a current, passing confidential-mode attestation
-	// verdict. Only consulted when Constraints.RequireTEE is set.
+	// verdict that rested on both measurement checks (a trusted OS image and
+	// a published zs-node compose release); the payer SDKs decide it
+	// (zs.TEEStatus.Attested, isTeeAttested in the TS SDK). Only consulted
+	// when Constraints.RequireTEE is set.
 	TEEAttested bool `json:"tee_attested"`
 
 	// Staging mirrors the node's on-chain `staging` flag (NodeRecord.staging):

@@ -753,11 +753,13 @@ func TestReserveWithTransientRetry_ResizesAfterReprobe(t *testing.T) {
 // request is sealed to a key nothing attested.
 func TestReserveWithTransientRetry_RequireTEERefusesUnattestedReprobe(t *testing.T) {
 	target := retryOp(1, "OWNER-TARGET")
-	target.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true}
+	target.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true, ComposeReleaseChecked: true}
 	unattested := target
-	unattested.TEE = &TEEStatus{Mode: "dstack-tdx"}
+	// Verified, so only the missing release check keeps it out: a retry
+	// that read the pass alone would take it.
+	unattested.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true}
 	attested := target
-	attested.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true}
+	attested.TEE = &TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true, ComposeReleaseChecked: true}
 
 	for _, tc := range []struct {
 		name       string

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/wire"
@@ -48,9 +49,21 @@ func teeOp(id uint64, model string, tee *TEEStatus) Operator {
 }
 
 var attestedTEE = &TEEStatus{
-	Mode:       "stub",
-	VerifierID: tee.VerifierIDBuiltin,
-	Verified:   true,
+	Mode:                  "dstack-tdx",
+	VerifierID:            tee.VerifierIDDstack,
+	Verified:              true,
+	OSImageChecked:        true,
+	ComposeReleaseChecked: true,
+}
+
+// unreleasedTEE passed on a trusted image whose compose matched no published
+// release: verified, and still not attested. A pick that read the pass alone
+// would keep it.
+var unreleasedTEE = &TEEStatus{
+	Mode:           "dstack-tdx",
+	VerifierID:     tee.VerifierIDDstack,
+	Verified:       true,
+	OSImageChecked: true,
 }
 
 var failedTEE = &TEEStatus{
@@ -65,6 +78,7 @@ func TestPickCandidates_TEEFilter_KeepsOnlyAttested(t *testing.T) {
 		teeOp(1, "gpt-4o-mini", attestedTEE),
 		teeOp(2, "gpt-4o-mini", nil),       // doesn't advertise
 		teeOp(3, "gpt-4o-mini", failedTEE), // advertised but failed
+		teeOp(4, "gpt-4o-mini", unreleasedTEE),
 	})
 
 	pick, err := srv.pickCandidates(context.Background(), endpointChatCompletions, "gpt-4o-mini", []byte(`{"model":"gpt-4o-mini"}`),
@@ -89,6 +103,7 @@ func TestPickCandidates_TEEFilter_AllNonAttestedSetsTEEBlocked(t *testing.T) {
 	srv := minimalTEEServer(t, []Operator{
 		teeOp(1, "gpt-4o-mini", nil),
 		teeOp(2, "gpt-4o-mini", failedTEE),
+		teeOp(3, "gpt-4o-mini", unreleasedTEE),
 	})
 
 	pick, err := srv.pickCandidates(context.Background(), endpointChatCompletions, "gpt-4o-mini", []byte(`{"model":"gpt-4o-mini"}`),
@@ -144,6 +159,40 @@ func TestPickCandidates_TEEFilter_RegistryMissTakesPrecedence(t *testing.T) {
 	}
 	if pick.RegistryCount != 0 {
 		t.Errorf("RegistryCount = %d, want 0", pick.RegistryCount)
+	}
+}
+
+// The previous_response_id pin resolves its operator by id, past the shared
+// filter, so it applies the TEE rule itself. A node that passed on no
+// published release must still override the pin, and an attested one keeps it.
+func TestPickCandidates_TEEFilter_ResponseIDPin(t *testing.T) {
+	const model = "gpt-4o-mini"
+	body := []byte(`{"model":"gpt-4o-mini","previous_response_id":"rid","input":[]}`)
+	sizing := SizingRequest{Model: model, InputTokens: 100, MaxOutputTokens: 100}
+	for _, tc := range []struct {
+		name        string
+		status      *TEEStatus
+		wantBlocked bool
+	}{
+		{"attested keeps the pin", attestedTEE, false},
+		{"verified on no published release overrides it", unreleasedTEE, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := minimalTEEServer(t, []Operator{teeOp(1, model, tc.status)})
+			srv.responseAffinity = NewIDAffinity(16, time.Minute, time.Now)
+			srv.responseAffinity.Record(1, 0, []string{"rid"})
+			pick, err := srv.pickCandidates(context.Background(), endpointResponses, model, body, sizing,
+				true, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+			if err != nil {
+				t.Fatalf("pickCandidates: %v", err)
+			}
+			if pick.AffinityBlocked {
+				t.Fatalf("the pin did not resolve: %s", pick.AffinityBlockReason)
+			}
+			if pick.TEEBlocked != tc.wantBlocked {
+				t.Fatalf("TEEBlocked = %v, want %v", pick.TEEBlocked, tc.wantBlocked)
+			}
+		})
 	}
 }
 

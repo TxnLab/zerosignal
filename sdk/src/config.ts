@@ -131,7 +131,9 @@ export interface Config {
      * an outage falls back on. The Client builds no registry yet, so it never
      * calls this itself: the host's registry does, a DiscoveryRegistry through
      * its ChainOperatorSource's teeVerifier, a registry of the host's own
-     * through probeAttestation. Hand it this same verifier.
+     * through probeAttestation. Hand it this same verifier. A custom verifier
+     * must report detail.measurementChecks, or no node it passes counts as
+     * attested.
      */
     teeVerifier?: Verifier
     /** Checks no attestation evidence: every node counts as unattested. Overrides teeVerifier. */
