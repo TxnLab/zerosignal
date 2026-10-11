@@ -5,8 +5,8 @@
 
 // The routing descriptor dispatch works from, mirroring proto/go/zs Operator:
 // one running node, addressed by (id, nodeId), with what its details probe
-// advertised. Fields only Go's registry reads (refresh times, the carry
-// window, the build id) stay in whichever registry builds these.
+// advertised. The build id, which only Go's registry reads, stays in whichever
+// registry builds these.
 
 import type { ModelCoordinates, ModelReasoning, OperatorDetails, OperatorDetailsModel } from '@txnlab/zs-proto/inject'
 import { isKnownRetention } from '@txnlab/zs-proto/inject'
@@ -145,6 +145,23 @@ export interface Operator {
     /** "<major>.<minor>"; '' when the node never said. */
     protoVersion: string
     reachable: boolean
+    /**
+     * Set once this cycle's details probe reached the target, succeeding or
+     * failing there. A probe that never reached it (skipped by a bounded
+     * cycle, no relay, every hop down) leaves it as it was, unset on a fresh
+     * chain row, so a registry falls back on reachableAsOf rather than trust
+     * this cycle's reachable. Never carried across cycles.
+     */
+    probed?: boolean | undefined
+    /** Unix ms of the last probe attempt; undefined when never probed. */
+    lastRefreshAt?: number | undefined
+    /**
+     * Unix ms of the last successful probe, the clock a registry's carry
+     * window keys off: unlike lastRefreshAt it does not advance on a failure,
+     * so a node that stops answering ages out on schedule. Undefined when
+     * never confirmed live.
+     */
+    reachableAsOf?: number | undefined
     /** Undefined: the node advertises no TEE. */
     tee?: TEEStatus | undefined
     metrics: OperatorMetrics

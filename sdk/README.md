@@ -337,8 +337,10 @@ and served for up to seven days while the PCCS is unreachable, before the node's
 is consulted. So build one verifier and keep it. `Config.teeVerifier` defaults to one per
 Client, and `disableTee` turns verification off.
 
-The SDK has no registry yet, so it never runs the attestation probe itself. After a node's
-details probe has applied its verified ephemeral key, the host's registry calls
+No `Client` runs the attestation probe yet: the SDK has no registry, and its
+`ChainOperatorSource.enrichSubset`, which runs it after each successful details probe, is not
+wired into one. Until it is, after a node's details probe has applied its verified ephemeral key,
+the host's registry calls
 `probeAttestation` with that row, the details' `tee` advertisement, `client.config.teeVerifier`,
 a `fetch`, and the probe's relay hop and timeout, and sets the `TEEStatus` it returns on the
 operator. That is `undefined` when the node advertises no TEE or verification is off; evidence
