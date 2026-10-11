@@ -227,9 +227,9 @@ export function rootBackdoorEnvs(): readonly string[] {
  * preimage, regardless of `enforceComposeSkeleton` — so the first time Phala
  * edits their template, newly deployed nodes are refused while behaving
  * perfectly. The browser has no config file, so unlike the proxy it has no
- * override: this list moving is a client redeploy. That is the same cost
- * `tee-allowlist.ts` reasons about for OS images, and the reason a
- * transparency log is the designed end state.
+ * override: this list moving is an SDK release and a client redeploy. The
+ * trusted OS images carry the same cost, and it is the reason a transparency
+ * log is the designed end state.
  *
  * Widening this by guessing is not an option — a digest admitted here blesses
  * 17KB of root-privileged bash sight unseen.
@@ -324,7 +324,7 @@ export function zeroSignalSecretEnvNames(): readonly string[] {
  *
  * THAT IS A PROPERTY OF THIS FUNCTION, NOT OF THE FLEET. Both shipped consumers
  * supply the release lists and set the flag: zs-proxy from its config defaults,
- * and the browser client from its `tee-allowlist.ts`. A library caller that
+ * and the browser client from `trust-lists.ts`. A library caller that
  * takes this policy verbatim gets the weaker check, and needs to say so rather
  * than inherit the fleet's reputation for it.
  *

@@ -8,16 +8,15 @@ package attest
 // TrustedDstackOSImages are the PRODUCTION dstack guest images this build
 // recognizes.
 //
-// IT LIVES HERE BECAUSE EVERY GO CONSUMER NEEDS THE SAME LIST AND NONE OF THEM
+// IT LIVES HERE BECAUSE EVERY CONSUMER NEEDS THE SAME LIST AND NONE OF THEM
 // CAN DERIVE IT. The proxy and the browser client appraise NODES with it; a
 // node appraises its own ACI/1 UPSTREAM with it. Those are different questions
 // about the same fleet of guest images, and two Go copies reaching different
 // verdicts on identical evidence is the failure the shared attest module
 // exists to prevent. `zs-proxy`'s defaultTrustedOSImages delegates here, and
-// proto/ts/src/attest/trust-lists.ts is generated from it
-// (TestTrustListTwinVectors fails while that file is stale);
-// client/src/operators/tee-allowlist.ts is the one remaining hand-copy, kept
-// honest by the shared policy vector.
+// proto/ts/src/attest/trust-lists.ts, which the TS SDK and the browser client
+// read, is generated from it (TestTrustListTwinVectors fails while that file
+// is stale).
 //
 // A DEV IMAGE MUST NEVER BE ADDED. This list is the only thing that catches a
 // quote taken on `dstack-dev-*`, where every other check in the chain passes
@@ -30,13 +29,9 @@ package attest
 // nothing anywhere notices a stale entry: the deploy succeeds, the quote
 // verifies, and payers route elsewhere with nothing logged. Re-read it from
 // `phala os-images`, regenerate the TypeScript twin
-// (`go test ./attest -run TestTrustListTwinVectors -update-trust-lists`), and
-// update the other two copies in the same change:
-// client/src/operators/tee-allowlist.ts (TRUSTED_OS_IMAGES — the browser's own,
-// until the client takes the SDK's list) and node/internal/tee/dstackprobe.sh's
-// ds_os_image_hash. The first of those is pinned against this list through
-// testdata/compose_vectors.json's shared_policy.trusted_os_images; the shell
-// script is pinned by nothing.
+// (`go test ./attest -run TestTrustListTwinVectors -update-trust-lists`) and
+// the compose vectors, and update the one hand copy in the same change:
+// node/internal/tee/dstackprobe.sh's ds_os_image_hash, which nothing pins.
 //
 // Returns a fresh slice per call: it lands in config structs callers mutate,
 // and a shared backing array would let one embedder's append be observed by
@@ -58,12 +53,13 @@ func TrustedDstackOSImages() []string {
 		// What pins this digest in the DEFAULT suite is weaker than it
 		// looks and worth knowing exactly (a live GPU capture now exists,
 		// but it is not in the corpus and no test reads it): it is
-		// carried in testdata/compose_vectors.json, so a
-		// wrong digit goes red in TestComposeVectors and in the client's
-		// tee-allowlist test — as a DISAGREEMENT between two copies, not
-		// as a wrong value. Either copy satisfies them, so the red says
-		// "these two differ", never "this one is wrong", and a digit
-		// wrong in all four copies is invisible there.
+		// carried in testdata/compose_vectors.json and the TypeScript
+		// twin, both generated from this list, so a changed digit goes
+		// red in TestComposeVectors and TestTrustListTwinVectors as a
+		// DISAGREEMENT with a stale copy, not as a wrong value.
+		// Regenerating satisfies them, so the red says "these differ",
+		// never "this one is wrong", and a digit wrong here is wrong in
+		// every copy and invisible to both.
 		//
 		// TestLive_TrustedOSImages_MatchTheVendorRelease is what closes
 		// that (`-tags osimageslive`, out of the default suite because it

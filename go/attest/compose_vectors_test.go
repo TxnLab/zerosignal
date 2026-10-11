@@ -131,18 +131,19 @@ type sharedPolicyVector struct {
 	//
 	// Carried for the same reason as the field above and against a sharper
 	// hazard: these digests move when Phala ships an image, on NO
-	// automation, and every consumer holds its own copy —
-	// attest.TrustedDstackOSImages here (which zs-proxy and zs-node both
-	// read), client/src/operators/tee-allowlist.ts in the browser, and
-	// node/internal/tee/dstackprobe.sh. A stale entry refuses nodes
-	// silently: the deploy succeeds, the quote verifies, and payers route
-	// elsewhere with nothing logged.
+	// automation. attest.TrustedDstackOSImages is the one source both SDKs
+	// read (the TS copy is generated from it and pinned by
+	// TestTrustListTwinVectors); node/internal/tee/dstackprobe.sh is the one
+	// hand copy left. A stale entry refuses nodes silently: the deploy
+	// succeeds, the quote verifies, and payers route elsewhere with nothing
+	// logged.
 	//
-	// The assertion against it is in client/src/operators/tee-allowlist.test.ts,
-	// NOT in proto/ts — the browser holds the second copy of these digests, and
-	// proto/ts holds none, so there is nothing there to compare. Carrying the
-	// field is therefore necessary and not sufficient: publishing it and
-	// asserting nothing would read exactly like coverage.
+	// proto/ts/test/attest-trust-lists.test.ts reads it back against the TS
+	// twin. Both are generated from TrustedDstackOSImages, so that is a
+	// consistency check, not a correctness one: a wrong digit here is wrong
+	// in both and passes. The field's other use is the MOVED guard in
+	// TestComposeVectors, which names the other places a digest lives when
+	// the committed vector is stale.
 	TrustedOSImages []string `json:"trusted_os_images"`
 }
 
@@ -1043,7 +1044,7 @@ func TestComposeVectors(t *testing.T) {
 				was, now     []string
 			}{
 				{"shared_policy.trusted_os_images",
-					"client/src/operators/tee-allowlist.ts (TRUSTED_OS_IMAGES) and " +
+					"ts/src/attest/trust-lists.ts (regenerate with -update-trust-lists) and " +
 						"node/internal/tee/dstackprobe.sh (ds_os_image_hash)",
 					prev.SharedPolicy.TrustedOSImages, v.SharedPolicy.TrustedOSImages},
 				{"shared_policy.root_backdoor_envs", "nothing else",

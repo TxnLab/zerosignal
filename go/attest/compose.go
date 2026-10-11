@@ -635,7 +635,8 @@ func ZeroSignalSecretEnvNames() []string {
 // THAT IS A PROPERTY OF THIS FUNCTION, NOT OF THE FLEET. Every shipped
 // consumer supplies the release lists and sets the flag: tee.DefaultComposePolicy
 // (which zs-proxy's config defaults match) from TrustedComposeSkeletons and
-// TrustedNodeImages, and the browser client from a bundled constant. They stay
+// TrustedNodeImages, and the browser client from the TS SDK's
+// defaultComposePolicy, which reads the generated trust-lists.ts. They stay
 // out of this function so a caller can replace them, as zs-proxy's config does
 // — so a library caller that takes this policy verbatim gets the weaker check,
 // and needs to say so rather than inherit the fleet's reputation for it.
