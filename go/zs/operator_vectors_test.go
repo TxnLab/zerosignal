@@ -13,13 +13,19 @@ package zs
 // field names, so a TS test compares its output to want as is.
 // probe_attestation is probeAttestation, the TEE verdict as it lands on the
 // operator, mirrored by probeAttestation in sdk/src/attestation.ts.
+// chain_nodes is the chain read, box bytes to the operator resolveOperatorNode
+// builds, mirrored by ChainOperatorSource in sdk/src/registry/chain.ts.
 //
 //	cd proto/go && go test ./zs -run TestOperatorVectors -update
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,6 +35,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/algorand/go-algorand-sdk/v2/types"
+
+	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/tools"
@@ -472,6 +482,314 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 	}
 }
 
+// chainNodeScenario is one operator box and one of its node boxes as algod
+// lists them, read on CurrentDay (Unix seconds / 86400). Want is the operator
+// resolveOperatorNode builds, null when the node is left out; Skipped says why:
+// "evicted" when the node fetch leaves an evicted operator's nodes out, or
+// "base_url" when resolveOperatorNode refuses the URL. A signing address that
+// won't decode has no case: the box holds 32 raw bytes, which always encode to
+// a valid address.
+type chainNodeScenario struct {
+	Name           string           `json:"name"`
+	CurrentDay     uint64           `json:"current_day"`
+	OperatorID     uint64           `json:"operator_id"`
+	OperatorBoxHex string           `json:"operator_box_hex"`
+	NodeID         uint64           `json:"node_id"`
+	NodeBoxHex     string           `json:"node_box_hex"`
+	Want           *chainNodeVector `json:"want"`
+	Skipped        string           `json:"skipped"`
+
+	op   escrow.OperatorRecord
+	node escrow.NodeRecord
+}
+
+// chainNodeVector is the chain-derived part of an Operator under the SDK's
+// field names.
+type chainNodeVector struct {
+	ID                  uint64             `json:"id"`
+	NodeID              uint64             `json:"nodeId"`
+	NFDAppID            uint64             `json:"nfdAppId"`
+	OwnerAddr           string             `json:"ownerAddr"`
+	SigningAddr         string             `json:"signingAddr"`
+	TicketSigningKeyHex string             `json:"ticketSigningKeyHex"`
+	BaseURL             string             `json:"baseUrl"`
+	Staging             bool               `json:"staging"`
+	Metrics             chainMetricsVector `json:"metrics"`
+}
+
+type chainMetricsVector struct {
+	LatencyEwmaMs             uint64 `json:"latencyEwmaMs"`
+	TokensPerSecEwma          uint64 `json:"tokensPerSecEwma"`
+	LastActivityAt            uint64 `json:"lastActivityAt"`
+	TicketsOpened             uint64 `json:"ticketsOpened"`
+	TicketsSettled            uint64 `json:"ticketsSettled"`
+	TicketsLapsedSettled      uint64 `json:"ticketsLapsedSettled"`
+	TicketsRefundedInactive   uint64 `json:"ticketsRefundedInactive"`
+	TicketsProtested          uint64 `json:"ticketsProtested"`
+	TicketsFrozenDispute      uint64 `json:"ticketsFrozenDispute"`
+	TotalRefundedInactiveUsdc uint64 `json:"totalRefundedInactiveUsdc"`
+	TotalProtestedUsdc        uint64 `json:"totalProtestedUsdc"`
+	TotalFrozenDisputeUsdc    uint64 `json:"totalFrozenDisputeUsdc"`
+	LatencyTotalMs            uint64 `json:"latencyTotalMs"`
+	LatencySamples            uint64 `json:"latencySamples"`
+	TotalRevenueGross         uint64 `json:"totalRevenueGross"`
+	Revenue24hUsdc            uint64 `json:"revenue24hUsdc"`
+	Revenue7dUsdc             uint64 `json:"revenue7dUsdc"`
+	Revenue30dUsdc            uint64 `json:"revenue30dUsdc"`
+}
+
+const chainVectorApp = 1234
+
+func chainNodeScenarios() []chainNodeScenario {
+	const day = 20_000
+	addr := func(fill byte) string {
+		var a types.Address
+		for i := range a {
+			a[i] = fill + byte(i)
+		}
+		return a.String()
+	}
+	base := func(name string) chainNodeScenario {
+		return chainNodeScenario{
+			Name:       name,
+			CurrentDay: day,
+			op: escrow.OperatorRecord{
+				ID: 7, OwnerAddr: addr(0x10), Status: escrow.OperatorStatusActive, NextNodeID: 3, LiveNodeCount: 1,
+			},
+			node: escrow.NodeRecord{
+				OperatorID: 7, NodeID: 2, Status: escrow.NodeStatusActive, SigningAddr: addr(0x40),
+				BaseURL: "https://node.example.com",
+			},
+		}
+	}
+	var out []chainNodeScenario
+	add := func(name string, edit func(*chainNodeScenario)) {
+		sc := base(name)
+		edit(&sc)
+		out = append(out, sc)
+	}
+	// ring sets the revenue bucket for each day given.
+	ring := func(m *escrow.RecordMetrics, lastDay uint64, byDay map[uint64]uint64) {
+		m.BucketsLastDay = lastDay
+		for d, v := range byDay {
+			m.RevenueBuckets[d%escrow.RevenueBucketCount] = v
+		}
+	}
+
+	add("an active node with no history", func(*chainNodeScenario) {})
+	add("a staging node", func(sc *chainNodeScenario) { sc.node.Staging = 1 })
+	add("any non-zero staging byte is staging", func(sc *chainNodeScenario) { sc.node.Staging = 7 })
+	add("the operator's NFD and owner come from its box", func(sc *chainNodeScenario) {
+		sc.op.NFDAppID = 765_432_100
+		sc.op.OwnerAddr = addr(0x80)
+	})
+	add("ids are read from the box names", func(sc *chainNodeScenario) {
+		sc.op.ID, sc.node.OperatorID, sc.node.NodeID = 300, 300, 65_536
+		sc.op.NextNodeID = 65_537
+	})
+	// Each field distinct, and the operator's rollup different from all of
+	// them, so no field can stand in for another and the rollup can't stand in
+	// for the node.
+	add("every metric is the node's own", func(sc *chainNodeScenario) {
+		m := &sc.node.RecordMetrics
+		m.LastActivityAt, m.TicketsOpened, m.TicketsSettled, m.TicketsLapsedSettled = 1_790_000_000, 1001, 1002, 1003
+		m.TicketsRefundedInactive, m.TotalRefundedInactiveUsdc, m.TicketsProtested = 1004, 1005, 1006
+		m.TotalProtestedUsdc, m.TicketsFrozenDispute, m.TotalFrozenDisputeUsdc = 1007, 1008, 1009
+		m.LatencyTotalMs, m.LatencyEwmaMs, m.TotalRevenueGross = 1010, 1011, 1012
+		m.TotalInputTokens, m.TokensPerSecEwma = 1013, 1014
+		sc.node.LatencySamples = 1015
+		sc.node.UsdcEscrowed = 1016
+		ring(m, day, map[uint64]uint64{day: 1017})
+		r := &sc.op.RecordMetrics
+		r.LastActivityAt, r.TicketsOpened, r.TicketsSettled, r.LatencyEwmaMs, r.TokensPerSecEwma = 9001, 9002, 9003, 9004, 9005
+		r.TotalRevenueGross = 9006
+		ring(r, day, map[uint64]uint64{day: 9007})
+		sc.op.LatencySamples = 9008
+	})
+	add("revenue windows end on the current day", func(sc *chainNodeScenario) {
+		ring(&sc.node.RecordMetrics, day, map[uint64]uint64{day: 100, day - 1: 200, day - 6: 400, day - 7: 800, day - 29: 1600})
+	})
+	add("a ring last written days ago", func(sc *chainNodeScenario) {
+		ring(&sc.node.RecordMetrics, day-3, map[uint64]uint64{day - 3: 100, day - 5: 200, day - 10: 400})
+	})
+	add("a ring older than thirty days reads as no revenue", func(sc *chainNodeScenario) {
+		ring(&sc.node.RecordMetrics, day-30, map[uint64]uint64{day - 30: 100, day - 31: 200})
+	})
+	add("a clock behind the ring reads no revenue", func(sc *chainNodeScenario) {
+		ring(&sc.node.RecordMetrics, day+1, map[uint64]uint64{day + 1: 100, day: 200})
+	})
+	add("trailing slashes are trimmed from the base URL", func(sc *chainNodeScenario) { sc.node.BaseURL = "https://node.example.com/zs///" })
+	add("an http base URL is accepted", func(sc *chainNodeScenario) { sc.node.BaseURL = "http://10.0.0.5:9090" })
+	add("zero padding inside the stored length is trimmed", func(sc *chainNodeScenario) { sc.node.BaseURL = "https://node.example.com\x00\x00\x00" })
+	add("a base URL with no scheme is skipped", func(sc *chainNodeScenario) { sc.node.BaseURL = "node.example.com" })
+	add("an uppercase scheme is skipped", func(sc *chainNodeScenario) { sc.node.BaseURL = "HTTPS://node.example.com" })
+	add("a non-http scheme is skipped", func(sc *chainNodeScenario) { sc.node.BaseURL = "ftp://node.example.com" })
+	add("a bare scheme trims to no URL and is skipped", func(sc *chainNodeScenario) { sc.node.BaseURL = "https:///" })
+	add("an empty base URL is skipped", func(sc *chainNodeScenario) { sc.node.BaseURL = "" })
+	add("an evicted operator's node is left out", func(sc *chainNodeScenario) { sc.op.Status = escrow.OperatorStatusEvicted })
+	// Only status 1 exists on chain, and an unregistered node's box is deleted;
+	// the read does not look at the byte.
+	add("a node's status byte is not read", func(sc *chainNodeScenario) { sc.node.Status = 0 })
+	return out
+}
+
+// encodeRecordMetrics writes the shared metrics block in the contract's field
+// order (go/escrow parseRecordMetrics).
+func encodeRecordMetrics(b []byte, m escrow.RecordMetrics) []byte {
+	for _, v := range []uint64{
+		m.LastActivityAt, m.TicketsOpened, m.TicketsSettled, m.TicketsLapsedSettled, m.TicketsRefundedInactive,
+		m.TotalRefundedInactiveUsdc, m.TicketsProtested, m.TotalProtestedUsdc, m.TicketsFrozenDispute,
+		m.TotalFrozenDisputeUsdc, m.LatencyTotalMs, m.LatencyEwmaMs, m.TotalRevenueGross, m.BucketsLastDay,
+	} {
+		b = binary.BigEndian.AppendUint64(b, v)
+	}
+	for _, v := range m.RevenueBuckets {
+		b = binary.BigEndian.AppendUint64(b, v)
+	}
+	b = binary.BigEndian.AppendUint64(b, m.TotalInputTokens)
+	for _, v := range m.OutputUnits {
+		b = binary.BigEndian.AppendUint64(b, v)
+	}
+	return binary.BigEndian.AppendUint64(b, m.TokensPerSecEwma)
+}
+
+func encodeOperatorBox(t *testing.T, op escrow.OperatorRecord) []byte {
+	owner, err := types.DecodeAddress(op.OwnerAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := append([]byte{}, owner[:]...)
+	b = append(b, byte(op.Status))
+	b = binary.BigEndian.AppendUint64(b, op.NFDAppID)
+	b = binary.BigEndian.AppendUint64(b, op.NextNodeID)
+	b = binary.BigEndian.AppendUint64(b, op.LiveNodeCount)
+	b = encodeRecordMetrics(b, op.RecordMetrics)
+	b = binary.BigEndian.AppendUint64(b, op.UsdcEscrowed)
+	b = append(b, op.ReservedSlots[:]...)
+	return binary.BigEndian.AppendUint64(b, op.LatencySamples)
+}
+
+func encodeNodeBox(t *testing.T, n escrow.NodeRecord) []byte {
+	signer, err := types.DecodeAddress(n.SigningAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := make([]byte, escrow.BaseURLMax)
+	copy(url, n.BaseURL)
+	b := append([]byte{byte(n.Status)}, signer[:]...)
+	b = append(b, byte(len(n.BaseURL)))
+	b = append(b, url...)
+	b = encodeRecordMetrics(b, n.RecordMetrics)
+	b = binary.BigEndian.AppendUint64(b, n.UsdcEscrowed)
+	b = append(b, byte(n.Staging))
+	b = append(b, n.ReservedSlots[:]...)
+	return binary.BigEndian.AppendUint64(b, n.LatencySamples)
+}
+
+// boxListAlgod answers algod's paged box listing, values included, from boxes.
+func boxListAlgod(t *testing.T, boxes map[string][]byte) algod.Client {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != fmt.Sprintf("/v2/applications/%d/boxes", chainVectorApp) || r.URL.Query().Get("include") != "values" {
+			http.NotFound(w, r)
+			return
+		}
+		prefix, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(r.URL.Query().Get("prefix"), "b64:"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		type box struct {
+			Name  []byte `json:"name"`
+			Value []byte `json:"value"`
+		}
+		list := []box{}
+		for name, value := range boxes {
+			if strings.HasPrefix(name, string(prefix)) {
+				list = append(list, box{Name: []byte(name), Value: value})
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"boxes": list, "round": 100})
+	}))
+	t.Cleanup(srv.Close)
+	c, err := algod.NewClient(srv.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// runChainNodeScenario runs readChainNodes over the box listing on CurrentDay.
+// The fetches are first run on their own, to check this test's encoder.
+func runChainNodeScenario(t *testing.T, sc *chainNodeScenario) {
+	opBox, nodeBox := encodeOperatorBox(t, sc.op), encodeNodeBox(t, sc.node)
+	sc.OperatorID, sc.NodeID = sc.op.ID, sc.node.NodeID
+	sc.OperatorBoxHex, sc.NodeBoxHex = hex.EncodeToString(opBox), hex.EncodeToString(nodeBox)
+	c := boxListAlgod(t, map[string][]byte{
+		string(escrow.OperatorBoxKey(sc.op.ID)):                       opBox,
+		string(escrow.NodeBoxKey(sc.node.OperatorID, sc.node.NodeID)): nodeBox,
+	})
+
+	ctx := context.Background()
+	var logged bytes.Buffer
+	// Late in the day, so a clock read wrong by hours lands on the next one.
+	at := time.Unix(int64(sc.CurrentDay)*escrow.SecondsPerDay+escrow.SecondsPerDay-1, 0)
+	s := &ChainOperatorSource{
+		EscrowAppID: chainVectorApp, Algod: c,
+		Log:        slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		chainClock: func() time.Time { return at },
+	}
+	records, err := s.fetchRecords(ctx)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("%s: operators = %d, %v", sc.Name, len(records), err)
+	}
+	// The encoder above is this test's own; a decode that disagrees with it
+	// would pin a case other than the one named.
+	if got := records[0]; got.NFDAppID != sc.op.NFDAppID || got.Status != sc.op.Status || got.RecordMetrics != sc.op.RecordMetrics {
+		t.Fatalf("%s: operator box decodes to %+v, encoded %+v", sc.Name, got, sc.op)
+	}
+	nodes, err := escrow.FetchNodesForOperators(ctx, chainVectorApp, records, c)
+	if err != nil {
+		t.Fatalf("%s: nodes: %v", sc.Name, err)
+	}
+	if len(nodes) == 1 {
+		if got := nodes[0]; got.RecordMetrics != sc.node.RecordMetrics || got.Staging != sc.node.Staging || got.LatencySamples != sc.node.LatencySamples {
+			t.Fatalf("%s: node box decodes to %+v, encoded %+v", sc.Name, got, sc.node)
+		}
+	}
+
+	ops, err := s.readChainNodes(ctx)
+	if err != nil {
+		t.Fatalf("%s: readChainNodes: %v", sc.Name, err)
+	}
+	if len(ops) == 0 {
+		switch {
+		case strings.Contains(logged.String(), "skipping unparseable node record") && strings.Contains(logged.String(), "base_url"):
+			sc.Skipped = "base_url"
+		case len(nodes) == 0 && sc.op.Status == escrow.OperatorStatusEvicted:
+			sc.Skipped = "evicted"
+		default:
+			t.Fatalf("%s: node left out for no reason this vector names; log: %s", sc.Name, logged.String())
+		}
+		return
+	}
+	o := ops[0]
+	m := o.Metrics
+	sc.Want = &chainNodeVector{
+		ID: o.ID, NodeID: o.NodeID, NFDAppID: o.NFDAppID, OwnerAddr: o.OwnerAddr, SigningAddr: o.SigningAddr,
+		TicketSigningKeyHex: hex.EncodeToString(o.TicketSigningKey), BaseURL: o.BaseURL, Staging: o.Staging,
+		Metrics: chainMetricsVector{
+			LatencyEwmaMs: m.LatencyEwmaMs, TokensPerSecEwma: m.TokensPerSecEwma, LastActivityAt: m.LastActivityAt,
+			TicketsOpened: m.TicketsOpened, TicketsSettled: m.TicketsSettled, TicketsLapsedSettled: m.TicketsLapsedSettled,
+			TicketsRefundedInactive: m.TicketsRefundedInactive, TicketsProtested: m.TicketsProtested,
+			TicketsFrozenDispute: m.TicketsFrozenDispute, TotalRefundedInactiveUsdc: m.TotalRefundedInactiveUsdc,
+			TotalProtestedUsdc: m.TotalProtestedUsdc, TotalFrozenDisputeUsdc: m.TotalFrozenDisputeUsdc,
+			LatencyTotalMs: m.LatencyTotalMs, LatencySamples: m.LatencySamples, TotalRevenueGross: m.TotalRevenueGross,
+			Revenue24hUsdc: m.Revenue24hUsdc, Revenue7dUsdc: m.Revenue7dUsdc, Revenue30dUsdc: m.Revenue30dUsdc,
+		},
+	}
+}
+
 func TestOperatorVectors(t *testing.T) {
 	scenarios := operatorScenarios()
 	for i := range scenarios {
@@ -481,14 +799,20 @@ func TestOperatorVectors(t *testing.T) {
 	for i := range probes {
 		runProbeAttestationScenario(t, &probes[i])
 	}
+	chain := chainNodeScenarios()
+	for i := range chain {
+		runChainNodeScenario(t, &chain[i])
+	}
 	f := struct {
 		Comment          string                     `json:"comment"`
 		Scenarios        []operatorScenario         `json:"scenarios"`
 		ProbeAttestation []probeAttestationScenario `json:"probe_attestation"`
+		ChainNodes       []chainNodeScenario        `json:"chain_nodes"`
 	}{
-		Comment:          "Generated by proto/go/zs TestOperatorVectors. fields, selection, and each probe's request_path, verified_node and want are compared exactly.",
+		Comment:          "Generated by proto/go/zs TestOperatorVectors. fields, selection, each probe's request_path, verified_node and want, and each chain node's want and skipped are compared exactly.",
 		Scenarios:        scenarios,
 		ProbeAttestation: probes,
+		ChainNodes:       chain,
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

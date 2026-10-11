@@ -97,7 +97,7 @@ interface SingleCall {
 }
 
 /** What algosdk passes on to fetch for one request. */
-type RequestOptions = { signal: AbortSignal }
+export type RequestOptions = { signal: AbortSignal }
 
 /**
  * AlgodEscrowChain is the EscrowChain over an algod client. The escrow
@@ -131,8 +131,7 @@ export class AlgodEscrowChain implements EscrowChain {
         this.#appId = o.appId
         this.#appAddress = algosdk.getApplicationAddress(o.appId).toString()
         this.#signer = o.signer
-        const t = o.requestTimeoutMs
-        this.#timeoutMs = t !== undefined && Number.isFinite(t) && t > 0 ? t : DEFAULT_REQUEST_TIMEOUT_MS
+        this.#timeoutMs = requestTimeoutOrDefault(o.requestTimeoutMs)
         this.#log = o.logger ?? discardLogger
         this.#clock = o.clock ?? Date.now
     }
@@ -277,9 +276,7 @@ export class AlgodEscrowChain implements EscrowChain {
 
     async spendableMicroAlgos(payer: string): Promise<bigint> {
         const acct = await this.#account(payer, 'spendable balance')
-        const amount = BigInt(acct.amount)
-        const min = BigInt(acct.minBalance)
-        return amount > min ? amount - min : 0n
+        return spendableOf(BigInt(acct.amount), BigInt(acct.minBalance))
     }
 
     async minTxnFee(): Promise<bigint> {
@@ -544,62 +541,23 @@ export class AlgodEscrowChain implements EscrowChain {
 
     /** A readonly method simulated from the application account (see the class doc). */
     async #readonly(name: string, args: algosdk.ABIArgument[], accounts: string[] = []): Promise<algosdk.ABIValue | undefined> {
-        const sp = await this.#params()
-        const m = method(name)
-        const atc = new AtomicTransactionComposer()
-        atc.addMethodCall({
-            appID: this.#appId,
-            method: m,
-            methodArgs: args,
-            sender: this.#appAddress,
-            suggestedParams: sp,
-            appAccounts: accounts,
-            signer: algosdk.makeEmptyTransactionSigner(),
-        })
-        const [built] = atc.buildGroup()
-        const txns = (await atc.gatherSignatures()).map((b) => algosdk.decodeSignedTransaction(b))
-        const req = new algosdk.modelsv2.SimulateRequest({
-            txnGroups: [new algosdk.modelsv2.SimulateRequestTransactionGroup({ txns })],
-            allowEmptySignatures: true,
-        })
-        let res: algosdk.modelsv2.SimulateResponse
         try {
-            res = await this.#algod.simulateTransactions(req).do(undefined, this.#opts())
+            return await simulateReadonly(this.#algod, this.#appId, this.#timeoutMs, name, args, accounts)
         } catch (err) {
-            throw new Error(`escrow: simulate ${name}: ${message(err)}`, { cause: err })
-        }
-        // An eval failure is reported in the group, not as a transport error.
-        const group = res.txnGroups[0]
-        if (group?.failureMessage) {
             // An app without the method falls through its ABI router to a reject,
             // a logic eval failure. Only that means the quota is unsupported; a
             // transient fault read as unsupported would drop the term for good.
-            if (name === 'mbrForFreeQuota' && group.failureMessage.includes('logic eval error')) {
+            if (name === 'mbrForFreeQuota' && err instanceof SimulateFailedError && err.failureMessage.includes('logic eval error')) {
                 throw new FreeQuotaUnsupportedError(
-                    `escrow: deployed app has no freeTicketAllowance method (app=${this.#appId}): ${group.failureMessage}`,
+                    `escrow: deployed app has no freeTicketAllowance method (app=${this.#appId}): ${err.failureMessage}`,
                 )
             }
-            throw new Error(`escrow: simulate ${name} failed (app=${this.#appId} sender=${this.#appAddress}): ${group.failureMessage}`)
+            throw err
         }
-        const result = group?.txnResults[0]?.txnResult
-        if (group?.txnResults.length !== 1 || result === undefined) {
-            throw new Error(`escrow: simulate ${name} returned ${group?.txnResults.length ?? 0} results, want 1`)
-        }
-        const mr = AtomicTransactionComposer.parseMethodResponse(
-            m,
-            { txID: built!.txn.txID(), rawReturnValue: new Uint8Array(), method: m },
-            result,
-        )
-        if (mr.decodeError) throw new Error(`escrow: decode ${name} return: ${mr.decodeError.message}`, { cause: mr.decodeError })
-        return mr.returnValue
     }
 
-    async #params(signal?: AbortSignal): Promise<SuggestedParams> {
-        try {
-            return await this.#algod.getTransactionParams().do(undefined, this.#opts(signal))
-        } catch (err) {
-            throw new Error(`escrow: suggested params: ${message(err)}`, { cause: err })
-        }
+    #params(signal?: AbortSignal): Promise<SuggestedParams> {
+        return suggestedParams(this.#algod, this.#timeoutMs, signal)
     }
 
     async #account(addr: string, why: string): Promise<algosdk.modelsv2.Account> {
@@ -610,10 +568,8 @@ export class AlgodEscrowChain implements EscrowChain {
         }
     }
 
-    // The request's deadline, and the caller's signal when there is one.
     #opts(signal?: AbortSignal): RequestOptions {
-        const timeout = AbortSignal.timeout(this.#timeoutMs)
-        return { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }
+        return requestOptions(this.#timeoutMs, signal)
     }
 
     // The chain signs only as its own payer: a call naming another account
@@ -625,6 +581,104 @@ export class AlgodEscrowChain implements EscrowChain {
     #txnSigner(): algosdk.TransactionSigner {
         return (txns, idx) => this.#signer.signTransactions(txns, idx)
     }
+}
+
+// ---- algod reads shared with the registry's chain read ----
+
+/** The per-request timeout an option asks for; absent, zero or negative is 30 s. */
+export function requestTimeoutOrDefault(ms: number | undefined): number {
+    return ms !== undefined && Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_REQUEST_TIMEOUT_MS
+}
+
+/** One algod request's options: its deadline, and the caller's signal when there is one. */
+export function requestOptions(timeoutMs: number, signal?: AbortSignal): RequestOptions {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    return { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }
+}
+
+/** Amount less min-balance, floored at zero: an account below its own minimum can send nothing. */
+export function spendableOf(amount: bigint, minBalance: bigint): bigint {
+    return amount > minBalance ? amount - minBalance : 0n
+}
+
+export async function suggestedParams(algod: algosdk.Algodv2, timeoutMs: number, signal?: AbortSignal): Promise<SuggestedParams> {
+    try {
+        return await algod.getTransactionParams().do(undefined, requestOptions(timeoutMs, signal))
+    } catch (err) {
+        throw new Error(`escrow: suggested params: ${message(err)}`, { cause: err })
+    }
+}
+
+/** A simulated readonly call the app evaluated and rejected, as opposed to one algod never ran. */
+export class SimulateFailedError extends Error {
+    constructor(
+        msg: string,
+        readonly failureMessage: string,
+    ) {
+        super(msg)
+        this.name = 'SimulateFailedError'
+    }
+}
+
+/**
+ * Simulates the escrow app's readonly method name and returns what it
+ * returned. The sender is the application account, which exists and carries
+ * ALGO on any live deployment, so the call answers for a payer that holds
+ * none yet.
+ */
+export async function simulateReadonly(
+    algod: algosdk.Algodv2,
+    appId: bigint,
+    timeoutMs: number,
+    name: string,
+    args: algosdk.ABIArgument[],
+    accounts: string[] = [],
+    signal?: AbortSignal,
+): Promise<algosdk.ABIValue | undefined> {
+    const sp = await suggestedParams(algod, timeoutMs, signal)
+    const sender = algosdk.getApplicationAddress(appId).toString()
+    const m = method(name)
+    const atc = new AtomicTransactionComposer()
+    atc.addMethodCall({
+        appID: appId,
+        method: m,
+        methodArgs: args,
+        sender,
+        suggestedParams: sp,
+        appAccounts: accounts,
+        signer: algosdk.makeEmptyTransactionSigner(),
+    })
+    const [built] = atc.buildGroup()
+    const txns = (await atc.gatherSignatures()).map((b) => algosdk.decodeSignedTransaction(b))
+    const req = new algosdk.modelsv2.SimulateRequest({
+        txnGroups: [new algosdk.modelsv2.SimulateRequestTransactionGroup({ txns })],
+        allowEmptySignatures: true,
+    })
+    let res: algosdk.modelsv2.SimulateResponse
+    try {
+        res = await algod.simulateTransactions(req).do(undefined, requestOptions(timeoutMs, signal))
+    } catch (err) {
+        throw new Error(`escrow: simulate ${name}: ${message(err)}`, { cause: err })
+    }
+    // An eval failure is reported in the group, not as a transport error.
+    const group = res.txnGroups[0]
+    if (group?.failureMessage) {
+        throw new SimulateFailedError(
+            `escrow: simulate ${name} failed (app=${appId} sender=${sender}): ${group.failureMessage}`,
+            group.failureMessage,
+        )
+    }
+    const result = group?.txnResults[0]?.txnResult
+    if (group?.txnResults.length !== 1 || result === undefined) {
+        throw new Error(`escrow: simulate ${name} returned ${group?.txnResults.length ?? 0} results, want 1`)
+    }
+    const mr = AtomicTransactionComposer.parseMethodResponse(
+        m,
+        { txID: built!.txn.txID(), rawReturnValue: new Uint8Array(), method: m },
+        result,
+    )
+    if (mr.decodeError) throw new Error(`escrow: decode ${name} return: ${mr.decodeError.message}`, { cause: mr.decodeError })
+    return mr.returnValue
 }
 
 // Waits for p, or rejects with the signal's reason once it aborts.
@@ -655,7 +709,7 @@ function checkAddr(what: string, addr: string): void {
 }
 
 // Go's isNotFound: algod reports a missing box as a 404.
-function isNotFound(err: unknown): boolean {
+export function isNotFound(err: unknown): boolean {
     const status = (err as { response?: { status?: unknown } } | null)?.response?.status
     if (status === 404) return true
     const text = message(err)

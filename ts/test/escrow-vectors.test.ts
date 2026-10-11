@@ -26,11 +26,16 @@ import {
     gapOpUpsForIters,
     netFee,
     nodeBoxKey,
+    nodeBoxPrefix,
     nodeBoxPrefixForOperator,
+    nodeIdsFromBoxName,
     NODE_RECORD_SIZE,
+    NodeBaseUrlEncodingError,
     openBoxReferences,
     OPERATOR_RECORD_SIZE,
     operatorBoxKey,
+    operatorBoxPrefix,
+    operatorIdFromBoxName,
     ringGapIters,
     settleInnerCount,
     TICKET_RECORD_SIZE,
@@ -129,12 +134,17 @@ describe('escrow_vectors.json', () => {
         for (const c of v.box_keys.operator) {
             it(`operator ${c.operator_id}`, () => {
                 expect(hex.encode(operatorBoxKey(BigInt(c.operator_id)))).toBe(c.key_hex)
+                expect(operatorIdFromBoxName(hex.decode(c.key_hex))).toBe(BigInt(c.operator_id))
             })
         }
         for (const c of v.box_keys.node) {
             it(`node ${c.operator_id}/${c.node_id}`, () => {
                 expect(hex.encode(nodeBoxKey(BigInt(c.operator_id), BigInt(c.node_id)))).toBe(c.key_hex)
                 expect(hex.encode(nodeBoxPrefixForOperator(BigInt(c.operator_id)))).toBe(c.operator_prefix_hex)
+                expect(nodeIdsFromBoxName(hex.decode(c.key_hex))).toEqual({
+                    operatorId: BigInt(c.operator_id),
+                    nodeId: BigInt(c.node_id),
+                })
             })
         }
         for (const c of v.box_keys.free_quota) {
@@ -336,6 +346,29 @@ describe('escrow input guards (TS only)', () => {
         expect(hex.encode(operatorBoxKey(0xffff_ffff_ffff_ffffn))).toMatch(/ffffffffffffffff$/)
     })
 
+    // A listing can return a name this contract never writes; reading it as an
+    // id would invent an operator or node.
+    it('parses no id out of a malformed box name', () => {
+        const op = operatorBoxKey(42n)
+        const node = nodeBoxKey(7n, 3n)
+        expect(operatorIdFromBoxName(node)).toBeUndefined()
+        expect(operatorIdFromBoxName(op.subarray(0, op.length - 1))).toBeUndefined()
+        expect(operatorIdFromBoxName(new Uint8Array([...op, 0]))).toBeUndefined()
+        expect(operatorIdFromBoxName(new Uint8Array([0x6e, ...op.subarray(1)]))).toBeUndefined()
+        expect(nodeIdsFromBoxName(op)).toBeUndefined()
+        expect(nodeIdsFromBoxName(node.subarray(0, node.length - 1))).toBeUndefined()
+        expect(nodeIdsFromBoxName(new Uint8Array([0x6f, ...node.subarray(1)]))).toBeUndefined()
+        // The ids are read where they sit, not from the start of a larger buffer.
+        expect(nodeIdsFromBoxName(new Uint8Array([0xff, ...node]).subarray(1))).toEqual({ operatorId: 7n, nodeId: 3n })
+    })
+
+    it('hands out the listing prefixes as copies', () => {
+        operatorBoxPrefix()[0] = 0
+        nodeBoxPrefix()[0] = 0
+        expect(hex.encode(operatorBoxPrefix())).toBe(hex.encode(new TextEncoder().encode('o:')))
+        expect(hex.encode(nodeBoxPrefix())).toBe(hex.encode(new TextEncoder().encode('n:')))
+    })
+
     // A wrong-length id names a box the contract never creates, so a read of
     // it would report "absent" instead of failing.
     it('refuses a ticket id that is not 16 bytes', () => {
@@ -352,6 +385,9 @@ describe('escrow input guards (TS only)', () => {
         data[33] = url.length
         data.fill(0, 34, 34 + 248)
         data.set(url, 34)
+        expect(() => decodeNodeRecord(BigInt(base.operator_id), BigInt(base.node_id), data)).toThrow(
+            NodeBaseUrlEncodingError,
+        )
         expect(() => decodeNodeRecord(BigInt(base.operator_id), BigInt(base.node_id), data)).toThrow(
             /baseUrl is not valid UTF-8/,
         )

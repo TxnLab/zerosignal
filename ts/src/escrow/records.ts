@@ -221,6 +221,22 @@ export function decodeOperatorRecord(id: bigint, data: Uint8Array): OperatorReco
     return { id, ownerAddr, status, nfdAppId, nextNodeId, liveNodeCount, ...metrics, usdcEscrowed, ...readTail(r) }
 }
 
+/**
+ * NodeBaseUrlEncodingError is a node box whose base URL is not UTF-8, which Go
+ * decodes and TypeScript cannot. It is its own type so a reader of many boxes
+ * can skip that one node rather than fail the read. Go keeps and routes such a
+ * node; a JS string cannot carry its URL.
+ */
+export class NodeBaseUrlEncodingError extends Error {
+    constructor(
+        readonly operatorId: bigint,
+        readonly nodeId: bigint,
+    ) {
+        super(`node ${operatorId}/${nodeId} baseUrl is not valid UTF-8`)
+        this.name = 'NodeBaseUrlEncodingError'
+    }
+}
+
 // decodeNodeRecord parses a node box value. operatorId and nodeId are the ones
 // the caller built the box key from; the box itself doesn't carry them.
 export function decodeNodeRecord(operatorId: bigint, nodeId: bigint, data: Uint8Array): NodeRecord {
@@ -240,15 +256,16 @@ export function decodeNodeRecord(operatorId: bigint, nodeId: bigint, data: Uint8
     // ignoreBOM keeps a leading U+FEFF, as Go's string conversion does; the
     // default decoder would silently drop it.
     //
-    // fatal refuses invalid UTF-8, where Go keeps the raw bytes. A JS string
-    // can't hold them, and substituting U+FFFD would hand back a URL that
-    // differs from the stored one while decoding as if nothing were wrong.
-    // Neither form is fetchable, so refusing costs nothing a caller could use.
+    // fatal refuses invalid UTF-8, where Go keeps the raw bytes (and its HTTP
+    // client percent-escapes them, so Go can still reach such a node). A JS
+    // string can't hold them, and substituting U+FFFD would hand back a URL
+    // that differs from the stored one while decoding as if nothing were
+    // wrong, so the box is refused rather than decoded into the wrong URL.
     let baseUrl: string
     try {
         baseUrl = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(urlField.subarray(0, end))
     } catch {
-        throw new Error(`node ${operatorId}/${nodeId} baseUrl is not valid UTF-8`)
+        throw new NodeBaseUrlEncodingError(operatorId, nodeId)
     }
     const metrics = readMetrics(r)
     const usdcEscrowed = r.u64()
