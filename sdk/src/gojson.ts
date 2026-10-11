@@ -315,10 +315,13 @@ function goCompactInto(out: ByteBuilder, src: Uint8Array): void {
     }
 }
 
-// compareCodePoints orders strings as Go orders their UTF-8 bytes. UTF-16
-// order differs only where a surrogate meets U+E000–U+FFFF: the surrogate
-// stands for a code point above them both.
-function compareCodePoints(a: string, b: string): number {
+/**
+ * compareCodePoints orders strings as Go orders their UTF-8 bytes, which is
+ * the order json.Marshal writes a map's keys in. UTF-16 order differs only
+ * where a surrogate meets U+E000–U+FFFF: the surrogate stands for a code point
+ * above them both.
+ */
+export function compareCodePoints(a: string, b: string): number {
     const n = Math.min(a.length, b.length)
     for (let i = 0; i < n; i++) {
         const x = a.charCodeAt(i)

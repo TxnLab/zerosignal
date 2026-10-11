@@ -126,8 +126,9 @@ type DynamicRegistryProvider struct {
 	// the constructor before Start), so they need no separate lock.
 	catalogPath string
 	// catalogSum is the sha256 of the last catalog bytes written; persist skips a
-	// re-write when the new snapshot marshals identically (an idle fleet churns no
-	// disk). Zero value never collides with a real write (json is never empty).
+	// re-write when the new snapshot marshals identically. Every successful probe
+	// moves ReachableAsOf, so in practice only a cycle that reached no node is
+	// skipped. Zero value never collides with a real write (json is never empty).
 	catalogSum [32]byte
 	// catalogDirOK records that path's directory has been created, so persist
 	// MkdirAlls once rather than every cycle. Reset on any write error so a
@@ -374,7 +375,8 @@ func (p *DynamicRegistryProvider) refreshLocked(ctx context.Context) {
 // persist writes the refreshed catalog to disk for a warm restart. Runs
 // under refreshMu (serialized), best-effort — a failed save is logged and only
 // costs a colder next start. No-op when catalogPath is empty, or when the
-// snapshot marshals identically to the last write (an idle fleet churns no disk).
+// snapshot marshals identically to the last write, which only a cycle that
+// reached no node does, since every successful probe moves ReachableAsOf.
 func (p *DynamicRegistryProvider) persist(ops []Operator) {
 	if p.catalogPath == "" {
 		return
@@ -608,22 +610,27 @@ func (p *DynamicRegistryProvider) carryForwardLastGood(prev *registrySnapshot, n
 	if prev == nil {
 		return
 	}
-	now := time.Now()
-	for i := range newOps {
-		if newOps[i].Reachable {
+	carryWithin(prev.byNode, newOps, time.Now(), p.maxCarryAge)
+}
+
+// carryWithin is the clock-free core of carryForwardLastGood and MergeCatalog,
+// split out so testdata/registry_cycle_vectors.json can pin it for the TS SDK.
+func carryWithin(lastGood map[NodeRef]Operator, ops []Operator, now time.Time, maxCarryAge time.Duration) {
+	for i := range ops {
+		if ops[i].Reachable {
 			continue
 		}
-		old, ok := prev.byNode[RefOf(newOps[i])]
+		old, ok := lastGood[RefOf(ops[i])]
 		if !ok {
 			continue
 		}
 		// Only carry within the window. ReachableAsOf==zero means the node was
 		// never confirmed live (nothing worth carrying); past the window it has
 		// aged out.
-		if old.ReachableAsOf.IsZero() || now.Sub(old.ReachableAsOf) >= p.maxCarryAge {
+		if old.ReachableAsOf.IsZero() || now.Sub(old.ReachableAsOf) >= maxCarryAge {
 			continue
 		}
-		carryCaps(&newOps[i], old)
+		carryCaps(&ops[i], old)
 	}
 }
 
@@ -870,13 +877,19 @@ func (p *DynamicRegistryProvider) ReprobeEphemeral(ctx context.Context, op Opera
 //     last successful probe (ReachableAsOf) is within max_carry_age, so it stays
 //     visible across the gaps between its probes and ages out once genuinely gone.
 func (p *DynamicRegistryProvider) advertisable(op Operator, now time.Time) bool {
-	if HeldOutStaging(op, p.allowStaging) || wireIncompatible(op) || op.SignerUnderfunded() {
+	return advertisableAt(op, now, p.allowStaging, p.maxCarryAge)
+}
+
+// advertisableAt is advertisable without the provider, so
+// testdata/registry_cycle_vectors.json can pin it for the TS SDK.
+func advertisableAt(op Operator, now time.Time, allowStaging bool, maxCarryAge time.Duration) bool {
+	if HeldOutStaging(op, allowStaging) || wireIncompatible(op) || op.SignerUnderfunded() {
 		return false
 	}
 	if op.Probed {
 		return op.Reachable
 	}
-	return !op.ReachableAsOf.IsZero() && now.Sub(op.ReachableAsOf) < p.maxCarryAge
+	return !op.ReachableAsOf.IsZero() && now.Sub(op.ReachableAsOf) < maxCarryAge
 }
 
 // AllModels implements RegistryProvider. Triggers a lazy refresh when

@@ -212,6 +212,12 @@ func LoadCatalog(path string) ([]Operator, error) {
 		}
 		return nil, fmt.Errorf("read catalog: %w", err)
 	}
+	return decodeCatalog(data)
+}
+
+// decodeCatalog is LoadCatalog after the read, so
+// testdata/persisted_catalog_vectors.json can pin it for the TS SDK.
+func decodeCatalog(data []byte) ([]Operator, error) {
 	var pc persistedCatalog
 	if err := json.Unmarshal(data, &pc); err != nil {
 		return nil, fmt.Errorf("unmarshal catalog: %w", err)
@@ -233,6 +239,12 @@ func LoadCatalog(path string) ([]Operator, error) {
 // partial or bounded live probe so nodes stay advertised/routable immediately
 // rather than filling in over sweep cycles. Fresh probe results always win.
 func MergeCatalog(base, fresh []Operator, maxCarryAge time.Duration) []Operator {
+	return mergeCatalogAt(base, fresh, maxCarryAge, time.Now())
+}
+
+// mergeCatalogAt is MergeCatalog at a given now, so
+// testdata/registry_cycle_vectors.json can pin it for the TS SDK.
+func mergeCatalogAt(base, fresh []Operator, maxCarryAge time.Duration, now time.Time) []Operator {
 	if maxCarryAge <= 0 {
 		maxCarryAge = DefaultMaxCarryAge
 	}
@@ -240,17 +252,7 @@ func MergeCatalog(base, fresh []Operator, maxCarryAge time.Duration) []Operator 
 	for _, op := range base {
 		byRef[RefOf(op)] = op
 	}
-	now := time.Now()
 	out := append([]Operator(nil), fresh...)
-	for i := range out {
-		if out[i].Reachable {
-			continue
-		}
-		old, ok := byRef[RefOf(out[i])]
-		if !ok || old.ReachableAsOf.IsZero() || now.Sub(old.ReachableAsOf) >= maxCarryAge {
-			continue
-		}
-		carryCaps(&out[i], old)
-	}
+	carryWithin(byRef, out, now, maxCarryAge)
 	return out
 }

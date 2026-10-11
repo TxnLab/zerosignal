@@ -124,8 +124,8 @@ The twin of `go/zs`, released in lockstep with it; the ZeroSignal web app runs o
 payer client (routing, reserve, escrow `open` / settle, sealing, relay hops, streaming, receipt
 checks), the shared API vocabulary (events, error kinds, config and its defaults, network
 presets), and the ports a host app implements (signer, storage, cache, logger, clock, fetch).
-Unlike `go/zs` it builds no operator discovery of its own: the host supplies one as
-`Config.registry`, which `Client` requires. It depends on
+It ships operator discovery as `DiscoveryRegistry`, but unlike `go/zs` its `Client` builds none
+of its own yet: the host supplies one as `Config.registry`, which `Client` requires. It depends on
 `@txnlab/zs-proto` at exactly its own version and re-exports it under
 `@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
 `testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).

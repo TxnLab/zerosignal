@@ -126,6 +126,8 @@ update-vectors:
 	cd go && $(GO) test ./zs         -run TestRegistryProbeVectors  -update
 	cd go && $(GO) test ./zs         -run TestEphemeralVerdictVectors -update
 	cd go && $(GO) test ./zs         -run TestPersistedProtoVersionVectors -update
+	cd go && $(GO) test ./zs         -run TestRegistryCycleVectors  -update
+	cd go && $(GO) test ./zs         -run TestPersistedCatalogVectors -update
 	cd go && $(GO) test ./zs         -run TestDepositPlanVectors    -update
 	cd go && $(GO) test ./zs         -run TestOperatorVectors       -update
 	cd go && $(GO) test ./zs         -run TestReserveSizingVectors  -update
