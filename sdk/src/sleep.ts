@@ -26,6 +26,32 @@ export function sleep(ms: number, signal: AbortSignal | undefined): Promise<bool
     })
 }
 
+/**
+ * untilAborted is p, or signal's reason once it aborts first. p is left
+ * running, and its rejection handled.
+ */
+export function untilAborted<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    if (signal === undefined) return p
+    if (signal.aborted) {
+        p.catch(() => {})
+        return Promise.reject(signal.reason)
+    }
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+        p.then(
+            (v) => {
+                signal.removeEventListener('abort', onAbort)
+                resolve(v)
+            },
+            (err: unknown) => {
+                signal.removeEventListener('abort', onAbort)
+                reject(err)
+            },
+        )
+    })
+}
+
 // setTimeout fires at once past this delay, so a longer wait is taken in steps.
 export const MAX_TIMER_MS = 2 ** 31 - 1
 

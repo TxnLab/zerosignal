@@ -22,7 +22,6 @@ import {
     type TicketJournal,
     Wallet,
     type WalletOpener,
-    ZsError,
     findError,
     isMemoryJournal,
     memoryJournal,
@@ -256,12 +255,6 @@ describe('turnOf', () => {
 })
 
 describe('Client.create', () => {
-    it('requires a registry', async () => {
-        const { registry: _, ...noRegistry } = base
-        await expect(Client.create(noRegistry)).rejects.toThrow(ZsError)
-        await expect(Client.create(noRegistry)).rejects.toMatchObject({ kind: 'invalid_request', code: 'invalid_config' })
-    })
-
     it('rejects a Config resolveConfig rejects', async () => {
         await expect(Client.create({ ...base, privacy: 'loud' as never })).rejects.toMatchObject({ code: 'invalid_config' })
     })
@@ -645,12 +638,41 @@ describe('Client.create', () => {
     it('fails when the escrow config read for a built wallet fails', async () => {
         const addr = algosdk.generateAccount().addr.toString()
         const { wallet: _, ...noWallet } = base
-        const p = Client.create({
-            ...noWallet,
-            signer: { ...signer, address: addr },
-            network: { network: 'testnet', algodEndpoint: 'http://127.0.0.1:1' },
-        })
-        await expect(p).rejects.toThrow(/^read escrow config: /)
+        // A refusal, which the algod transport does not retry.
+        const algod = vi.fn(async () => new Response(JSON.stringify({ message: 'no such app' }), { status: 404 }))
+        vi.stubGlobal('fetch', algod)
+        try {
+            const p = Client.create({
+                ...noWallet,
+                signer: { ...signer, address: addr },
+                network: { network: 'testnet', algodEndpoint: 'http://127.0.0.1:1' },
+            })
+            await expect(p).rejects.toThrow(/^read escrow config: .*no such app/)
+            expect(algod).toHaveBeenCalled()
+            expect(String((algod.mock.calls[0] as unknown[])[0])).toMatch(/^http:\/\/127\.0\.0\.1:1\//)
+        } finally {
+            vi.unstubAllGlobals()
+        }
+    })
+
+    it('stops retrying the escrow config reads once create gives up', async () => {
+        const addr = algosdk.generateAccount().addr.toString()
+        const { wallet: _, ...noWallet } = base
+        const algod = vi.fn(async () => new Response('', { status: 503 }))
+        vi.stubGlobal('fetch', algod)
+        try {
+            const ac = new AbortController()
+            const p = Client.create({ ...noWallet, signer: { ...signer, address: addr } }, ac.signal)
+            await vi.waitFor(() => expect(algod).toHaveBeenCalled())
+            ac.abort(new Error('caller left'))
+            await expect(p).rejects.toThrow('read escrow config: caller left')
+            const calls = algod.mock.calls.length
+            // Past the transport's first one-second wait.
+            await new Promise((r) => setTimeout(r, 1_500))
+            expect(algod.mock.calls.length).toBe(calls)
+        } finally {
+            vi.unstubAllGlobals()
+        }
     })
 
     it("stops the escrow config read on create's signal", async () => {

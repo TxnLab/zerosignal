@@ -31,6 +31,42 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-11 — the TS Client builds its own operator discovery
+
+`Config.registry` is optional in `@txnlab/zerosignal`. Without it, `Client.create` builds a
+`ChainOperatorSource` and a `DiscoveryRegistry` from the resolved `Config`, as `zs.New` does:
+the network's algod and escrow app, every `discovery` setting, `storage` for the saved catalog
+(under `zs.catalog.<escrow app id>`), `privacy`, `teeVerifier`, `fetch`, `allowStaging`, the
+logger and the clock. The Client starts the refresh timer and stops it in `close()`. A registry
+passed in `Config.registry` is used as is and never stopped, so a host can share one across
+Clients; `buildDiscovery(cfg, chainAlgod(cfg))`, given a resolved `Config`, builds it and the
+stores its probes record to as `create` would.
+
+- **Boot.** `Client.create` waits for the saved catalog and one chain read. The first probe of
+  every node runs in the background, and the first request waits for it. `zs.New` waits for
+  both. `create`'s signal bounds the wait. A boot whose chain read failed doesn't rewrite the
+  catalog it just loaded, so an abort isn't held up by that write. A boot fleet with a duplicate or zero node id fails
+  `create`, as it fails `zs.New`.
+- **One set of routing stores.** With a built registry, every routing store absent from
+  `Config.stores` is built, and each one, supplied or built, is the same instance in the probes
+  and in dispatch. A relay the probes charge is demoted in the requests' relay choice, and the
+  reverse. The built reputation store judges a relay's `relay_upstream_unreachable` claim by the
+  probes' last reachability for the target. With `Config.registry` an absent routing store still
+  keeps no signal.
+- **Retrying algod.** The algod client the TS SDK builds for its wallet and discovery now retries
+  as Go's `algod.DefaultTransport` does: a transport failure, a 429 or a 5xx, up to 20 retries
+  after the first attempt, waiting 1 s more each time up to 30 s, or a longer `Retry-After`, also
+  capped at 30 s. Every method retries, transaction submits included: algod does not apply a
+  resent transaction twice, though a submit that landed behind a lost 5xx comes back as an
+  "already in ledger" failure, as it does in Go. Each request's timeout and signal still bound
+  it, retries included, and the escrow config reads `create` starts now run under its signal and
+  10 s bound, as Go's `RefreshConfig` reads run under its context. In a browser a
+  cross-origin algod's `Retry-After` is readable only with `Access-Control-Expose-Headers`. `retryingAlgod` builds the same client for a host's own `ChainOperatorSource`.
+  `algod_retry_vectors.json` pins the budget, which outcomes retry and each wait against Go.
+- `discovery.operatorIds` refuses an id that is not a non-negative integer, or is above
+  `Number.MAX_SAFE_INTEGER`, with `invalid_config`. Go's ids are `uint64`; no operator id comes
+  near either limit.
+
 ### 2026-10-11 — a TEE node is attested only on both measurement checks
 
 Both SDKs count a node as TEE-attested for routing only when its verdict passed **and** rested

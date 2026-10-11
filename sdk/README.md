@@ -6,8 +6,8 @@ Go SDK, [`github.com/TxnLab/zerosignal/go/zs`](https://github.com/TxnLab/zerosig
 event names, error kinds, config defaults and network presets are shared with it and pinned by
 a golden fixture both test suites read.
 
-> **Status: in development.** `Client.stream` runs a paid turn end to end, but the Client
-> builds no operator discovery of its own yet, so `Config.registry` is required.
+> **Status: in development.** `Client.stream` runs a paid turn end to end, over operator
+> discovery the Client builds itself or one the host supplies.
 
 ## Install
 
@@ -34,11 +34,11 @@ through `Config`:
 | Port | Default | Purpose |
 |---|---|---|
 | `signer` | required | The payer's key: raw Ed25519 `signBytes` and algosdk `signTransactions`, for one address. |
-| `storage` | `memoryStorage()` | Durable key-value storage for state that should survive a reload. |
+| `storage` | `memoryStorage()` | Durable key-value storage for state that should survive a reload: the operator catalog a built registry saves. |
 | `cache` | `memoryCache()` | Shared, single-flight fetch cache. Adapt TanStack Query or similar here. |
 | `logger` | discards | slog-style `debug` / `info` / `warn` / `error`. Never receives prompt or response content. |
 | `clock` | `Date.now` | Unix milliseconds. |
-| `fetch` | Node: `nodeFetch()`; elsewhere `globalThis.fetch` | Traffic to nodes. Chain reads keep their own transport. |
+| `fetch` | Node: `nodeFetch()`; elsewhere `globalThis.fetch` | Traffic to nodes: discovery probes, reserves and inference. Algod traffic goes through the global `fetch` (see [Algod](#algod)). |
 
 ### Private addresses
 
@@ -110,50 +110,109 @@ cannot run with throws a `ZsError` with kind `invalid_request` and code `invalid
 ## Client
 
 `Client.create(config)` builds the payer. One Client serves every concurrent turn. It builds
-the reserve client and the wallet when `Config` leaves them out. Building the wallet reads the
-escrow's config from chain, so `create` fails if algod can't be reached.
+the operator registry, the reserve client and the wallet when `Config` leaves them out. Building
+the wallet reads the escrow's config from chain, so `create` fails if algod can't be reached.
 
-`Config.registry` is required, and the host implements it: a `RegistryProvider` lists the
-operators for a model, resolves one node by its ref, lists every operator for the relay pool,
-re-probes a node whose ephemeral key went stale, and records which models were asked for.
+### Discovery
 
-`DiscoveryRegistry` is the SDK's, the Go SDK's dynamic registry over a `ChainOperatorSource`. It
-needs no Client. Once started it reads the chain and probes a bounded set of nodes every
-`refreshInterval`, and a read older than `maxCacheAge` refreshes first. A node it did not reach
-keeps its last-known models for `maxCarryAge`. With a `StorageAdapter` it saves the catalog in
-the Go SDK's format. After a restart, the nodes the first probe does not reach keep their saved
-models, and a subscriber can render the saved fleet before that probe lands. `ready` settles
-after the saved catalog and one chain read; the first probe of every node runs after that, and
-reads wait for it. `subscribe` hands each cycle's snapshot to an app that renders it.
-`CatalogEngine` folds probe results but is not a registry. A host that sets `Config.allowStaging`
-passes the same value to the registry's `allowStaging`, or its model and tool lists disagree with
-what the Client routes to.
+Without `Config.registry`, `Client.create` builds the SDK's discovery, as the Go SDK's `zs.New`
+does: a `ChainOperatorSource` reading the escrow's operator and node boxes from the network's
+algod, and a `DiscoveryRegistry` that refreshes it. Once started it reads the chain and probes a
+bounded set of nodes every `refreshInterval`, and a read older than `maxCacheAge` refreshes
+first. A node it did not reach keeps its last-known models for `maxCarryAge`. The catalog is
+saved to `Config.storage` in the Go SDK's format, under `zs.catalog.<escrow app id>` since
+operator and node ids repeat across networks, so after a restart the nodes the first probe
+does not reach keep their saved models. The registry, its source and the stores it builds run on
+`Config.clock`; the Go SDK's run on the wall clock. The registry probes each node through a relay unless
+`privacy` is `direct`, dials with `Config.fetch`, verifies TEE evidence with `teeVerifier`, and
+applies the same staging gate as routing (`allowStaging`). `close()` stops it.
 
-The source's relay reputation and latency are the ones a Client should route on, as the Go
-SDK's source is both stores, so pass them on:
+`Config.discovery` tunes it, each setting in milliseconds or a count, a non-positive value
+taking the default:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `refreshInterval` | 300 000 | Time between refresh cycles. |
+| `refreshTimeout` | 30 000 | One refresh cycle: the chain read and its probes. |
+| `probeBudget` | 96 | Details probes per cycle; the rest of the fleet carries forward. |
+| `targetTopK` | 8 | Targets probed in full per recently requested model. |
+| `maxCacheAge` | 900 000 | A read of a snapshot older than this refreshes first. |
+| `maxCarryAge` | 5 400 000 | How long a node not reached stays routable on its last answer. |
+| `latencyStateMax` | 4096 | Entries per keying in the built latency store. |
+| `detailsTimeout` | 2 000 | One details probe, and the attestation probe after it. |
+| `detailsConcurrency` | 24 | Probes in flight at once. |
+| `operatorIds` | all | Discover only these operators, each of which must exist. |
+
+**Boot differs from Go's.** `create` waits for the saved catalog and one chain read
+(`registry.ready`): up to 5 s to load the catalog, a minute for the chain read and 5 s to save
+it again, and `create`'s signal bounds that wait. The first probe of every node then runs in the
+background, and the first request, or any read of the registry, waits for it. `zs.New` waits for
+the probe too. When the chain read fails, `create` still succeeds: the registry serves the saved
+catalog, or nothing, and retries on its timer. A boot fleet holding a duplicate or zero node id
+fails `create`, as in Go.
+
+**The routing stores are shared.** With a built registry the Client builds each routing store
+`Config.stores` leaves out (see [Routing stores](#routing-stores)) and hands every one, supplied
+or built, to both the probes and the requests, so a relay the probes charge is demoted in the
+requests' relay choice and a relay a request charges is passed over by the probes. The built
+reputation store judges a relay's claim that its target is down by the probes' last answer from
+that target; a supplied one judges it by its own `targetReachable`.
+
+**One registry across Clients.** A `RegistryProvider` passed as `Config.registry` is used as is
+and never stopped: the host owns it. That suits a browser that keeps one fleet view while it
+builds a Client per account or per session. `buildDiscovery` builds the registry exactly as
+`create` would from the same `Config` (every `discovery` setting, `privacy`, `fetch`,
+`teeVerifier`, `allowStaging`, `storage` under `catalogStorageKey(escrowAppId)`, the logger and
+the clock), with the routing stores its probes record to. Pass those stores and the resolved
+`teeVerifier` to each Client, since a Client with a supplied registry builds no routing store
+and would otherwise build a second verifier:
 
 ```ts
-const source = new ChainOperatorSource({ algod, escrowAppId, teeVerifier, fetch })
-const registry = new DiscoveryRegistry({ source, storage, discovery, logger })
+import { Client, type Config, buildDiscovery, chainAlgod, resolveConfig, testnet } from '@txnlab/zerosignal'
+
+const shared: Omit<Config, 'signer'> = { network: testnet(), storage, logger }
+const cfg = resolveConfig({ ...shared, signer })
+const { registry, stores } = buildDiscovery(cfg, chainAlgod(cfg))
 await registry.ready
 registry.start()
-const zs = await Client.create({
-    signer,
-    network: testnet(),
-    registry,
-    teeVerifier,
-    stores: { relayReputation: source.relayReputation, relayLatency: source.relayLatency },
-})
+
+const zs = await Client.create({ ...shared, signer, registry, stores, teeVerifier: cfg.teeVerifier })
+// ...
+await zs.close()     // leaves the registry running
+await registry.stop()
 ```
 
-A Client learns between turns only through the routing stores passed in `Config.stores` (see
-[Routing stores](#routing-stores)). Without them it keeps no relay reputation, latency or
-target backoff, and a node whose settle group fails its check is not barred.
+Build every Client sharing the registry from the same settings: one that sets another
+`allowStaging` or `privacy` routes on a fleet view built for different ones.
+
+A host can also implement `RegistryProvider` itself: it lists the operators for a model,
+resolves one node by its ref, lists every operator for the relay pool, re-probes a node whose
+ephemeral key went stale, and records which models were asked for. `subscribe` on a
+`DiscoveryRegistry` hands each cycle's snapshot to an app that renders it, the saved fleet
+first. `CatalogEngine` folds probe results but is not a registry.
+
+### Algod
+
+The algod client the SDK builds, for its wallet and its discovery, retries as the Go SDK's does
+(`algod.DefaultTransport`): a request that got no response, a 429 or any 5xx is retried up to
+20 times after the first attempt, waiting one second more before each (1 s, 2 s, …) up to 30 s,
+or a longer `Retry-After` (seconds or an HTTP date), also held to 30 s. Every method retries,
+transaction submits included: algod does not apply a resent transaction twice, though one that
+landed behind a lost 5xx answers the retry with an "already in ledger" failure. Each
+request's timeout and signal bound the retries too. Algod is the endpoint `network` names, so its
+requests go through the global `fetch`, not `Config.fetch` and its private-address guard.
+`retryingAlgod` builds the same client for a host's own `ChainOperatorSource`. The escrow config
+reads `create` makes run under its signal and its 10 s bound, so none outlives a `create` that
+gave up. In a browser the `Retry-After` of a cross-origin algod is
+readable only when it sends `Access-Control-Expose-Headers: Retry-After`; without it the linear
+schedule applies.
+
+### Turns
 
 ```ts
 import { Client, testnet } from '@txnlab/zerosignal'
 
-const zs = await Client.create({ signer, network: testnet(), registry })
+const zs = await Client.create({ signer, network: testnet() })
 
 const turn = zs.stream({
   endpoint: '/v1/chat/completions',
@@ -310,7 +369,9 @@ browser needs because it can't reach every node a server can. Relay selection
 (`selectRelayHopWeighted`, `applyRelay`) comes with them. They are per-instance and take an
 injected clock. A wall clock that steps back costs at most one window, since each store
 re-dates a record it finds in the future. A `Client` routes with the ones passed in
-`Config.stores`, and keeps no such signal for one left out; `RelayHealthStore` is the host's.
+`Config.stores`. When it builds its registry it builds each one left out and shares them all with
+the registry's probes (see [Discovery](#discovery)); with `Config.registry` it keeps no such
+signal for one left out. `RelayHealthStore` is the host's.
 
 ## Catalog
 
@@ -365,9 +426,12 @@ and served for up to seven days while the PCCS is unreachable, before the node's
 is consulted. So build one verifier and keep it. `Config.teeVerifier` defaults to one per
 Client, and `disableTee` turns verification off.
 
-No `Client` runs the attestation probe itself. A `DiscoveryRegistry` does, through
-`ChainOperatorSource.enrichSubset`, after each successful details probe, with the source's
-`teeVerifier`. A registry of the host's own, after a node's details probe has applied its
+A `DiscoveryRegistry` runs the attestation probe, through `ChainOperatorSource.enrichSubset`,
+after each successful details probe, with the source's `teeVerifier`. The registry a Client
+builds hands its source `Config.teeVerifier`, so evidence checks and the collateral cache are
+the Client's; with `disableTee` it checks none, and every node reads as unattested. A registry
+the host supplies needs that same verifier passed to its source. A registry of the host's own,
+after a node's details probe has applied its
 verified ephemeral key, calls
 `probeAttestation` with that row, the details' `tee` advertisement, `client.config.teeVerifier`,
 a `fetch`, and the probe's relay hop and timeout, and sets the `TEEStatus` it returns on the

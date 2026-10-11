@@ -13,12 +13,14 @@
 // attestation steps it calls are pinned where they live.
 //
 // Differences from Go:
-//   - Go's routing stores are fields of its source. Here a host may hand in
-//     the reputation and latency stores it shares with a Client, which then
-//     sees the probe's records. A supplied reputation store judges a relay's
-//     relay_upstream_unreachable claim by its own targetReachable callback,
-//     which must answer from recallReachable for the claim to be read against
-//     the probes as Go reads it; the store built here is wired that way.
+//   - Go's routing stores are fields of its source. Here the reputation and
+//     latency stores can be handed in, and a Client that builds its registry
+//     hands in the ones it routes with, so it sees the probe's records. A
+//     supplied reputation store judges a relay's relay_upstream_unreachable
+//     claim by its own targetReachable callback, which must answer from
+//     recallReachable for the claim to be read against the probes as Go reads
+//     it; the store built here, and the one a Client builds, are wired that
+//     way.
 //   - probeDetails reports to a relay-health store that Go has no twin of.
 //     Its records land where Go's do: a relay that failed the hop is
 //     remembered unreachable, a forward through one records no reachability,
@@ -57,7 +59,8 @@ import { checkEphemeralAdvertisement, recordEphemeralStaleness } from '../catalo
 import { defaults } from '../config.js'
 import { DEFAULT_DETAILS_TIMEOUT_MS, type DetailsProbeStores, RelayHopError, RelayUpstreamUnreachableError, probeDetails } from '../details.js'
 import { type Operator, detailsFieldsOf, refOf, selectionOf } from '../operator.js'
-import { type Clock, type Fetch, type LogAttrs, type Logger, discardLogger } from '../ports.js'
+import { quietLogger } from '../log.js'
+import { type Clock, type Fetch, type Logger, discardLogger } from '../ports.js'
 import { RelayLatencyStore } from '../routing/latency.js'
 import { type RelayHop, randomRelaySeed, relayRef, selectRelayHopWeighted } from '../routing/relay.js'
 import { RelayReputationStore } from '../routing/reputation.js'
@@ -484,17 +487,6 @@ export class NodeProber {
     }
 }
 
-/** quietLogger is log with each call's throw dropped. */
-export function quietLogger(log: Logger): Logger {
-    const quiet =
-        (fn: (msg: string, attrs?: LogAttrs) => void) =>
-        (msg: string, attrs?: LogAttrs): void => {
-            try {
-                fn.call(log, msg, attrs)
-            } catch {}
-        }
-    return { debug: quiet(log.debug), info: quiet(log.info), warn: quiet(log.warn), error: quiet(log.error) }
-}
 
 function positiveOr(v: number | undefined, fallback: number): number {
     return v !== undefined && Number.isFinite(v) && v > 0 ? v : fallback

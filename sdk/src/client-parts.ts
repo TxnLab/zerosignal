@@ -13,12 +13,14 @@ import type { EstimatePolicy } from './estimate.js'
 import type { RegistryProvider, ReserveClient, TicketJournal, WalletOpener } from './parts.js'
 import type { PickDeps } from './pick.js'
 import type { Reconciler } from './reconciler.js'
+import type { ChainOperatorSource } from './registry/chain.js'
 import type { Watchdog } from './refund-watchdog.js'
 import type { Settles } from './settles.js'
 
 /**
  * The parts a Client runs on. Routing stores, the spend guard and the logger
- * are read off cfg, where an absent store is no signal.
+ * are read off cfg, where an absent store is no signal; with a built registry
+ * every routing store is set.
  */
 export interface Parts {
     cfg: ResolvedConfig
@@ -38,6 +40,13 @@ export interface Parts {
     settles: Settles
     /** Aborted by close, ending background work that would outlive the Client. */
     life: AbortController
+    /**
+     * The chain source behind the registry create built; undefined with a
+     * supplied registry. Nothing at runtime reads it: tests drive its probes.
+     */
+    source: ChainOperatorSource | undefined
+    /** Stops the registry create built, which close calls; undefined with a supplied one. */
+    stopRegistry: (() => Promise<void>) | undefined
 }
 
 /** Each Client's parts, set by its constructor. */

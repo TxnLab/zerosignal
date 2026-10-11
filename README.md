@@ -116,7 +116,8 @@ Subpaths: `wire`, `ticket`, `selection`, `pricing`, `imageprice`, `tokenize`, `t
 Wire-shaped types use snake_case property names matching the JSON wire format, so `JSON.stringify(envelope)` produces the bytes the Go side emits — no field-rename layer. Function names are camelCase.
 
 Not ported (intentionally): file-IO identity loaders, the Go `reflect+unsafe` ephemeral-key wipe (JS strings are immutable; see `ts/README.md` "Secret-key lifetime"), the `algo/`, `algod/`, `keystore/` subpackages, the node-side half of `tools/` (request rewriters, tool loop, markup recovery), and the chain-access half of `escrow/` (box reads, and checking and completing the node-built
-open and settle groups), which the TypeScript SDK below carries instead (`sdk/src/escrow/`).
+open and settle groups), which the TypeScript SDK below carries instead (`sdk/src/escrow/`, and
+`algod/`'s retrying transport in `sdk/src/algod-transport.ts`).
 
 ### TypeScript SDK — [`sdk/`](./sdk/), npm package `@txnlab/zerosignal`
 
@@ -124,8 +125,10 @@ The twin of `go/zs`, released in lockstep with it; the ZeroSignal web app runs o
 payer client (routing, reserve, escrow `open` / settle, sealing, relay hops, streaming, receipt
 checks), the shared API vocabulary (events, error kinds, config and its defaults, network
 presets), and the ports a host app implements (signer, storage, cache, logger, clock, fetch).
-It ships operator discovery as `DiscoveryRegistry`, but unlike `go/zs` its `Client` builds none
-of its own yet: the host supplies one as `Config.registry`, which `Client` requires. It depends on
+Its `Client` builds operator discovery (`DiscoveryRegistry`) when `Config.registry` is absent, as
+`zs.New` does, with one difference at boot: `zs.New` waits for the chain read and a probe of every
+node, while `Client.create` waits only for the chain read, and the first request waits for the
+probe. A host can still supply its own registry, or share one across Clients. It depends on
 `@txnlab/zs-proto` at exactly its own version and re-exports it under
 `@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
 `testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).

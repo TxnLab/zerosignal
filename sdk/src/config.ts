@@ -40,7 +40,10 @@ export interface Affinity {
     max: number
 }
 
-/** Discovery tunes operator discovery and the details probes behind routing. */
+/**
+ * Discovery tunes operator discovery and the details probes behind routing.
+ * Only the registry the Client builds reads it.
+ */
 export interface Discovery {
     refreshInterval: number
     /** One refresh cycle. */
@@ -55,7 +58,11 @@ export interface Discovery {
     latencyStateMax: number
     detailsTimeout: number
     detailsConcurrency: number
-    /** When set, limits discovery to these operators. */
+    /**
+     * When set, limits discovery to these operators. Each must be a
+     * non-negative integer no larger than Number.MAX_SAFE_INTEGER, where Go's
+     * are uint64: an id is a routing key, so it may not round.
+     */
     operatorIds?: number[]
 }
 
@@ -126,14 +133,14 @@ export interface Config {
     /** These models route only to attested nodes. */
     requireTeeModels?: string[]
     /**
-     * Checks the attestation evidence nodes publish; defaultVerifier() when
-     * absent, built once per Client since its Intel collateral cache is what
-     * an outage falls back on. The Client builds no registry yet, so it never
-     * calls this itself: the host's registry does, a DiscoveryRegistry through
-     * its ChainOperatorSource's teeVerifier, a registry of the host's own
-     * through probeAttestation. Hand it this same verifier. A custom verifier
-     * must report detail.measurementChecks, or no node it passes counts as
-     * attested.
+     * Checks the attestation evidence nodes publish, in the discovery the
+     * Client builds; defaultVerifier() when absent, built once per Client
+     * since its Intel collateral cache is what an outage falls back on. With
+     * Config.registry the Client never calls it: the host's registry does, a
+     * DiscoveryRegistry through its ChainOperatorSource's teeVerifier, a
+     * registry of the host's own through probeAttestation, so hand that this
+     * same verifier. A custom verifier must report detail.measurementChecks,
+     * or no node it passes counts as attested.
      */
     teeVerifier?: Verifier
     /** Checks no attestation evidence: every node counts as unattested. Overrides teeVerifier. */
@@ -191,14 +198,14 @@ export interface Config {
 
     /**
      * The network-facing parts: operator discovery, the reserve call, and
-     * escrow. The registry is required: the Client builds no discovery of its
-     * own yet, so `Client.create` refuses a config without one; the SDK's is
-     * DiscoveryRegistry, which a host builds and passes here. The Client
-     * builds an absent reserve client or wallet; a supplied part is used as
-     * is, so the settings only a built part reads (reserveTimeout,
-     * allowPrivateHosts) do not reach it. A supplied registry lists staging
-     * nodes, as Go's does: routing holds them out as targets unless
-     * allowStaging, and the relay pool keeps them.
+     * escrow. The Client builds each absent one; a supplied part is used as
+     * is, so the settings only a built part reads (discovery, teeVerifier,
+     * storage, reserveTimeout, allowPrivateHosts) do not reach it. A built
+     * registry is the Client's, which close stops; a supplied one is the
+     * caller's, which may share it across Clients and stops it itself. A
+     * supplied registry must apply the same staging gate as allowStaging: it
+     * lists staging nodes, as Go's does, and routing holds them out as
+     * targets unless allowStaging, while the relay pool keeps them.
      */
     registry?: RegistryProvider
     reserveClient?: ReserveClient
@@ -244,7 +251,10 @@ export interface ResolvedConfig {
     allowPrivateHosts: boolean
     spendGuard: SpendGuard | undefined
     remedies: Remedies
-    /** As given: the defaults depend on which parts the Client builds. */
+    /**
+     * As given: the defaults depend on which parts the Client builds. A
+     * Client's config fills in the ones it built.
+     */
     stores: Stores
     registry: RegistryProvider | undefined
     reserveClient: ReserveClient | undefined
@@ -356,7 +366,14 @@ export function resolveConfig(c: Config): ResolvedConfig {
         detailsConcurrency: orDefault(d.detailsConcurrency, dd.detailsConcurrency),
     }
     // Empty is no limit, as in Go, not a limit to no operators.
-    if (d.operatorIds?.length) discovery.operatorIds = d.operatorIds
+    if (d.operatorIds?.length) {
+        // Go's are uint64; checked here so a bad one fails as config, not
+        // as a RangeError from the chain read.
+        for (const id of d.operatorIds) {
+            if (!Number.isSafeInteger(id) || id < 0) throw configError(`discovery.operatorIds: ${id} is not an operator id`)
+        }
+        discovery.operatorIds = d.operatorIds
+    }
 
     const allowPrivateHosts = c.allowPrivateHosts ?? false
     const fetch = c.fetch ?? defaultFetch(allowPrivateHosts)

@@ -155,11 +155,17 @@ func drainAndClose(res *http.Response) {
 // (also clamped to RetryWaitMax) so a server-asserted throttle window
 // is always honored.
 func backoff(attempt int, res *http.Response, min, max time.Duration) time.Duration {
+	return backoffAt(attempt, retryAfterHeader(res), time.Now(), min, max)
+}
+
+// backoffAt is backoff for a Retry-After value read at now, so
+// testdata/algod_retry_vectors.json can pin it against the TS twin.
+func backoffAt(attempt int, retryAfterValue string, now time.Time, min, max time.Duration) time.Duration {
 	wait := time.Duration(attempt+1) * min
 	if wait > max {
 		wait = max
 	}
-	if ra := retryAfter(res); ra > wait {
+	if ra := retryAfterAt(retryAfterValue, now); ra > wait {
 		if ra > max {
 			ra = max
 		}
@@ -168,14 +174,21 @@ func backoff(attempt int, res *http.Response, min, max time.Duration) time.Durat
 	return wait
 }
 
+func retryAfterHeader(res *http.Response) string {
+	if res == nil {
+		return ""
+	}
+	return res.Header.Get("Retry-After")
+}
+
 // retryAfter parses an RFC 7231 Retry-After header in either of its
 // two forms: a non-negative integer count of seconds, or an HTTP-date.
 // Anything unparseable returns 0 (no server-supplied wait).
 func retryAfter(res *http.Response) time.Duration {
-	if res == nil {
-		return 0
-	}
-	v := res.Header.Get("Retry-After")
+	return retryAfterAt(retryAfterHeader(res), time.Now())
+}
+
+func retryAfterAt(v string, now time.Time) time.Duration {
 	if v == "" {
 		return 0
 	}
@@ -183,7 +196,7 @@ func retryAfter(res *http.Response) time.Duration {
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
-		if d := time.Until(t); d > 0 {
+		if d := t.Sub(now); d > 0 {
 			return d
 		}
 	}
@@ -197,11 +210,11 @@ func retryAfter(res *http.Response) time.Duration {
 // 100) matters because both proxy and node hammer a single algod host
 // from many goroutines at once — Go's defaults cap idle conns per host
 // at 2, which forces a fresh dial on every concurrent caller past the
-// second. The retry knobs (20 attempts, 1s→30s linear-cap backoff)
-// absorb transient 429/503/5xx from hosted-node providers without
-// failing admission or settlement. Per-call deadlines should still
-// come from the caller's ctx — the retry budget can otherwise stretch
-// to several minutes against a sustained-error backend.
+// second. The retry knobs (20 retries after the first attempt, 1s→30s
+// linear-cap backoff) absorb transient 429/503/5xx from hosted-node
+// providers without failing admission or settlement. Per-call deadlines
+// should still come from the caller's ctx — the retry budget can
+// otherwise stretch to several minutes against a sustained-error backend.
 func DefaultTransport() *RetryRoundTripper {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.MaxIdleConns = 100

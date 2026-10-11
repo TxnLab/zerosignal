@@ -23,12 +23,9 @@
 //     that won't resolve. nfdAppId, signerSpendableMicroAlgos and the metrics
 //     (the latency and throughput EWMAs routing reads among them) narrow with
 //     Number() and would round past 2^53, which none reaches.
-//   - Retries and deadlines belong to the algod client. Go's algod.NewClient
-//     retries a 429, 503 or other 5xx on every read and bounds a read only by
-//     the refresh context; here the host's Algodv2 does whatever its
-//     BaseHTTPClient does, and each read also carries requestTimeoutMs. Until
-//     the SDK builds its Algodv2 on Go's retrying transport, one transient 503
-//     on the listing fails the whole read.
+//   - Each algod request carries requestTimeoutMs, which also bounds the
+//     retries of the transport under it (retryingAlgod, which a Client builds
+//     its source on). Go bounds a read only by the refresh context.
 
 import type algosdk from 'algosdk'
 import {

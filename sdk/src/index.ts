@@ -11,6 +11,17 @@
 export * from './ack.js'
 export * from './admit.js'
 export * from './affinity.js'
+// The transport; the retry rules under it stay internal.
+export {
+    ALGOD_MAX_RETRIES,
+    ALGOD_RETRY_WAIT_MAX_MS,
+    ALGOD_RETRY_WAIT_MIN_MS,
+    AlgodHTTPError,
+    type AlgodTransportOptions,
+    RetryingAlgodClient,
+    retryingAlgod,
+} from './algod-transport.js'
+export { type BuiltDiscovery, type RoutingStores, buildDiscovery, catalogStorageKey, chainAlgod } from './assemble.js'
 export * from './attestation.js'
 export * from './client.js'
 export * from './config.js'
