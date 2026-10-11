@@ -103,9 +103,12 @@ type ChainOperatorSource struct {
 	// sees the proxy's IP from background discovery traffic. When no eligible
 	// relay exists for an operator, its probe is skipped this cycle rather
 	// than sent directly (the privacy contract — never reveal the IP). False
-	// = probe operators directly, pre-relay behavior. NB: a fully cold start
-	// (no operator yet Reachable) can't bootstrap relayed probes — handled at
-	// the privacy rollout, not in the dormant landing.
+	// = probe operators directly, pre-relay behavior. A cold start, with no node
+	// probed yet, is not stuck: buildSelAll seeds each unprobed peer's protocol
+	// version so it stays relay-eligible, and with no node known reachable the
+	// relay pick draws from every eligible peer. A node with no eligible relay
+	// (every other node shares its operator or owner, runs an incompatible
+	// protocol, or sits in its /16) is skipped, cold or warm.
 	Privacy bool
 
 	// reachMu guards lastReachable.
@@ -221,6 +224,9 @@ type ChainOperatorSource struct {
 	// exists so a test can pin that FetchChain runs the balance pass without
 	// hand-encoding escrow's positional box layout.
 	readChain func(ctx context.Context) ([]Operator, error)
+	// chainClock overrides the day the revenue windows end on in tests; nil =
+	// time.Now.
+	chainClock func() time.Time
 }
 
 // recallReachable returns the last-known reachability for a node (false when
@@ -321,7 +327,11 @@ func (s *ChainOperatorSource) EnrichSubset(ctx context.Context, ops []Operator, 
 func (s *ChainOperatorSource) resolveActiveNodes(ctx context.Context, records []escrow.OperatorRecord) ([]Operator, error) {
 	// Day index for the windowed-revenue reads. The on-chain ring is
 	// day-granular, so computing this once for the whole batch costs nothing.
-	currentDay := uint64(time.Now().Unix()) / escrow.SecondsPerDay
+	now := time.Now
+	if s.chainClock != nil {
+		now = s.chainClock
+	}
+	currentDay := uint64(now().Unix()) / escrow.SecondsPerDay
 
 	// Index operators by id so each fetched node recovers its owner / nfd / id.
 	opByID := make(map[uint64]escrow.OperatorRecord, len(records))

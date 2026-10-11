@@ -35,8 +35,11 @@ export const LATENCY_EWMA_ALPHA = 0.3
 
 /**
  * A sample older than this is untrusted: reads prune it, and a new sample
- * restarts the average instead of blending across the gap. Well above the
- * probe interval, so a steadily probed path stays warm.
+ * restarts the average instead of blending across the gap. It equals Go's
+ * default refresh interval, so a sample from the discovery probe alone goes
+ * stale around the node's next probe. In TS the host sets the refresh
+ * cadence, so a host probing less often than that loses the probe samples.
+ * Reserve round-trips are what keep a path in use warm.
  */
 export const LATENCY_STALE_MS = 5 * 60_000
 

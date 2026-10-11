@@ -68,11 +68,35 @@ export interface ModelCapacity {
     vendorToolTokensPerCall: number
 }
 
-/** The node's on-chain inference metrics routing reads; 0 when it has none. */
+/**
+ * The node's own on-chain track record (its NodeRecord, not the operator's
+ * rollup across its nodes); 0 when it has none. Routing reads the two EWMAs.
+ * The rest are for display, set by the SDK's chain read and optional so a host
+ * that builds operators itself can leave them out. Amounts are microUSDC.
+ */
 export interface OperatorMetrics {
     /** Co-signed TTFT EWMA (NodeRecord.latencyEwmaMs). */
     latencyEwmaMs: number
     tokensPerSecEwma: number
+    /** Unix seconds of the node's last ticket-touching state change. */
+    lastActivityAt?: number | undefined
+    ticketsOpened?: number | undefined
+    ticketsSettled?: number | undefined
+    ticketsLapsedSettled?: number | undefined
+    ticketsRefundedInactive?: number | undefined
+    ticketsProtested?: number | undefined
+    ticketsFrozenDispute?: number | undefined
+    totalRefundedInactiveUsdc?: number | undefined
+    totalProtestedUsdc?: number | undefined
+    totalFrozenDisputeUsdc?: number | undefined
+    /** Summed over token-output settles only; divide by latencySamples, never the settle counts. */
+    latencyTotalMs?: number | undefined
+    latencySamples?: number | undefined
+    totalRevenueGross?: number | undefined
+    /** Windows of the daily revenue ring, ending on the day the chain was read. */
+    revenue24hUsdc?: number | undefined
+    revenue7dUsdc?: number | undefined
+    revenue30dUsdc?: number | undefined
 }
 
 /** The payer's own verdict on the node's attestation evidence. */
@@ -92,6 +116,8 @@ export interface TEEStatus {
 export interface Operator {
     id: number
     nodeId: number
+    /** The operator's NFD app id, 0 when it has none; display only. */
+    nfdAppId?: number | undefined
     ownerAddr: string
     signingAddr: string
     /** The ed25519 key tickets are signed with, from the chain. */

@@ -28,9 +28,9 @@ var ErrOperatorUnknown = errors.New("operator unknown")
 // unblock it, and the field shape it would take.
 
 // RegistryProvider is the proxy's view of the set of operators it can
-// dispatch to. The interface is shaped so that a future on-chain backend
-// (Algorand app with box storage per operator, Phase 2 in the plan) is a
-// drop-in replacement for StaticRegistryProvider.
+// dispatch to. StaticRegistryProvider serves a fixed list.
+// DynamicRegistryProvider refreshes from an OperatorSource, in production
+// ChainOperatorSource, which reads the escrow app's operator and node boxes.
 //
 // Operators returns every operator that advertises support for model, in
 // the registry's selection-preference order. An empty slice means no

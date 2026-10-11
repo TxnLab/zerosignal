@@ -36,6 +36,8 @@ export * from './parts.js'
 export * from './ports.js'
 export * from './reconcile.js'
 export type { RefundWatchdog } from './refund-watchdog.js'
+// The fetchers under it stay internal until the registry that uses them lands.
+export { ChainOperatorSource, type ChainOperatorSourceOptions } from './registry/index.js'
 export * from './request-parse.js'
 export * from './reserve.js'
 export * from './reserve-price.js'

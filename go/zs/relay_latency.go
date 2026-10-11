@@ -60,8 +60,10 @@ const (
 	latencyEWMAAlpha = 0.3
 	// latencyStaleAfter: a sample older than this is untrusted — readers return
 	// (prune) it and a new sample restarts the EWMA rather than blending across a
-	// gap. Above the 60s discovery probe interval so a steadily-probed path stays
-	// warm, but a path we stopped using ages out within minutes.
+	// gap. It equals the default refresh interval, so a sample from the discovery probe
+	// alone goes stale around the node's next probe, and stays stale while
+	// bounded probing skips the node. Reserve round-trips are what keep a path in
+	// use warm; a path we stopped using ages out within minutes.
 	latencyStaleAfter = 5 * time.Minute
 	// LatencyMinSamples is the confidence floor for a *demotion* decision (the
 	// target slow-outlier pass). One sample is too noisy to reorder on; the relay

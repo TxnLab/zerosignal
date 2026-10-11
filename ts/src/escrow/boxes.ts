@@ -53,6 +53,40 @@ export function nodeBoxPrefixForOperator(operatorId: bigint): Uint8Array {
     return concatBytes(NODE_PREFIX, be64(operatorId))
 }
 
+// operatorBoxPrefix and nodeBoxPrefix are the names every operator and every
+// node box starts with, for a prefix-filtered box listing. Each call returns a
+// fresh copy, so a caller can't rewrite the prefix for every other one.
+export function operatorBoxPrefix(): Uint8Array {
+    return OPERATOR_PREFIX.slice()
+}
+
+export function nodeBoxPrefix(): Uint8Array {
+    return NODE_PREFIX.slice()
+}
+
+function hasPrefix(name: Uint8Array, prefix: Uint8Array): boolean {
+    return prefix.every((b, i) => name[i] === b)
+}
+
+function readBe64(b: Uint8Array, off: number): bigint {
+    return new DataView(b.buffer, b.byteOffset, b.byteLength).getBigUint64(off, false)
+}
+
+// operatorIdFromBoxName is the inverse of operatorBoxKey, for names a box
+// listing returns. Undefined for a name that isn't a well-formed operator box
+// (wrong prefix or length): no box this contract writes, so a caller skips it.
+export function operatorIdFromBoxName(name: Uint8Array): bigint | undefined {
+    if (name.length !== OPERATOR_PREFIX.length + 8 || !hasPrefix(name, OPERATOR_PREFIX)) return undefined
+    return readBe64(name, OPERATOR_PREFIX.length)
+}
+
+// nodeIdsFromBoxName is the inverse of nodeBoxKey, undefined for a name that
+// isn't a well-formed node box.
+export function nodeIdsFromBoxName(name: Uint8Array): { operatorId: bigint; nodeId: bigint } | undefined {
+    if (name.length !== NODE_PREFIX.length + 16 || !hasPrefix(name, NODE_PREFIX)) return undefined
+    return { operatorId: readBe64(name, NODE_PREFIX.length), nodeId: readBe64(name, NODE_PREFIX.length + 8) }
+}
+
 // freeQuotaBoxKey returns "q:" + the payer's raw 32-byte public key — the
 // contract keys the map by Account, whose native encoding is the public key,
 // not the base32 address.
