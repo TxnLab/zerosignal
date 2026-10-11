@@ -3,9 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { readFileSync } from 'node:fs'
+import { isIP } from 'node:net'
+
 import { describe, expect, it } from 'vitest'
 
-import { isBlockedOperatorUrl, operatorUrlAllowed } from '../src/index.js'
+import { isBlockedOperatorUrl, operatorUrlAllowed, PrivateTargetError } from '../src/index.js'
+
+const vectors = JSON.parse(readFileSync(new URL('../../testdata/private_target_vectors.json', import.meta.url), 'utf8')) as {
+    cases: { address: string; refused: boolean }[]
+}
+
+// The browser's default fetch refuses on this check alone, so it may be
+// stricter than Go's dial guard but never looser: a literal Go refuses to dial,
+// the browser must refuse to fetch.
+describe('isBlockedOperatorUrl against the dial guard', () => {
+    const refused = vectors.cases.filter((c) => c.refused && isIP(c.address) !== 0)
+
+    it('has refused literals', () => expect(refused.length).toBeGreaterThan(20))
+
+    it.each(refused.map((c) => c.address))('%s: refused, as Go refuses the dial', (address) => {
+        const host = isIP(address) === 6 ? `[${address}]` : address
+        expect(isBlockedOperatorUrl(`http://${host}:8080/`)).toBe(true)
+    })
+})
 
 describe('isBlockedOperatorUrl', () => {
     it.each([
@@ -82,5 +103,15 @@ describe('operatorUrlAllowed', () => {
         expect(operatorUrlAllowed('http://127.0.0.1:8080', false)).toBe(false)
         expect(operatorUrlAllowed('http://127.0.0.1:8080', true)).toBe(true)
         expect(operatorUrlAllowed('https://op.example', false)).toBe(true)
+    })
+})
+
+describe('PrivateTargetError', () => {
+    const prefix = 'refusing to dial private/loopback/link-local address: '
+
+    it('lists the addresses a name resolved to, and only when they add something', () => {
+        expect(new PrivateTargetError('n.example', ['10.0.0.1', '127.0.0.1']).message).toBe(`${prefix}n.example (10.0.0.1, 127.0.0.1)`)
+        expect(new PrivateTargetError('10.0.0.1', ['10.0.0.1']).message).toBe(`${prefix}10.0.0.1`)
+        expect(new PrivateTargetError('n.example', []).message).toBe(`${prefix}n.example`)
     })
 })

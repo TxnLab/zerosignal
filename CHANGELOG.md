@@ -31,6 +31,26 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-11 — the TS SDK's browser fetch refuses private hosts
+
+Outside Node, `@txnlab/zerosignal`'s default `fetch` was the runtime's own, with no check, and
+the SDK never called `operatorUrlAllowed`. With `privacy: 'direct'` a browser payer would probe,
+reserve against and send a prompt to an operator whose on-chain URL named `localhost` or a LAN
+address, and under `relay_required` it would still use such an operator as a relay. Unless
+`allowPrivateHosts` is set, that fetch now refuses a URL whose host `isBlockedOperatorUrl`
+blocks, rejecting with a `PrivateTargetError` before the request leaves, as Go's dial guard and
+the Node build already did. Such a node stays in the chain read and reads as unreachable.
+
+- The check is a literal-host one, and stricter than Go's: it also refuses `240.0.0.0/4` and all
+  of `::/96`, which Go dials. A test holds it to refusing everything Go refuses. A public name
+  that resolves to a private address, or a public node that redirects to one, still gets
+  through in a browser.
+- `PrivateTargetError` is now exported from the package root as well as from
+  `@txnlab/zerosignal/node`, and is the same class in both.
+- A host that supplies `Config.fetch` is unaffected and owns the check. A browser host on
+  localnet sets `allowPrivateHosts`, or, for a `ChainOperatorSource` it builds itself, passes
+  its own `fetch`, since `ProbeOptions` has no such setting.
+
 ### 2026-10-11 — the TS Client builds its own operator discovery (0.4.0)
 
 `Config.registry` is optional in `@txnlab/zerosignal`. Without it, `Client.create` builds a

@@ -43,19 +43,22 @@ through `Config`:
 ### Private addresses
 
 An operator registers its own URL on-chain, so an operator could point the payer at
-`localhost` or its LAN. Routing skips a URL whose host is literally private
-(`operatorUrlAllowed`), which is all a browser can check. In Node the default `fetch` also
-checks every address it is about to dial, as Go's SDK does: a name that resolves into a
-private, loopback, link-local, multicast or CGNAT range is refused at the dial, against the
-same resolution the socket uses, so a DNS rebind can't slip between the check and the
-connection. The refused fetch rejects with a `TypeError` whose `cause` is a
-`PrivateTargetError`. `allowPrivateHosts: true` lifts both checks, for localnet.
+`localhost` or its LAN. The default `fetch` refuses to send to one, as Go's SDK does, so such
+a node stays in the chain read but every probe, reserve and request to it fails, and it never
+reads as reachable. Outside Node it refuses a URL whose host is literally private
+(`isBlockedOperatorUrl`), which is all a browser can check, rejecting with a
+`PrivateTargetError`. In Node it checks every address it is about to dial: a name that
+resolves into a private, loopback, link-local, multicast or CGNAT range is refused at the dial,
+against the same resolution the socket uses, so a DNS rebind can't slip between the check and
+the connection. That fetch rejects with a `TypeError` whose `cause` is a `PrivateTargetError`.
+`allowPrivateHosts: true` lifts the check, for localnet.
 
 The guard is `nodeFetch` from `@txnlab/zerosignal/node`, built on
 [undici](https://github.com/nodejs/undici)'s fetch over its own connection pool, so its
 `Response` is undici's class rather than the global one. Neither build reads `HTTP_PROXY`. A
 `fetch` passed in `Config` replaces it, guard and all. `isPrivateAddress` is the range check
-on its own, for a host that dials through something else.
+on its own, and `operatorUrlAllowed` the URL check, for a host that dials through something
+else.
 
 The guard is Node's only. Bun and Deno get their own `fetch`, as a browser does, with only the
 literal-host check: Bun's `undici` ignores the connection hook the guard rests on, and Deno

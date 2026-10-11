@@ -43,9 +43,9 @@
 //     relay_required. Go's source takes a bool whose zero is direct.
 //   - The fetch is the host's. Absent, it is the default Config uses with
 //     private hosts refused, resolved at the first probe: under Node that
-//     refuses private addresses as the Go client New() builds does; a
-//     browser's fetch cannot, so there a node at a private address is probed.
-//     A localnet host passes its own fetch.
+//     refuses private addresses as the Go client New() builds does; in a
+//     browser it refuses a URL whose host is literally private. A localnet
+//     host passes its own fetch.
 //   - The probe set is keyed by nodeRefString, and the node's build id is not
 //     kept, since the SDK's Operator does not carry one.
 
@@ -143,7 +143,10 @@ export function applyProbeOutcome(op: ProbeOutcomeFields, outcome: ProbeOutcome,
  * each fails safe rather than following Config.
  */
 export interface ProbeOptions {
-    /** Every probe's fetch: Config.fetch as resolved. Absent is the default Config uses. */
+    /**
+     * Every probe's fetch: Config.fetch as resolved. Absent is the default
+     * Config uses with private hosts refused, so a localnet host passes its own.
+     */
     fetch?: Fetch | undefined
     /**
      * relay_required when absent, as in Config: a source left at a direct

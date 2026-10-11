@@ -27,6 +27,7 @@ import {
 import { TargetBackoffStore } from '../src/routing/backoff.js'
 import { BundleVerifier, type Verifier } from '../src/tee/index.js'
 import { defaultFetch as browserDefaultFetch } from '../src/default-fetch.js'
+import { PrivateTargetError } from '../src/hostguard.js'
 
 const signer: Signer = {
     address: 'PAYER',
@@ -94,7 +95,53 @@ describe('resolveConfig', () => {
             vi.stubGlobal('fetch', f)
             try {
                 await browserDefaultFetch(false)!('http://x.example')
-                expect(f).toHaveBeenCalledOnce()
+                await browserDefaultFetch(true)!('http://127.0.0.1/x')
+                expect(f).toHaveBeenCalledTimes(2)
+            } finally {
+                vi.unstubAllGlobals()
+            }
+        })
+
+        // Go refuses these at the dial; a browser has no dial to hook, so the
+        // fetch refuses them before the runtime sees the request.
+        it('refuses a private or loopback node unless allowPrivateHosts', async () => {
+            const f = vi.fn(() => Promise.resolve(new Response()))
+            vi.stubGlobal('fetch', f)
+            try {
+                const guarded = browserDefaultFetch(false)!
+                for (const input of [
+                    'http://127.0.0.1:8080/v1/zs/details',
+                    new URL('http://[::1]/v1/models'),
+                    new Request('http://node.local/v1/chat/completions', { method: 'POST' }),
+                    'http://localhost./x',
+                    'not a url',
+                    // A URL from another realm, which fails instanceof URL.
+                    { href: 'http://192.168.0.2/x', toString: () => 'http://192.168.0.2/x' } as unknown as URL,
+                ]) {
+                    const err = await guarded(input).catch((e: unknown) => e)
+                    expect(err).toBeInstanceOf(PrivateTargetError)
+                }
+                // The refusal names the host as Node's does: no port, the
+                // address it refused, and no repeat of the host in the message.
+                const refused = (await guarded('http://10.1.2.3:8080/x').catch((e: unknown) => e)) as PrivateTargetError
+                expect(refused).toMatchObject({ name: 'PrivateTargetError', host: '10.1.2.3', addresses: ['10.1.2.3'] })
+                expect(refused.message).not.toContain('(')
+                await expect(guarded('not a url')).rejects.toMatchObject({ host: 'not a url' })
+                expect(f).not.toHaveBeenCalled()
+
+                // A public node gets the request as asked, init and all.
+                const signal = new AbortController().signal
+                const init = { method: 'POST', body: 'b', headers: { 'content-type': 'application/json' }, signal }
+                await guarded('https://node.example/v1/chat/completions', init)
+                expect(f).toHaveBeenLastCalledWith('https://node.example/v1/chat/completions', init)
+                const publicRequest = new Request('https://node.example/x')
+                await guarded(publicRequest)
+                expect(f).toHaveBeenLastCalledWith(publicRequest, undefined)
+                await guarded({ toString: () => 'https://node.example/x' } as unknown as URL)
+                const open = browserDefaultFetch(true)!
+                await open('http://127.0.0.1:8080/x')
+                await open(new Request('http://node.local/x'))
+                expect(f).toHaveBeenCalledTimes(5)
             } finally {
                 vi.unstubAllGlobals()
             }

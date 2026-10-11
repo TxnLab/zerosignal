@@ -6,8 +6,9 @@
 // SSRF guard for operator base URLs. An operator publishes its URL on-chain and
 // the payer dials it, as a target and as a relay hop, so a URL naming localhost
 // or a private range would turn the payer's own machine against itself or its
-// LAN. Such operators are kept out of routing unless Config.allowPrivateHosts
-// is set, for localnet development.
+// LAN. Unless Config.allowPrivateHosts is set, for localnet development, the
+// default fetch refuses to send to one (default-fetch.ts), as Go's dial guard
+// does.
 //
 // This is a literal-host check: a browser can't resolve DNS. It catches
 // localhost and *.localhost, mDNS *.local, literal private IPv4 and IPv6, and
@@ -15,7 +16,9 @@
 // name that resolves to a private address gets past it. In a browser that
 // residue is the price of having no resolver. In Node the default fetch closes
 // it as Go's httpx dial guard does, judging every address it is about to dial
-// behind the same setting (node/fetch.ts, privateip.ts).
+// behind the same setting (node/fetch.ts, privateip.ts). A host that supplies
+// its own Config.fetch takes on the check, and operatorUrlAllowed is here for
+// it.
 //
 // It classifies URL.hostname, the WHATWG parser's canonical form, never the
 // registered string. The parser rewrites an embedded IPv4 in hex
@@ -79,6 +82,19 @@ export function isBlockedOperatorUrl(baseUrl: string): boolean {
     const v4 = ipv4Octets(h)
     if (v4) return isPrivateIPv4(v4)
     return isPrivateIPv6(h)
+}
+
+/**
+ * PrivateTargetError fails a dial to a private address: Go's
+ * httpx.ErrPrivateTarget. Both builds of the default fetch throw it, Node's on
+ * the resolved address and the browser's on the URL's literal host.
+ */
+export class PrivateTargetError extends Error {
+    override readonly name = 'PrivateTargetError'
+
+    constructor(readonly host: string, readonly addresses: readonly string[]) {
+        super(`refusing to dial private/loopback/link-local address: ${host}${addresses.length && addresses[0] !== host ? ` (${addresses.join(', ')})` : ''}`)
+    }
 }
 
 /** operatorUrlAllowed is the routing policy: a private operator URL only with allowPrivateHosts. */
