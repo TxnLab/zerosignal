@@ -32,12 +32,14 @@ import (
 // outage or a retired release asset must not turn into a red build on work that
 // has nothing to do with them.
 //
-// WHY IT EXISTS AS MORE THAN A FORMALITY. The digests live in four hand-kept
-// copies (here, testdata/compose_vectors.json, client's tee-allowlist.ts, and
-// node's dstackprobe.sh). What pins them today is the vector, which compares our
-// copies TO EACH OTHER — so one wrong digit goes red as "these two disagree",
-// which either copy satisfies, and a digit wrong in ALL FOUR is completely
-// invisible. That last case is not hypothetical bookkeeping: a wrong digest here
+// WHY IT EXISTS AS MORE THAN A FORMALITY. The digests are hand-kept in
+// osimages.go, node's dstackprobe.sh and this test's assets table;
+// testdata/compose_vectors.json and
+// ts/src/attest/trust-lists.ts are generated from osimages.go. What pins them
+// today compares the copies TO EACH OTHER — so a changed digit goes red as
+// "these disagree", which regenerating satisfies, and a digit wrong in
+// osimages.go is wrong in every generated copy and completely invisible. That
+// last case is not hypothetical bookkeeping: a wrong digest here
 // refuses every node on that guest image, silently, with nothing logged
 // operator-side, and it reads as a dev-image rejection rather than a typo.
 //
