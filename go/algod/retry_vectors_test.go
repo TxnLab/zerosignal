@@ -1,0 +1,160 @@
+/*
+ * Copyright (c) 2026. TxnLab Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package algod
+
+// Generates / verifies proto/testdata/algod_retry_vectors.json: DefaultTransport's
+// retry budget, which outcomes it retries, and the wait before each retry,
+// Retry-After included. The TS SDK's algod transport (sdk/src/algod-transport.ts)
+// replays it.
+//
+//	cd proto/go && go test ./algod -run TestAlgodRetryVectors -update
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"net/http"
+	"os"
+	"testing"
+	"time"
+)
+
+var updateVectors = flag.Bool("update", false, "regenerate the selected test's proto/testdata vectors")
+
+const algodRetryVectorsPath = "../../testdata/algod_retry_vectors.json"
+
+type retryStatusCase struct {
+	// Status 0 is a transport error: no response at all.
+	Status int  `json:"status"`
+	Retry  bool `json:"retry"`
+}
+
+type backoffCase struct {
+	Attempt    int     `json:"attempt"`
+	RetryAfter string  `json:"retry_after"`
+	WaitMs     float64 `json:"wait_ms"`
+}
+
+func TestAlgodRetryVectors(t *testing.T) {
+	// time.Parse looks a zone abbreviation up in time.Local first, so the
+	// fixture would otherwise depend on the zone of the machine that wrote it.
+	local := time.Local
+	time.Local = time.UTC
+	t.Cleanup(func() { time.Local = local })
+
+	rt := DefaultTransport()
+	now := time.Date(2026, 10, 5, 12, 0, 0, 250_000_000, time.UTC)
+
+	var statuses []retryStatusCase
+	for _, s := range []int{0, 100, 200, 204, 301, 304, 400, 401, 403, 404, 408, 409, 425, 428, 429, 430, 499, 500, 501, 502, 503, 504, 520, 524, 599, 600} {
+		var res *http.Response
+		var err error
+		if s == 0 {
+			err = errTransport
+		} else {
+			res = &http.Response{StatusCode: s}
+		}
+		statuses = append(statuses, retryStatusCase{Status: s, Retry: shouldRetry(res, err)})
+	}
+
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	var schedule []float64
+	for attempt := 0; attempt < rt.MaxRetries; attempt++ {
+		schedule = append(schedule, ms(backoffAt(attempt, "", now, rt.RetryWaitMin, rt.RetryWaitMax)))
+	}
+
+	type in struct {
+		attempt int
+		v       string
+	}
+	inputs := []in{
+		{0, ""}, {1, ""}, {19, ""}, {29, ""}, {30, ""}, {40, ""},
+		// Seconds, against the linear schedule and the cap.
+		{0, "5"}, {9, "5"}, {0, "0"}, {0, "30"}, {0, "45"}, {3, "+7"}, {0, "-1"}, {0, "007"},
+		// Not an integer, and no date either.
+		{0, " 7"}, {0, "7 "}, {0, "7.5"}, {0, "abc"}, {0, "1e3"}, {0, "0x10"},
+		// time.Duration overflow: past 9223372036 s the product wraps.
+		{0, "9223372036"}, {0, "9223372037"}, {0, "18446744074"}, {0, "18446744079"},
+		{0, "9223372036854775807"}, {0, "9223372036854775808"},
+		// IMF-fixdate, the form servers send.
+		{0, "Mon, 05 Oct 2026 12:00:05 GMT"}, {0, "Mon, 05 Oct 2026 12:00:00 GMT"},
+		{0, "Mon, 05 Oct 2026 11:59:00 GMT"}, {0, "Tue, 06 Oct 2026 12:00:00 GMT"},
+		{12, "Mon, 05 Oct 2026 12:00:05 GMT"},
+		{0, "Fri, 05 Oct 2026 12:00:05 GMT"}, {0, "mon, 05 OCT 2026 12:00:05 GMT"},
+		{0, "Mon,  05 Oct 2026 12:00:05 GMT"}, {0, "Mon, 05 Oct 2026 12:00:05.5 GMT"},
+		{0, "Mon, 05 Oct 2026 12:00:05,123456789 GMT"}, {0, "Mon, 05 Oct 2026 12:00:05.1234567891 GMT"},
+		{0, "Mon, 5 Oct 2026 12:00:05 GMT"}, {0, "Mon, 05 Oct 2026 12:0:05 GMT"},
+		{0, "Mon, 05 Oct 2026 12:00:05 gmt"}, {0, "Mon, 05 Oct 2026 12:00:05 UTC"},
+		{0, "Mon, 05 Oct 2026 12:00:05 GMT "}, {0, "Mon, 31 Sep 2026 12:00:05 GMT"},
+		{0, "Mon, 05 Oct 2026 24:00:05 GMT"}, {0, "Mon, 05 Oct 2026 12:60:05 GMT"},
+		{0, "Mon, 05 Oct 2026 12:00:60 GMT"}, {0, "Mon, 05 Oct 2026 1:00:05 GMT"},
+		{0, "Mon, 29 Feb 2028 12:00:05 GMT"}, {0, "Mon, 29 Feb 2027 12:00:05 GMT"},
+		// RFC 850.
+		{0, "Monday, 05-Oct-26 12:00:10 GMT"}, {0, "monday, 05-oct-26 12:00:10 UTC"},
+		{0, "Monday, 05-Oct-26 12:00:10 GMT+3"}, {0, "Monday, 05-Oct-26 12:00:10 +03"},
+		{0, "Monday, 05-Oct-26 12:00:10 ZZZT"}, {0, "Monday, 05-Oct-26 12:00:10 ZZZZ"},
+		{0, "Monday, 05-Oct-26 12:00:10 GMT+24"}, {0, "Monday, 05-Oct-26 12:00:10"},
+		{0, "Mon, 05-Oct-26 12:00:10 GMT"}, {0, "Monday, 05-Oct-69 12:00:10 GMT"},
+		// ANSI C.
+		{0, "Mon Oct  5 12:00:20 2026"}, {0, "Mon Oct 5 12:00:20 2026"}, {0, "Mon Oct 05 12:00:20 2026"},
+		{0, "Mon Oct 15 12:00:20 2026"}, {0, "Mon Oct  5 12:00:20 2026 GMT"},
+	}
+	var cases []backoffCase
+	for _, c := range inputs {
+		cases = append(cases, backoffCase{
+			Attempt:    c.attempt,
+			RetryAfter: c.v,
+			WaitMs:     ms(backoffAt(c.attempt, c.v, now, rt.RetryWaitMin, rt.RetryWaitMax)),
+		})
+	}
+
+	f := struct {
+		Comment     string            `json:"comment"`
+		MaxRetries  int               `json:"max_retries"`
+		WaitMinMs   float64           `json:"wait_min_ms"`
+		WaitMaxMs   float64           `json:"wait_max_ms"`
+		Statuses    []retryStatusCase `json:"statuses"`
+		ScheduleMs  []float64         `json:"schedule_ms"`
+		NowUnixMs   int64             `json:"now_unix_ms"`
+		BackoffCase []backoffCase     `json:"backoff"`
+	}{
+		Comment: "Generated by proto/go/algod TestAlgodRetryVectors. DefaultTransport makes the first attempt and up to max_retries more. " +
+			"statuses: whether an outcome is retried (status 0 is a transport error). schedule_ms: the wait before retry n+1 with no Retry-After. " +
+			"backoff: the wait before the retry after attempt (0-based), with the response's Retry-After read at now_unix_ms; an empty retry_after is none.",
+		MaxRetries:  rt.MaxRetries,
+		WaitMinMs:   ms(rt.RetryWaitMin),
+		WaitMaxMs:   ms(rt.RetryWaitMax),
+		Statuses:    statuses,
+		ScheduleMs:  schedule,
+		NowUnixMs:   now.UnixMilli(),
+		BackoffCase: cases,
+	}
+	out, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = append(out, '\n')
+
+	if *updateVectors {
+		if err := os.WriteFile(algodRetryVectorsPath, out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(algodRetryVectorsPath)
+	if err != nil {
+		t.Fatalf("read vectors (regenerate with -update): %v", err)
+	}
+	if !bytes.Equal(want, out) {
+		t.Fatal("algod_retry_vectors.json is stale; regenerate with -update")
+	}
+}
+
+type transportErr struct{}
+
+func (transportErr) Error() string { return "dial tcp: connection refused" }
+
+var errTransport error = transportErr{}

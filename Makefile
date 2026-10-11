@@ -94,6 +94,7 @@ update-vectors:
 	cd go && $(GO) test ./imageprice -run TestVectors               -update
 	cd go && $(GO) test ./pricing    -run TestVectors               -update
 	cd go && $(GO) test ./httpx      -run TestPrivateTargetVectors  -update
+	cd go && $(GO) test ./algod      -run TestAlgodRetryVectors     -update
 	cd go && $(GO) test ./keystore   -run TestAccountVectors        -update
 	cd go && $(GO) test ./tokenize   -run TestVectors               -update
 	cd go && $(GO) test ./selection  -run TestSelectionVectors      -update

@@ -260,8 +260,11 @@ export function isMemoryJournal(j: TicketJournal): boolean {
 }
 
 /**
- * Stores are the Client's state that can outlive it or be shared. An absent
- * routing store keeps no such signal.
+ * Stores are the Client's state that can outlive it or be shared. When the
+ * Client builds its registry, an absent routing store is a new one, and every
+ * routing store, supplied or not, is shared by the registry's probes and the
+ * Client's requests. With Config.registry an absent routing store keeps no
+ * such signal.
  */
 export interface Stores {
     /**
@@ -282,6 +285,11 @@ export interface Stores {
      * response. Absent is a new IDAffinity from Config.affinity.
      */
     responseAffinity?: AffinityStore
+    /**
+     * A supplied store judges a relay's claim that its target is down by its
+     * own targetReachable. The one a Client builds asks its registry's last
+     * probe of the target.
+     */
     relayReputation?: RelayReputationStore
     relayLatency?: RelayLatencyStore
     targetBackoff?: TargetBackoffStore

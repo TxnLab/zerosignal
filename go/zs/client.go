@@ -176,8 +176,11 @@ type Client struct {
 // New builds a Client, and each nil Registry, ReserveClient and Wallet from
 // Signer and Network. Building them reads the chain: the escrow's config,
 // which must succeed, and a first discovery, which may fail and is retried in
-// the background. ctx bounds those reads only. Close stops the background
-// work.
+// the background. That discovery is the chain read and a details probe of
+// every node, and New waits for both, up to a minute. The TS Client waits only
+// for the chain read; its probe runs in the background, and a request made
+// before it finishes waits for it. ctx bounds those reads only. Close stops
+// the background work.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	callerLogger := cfg.Logger
 	cfg = cfg.withDefaults()

@@ -7,9 +7,10 @@
 // and settlement. One Client serves every concurrent request, so per-request
 // state never goes on it; a turn's state lives in the turn.
 
-import algosdk from 'algosdk'
+import type algosdk from 'algosdk'
 
 import { IDAffinity } from './affinity.js'
+import { type BuiltDiscovery, buildDiscovery, chainAlgod } from './assemble.js'
 import { type Parts, dispatchDepsOf, partsOf } from './client-parts.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
 import { type RunSealed, dispatch } from './dispatch.js'
@@ -20,8 +21,10 @@ import { FeeRateCache } from './fee-rate.js'
 import { FETCH_BASE_URL, type FetchTarget, openAIFetch } from './fetch/serve.js'
 import {
     type RegistryProvider,
+    type ReserveClient,
     type Stores,
     type TicketJournal,
+    type WalletOpener,
     httpReserveClient,
     isMemoryJournal,
     memoryJournal,
@@ -34,6 +37,7 @@ import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
 import { Settles } from './settles.js'
+import { untilAborted } from './sleep.js'
 import { IdleWatchdog } from './idle.js'
 import { type GenComplete, forwardStream, frameFactory } from './stream.js'
 import { type Request, type Stream, TurnStream, turnOf } from './turn.js'
@@ -76,19 +80,20 @@ export class Client {
     }
 
     /**
-     * Builds a Client, and the reserve client and wallet when Config leaves
-     * them out. Building the wallet reads the escrow's config from chain
-     * (the ticket MBR, the globals and the free-quota term), which must
-     * succeed; signal bounds that read only. Config.registry is required: the
-     * SDK builds no operator discovery of its own yet.
+     * Builds a Client, and the registry, reserve client and wallet when Config
+     * leaves them out. Building the wallet reads the escrow's config from
+     * chain (the ticket MBR, the globals and the free-quota term), which must
+     * succeed. Building the registry loads the saved catalog and reads the
+     * operators from chain, which may fail: the registry then starts from the
+     * saved catalog, or empty, and retries in the background. The first probe
+     * of every node runs in the background too, and the first request waits
+     * for it. What boot seeds the registry with must hold no duplicate or
+     * zero node id, or create rejects. signal bounds these reads only. close
+     * stops the registry this builds; one the caller supplied is left running.
      */
     static async create(config: Config, signal?: AbortSignal): Promise<Client> {
         const cfg = resolveConfig(config)
         for (const w of cfg.warnings) cfg.logger.warn(w)
-        const registry = cfg.registry
-        if (!registry) {
-            throw configError('Config.registry is required: this SDK builds no operator discovery of its own')
-        }
         const reserveClient =
             cfg.reserveClient ??
             httpReserveClient({
@@ -97,9 +102,48 @@ export class Client {
                 timeoutMs: cfg.reserveTimeout,
                 clock: cfg.clock,
             })
-        const wallet = cfg.wallet ?? (await buildWallet(cfg, signal))
+        const algod = cfg.wallet === undefined || cfg.registry === undefined ? chainAlgod(cfg) : undefined
+        // The wallet first, as in Go: its read is the one that fails create,
+        // so it fails before the slow discovery rather than after.
+        const wallet = cfg.wallet ?? (await buildWallet(cfg, algod!, signal))
 
-        const st = cfg.stores
+        let st = cfg.stores
+        let registry = cfg.registry
+        let built: BuiltDiscovery | undefined
+        if (registry === undefined) {
+            built = buildDiscovery(cfg, algod!)
+            try {
+                await untilAborted(built.registry.ready, signal)
+            } catch (err) {
+                await built.registry.stop()
+                if (signal?.aborted) throw err
+                throw new Error(`registry: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+            }
+            // Not create's signal: that bounds construction, and the refresh
+            // timer runs until close.
+            built.registry.start()
+            registry = built.registry
+            st = { ...st, ...built.stores }
+        }
+        try {
+            return Client.#assemble(cfg, registry, st, reserveClient, wallet, built)
+        } catch (err) {
+            // A started registry left behind would read the chain and probe
+            // the fleet for the life of the process.
+            await built?.registry.stop()
+            throw err
+        }
+    }
+
+    // The rest of create, which reads nothing: the parts and the Client.
+    static #assemble(
+        cfg: ResolvedConfig,
+        registry: RegistryProvider,
+        st: Stores,
+        reserveClient: ReserveClient,
+        wallet: WalletOpener,
+        built: BuiltDiscovery | undefined,
+    ): Client {
         const toolAffinity = st.toolAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
         const responseAffinity = st.responseAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
 
@@ -128,7 +172,7 @@ export class Client {
         // As Go's New, config reads back the parts built here.
         const stores: Stores = { ...st, toolAffinity, responseAffinity }
         if (journal !== undefined) stores.journal = journal
-        const filled: ResolvedConfig = { ...cfg, reserveClient, wallet, stores }
+        const filled: ResolvedConfig = { ...cfg, registry, reserveClient, wallet, stores }
         const pick: PickDeps = {
             registry,
             toolAffinity,
@@ -195,6 +239,8 @@ export class Client {
             reconciler,
             settles,
             life,
+            source: built?.source,
+            stopRegistry: built === undefined ? undefined : () => built.registry.stop(),
         })
         reconciler?.start()
         c.#warmFeeRate()
@@ -239,8 +285,10 @@ export class Client {
     }
 
     /**
-     * Stops the ticket sweep create started and releases this Client's hold
-     * on its journal, so another Client may sweep it. It does not wait for
+     * Stops the registry create built, if it built one, and the ticket sweep
+     * it started, and releases this Client's hold on its journal, so another
+     * Client may sweep it. A registry from Config is left running: the caller
+     * owns it, and may share it with other Clients. It does not wait for
      * settlements; see waitSettles. It ends any watch on a settle still
      * unconfirmed, leaving that ticket's journal row in place. When the Client
      * runs the SDK's Wallet over a journal the caller supplied, it also stops
@@ -253,10 +301,13 @@ export class Client {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             this.#p.life.abort()
+            const stopping = this.#p.stopRegistry?.()
             const r = this.#p.reconciler
-            if (r === undefined) return
-            const refunds = this.#p.refunds
-            await r.close(r.handOff ? () => refunds.handOff() : undefined)
+            if (r !== undefined) {
+                const refunds = this.#p.refunds
+                await r.close(r.handOff ? () => refunds.handOff() : undefined)
+            }
+            await stopping
         })()
         return this.#closing
     }
@@ -366,13 +417,10 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
 }
 
 /** buildWallet reads the escrow's config and builds the wallet that opens tickets against it. */
-async function buildWallet(cfg: ResolvedConfig, signal?: AbortSignal): Promise<Wallet> {
-    const n = cfg.network
-    // No port argument: algosdk would replace the endpoint's own with it.
-    const algod = new algosdk.Algodv2(n.algodToken, n.algodEndpoint)
+async function buildWallet(cfg: ResolvedConfig, algod: algosdk.Algodv2, signal?: AbortSignal): Promise<Wallet> {
     const chain = new AlgodEscrowChain({
         algod,
-        appId: n.escrowAppId,
+        appId: cfg.network.escrowAppId,
         signer: cfg.signer,
         logger: cfg.logger,
         clock: cfg.clock,

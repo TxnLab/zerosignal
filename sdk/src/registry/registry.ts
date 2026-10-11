@@ -69,13 +69,13 @@ import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 
 import { DEFAULT_DEMAND_MAX, ModelDemand, selectProbeSet } from '../catalog/probe.js'
 import { type Discovery, defaults } from '../config.js'
+import { quietLogger } from '../log.js'
 import { type BuiltinToolDef, type Operator, refOf, sealRecipientOf } from '../operator.js'
 import type { RegistryProvider } from '../parts.js'
 import { type Clock, type Logger, type StorageAdapter, discardLogger } from '../ports.js'
-import { MAX_TIMER_MS } from '../sleep.js'
+import { MAX_TIMER_MS, untilAborted } from '../sleep.js'
 import { type NodeRef, nodeRefString } from '../types.js'
 import { CATALOG_STORAGE_KEY, loadCatalog, marshalCatalog } from './persist.js'
-import { quietLogger } from './probe.js'
 
 /**
  * BOOT_FETCH_TIMEOUT_MS bounds boot's chain read, and then the first cycle's
@@ -309,7 +309,10 @@ export class DiscoveryRegistry implements RegistryProvider {
             this.#snap = snap
             this.#publish(snap)
             // Saved now, not a cycle from now, so a fast restart is covered.
-            await this.#persist(snap.view.operators)
+            // Without a chain read the seed is the catalog just loaded, so
+            // there is nothing new to save, and a stop or a caller's abort is
+            // not held up by the write.
+            if (chainOps !== undefined) await this.#persist(snap.view.operators)
         }
         // Go's boot probe. Without a chain read there is nothing to probe, and
         // Go serves what boot seeded rather than retry inside the same wait.
@@ -739,30 +742,6 @@ async function withDeadline<T>(ms: number, parent: AbortSignal | undefined, fn: 
         clearTimeout(timer)
         parent?.removeEventListener('abort', onAbort)
     }
-}
-
-// p, or signal's reason once it aborts first. p is left running, and its
-// rejection handled.
-function untilAborted<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-    if (signal === undefined) return p
-    if (signal.aborted) {
-        p.catch(() => {})
-        return Promise.reject(signal.reason)
-    }
-    return new Promise<T>((resolve, reject) => {
-        const onAbort = () => reject(signal.reason)
-        signal.addEventListener('abort', onAbort, { once: true })
-        p.then(
-            (v) => {
-                signal.removeEventListener('abort', onAbort)
-                resolve(v)
-            },
-            (err: unknown) => {
-                signal.removeEventListener('abort', onAbort)
-                reject(err)
-            },
-        )
-    })
 }
 
 function nodeKey(op: Operator): string {

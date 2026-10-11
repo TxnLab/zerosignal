@@ -29,6 +29,7 @@ import type { SettleSubmission } from '../ack.js'
 import type { PayerDeposit } from '../mbr.js'
 import type { EscrowCall } from '../parts.js'
 import { type Clock, type Logger, type Signer, SignerAddressError, discardLogger } from '../ports.js'
+import { untilAborted } from '../sleep.js'
 import type {
     EscrowChain,
     EscrowChainConfig,
@@ -49,6 +50,8 @@ export interface AlgodEscrowChainOptions {
      * The most one algod request may take; absent, zero or negative is 30 s.
      * The pool calls take no signal and run under the wallet's deposit lock,
      * so this is what keeps a stalled algod from holding every open behind it.
+     * It is also the only bound on the retries of those reads, and of the
+     * account and free-quota reads, on a retrying algod (retryingAlgod).
      */
     requestTimeoutMs?: number
     logger?: Logger
@@ -147,13 +150,16 @@ export class AlgodEscrowChain implements EscrowChain {
      * Reads and keeps what the first open would otherwise read: the ticket
      * MBR, the globals and the free-quota term (Go's RefreshConfig). A
      * Client runs it at startup so a misconfigured app refuses there, not
-     * after a node has signed a ticket. signal stops the wait, not the reads.
+     * after a node has signed a ticket. The reads it starts run under signal,
+     * as Go's run under RefreshConfig's ctx: on a retrying algod a read left
+     * running after Client.create gave up would retry until its own timeout.
+     * A read already in flight when it is called keeps its own bound.
      */
     async refreshConfig(signal?: AbortSignal): Promise<void> {
         signal?.throwIfAborted()
-        await untilAborted(this.ticketMbr(), signal)
-        await this.#readGlobalsOnce(signal)
-        await untilAborted(this.#readFreeQuotaMbrOnce(), signal)
+        await untilAborted(this.#ticketMbrOnce(signal), signal)
+        await untilAborted(this.#globalsOnce(signal), signal)
+        await untilAborted(this.#readFreeQuotaMbrOnce(signal), signal)
     }
 
     async protocolFeeBps(signal?: AbortSignal): Promise<number> {
@@ -169,11 +175,16 @@ export class AlgodEscrowChain implements EscrowChain {
     // each caller stops waiting on its own signal. A failed read is not kept.
     #readGlobalsOnce(signal?: AbortSignal): Promise<Globals> {
         signal?.throwIfAborted()
-        this.#globals ??= this.#readGlobals().catch((err: unknown) => {
+        return untilAborted(this.#globalsOnce(), signal)
+    }
+
+    // start bounds the read only when this call starts it.
+    #globalsOnce(start?: AbortSignal): Promise<Globals> {
+        this.#globals ??= this.#readGlobals(start).catch((err: unknown) => {
             this.#globals = undefined
             throw err
         })
-        return untilAborted(this.#globals, signal)
+        return this.#globals
     }
 
     async #globalState(signal?: AbortSignal): Promise<Map<string, algosdk.modelsv2.TealValue>> {
@@ -190,8 +201,8 @@ export class AlgodEscrowChain implements EscrowChain {
 
     // Go's readGlobals: usdc and treasury are required, a contract missing
     // either is misconfigured.
-    async #readGlobals(): Promise<Globals> {
-        const kv = await this.#globalState()
+    async #readGlobals(signal?: AbortSignal): Promise<Globals> {
+        const kv = await this.#globalState(signal)
         const usdc = kv.get('usdc')
         if (usdc === undefined) throw new Error(`escrow: usdcAssetId global not found on app ${this.#appId}`)
         if (usdc.type !== 2) throw new Error(`escrow: usdcAssetId global has type ${usdc.type}, want 2 (uint)`)
@@ -216,7 +227,12 @@ export class AlgodEscrowChain implements EscrowChain {
     // ---- the prepaid pool ----
 
     ticketMbr(): Promise<bigint> {
-        this.#ticketMbr ??= this.#readonly('mbrForTicket', [])
+        return this.#ticketMbrOnce()
+    }
+
+    // start bounds the read only when this call starts it.
+    #ticketMbrOnce(start?: AbortSignal): Promise<bigint> {
+        this.#ticketMbr ??= this.#readonly('mbrForTicket', [], [], start)
             .then((v) => {
                 if (typeof v !== 'bigint') throw new Error(`escrow: mbrForTicket returned ${typeof v}, want uint64`)
                 if (v === 0n) throw new Error('escrow: mbrForTicket returned 0 (contract misconfigured?)')
@@ -247,8 +263,9 @@ export class AlgodEscrowChain implements EscrowChain {
         }
     }
 
-    #readFreeQuotaMbrOnce(): Promise<bigint> {
-        this.#freeQuotaMbr ??= this.#readonly('mbrForFreeQuota', [])
+    // start bounds the read only when this call starts it.
+    #readFreeQuotaMbrOnce(start?: AbortSignal): Promise<bigint> {
+        this.#freeQuotaMbr ??= this.#readonly('mbrForFreeQuota', [], [], start)
             .then((v) => {
                 if (typeof v !== 'bigint') throw new Error(`escrow: mbrForFreeQuota returned ${typeof v}, want uint64`)
                 return v
@@ -540,9 +557,14 @@ export class AlgodEscrowChain implements EscrowChain {
     }
 
     /** A readonly method simulated from the application account (see the class doc). */
-    async #readonly(name: string, args: algosdk.ABIArgument[], accounts: string[] = []): Promise<algosdk.ABIValue | undefined> {
+    async #readonly(
+        name: string,
+        args: algosdk.ABIArgument[],
+        accounts: string[] = [],
+        signal?: AbortSignal,
+    ): Promise<algosdk.ABIValue | undefined> {
         try {
-            return await simulateReadonly(this.#algod, this.#appId, this.#timeoutMs, name, args, accounts)
+            return await simulateReadonly(this.#algod, this.#appId, this.#timeoutMs, name, args, accounts, signal)
         } catch (err) {
             // An app without the method falls through its ABI router to a reject,
             // a logic eval failure. Only that means the quota is unsupported; a
@@ -679,25 +701,6 @@ export async function simulateReadonly(
     )
     if (mr.decodeError) throw new Error(`escrow: decode ${name} return: ${mr.decodeError.message}`, { cause: mr.decodeError })
     return mr.returnValue
-}
-
-// Waits for p, or rejects with the signal's reason once it aborts.
-function untilAborted<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-    if (signal === undefined) return p
-    return new Promise<T>((resolve, reject) => {
-        const onAbort = () => reject(signal.reason)
-        signal.addEventListener('abort', onAbort, { once: true })
-        p.then(
-            (v) => {
-                signal.removeEventListener('abort', onAbort)
-                resolve(v)
-            },
-            (e: unknown) => {
-                signal.removeEventListener('abort', onAbort)
-                reject(e)
-            },
-        )
-    })
 }
 
 function checkLen(what: string, b: Uint8Array, want: number): void {
