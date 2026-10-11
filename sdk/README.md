@@ -115,8 +115,36 @@ escrow's config from chain, so `create` fails if algod can't be reached.
 
 `Config.registry` is required, and the host implements it: a `RegistryProvider` lists the
 operators for a model, resolves one node by its ref, lists every operator for the relay pool,
-re-probes a node whose ephemeral key went stale, and records which models were asked for. The
-SDK ships none; `CatalogEngine` folds probe results but is not one.
+re-probes a node whose ephemeral key went stale, and records which models were asked for.
+
+`DiscoveryRegistry` is the SDK's, the Go SDK's dynamic registry over a `ChainOperatorSource`. It
+needs no Client. Once started it reads the chain and probes a bounded set of nodes every
+`refreshInterval`, and a read older than `maxCacheAge` refreshes first. A node it did not reach
+keeps its last-known models for `maxCarryAge`. With a `StorageAdapter` it saves the catalog in
+the Go SDK's format. After a restart, the nodes the first probe does not reach keep their saved
+models, and a subscriber can render the saved fleet before that probe lands. `ready` settles
+after the saved catalog and one chain read; the first probe of every node runs after that, and
+reads wait for it. `subscribe` hands each cycle's snapshot to an app that renders it.
+`CatalogEngine` folds probe results but is not a registry. A host that sets `Config.allowStaging`
+passes the same value to the registry's `allowStaging`, or its model and tool lists disagree with
+what the Client routes to.
+
+The source's relay reputation and latency are the ones a Client should route on, as the Go
+SDK's source is both stores, so pass them on:
+
+```ts
+const source = new ChainOperatorSource({ algod, escrowAppId, teeVerifier, fetch })
+const registry = new DiscoveryRegistry({ source, storage, discovery, logger })
+await registry.ready
+registry.start()
+const zs = await Client.create({
+    signer,
+    network: testnet(),
+    registry,
+    teeVerifier,
+    stores: { relayReputation: source.relayReputation, relayLatency: source.relayLatency },
+})
+```
 
 A Client learns between turns only through the routing stores passed in `Config.stores` (see
 [Routing stores](#routing-stores)). Without them it keeps no relay reputation, latency or
@@ -337,10 +365,10 @@ and served for up to seven days while the PCCS is unreachable, before the node's
 is consulted. So build one verifier and keep it. `Config.teeVerifier` defaults to one per
 Client, and `disableTee` turns verification off.
 
-No `Client` runs the attestation probe yet: the SDK has no registry, and its
-`ChainOperatorSource.enrichSubset`, which runs it after each successful details probe, is not
-wired into one. Until it is, after a node's details probe has applied its verified ephemeral key,
-the host's registry calls
+No `Client` runs the attestation probe itself. A `DiscoveryRegistry` does, through
+`ChainOperatorSource.enrichSubset`, after each successful details probe, with the source's
+`teeVerifier`. A registry of the host's own, after a node's details probe has applied its
+verified ephemeral key, calls
 `probeAttestation` with that row, the details' `tee` advertisement, `client.config.teeVerifier`,
 a `fetch`, and the probe's relay hop and timeout, and sets the `TEEStatus` it returns on the
 operator. That is `undefined` when the node advertises no TEE or verification is off; evidence

@@ -484,7 +484,8 @@ export class NodeProber {
     }
 }
 
-function quietLogger(log: Logger): Logger {
+/** quietLogger is log with each call's throw dropped. */
+export function quietLogger(log: Logger): Logger {
     const quiet =
         (fn: (msg: string, attrs?: LogAttrs) => void) =>
         (msg: string, attrs?: LogAttrs): void => {

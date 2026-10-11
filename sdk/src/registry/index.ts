@@ -4,7 +4,8 @@
  */
 
 // Discovery: the on-chain operator and node set and the details probes that
-// fill it in, Go's ChainOperatorSource.
+// fill it in (Go's ChainOperatorSource), the registry that refreshes them on a
+// schedule (Go's DynamicRegistryProvider), and the catalog it saves.
 
 export {
     type ApplicationBox,
@@ -33,3 +34,23 @@ export {
     applyProbeOutcome,
     classifyProbeFailure,
 } from './probe.js'
+export {
+    CATALOG_FORMAT_VERSION,
+    CATALOG_STORAGE_KEY,
+    decodeCatalog,
+    loadCatalog,
+    marshalCatalog,
+    saveCatalog,
+} from './persist.js'
+export {
+    BOOT_FETCH_TIMEOUT_MS,
+    DiscoveryRegistry,
+    type DiscoveryRegistryOptions,
+    type OperatorSource,
+    type RegistrySnapshot,
+    STORAGE_TIMEOUT_MS,
+    advertisable,
+    carryCaps,
+    carryForwardLastGood,
+    mergeCatalog,
+} from './registry.js'

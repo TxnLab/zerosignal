@@ -115,7 +115,7 @@ func TestSaveLoadCatalog_RoundTrip(t *testing.T) {
 
 // TestPersist_SkipsUnchangedWrite: persist MkdirAll-creates the catalog dir and
 // writes once, then skips the disk write when the next snapshot marshals
-// identically (an idle fleet churns no disk), and writes again once it changes.
+// identically, and writes again once it changes.
 func TestPersist_SkipsUnchangedWrite(t *testing.T) {
 	// A nested dir the provider must create itself, exercising the MkdirAll path.
 	path := filepath.Join(t.TempDir(), "state", "catalog.json")

@@ -128,9 +128,10 @@ export interface Config {
     /**
      * Checks the attestation evidence nodes publish; defaultVerifier() when
      * absent, built once per Client since its Intel collateral cache is what
-     * an outage falls back on. The SDK has no registry of its own yet, so it
-     * never calls this itself: the host's registry reads
-     * client.config.teeVerifier and passes it to probeAttestation.
+     * an outage falls back on. The Client builds no registry yet, so it never
+     * calls this itself: the host's registry does, a DiscoveryRegistry through
+     * its ChainOperatorSource's teeVerifier, a registry of the host's own
+     * through probeAttestation. Hand it this same verifier.
      */
     teeVerifier?: Verifier
     /** Checks no attestation evidence: every node counts as unattested. Overrides teeVerifier. */
@@ -188,8 +189,9 @@ export interface Config {
 
     /**
      * The network-facing parts: operator discovery, the reserve call, and
-     * escrow. The registry is required: this SDK builds no discovery of its
-     * own yet, so `Client.create` refuses a config without one. The Client
+     * escrow. The registry is required: the Client builds no discovery of its
+     * own yet, so `Client.create` refuses a config without one; the SDK's is
+     * DiscoveryRegistry, which a host builds and passes here. The Client
      * builds an absent reserve client or wallet; a supplied part is used as
      * is, so the settings only a built part reads (reserveTimeout,
      * allowPrivateHosts) do not reach it. A supplied registry lists staging
