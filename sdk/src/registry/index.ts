@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Discovery: the on-chain operator and node set, Go's ChainOperatorSource.
+// Discovery: the on-chain operator and node set and the details probes that
+// fill it in, Go's ChainOperatorSource.
 
 export {
     type ApplicationBox,
@@ -23,3 +24,12 @@ export {
     readOperatorBox,
     resolveOperatorNode,
 } from './chain.js'
+export {
+    DEFAULT_DETAILS_CONCURRENCY,
+    NodeProber,
+    type ProbeOptions,
+    type ProbeOutcome,
+    type ProbeOutcomeFields,
+    applyProbeOutcome,
+    classifyProbeFailure,
+} from './probe.js'

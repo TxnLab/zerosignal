@@ -52,6 +52,10 @@ import { decodeAlgorandAddress } from '@txnlab/zs-proto/ticket'
 import { isNotFound, requestOptions, requestTimeoutOrDefault, simulateReadonly, spendableOf } from '../escrow/algod.js'
 import type { ModelCapacity, Operator } from '../operator.js'
 import { type Clock, type Logger, discardLogger } from '../ports.js'
+import type { RelayLatencyStore } from '../routing/latency.js'
+import type { RelayReputationStore } from '../routing/reputation.js'
+import type { NodeRef } from '../types.js'
+import { NodeProber, type ProbeOptions } from './probe.js'
 
 /** Where the escrow app's boxes are read from. */
 export interface ChainReadOptions {
@@ -352,7 +356,7 @@ export const SIGNER_BALANCE_CONCURRENCY = 8
  */
 export const SIGNER_BALANCE_TIMEOUT_MS = 10_000
 
-export interface ChainOperatorSourceOptions {
+export interface ChainOperatorSourceOptions extends ProbeOptions {
     algod: algosdk.Algodv2
     escrowAppId: bigint
     /** Restricts the read to these operators, each of which must exist. Empty reads every one. */
@@ -360,7 +364,7 @@ export interface ChainOperatorSourceOptions {
     /** The most one algod request may take; absent, zero or negative is 30 s. */
     requestTimeoutMs?: number | undefined
     logger?: Logger | undefined
-    /** Wall clock, Unix ms: the day the revenue windows end on. */
+    /** Wall clock, Unix ms: the day the revenue windows end on, and the probes' stamps. */
     clock?: Clock | undefined
     /**
      * The most a whole balance pass may take; absent, zero or negative is
@@ -371,11 +375,13 @@ export interface ChainOperatorSourceOptions {
 }
 
 /**
- * ChainOperatorSource reads the on-chain operator and node set (Go's
- * ChainOperatorSource.FetchChain). It keeps one thing across reads: each
- * signing account's last successful balance, so a failed read leaves a node
- * judged on what was last seen rather than read as unknown, which would
- * re-admit a node last seen broke.
+ * ChainOperatorSource is Go's ChainOperatorSource: the on-chain operator and
+ * node set (fetchChain) and the details probes that fill it in (enrichSubset,
+ * reprobeEphemeral, run by NodeProber in probe.ts). Across reads it keeps
+ * each signing account's last successful balance, so a failed read leaves a
+ * node judged on what was last seen rather than read as unknown, which would
+ * re-admit a node last seen broke; and across probes, each node's last
+ * outcome and the relay reputation and latency the probes record.
  *
  * Every signer in the fleet is read on every pass, never just the nodes a
  * request is about to use: a read aimed at one node would announce the choice
@@ -390,6 +396,7 @@ export class ChainOperatorSource {
     readonly #clock: Clock
     readonly #balanceTimeoutMs: number
     readonly #signerSpendable = new Map<string, bigint>()
+    readonly #prober: NodeProber
 
     constructor(o: ChainOperatorSourceOptions) {
         this.#algod = o.algod
@@ -400,6 +407,39 @@ export class ChainOperatorSource {
         this.#clock = o.clock ?? Date.now
         const t = o.signerBalanceTimeoutMs
         this.#balanceTimeoutMs = t !== undefined && Number.isFinite(t) && t > 0 ? t : SIGNER_BALANCE_TIMEOUT_MS
+        this.#prober = new NodeProber({ ...o, logger: this.#log, clock: this.#clock })
+    }
+
+    /** The reputation store the probes record to, for a Client to share. */
+    get relayReputation(): RelayReputationStore {
+        return this.#prober.relayReputation
+    }
+
+    /** The latency store the probes record to, for a Client to share. */
+    get relayLatency(): RelayLatencyStore {
+        return this.#prober.relayLatency
+    }
+
+    /** recallReachable is the node's last probe outcome; false when never probed. */
+    recallReachable(ref: NodeRef): boolean {
+        return this.#prober.recallReachable(ref)
+    }
+
+    /**
+     * enrichSubset probes the nodes of ops whose nodeRefString is in probeSet,
+     * every node when it is null, and updates them in place (Go's
+     * EnrichSubset). The rest keep what the caller seeded them with.
+     */
+    enrichSubset(ops: Operator[], probeSet: ReadonlySet<string> | null, signal?: AbortSignal): Promise<void> {
+        return this.#prober.enrichSubset(ops, probeSet, signal)
+    }
+
+    /**
+     * reprobeEphemeral probes target live and returns a refreshed copy (Go's
+     * ReprobeEphemeral); all is only the relay pool.
+     */
+    reprobeEphemeral(all: readonly Operator[], target: Operator, signal?: AbortSignal): Promise<Operator> {
+        return this.#prober.reprobeEphemeral(all, target, signal)
     }
 
     /**

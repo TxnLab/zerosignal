@@ -13,8 +13,8 @@
 //  - As in fetchDetails, the caller's abort is rethrown as is, from the fetch
 //    or the verification, rather than recorded as fetch_failed or a failing
 //    verdict, since a TypeScript caller tells an abort apart by its own signal.
-//    In Go the cancelled context abandons the whole refresh, so that status is
-//    never read.
+//    Go's registry stores a cycle its deadline cut short, so the caller still
+//    records a status: registry/probe.ts records fetchFailedStatus.
 //  - The status carries the verdict's display detail, which Go logs instead.
 //  - An evidence URL that Go's url.Parse refuses but WHATWG URL accepts (such
 //    as "/%zz") is fetched here and fetch_failed in Go. Where the bundle comes
@@ -184,13 +184,7 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
             mode: p.advertised.mode,
             err: message(err),
         })
-        return {
-            mode: p.advertised.mode,
-            attestedAt: unixMillis(p.advertised.attested_at),
-            verifierId: VERIFIER_ID_BUILTIN,
-            verified: false,
-            failureTag: FailureTag.FetchFailed,
-        }
+        return fetchFailedStatus(p.advertised)
     }
 
     const verdict = await p.verifier.verify(
@@ -222,6 +216,20 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
         failureTag: verdict.failureTag,
         ...(verdict.attestedModelIds !== undefined && { attestedModelIds: verdict.attestedModelIds }),
         ...(verdict.detail !== undefined && { detail: verdict.detail }),
+    }
+}
+
+/**
+ * fetchFailedStatus is the TEEStatus of a node whose evidence never arrived:
+ * unverified, with the time the node advertised.
+ */
+export function fetchFailedStatus(advertised: TEEAdvertisement): TEEStatus {
+    return {
+        mode: advertised.mode,
+        attestedAt: unixMillis(advertised.attested_at),
+        verifierId: VERIFIER_ID_BUILTIN,
+        verified: false,
+        failureTag: FailureTag.FetchFailed,
     }
 }
 

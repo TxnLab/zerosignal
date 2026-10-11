@@ -421,7 +421,8 @@ func (s *ChainOperatorSource) enrich(ctx context.Context, operators []Operator, 
 	now := time.Now()
 	// Bound the probe fan-out: a large fleet must not open a socket per node
 	// at once (each probe is also relayed in privacy mode), or the cycle can't
-	// finish inside the refresh timeout and gets dropped wholesale. A buffered
+	// finish inside the refresh timeout: every probe the deadline cuts off
+	// learns nothing, and the registry stores the cycle anyway. A buffered
 	// channel is the semaphore; probeOne handles its own errors, so there's
 	// nothing to join beyond completion (hence WaitGroup, not errgroup).
 	limit := s.DetailsConcurrency
@@ -509,37 +510,23 @@ func (s *ChainOperatorSource) buildSelAll(operators []Operator) []selection.Oper
 // semantics out of band from the scheduled cycle.
 func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClient, attestation *AttestationClient, selAll []selection.Operator, op *Operator, now time.Time, log *slog.Logger) {
 	resp, usedHop, err := s.probeDetailsWithRetry(ctx, client, selAll, *op, log)
-	if err != nil {
-		var hopErr *RelayHopError
-		switch {
-		case errors.Is(err, selection.ErrNoRelay):
-			// Privacy on but no eligible relay to probe this operator
-			// privately — skip the probe this cycle rather than reveal
-			// our IP with a direct request. Leave Reachable as-is (we
-			// didn't probe, so we don't know); just stamp the attempt.
-			op.LastRefreshAt = now
+	outcome := classifyProbe(err, ctx.Err())
+	reachable, record := applyProbeOutcome(op, outcome, now)
+	if outcome != probeSucceeded {
+		if record {
+			s.recordReachable(RefOf(*op), reachable)
+		}
+		switch outcome {
+		case probeNoRelay:
 			log.Debug("privacy mode: no eligible relay to probe operator; skipping details probe",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID))
-		case ctx.Err() != nil:
-			// Cancelled (the cycle's deadline, or a re-probe's request went
-			// away): nothing was learned about the target. Leave it as-is.
+		case probeCancelled:
 			log.Debug("operator details probe cancelled",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID),
 				slog.Any("err", err))
-		case errors.As(err, &hopErr):
-			// Every relay hop tried this cycle failed at the HOP — the relay
-			// was unreachable, returned a relay-generated code, (>=9.1)
-			// answered a code-less transient status without stamping
-			// wire.RelayHopHeader, proving its own front door ate the probe,
-			// or timed out waiting. In none of those did we reach the target,
-			// so don't flip the target to unreachable; its status is unknown.
-			// probeDetailsWithRetry already recorded the relays that failed
-			// (not the ones that timed out), so SelectRelay deprioritizes them
-			// next cycle. Leave Reachable + the capability fields as-is for
-			// the snapshot-merge to carry last-known-good forward.
-			op.LastRefreshAt = now
+		case probeHopFailed:
 			log.Warn("operator details probe: all relay hops failed this cycle; target status unknown",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID),
@@ -547,18 +534,6 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 				slog.Any("err", err),
 			)
 		default:
-			// The target itself failed: down, an error status the relay
-			// forwarded from the target, relay_upstream_unreachable from
-			// every relay that worked, a malformed body, or — direct mode —
-			// a transport error to the target. Keep the operator in the registry so dispatch
-			// can still reach it if its reserve endpoint is alive; don't
-			// clobber the previously-fetched Models list (the caller's
-			// snapshot-merge decides whether to carry last-known-good
-			// capabilities forward).
-			op.Reachable = false
-			op.Probed = true // reached the target; the down result is fresh this cycle
-			op.LastRefreshAt = now
-			s.recordReachable(RefOf(*op), false)
 			log.Warn("operator details probe failed",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID),
@@ -589,18 +564,9 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	// no seal target (there is no anchor) so dispatch fails closed.
 	s.applyEphemeralAdvertisement(op, resp, usedHop, log)
 	applyDetailsFields(op, resp)
-	op.Reachable = true
-	op.Probed = true
-	op.LastRefreshAt = now
-	// Advance the carry-window clock: this is the last moment we confirmed the
-	// node's capabilities live, so the registry keeps advertising/routing it
-	// (via carry-forward) until now-ReachableAsOf passes max_carry_age. Set only
-	// on success — a failed probe leaves it pinned at the previous good time so
-	// the node ages out of the window on schedule rather than resetting.
-	op.ReachableAsOf = now
-	// A successful (relayed) probe is unambiguous: the target responded,
-	// so it's up. Remember it so SelectRelay prefers it as a relay.
-	s.recordReachable(RefOf(*op), true)
+	if record {
+		s.recordReachable(RefOf(*op), reachable)
+	}
 
 	// TEE attestation. Operators that don't advertise TEE
 	// (resp.TEE == nil) keep Operator.TEE == nil and are
@@ -611,6 +577,99 @@ func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClien
 	// excluded from TEE-required routing same as if they'd
 	// never advertised.
 	s.probeAttestation(ctx, op, resp, attestation, usedHop, log)
+}
+
+// probeOutcome is how one details probe ended, as far as what it says about
+// the target. The TS SDK's applyProbeOutcome takes the same five, pinned with
+// this side's by testdata/registry_probe_vectors.json.
+type probeOutcome string
+
+const (
+	probeNoRelay      probeOutcome = "no_relay"
+	probeCancelled    probeOutcome = "cancelled"
+	probeHopFailed    probeOutcome = "hop_failed"
+	probeTargetFailed probeOutcome = "target_failed"
+	probeSucceeded    probeOutcome = "succeeded"
+)
+
+// classifyProbe sorts probeDetailsWithRetry's error (see its godoc). ctxErr is
+// the probe context's error. It outranks a hop error, since a probe cut short
+// learned nothing about either hop, but not ErrNoRelay, which is decided before
+// any request is sent.
+func classifyProbe(err, ctxErr error) probeOutcome {
+	var hopErr *RelayHopError
+	switch {
+	case err == nil:
+		return probeSucceeded
+	case errors.Is(err, selection.ErrNoRelay):
+		return probeNoRelay
+	case ctxErr != nil:
+		return probeCancelled
+	case errors.As(err, &hopErr):
+		return probeHopFailed
+	default:
+		return probeTargetFailed
+	}
+}
+
+// applyProbeOutcome writes onto op what outcome says about its target, and
+// returns the reachability to remember for it when record is set. On success it
+// also voids the ephemeral recipient and the TEE verdict, which only this
+// probe's own advertisement may set again (applyEphemeralAdvertisement and
+// probeAttestation run after it). It is the whole of probeOne's decision, pure
+// so the TS SDK can replay it.
+func applyProbeOutcome(op *Operator, outcome probeOutcome, now time.Time) (reachable, record bool) {
+	switch outcome {
+	case probeNoRelay:
+		// Privacy on but no eligible relay to probe this operator privately:
+		// the probe was skipped rather than reveal our IP with a direct
+		// request. We didn't probe, so we don't know; just stamp the attempt.
+		op.LastRefreshAt = now
+	case probeCancelled:
+		// The cycle's deadline, or a re-probe's request went away: nothing was
+		// learned about the target. Leave it as-is.
+	case probeHopFailed:
+		// Every relay hop tried this cycle failed at the HOP — the relay was
+		// unreachable, returned a relay-generated code, (>=9.1) answered a
+		// code-less transient status without stamping wire.RelayHopHeader,
+		// proving its own front door ate the probe, or timed out waiting. In
+		// none of those did we reach the target, so its status is unknown.
+		// probeDetailsWithRetry already recorded the relays that failed (not
+		// the ones our deadline cut off after they accepted the connection),
+		// so SelectRelay deprioritizes them next cycle. Reachable and the
+		// capability fields stay for the snapshot-merge to carry last-known-good
+		// forward.
+		op.LastRefreshAt = now
+	case probeTargetFailed:
+		// The target itself failed: down, an error status the relay forwarded
+		// from the target, relay_upstream_unreachable from every relay that
+		// worked, a malformed body, or — direct mode — a transport error to the
+		// target. The operator stays in the registry so dispatch can still
+		// reach it if its reserve endpoint is alive, and the previously-fetched
+		// Models stay (the caller's snapshot-merge decides whether to carry
+		// last-known-good capabilities forward).
+		op.Reachable = false
+		op.Probed = true // reached the target; the down result is fresh this cycle
+		op.LastRefreshAt = now
+		return false, true
+	case probeSucceeded:
+		clearEphemeral(op)
+		op.TEE = nil
+		op.Reachable = true
+		op.Probed = true
+		op.LastRefreshAt = now
+		// Advance the carry-window clock: this is the last moment we confirmed
+		// the node's capabilities live, so the registry keeps advertising/routing
+		// it (via carry-forward) until now-ReachableAsOf passes max_carry_age.
+		// Set only on success — a failed probe leaves it pinned at the previous
+		// good time so the node ages out of the window on schedule rather than
+		// resetting.
+		op.ReachableAsOf = now
+		// A successful (relayed) probe is unambiguous: the target responded,
+		// so it's up. Remember it so SelectRelay prefers it as a relay.
+		return true, true
+	}
+	return false, false
 }
 
 // applyDetailsFields copies what a details advertisement says onto op, short
@@ -758,10 +817,7 @@ func (s *ChainOperatorSource) ReprobeEphemeral(ctx context.Context, all []Operat
 func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inject.OperatorDetails, usedHop *RelayHop, log *slog.Logger) {
 	// Clear first: a failed / absent probe must not leave a stale ephemeral
 	// recipient pinned from an earlier cycle.
-	op.EphemeralRecipient = nil
-	op.EphemeralRecipientPubkey = ""
-	op.EphemeralExpiry = 0
-	op.EphemeralIssuedAt = 0
+	clearEphemeral(op)
 
 	v := checkEphemeral(resp, op.TicketSigningKey, time.Now(), op.ID, op.NodeID)
 	switch v.Outcome {
@@ -817,6 +873,13 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 	// ephemeralAbsent: the node isn't offering one this cycle.
 	// ephemeralExpired: genuine but stale, so no seal target this cycle, and
 	// silent, since a stale-but-genuine block is not an attack.
+}
+
+func clearEphemeral(op *Operator) {
+	op.EphemeralRecipient = nil
+	op.EphemeralRecipientPubkey = ""
+	op.EphemeralExpiry = 0
+	op.EphemeralIssuedAt = 0
 }
 
 // ephemeralOutcome is what one probe's ephemeral advertisement leaves a node
