@@ -44,11 +44,10 @@ package attest
 // acts as the user who minted it and inherits that user's admin bypass,
 // exempting from review precisely the credential the review exists to contain.
 // Adding the App to the bypass list undoes this, and nothing here can detect
-// it. MEASURED 2026-10-10: the `main` ruleset exists and the App is not on its
-// bypass list, but it requires ZERO approving reviews, so the App could merge
-// its own pull request once the required checks pass. Until
-// required_approving_review_count is at least 1, those checks are all that
-// bound it.
+// it. MEASURED 2026-10-11: the `main` ruleset requires 1 approving review and
+// the App is not on its bypass list, so the App cannot merge its own pull
+// request. Lowering required_approving_review_count to 0 would leave the
+// required checks as all that bound it.
 //
 // To add one by hand, compute a release's values with
 // `go run ./cmd/release-allowlist print -image <ref>` in the zs-node repo (the
