@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-11 — the TS Client builds its own operator discovery
+### 2026-10-11 — the TS Client builds its own operator discovery (0.4.0)
 
 `Config.registry` is optional in `@txnlab/zerosignal`. Without it, `Client.create` builds a
 `ChainOperatorSource` and a `DiscoveryRegistry` from the resolved `Config`, as `zs.New` does:
@@ -67,7 +67,7 @@ stores its probes record to as `create` would.
   `Number.MAX_SAFE_INTEGER`, with `invalid_config`. Go's ids are `uint64`; no operator id comes
   near either limit.
 
-### 2026-10-11 — a TEE node is attested only on both measurement checks
+### 2026-10-11 — a TEE node is attested only on both measurement checks (0.4.0)
 
 Both SDKs count a node as TEE-attested for routing only when its verdict passed **and** rested
 on both reference checks: the guest OS image matched a trusted production image, and the compose
