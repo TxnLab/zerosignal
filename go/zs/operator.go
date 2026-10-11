@@ -202,9 +202,10 @@ type Operator struct {
 	// advertise TEE, or (b) the attestation probe / verification has
 	// not yet completed for this refresh cycle. Routing keys on
 	// IsTEEAttested(), which only returns true when the verdict
-	// passed; populated-but-failed verdicts are kept for diagnostics
-	// (failure tag is logged, surfaced on the operator dashboard) but
-	// are treated as not-attested for filtering purposes.
+	// passed on both measurement checks; populated-but-failed verdicts
+	// are kept for diagnostics (failure tag is logged, surfaced on the
+	// operator dashboard) but are treated as not-attested for filtering
+	// purposes.
 	TEE *TEEStatus
 
 	// Metrics is this NODE's reliability track record, read verbatim from the
@@ -316,17 +317,27 @@ func (m OperatorMetrics) LatencyMeanMs() uint64 {
 }
 
 // TEEStatus captures the proxy's verdict on an operator's confidential-
-// mode attestation. Verified is the routing-relevant bit; everything
-// else exists for observability (dashboards, debug logs, alerting).
-// FailureTag is empty when Verified is true and one of the canonical
-// verifier failure tags otherwise (see proto/TEE.md §4.3 and the tee
-// package's Failure* constants for the full list).
+// mode attestation. Attested() is the routing-relevant answer, read from
+// Verified and the two measurement checks; everything else exists for
+// observability (dashboards, debug logs, alerting). FailureTag is empty
+// when Verified is true and one of the canonical verifier failure tags
+// otherwise (see proto/TEE.md §4.3 and the tee package's Failure*
+// constants for the full list).
 type TEEStatus struct {
 	Mode       string    // "stub" | "dstack-tdx" | "nvidia-cc-tdx" | "nvidia-cc-snp"
 	AttestedAt time.Time // bundle.GeneratedAt of the verified evidence
 	VerifierID string    // which verifier decided: "builtin" or "dstack-tdx"
 	Verified   bool      // true when the most recent verdict passed
 	FailureTag string    // empty when Verified; otherwise the verdict tag
+
+	// OSImageChecked and ComposeReleaseChecked are the verdict's
+	// tee.MeasurementChecks: the guest image matched a trusted production
+	// image, and the compose matched a published zs-node release. Copied as
+	// the verdict reports them, and false when it carries none (a refusal, a
+	// stub, a verifier that reports none); Attested reads them only beside
+	// Verified, so a refusal is unattested whatever they say.
+	OSImageChecked        bool
+	ComposeReleaseChecked bool
 
 	// AttestedModelIDs is tee.Verdict.AttestedModelIDs from the most recent
 	// verdict; nil unless that verdict passed. See tee.Verdict for nil versus
@@ -340,13 +351,27 @@ func (o Operator) TEENode() tee.Node {
 	return tee.Node{OperatorID: o.ID, NodeID: o.NodeID, EphemeralRecipientPubkey: o.EphemeralRecipientPubkey}
 }
 
-// IsTEEAttested reports whether the operator has a current
-// successful TEE verdict — the only condition under which a routing
-// filter that requires TEE will keep this operator in the candidate
-// list. Operators that don't advertise TEE (TEE == nil) and operators
-// whose verification failed (TEE.Verified == false) both return false.
+// Attested reports whether this status counts as TEE-attested for routing:
+// the verdict passed AND it rested on both reference checks. Nil-safe.
+//
+// A pass alone is the weaker claim "real confidential hardware running SOME
+// measured software"; anyone can rent a confidential VM and run their own
+// image in it. The verifier's compose policy refuses an unrecognized release
+// today, so the two usually coincide, but that is a setting of the verifier
+// and the gate must not move when it does. operator_vectors.json pins this
+// against the TypeScript SDK's isTeeAttested.
+func (s *TEEStatus) Attested() bool {
+	return s != nil && s.Verified && s.OSImageChecked && s.ComposeReleaseChecked
+}
+
+// IsTEEAttested reports whether the operator's current TEE status is
+// Attested — the only condition under which a routing filter that requires
+// TEE will keep this operator in the candidate list. Operators that don't
+// advertise TEE (TEE == nil), operators whose verification failed, and
+// operators whose pass did not rest on both measurement checks all return
+// false.
 func (o Operator) IsTEEAttested() bool {
-	return o.TEE != nil && o.TEE.Verified
+	return o.TEE.Attested()
 }
 
 // SealRecipient returns the age recipient an inbound request envelope (reserve

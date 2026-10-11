@@ -119,7 +119,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -162,7 +167,12 @@
         "failure_tag": "",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": [],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -225,7 +235,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -288,7 +299,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -351,7 +363,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -414,7 +427,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -477,7 +491,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -540,7 +555,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -603,7 +619,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -666,7 +683,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -733,7 +751,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -800,7 +823,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -863,7 +891,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -930,7 +959,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -997,7 +1031,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -1060,7 +1099,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1127,7 +1167,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -1190,7 +1235,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1253,7 +1299,8 @@
         "failure_tag": null,
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1316,7 +1363,8 @@
         "failure_tag": "stale_evidence",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1379,7 +1427,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1442,7 +1491,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1505,7 +1555,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1572,7 +1623,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -1634,7 +1690,8 @@
         "failure_tag": "",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1698,7 +1755,8 @@
         "failure_tag": "",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1760,7 +1818,8 @@
         "failure_tag": "stub_not_allowed",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1822,7 +1881,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1883,7 +1943,8 @@
         "failure_tag": "verifier_not_implemented",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -1946,7 +2007,8 @@
         "failure_tag": "verifier_not_implemented",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2009,7 +2071,8 @@
         "failure_tag": "verifier_not_implemented",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2072,7 +2135,8 @@
         "failure_tag": "verifier_not_implemented",
         "verifier_id": "builtin",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2135,7 +2199,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2198,7 +2263,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2260,7 +2326,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2323,7 +2390,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2401,7 +2469,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": true
+        "carried_called": true,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -2475,7 +2548,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": true
+        "carried_called": true,
+        "measurement_checks": null
       }
     },
     {
@@ -2549,7 +2623,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": true
+        "carried_called": true,
+        "measurement_checks": null
       }
     },
     {
@@ -2612,7 +2687,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2686,7 +2762,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2760,7 +2837,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2834,7 +2912,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2908,7 +2987,8 @@
         "failure_tag": "collateral_unreachable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -2986,7 +3066,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -3060,7 +3145,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3134,7 +3220,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3208,7 +3295,8 @@
         "failure_tag": "vendor_chain_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3271,7 +3359,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3334,7 +3423,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3397,7 +3487,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3458,7 +3549,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3519,7 +3611,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3586,7 +3679,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -3658,7 +3756,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": true,
+          "compose_hash": false
+        }
       }
     },
     {
@@ -3732,7 +3835,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": true,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -3802,7 +3910,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -3870,7 +3979,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -3932,7 +4046,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4002,7 +4117,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4063,7 +4179,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4127,7 +4244,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4191,7 +4309,8 @@
         "failure_tag": "measurement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4254,7 +4373,8 @@
         "failure_tag": "aux_binding_absent",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4317,7 +4437,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4380,7 +4501,8 @@
         "failure_tag": "key_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4443,7 +4565,8 @@
         "failure_tag": "aux_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4486,7 +4609,8 @@
         "failure_tag": "happ_preimage_missing",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4536,7 +4660,8 @@
         "failure_tag": "happ_preimage_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4599,7 +4724,8 @@
         "failure_tag": "happ_preimage_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4662,7 +4788,8 @@
         "failure_tag": "aux_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4730,7 +4857,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -4794,7 +4926,8 @@
         "failure_tag": "aux_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4864,7 +4997,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -4931,7 +5069,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -4997,7 +5136,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5064,7 +5204,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5131,7 +5272,8 @@
         "failure_tag": "advertisement_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5203,7 +5345,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -5270,7 +5417,8 @@
         "failure_tag": "posture_upstream_unverifiable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5346,7 +5494,12 @@
           "glm-4.6",
           "grok-4"
         ],
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": false,
+          "compose_hash": true
+        }
       }
     },
     {
@@ -5414,7 +5567,8 @@
         "failure_tag": "posture_upstream_unverifiable",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5480,7 +5634,8 @@
         "failure_tag": "posture_preimage_invalid",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     },
     {
@@ -5546,7 +5701,8 @@
         "failure_tag": "aux_binding_mismatch",
         "verifier_id": "dstack-tdx",
         "attested_model_ids": null,
-        "carried_called": false
+        "carried_called": false,
+        "measurement_checks": null
       }
     }
   ]

@@ -302,6 +302,12 @@ export class DstackVerifier {
                 return fail(FailureTag.MeasurementMismatch)
             }
         }
+        // enforceSkeleton is the live term: a document validated under the
+        // shape rules alone was never matched to a release. composeValidated
+        // never changes the result, since a pass with the match on has always
+        // validated the document; it is a guard, so a later edit that lets an
+        // absent document through under the match cannot report a release
+        // check that never ran. Go's DstackVerifier computes the same.
         const checks: MeasurementChecks = {
             osImage: true,
             composeRelease: composeValidated && enforceSkeleton,

@@ -47,8 +47,8 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `zs/wallet.go` deposit / MBR | `sdk/src/mbr.ts` | `deposit_plan_vectors.json` |
 | `go/escrow` group checks | `sdk/src/escrow/{open,settle}.ts` | `escrow_group_vectors.json` |
 | `zs/decode.go` | `sdk/src/decode.ts` | `stream_events_vectors.json` |
-| `zs/operator.go` | `sdk/src/operator.ts` | `operator_vectors.json` |
-| `probeAttestation` (`zs/fetcher.go`), `zs/attestation_client.go` | `sdk/src/attestation.ts` | the `probe_attestation` block of `operator_vectors.json` (the 256 KiB body cap is tested per language) |
+| `zs/operator.go`, including the TEE routing rule `TEEStatus.Attested` (a pass that rested on both the OS-image and the compose-release check) | `sdk/src/operator.ts` (`isTeeAttested`) | `operator_vectors.json` |
+| `probeAttestation` (`zs/fetcher.go`), `zs/attestation_client.go` | `sdk/src/attestation.ts` | the `probe_attestation` block of `operator_vectors.json`, which also pins whether each status is attested (the 256 KiB body cap is tested per language) |
 | the chain read: `go/escrow` operator and node fetchers, `go/algod` `ListApplicationBoxes`, `readChainNodes` / `resolveOperatorNode` (`zs/fetcher.go`), `zs/signer_balance.go` | `sdk/src/registry/chain.ts` | the `chain_nodes` block of `operator_vectors.json` (the fetch paths and the balance pass are tested per language) |
 | the probe pass: `enrich`, `probeOne`, `buildSelAll`, `ReprobeEphemeral` (`zs/fetcher.go`) | `sdk/src/registry/probe.ts` | `registry_probe_vectors.json` (`applyProbeOutcome`, what each outcome writes onto the node and the reachability it remembers; the rotation, concurrency and abort handling are tested per language) |
 | the refresh cycle: `zs/registry_dynamic.go` `DynamicRegistryProvider` (`carryWithin`, `carryCaps`, `advertisableAt`), `zs/assemble.go` `bootRegistry`, `zs/persist.go` `MergeCatalog` | `sdk/src/registry/registry.ts` `DiscoveryRegistry` (`carryForwardLastGood`, `carryCaps`, `advertisable`, `mergeCatalog`) | `registry_cycle_vectors.json` (the carry and its window, `advertisable`, a saved catalog merged into a boot's chain read; the probe set through `probe_set_vectors.json`; the timer, coalescing, boot order and transition logs are tested per language) |
@@ -58,7 +58,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `go/httpx` private-target guard | `sdk/src/privateip.ts` | `private_target_vectors.json` |
 | `go/keystore` accounts | `sdk/src/accounts/*` | `account_vectors.json` |
 | `go/zs` declarations (events, error kinds, Config defaults) | `sdk/src/{events,errors,config}.ts` | `sdk_vocabulary_vectors.json` (generated from the Go const decls) |
-| `zs/tee` `BundleVerifier` / `DstackVerifier`, the TEE evidence verdict (chain step stubbed) | `sdk/src/tee/` | `tee_verdict_vectors.json` |
+| `zs/tee` `BundleVerifier` / `DstackVerifier`, the TEE evidence verdict and its measurement checks (chain step stubbed) | `sdk/src/tee/` | `tee_verdict_vectors.json` |
 
 **Mirrored but unpinned** — no fixture compares the two, so the comment headers and per-language tests are all that hold them together. Treat a change here as two changes and test both:
 - `zs/dispatch.go` `pickCandidates` ↔ `sdk/src/pick.ts`, and the dispatch loop ↔ `sdk/src/dispatch.ts`.

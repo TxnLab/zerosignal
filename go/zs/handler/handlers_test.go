@@ -316,7 +316,9 @@ func TestHandleOperators_PerOperatorView(t *testing.T) {
 		MinChargeOutputTokens: 1000,
 		MinChargeAlgoTxns:     9,
 		MinChargeMicroUSDC:    1620,
-		TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: true,
+		// A pass on a trusted image whose compose matched no published
+		// release: verified, and still not attested.
+		TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: true, OSImageChecked: true,
 			AttestedModelIDs: []string{"m"}},
 		Metrics: zs.OperatorMetrics{
 			LastActivityAt:            1_700_000_000,
@@ -378,6 +380,7 @@ func TestHandleOperators_PerOperatorView(t *testing.T) {
 			TEE                   *struct {
 				Mode             string   `json:"mode"`
 				Verified         bool     `json:"verified"`
+				Attested         bool     `json:"attested"`
 				AttestedModelIDs []string `json:"attested_model_ids"`
 			} `json:"tee"`
 			Metrics struct {
@@ -446,7 +449,7 @@ func TestHandleOperators_PerOperatorView(t *testing.T) {
 	if g2 := body.Operators[1]; g2.MinChargeOutputTokens != 0 || g2.MinChargeAlgoTxns != 0 || g2.MinChargeMicroUSDC != 0 {
 		t.Errorf("[1] min-charge should be zero: out=%d algo=%d µusdc=%d", g2.MinChargeOutputTokens, g2.MinChargeAlgoTxns, g2.MinChargeMicroUSDC)
 	}
-	if got1.TEE == nil || got1.TEE.Mode != "dstack-tdx" || !got1.TEE.Verified ||
+	if got1.TEE == nil || got1.TEE.Mode != "dstack-tdx" || !got1.TEE.Verified || got1.TEE.Attested ||
 		!slices.Equal(got1.TEE.AttestedModelIDs, []string{"m"}) {
 		t.Errorf("[0].tee = %+v", got1.TEE)
 	}
@@ -579,7 +582,8 @@ func TestHandleOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
 		return zs.Operator{
 			ID: id, BaseURL: fmt.Sprintf("http://%d", id), Reachable: true,
 			ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
-			TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: ids != nil, AttestedModelIDs: ids},
+			TEE: &zs.TEEStatus{Mode: "dstack-tdx", Verified: ids != nil, AttestedModelIDs: ids,
+				OSImageChecked: ids != nil, ComposeReleaseChecked: ids != nil},
 		}
 	}
 	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op(1, []string{}), op(2, nil)})
@@ -591,7 +595,7 @@ func TestHandleOperators_AttestedModelIDsNullVersusEmpty(t *testing.T) {
 	s.handleOperators(w, httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil))
 
 	raw := w.Body.String()
-	for _, want := range []string{`"attested_model_ids":[]`, `"attested_model_ids":null`} {
+	for _, want := range []string{`"attested":true,"attested_model_ids":[]`, `"attested":false,"attested_model_ids":null`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("body lacks %s:\n%s", want, raw)
 		}

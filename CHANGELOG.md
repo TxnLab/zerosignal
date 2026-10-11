@@ -31,6 +31,35 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-11 — a TEE node is attested only on both measurement checks
+
+Both SDKs count a node as TEE-attested for routing only when its verdict passed **and** rested
+on both reference checks: the guest OS image matched a trusted production image, and the compose
+matched a published zs-node release. Before, a pass alone was enough. The verifier's release
+match refused an unrecognized compose anyway, so the two usually agreed, but the rule now holds
+whatever the verifier is configured to do. Two setups that used to route `Require-TEE` traffic
+now get `no_tee_capacity`: a stub pass (`allow_stub`), which carries no checks, and a verifier
+with the release match off (`enforce_compose_skeleton: false`) that identifies the workload by a
+`trusted_compose_hashes` pin, whose pass has no compose-release check. Both SDKs now log
+"operator attestation passed but is not attested for routing" for such a node.
+
+A stub pass now only sets the `verified` display bit. To route `Require-TEE` traffic to a build
+that is not a published release, keep the release match on and append that build's skeleton
+digest and image reference to `trusted_compose_skeletons` and `trusted_node_images`. The browser
+client adds its dev references the same way.
+
+- **Go:** `tee.Verdict.MeasurementChecks` (nil on a refusal and on a stub pass) records the
+  checks, `zs.TEEStatus` gains `OSImageChecked` and `ComposeReleaseChecked`, and
+  `TEEStatus.Attested()` is the rule `Operator.IsTEEAttested` and the `tee_attested` projection
+  read. `/v1/zs/operators` adds `tee.attested` beside `tee.verified`, which stays the pass alone.
+- **TypeScript:** `TEEStatus` gains the required `osImageChecked` and `composeReleaseChecked`,
+  which `probeAttestation` copies from `verdict.detail.measurementChecks`. A host that builds
+  its own `TEEStatus` must set them, or every node reads as unattested.
+- A custom verifier (`Config.TEEVerifier` / `Config.teeVerifier`) must report the measurement
+  checks, or no node it passes is attested.
+- `operator_vectors.json` pins the rule, and `tee_verdict_vectors.json` now pins each verdict's
+  measurement checks. The saved catalog never held the TEE verdict, so its format is unchanged.
+
 ### 2026-10-10 — the TypeScript SDK verifies TEE evidence itself (0.3.0)
 
 `@txnlab/zerosignal/tee` is the twin of `zs/tee`: `BundleVerifier` and `DstackVerifier` run

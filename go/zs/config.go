@@ -149,6 +149,8 @@ type Config struct {
 	// TEEVerifier checks the attestation evidence nodes publish, in the
 	// discovery New builds. Nil uses tee.DefaultVerifier, which fetches each
 	// TEE node's evidence on every refresh and Intel's collateral to check it.
+	// A custom verifier must report tee.Verdict.MeasurementChecks, or no node
+	// it passes counts as attested.
 	TEEVerifier tee.Verifier
 	// DisableTEE checks no attestation evidence: every node counts as
 	// unattested, so RequireTEEModels have no route. It overrides

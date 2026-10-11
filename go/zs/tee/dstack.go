@@ -209,6 +209,13 @@ func (v *DstackVerifier) verifyQuoteChain(ctx context.Context, quote []byte, car
 // success. op supplies the independently-verified ephemeral recipient
 // the binding must be to.
 func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBundle, op Node) string {
+	return v.verify(ctx, bundle, op, nil)
+}
+
+// verify is Verify, additionally writing the reference checks a pass rested
+// on into checks when it is non-nil. Written only on a pass, so a refusal
+// never reports a check that a later step overruled.
+func (v *DstackVerifier) verify(ctx context.Context, bundle inject.TEEEvidenceBundle, op Node, checks *MeasurementChecks) string {
 	quote, err := base64.StdEncoding.DecodeString(bundle.CPUReport)
 	if err != nil || len(quote) == 0 {
 		return FailureVendorChainInvalid
@@ -281,7 +288,8 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// "no constraint" in that configuration is the exact shape this package
 	// argues against everywhere else — a check that vanishes while looking
 	// like the feature working.
-	if len(v.TrustedComposeHashes) > 0 || !v.ComposePolicy.EnforceComposeSkeleton {
+	composeHashPinned := len(v.TrustedComposeHashes) > 0
+	if composeHashPinned || !v.ComposePolicy.EnforceComposeSkeleton {
 		if !containsHexFold(v.TrustedComposeHashes, measurements[attest.EventComposeHash]) {
 			v.log().Warn("attestation: compose hash is not in the trusted set",
 				slog.Uint64("operator_id", op.OperatorID),
@@ -332,6 +340,7 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// It stays a skip when the release match is off, because that is the
 	// configuration where a pre-9.6 guest agent must not read as compromised
 	// for publishing no preimage it was never able to publish.
+	composeValidated := false
 	if bundle.AppCompose == "" {
 		if v.ComposePolicy.EnforceComposeSkeleton {
 			v.log().Warn("attestation: node published no app_compose, so the release "+
@@ -360,6 +369,20 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 			}
 			return FailureMeasurementMismatch
 		}
+		composeValidated = true
+	}
+	// OSImage is constant because the gate above refuses anything else; it is
+	// recorded anyway so the routing rule reads a fact rather than relying on
+	// this function's order. The EnforceComposeSkeleton term is the live one:
+	// a document validated under the shape rules alone was never matched to a
+	// release. composeValidated never changes the result, since a pass with
+	// the match on has always validated the document; it is a guard, so a
+	// later edit that lets an absent document through under the match cannot
+	// report a release check that never ran.
+	passed := MeasurementChecks{
+		OSImage:        true,
+		ComposeRelease: composeValidated && v.ComposePolicy.EnforceComposeSkeleton,
+		ComposeHash:    composeHashPinned,
 	}
 
 	// SPEC step 6: both halves of the quote's report_data. The caller
@@ -409,6 +432,9 @@ func (v *DstackVerifier) Verify(ctx context.Context, bundle inject.TEEEvidenceBu
 	// value, never a copy read from anywhere else.
 	if tag := v.checkPosture(bundle.Posture, inject.UpstreamAttested(bundle.UpstreamAttestation), op); tag != "" {
 		return tag
+	}
+	if checks != nil {
+		*checks = passed
 	}
 	return ""
 }

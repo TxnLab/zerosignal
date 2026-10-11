@@ -58,8 +58,15 @@ type operatorVectorNode struct {
 	Reachable                 bool    `json:"reachable"`
 	Staging                   bool    `json:"staging"`
 	SignerSpendableMicroAlgos *uint64 `json:"signer_spendable_microalgos"`
-	// TEEVerified is the verdict, or null when the node advertises no TEE.
-	TEEVerified *bool `json:"tee_verified"`
+	// TEE is the verdict as it sits on the operator, or null when the node
+	// advertises no TEE. Selection.tee_attested is the routing rule read from it.
+	TEE *operatorVectorTEE `json:"tee"`
+}
+
+type operatorVectorTEE struct {
+	Verified              bool `json:"verified"`
+	OSImageChecked        bool `json:"os_image_checked"`
+	ComposeReleaseChecked bool `json:"compose_release_checked"`
 }
 
 type capacityVector struct {
@@ -152,7 +159,7 @@ type operatorScenario struct {
 
 func operatorScenarios() []operatorScenario {
 	u64 := func(v uint64) *uint64 { return &v }
-	yes, no := true, false
+	yes := true
 	base := func(name string) operatorScenario {
 		return operatorScenario{
 			Name: name,
@@ -271,8 +278,23 @@ func operatorScenarios() []operatorScenario {
 		sc.Node.SignerSpendableMicroAlgos = u64(0)
 	})
 	add("a funded signer is projected", func(sc *operatorScenario) { sc.Node.SignerSpendableMicroAlgos = u64(12_000_000) })
-	add("an attested node", func(sc *operatorScenario) { sc.Node.TEEVerified = &yes })
-	add("a TEE node whose evidence failed counts as unattested", func(sc *operatorScenario) { sc.Node.TEEVerified = &no })
+	// Attested is a pass that rested on both reference checks. Each case below
+	// drops one input, so no single field can stand in for the conjunction.
+	add("an attested node", func(sc *operatorScenario) {
+		sc.Node.TEE = &operatorVectorTEE{Verified: true, OSImageChecked: true, ComposeReleaseChecked: true}
+	})
+	add("a pass on an untrusted OS image counts as unattested", func(sc *operatorScenario) {
+		sc.Node.TEE = &operatorVectorTEE{Verified: true, ComposeReleaseChecked: true}
+	})
+	add("a pass on a compose that is no published release counts as unattested", func(sc *operatorScenario) {
+		sc.Node.TEE = &operatorVectorTEE{Verified: true, OSImageChecked: true}
+	})
+	add("a pass with no measurement checks counts as unattested", func(sc *operatorScenario) {
+		sc.Node.TEE = &operatorVectorTEE{Verified: true}
+	})
+	add("a TEE node whose evidence failed counts as unattested", func(sc *operatorScenario) {
+		sc.Node.TEE = &operatorVectorTEE{OSImageChecked: true, ComposeReleaseChecked: true}
+	})
 	add("an unreachable node", func(sc *operatorScenario) { sc.Node.Reachable = false })
 	return out
 }
@@ -283,8 +305,8 @@ func runOperatorScenario(sc *operatorScenario) {
 		ID: n.ID, NodeID: n.NodeID, OwnerAddr: n.OwnerAddr, BaseURL: n.BaseURL,
 		Reachable: n.Reachable, Staging: n.Staging, SignerSpendableMicroAlgos: n.SignerSpendableMicroAlgos,
 	}
-	if n.TEEVerified != nil {
-		op.TEE = &TEEStatus{Verified: *n.TEEVerified}
+	if n.TEE != nil {
+		op.TEE = &TEEStatus{Verified: n.TEE.Verified, OSImageChecked: n.TEE.OSImageChecked, ComposeReleaseChecked: n.TEE.ComposeReleaseChecked}
 	}
 	applyDetailsFields(&op, sc.Details)
 
@@ -307,23 +329,33 @@ func runOperatorScenario(sc *operatorScenario) {
 }
 
 // probeVerdictVector is what the scenario's verifier returns.
+// MeasurementChecks is null for a verdict that carries none (a refusal, a stub).
 type probeVerdictVector struct {
-	Pass             bool     `json:"pass"`
-	FailureTag       string   `json:"failure_tag"`
-	VerifierID       string   `json:"verifier_id"`
-	AttestedAtMs     int64    `json:"attested_at_ms"`
-	AttestedModelIDs []string `json:"attested_model_ids"`
+	Pass              bool                     `json:"pass"`
+	FailureTag        string                   `json:"failure_tag"`
+	VerifierID        string                   `json:"verifier_id"`
+	AttestedAtMs      int64                    `json:"attested_at_ms"`
+	AttestedModelIDs  []string                 `json:"attested_model_ids"`
+	MeasurementChecks *measurementChecksVector `json:"measurement_checks"`
+}
+
+type measurementChecksVector struct {
+	OSImage        bool `json:"os_image"`
+	ComposeRelease bool `json:"compose_release"`
+	ComposeHash    bool `json:"compose_hash"`
 }
 
 // teeStatusVector is a TEEStatus under the SDK's field names, attestedAt in
 // Unix milliseconds and 0 for the zero time.
 type teeStatusVector struct {
-	Mode             string   `json:"mode"`
-	AttestedAt       int64    `json:"attestedAt"`
-	VerifierID       string   `json:"verifierId"`
-	Verified         bool     `json:"verified"`
-	FailureTag       string   `json:"failureTag"`
-	AttestedModelIDs []string `json:"attestedModelIds"`
+	Mode                  string   `json:"mode"`
+	AttestedAt            int64    `json:"attestedAt"`
+	VerifierID            string   `json:"verifierId"`
+	Verified              bool     `json:"verified"`
+	FailureTag            string   `json:"failureTag"`
+	OSImageChecked        bool     `json:"osImageChecked"`
+	ComposeReleaseChecked bool     `json:"composeReleaseChecked"`
+	AttestedModelIDs      []string `json:"attestedModelIds"`
 }
 
 type teeNodeVector struct {
@@ -355,8 +387,10 @@ type probeAttestationScenario struct {
 	RequestRelayTarget string `json:"request_relay_target"`
 	// VerifiedNode is what the verifier was handed, null when it was not called.
 	VerifiedNode *teeNodeVector `json:"verified_node"`
-	// Want is the operator's TEEStatus, null for none.
-	Want *teeStatusVector `json:"want"`
+	// Want is the operator's TEEStatus, null for none, and Attested whether
+	// routing counts it as attested.
+	Want     *teeStatusVector `json:"want"`
+	Attested bool             `json:"attested"`
 }
 
 type stubTEEVerifier struct {
@@ -375,7 +409,10 @@ func probeAttestationScenarios() []probeAttestationScenario {
 		return &inject.TEEAdvertisement{Mode: inject.TEEModeDstackTDX, AttestedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
 	}
 	pass := func() *probeVerdictVector {
-		return &probeVerdictVector{Pass: true, VerifierID: tee.VerifierIDDstack, AttestedAtMs: 1790812800000, AttestedModelIDs: []string{"m", "n"}}
+		return &probeVerdictVector{
+			Pass: true, VerifierID: tee.VerifierIDDstack, AttestedAtMs: 1790812800000, AttestedModelIDs: []string{"m", "n"},
+			MeasurementChecks: &measurementChecksVector{OSImage: true, ComposeRelease: true},
+		}
 	}
 	base := func(name string) probeAttestationScenario {
 		return probeAttestationScenario{
@@ -392,6 +429,25 @@ func probeAttestationScenarios() []probeAttestationScenario {
 	add("a node advertising no TEE has no status", func(sc *probeAttestationScenario) { sc.Advertised = nil })
 	add("verification off leaves every node without a status", func(sc *probeAttestationScenario) { sc.Verdict = nil })
 	add("a passing verdict is copied, with its attested models", func(*probeAttestationScenario) {})
+	add("a pass on both checks and a compose pin is attested", func(sc *probeAttestationScenario) {
+		sc.Verdict.MeasurementChecks.ComposeHash = true
+	})
+	// A hand-pinned compose hash identifies a deployment, not a published
+	// release, so it does not stand in for the release match.
+	add("a pass on a pinned compose hash without the release match is not attested", func(sc *probeAttestationScenario) {
+		sc.Verdict.MeasurementChecks = &measurementChecksVector{OSImage: true, ComposeHash: true}
+	})
+	add("a pass on the compose release alone is not attested", func(sc *probeAttestationScenario) {
+		sc.Verdict.MeasurementChecks = &measurementChecksVector{ComposeRelease: true}
+	})
+	add("a pass with no measurement checks is not attested", func(sc *probeAttestationScenario) {
+		sc.Verdict.MeasurementChecks = nil
+	})
+	add("a failing verdict is not attested whatever checks it carries", func(sc *probeAttestationScenario) {
+		sc.Verdict.Pass = false
+		sc.Verdict.FailureTag = tee.FailureAuxBindingMismatch
+		sc.Verdict.AttestedModelIDs = nil
+	})
 	add("the evidence time is the verdict's, not the advertisement's", func(sc *probeAttestationScenario) {
 		sc.Verdict.AttestedAtMs = 1790813400000
 	})
@@ -455,6 +511,9 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 	var stub *stubTEEVerifier
 	if sc.Verdict != nil {
 		v := tee.Verdict{Pass: sc.Verdict.Pass, FailureTag: sc.Verdict.FailureTag, VerifierID: sc.Verdict.VerifierID, AttestedModelIDs: sc.Verdict.AttestedModelIDs}
+		if c := sc.Verdict.MeasurementChecks; c != nil {
+			v.MeasurementChecks = &tee.MeasurementChecks{OSImage: c.OSImage, ComposeRelease: c.ComposeRelease, ComposeHash: c.ComposeHash}
+		}
 		if sc.Verdict.AttestedAtMs != 0 {
 			v.AttestedAt = time.UnixMilli(sc.Verdict.AttestedAtMs).UTC()
 		}
@@ -474,9 +533,12 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 		}
 		sc.Want = &teeStatusVector{
 			Mode: op.TEE.Mode, AttestedAt: ms, VerifierID: op.TEE.VerifierID, Verified: op.TEE.Verified,
-			FailureTag: op.TEE.FailureTag, AttestedModelIDs: op.TEE.AttestedModelIDs,
+			FailureTag:     op.TEE.FailureTag,
+			OSImageChecked: op.TEE.OSImageChecked, ComposeReleaseChecked: op.TEE.ComposeReleaseChecked,
+			AttestedModelIDs: op.TEE.AttestedModelIDs,
 		}
 	}
+	sc.Attested = op.IsTEEAttested()
 	if sc.Want != nil && sc.Want.FailureTag == tee.FailureFetchFailed && sc.RequestPath == "" {
 		t.Fatalf("%s: fetch_failed without a request", sc.Name)
 	}
@@ -809,7 +871,7 @@ func TestOperatorVectors(t *testing.T) {
 		ProbeAttestation []probeAttestationScenario `json:"probe_attestation"`
 		ChainNodes       []chainNodeScenario        `json:"chain_nodes"`
 	}{
-		Comment:          "Generated by proto/go/zs TestOperatorVectors. fields, selection, each probe's request_path, verified_node and want, and each chain node's want and skipped are compared exactly.",
+		Comment:          "Generated by proto/go/zs TestOperatorVectors. fields, selection, each probe's request_path, verified_node, want and attested, and each chain node's want and skipped are compared exactly.",
 		Scenarios:        scenarios,
 		ProbeAttestation: probes,
 		ChainNodes:       chain,

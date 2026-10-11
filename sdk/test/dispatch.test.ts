@@ -899,12 +899,16 @@ describe('the reserve request', () => {
     // Pick admitted the node under its old key; the re-probe swaps the key
     // after pick has run, so the TEE gate must be applied again.
     it('takes a re-probed node for a TEE-required request only if attested under its new key', async () => {
-        const tee = (verified: boolean) => ({
+        // Every status is a pass, so only the release check separates them: a
+        // re-check that read the pass alone would take the unattested key.
+        const tee = (attested: boolean) => ({
             mode: 'dstack-tdx',
             attestedAt: 0,
             verifierId: 'dstack-tdx',
-            verified,
+            verified: true,
             failureTag: '',
+            osImageChecked: true,
+            composeReleaseChecked: attested,
         })
         // A null verdict is a re-probe that found nothing: still no refresh,
         // and no throw on the way.
