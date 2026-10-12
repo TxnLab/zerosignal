@@ -377,6 +377,25 @@ export class Wallet implements WalletOpener {
         })
     }
 
+    /**
+     * Makes sure the payer holds the prepaid pool's opt-in before a reserve,
+     * the one thing a node checks there, depositing only for a payer who isn't
+     * opted in. Topping up an opted-in pool short of its working set is left
+     * to open: such a pool never latches, so doing it here too would repeat
+     * the whole funding pass on every request. Go's PrepareDeposit.
+     */
+    async prepareDeposit(signal?: AbortSignal): Promise<void> {
+        if (this.#depositReady) return
+        let optedIn: boolean
+        try {
+            optedIn = await this.#pool.isPayerOptedIn(this.#signer.address)
+        } catch (err) {
+            throw new Error(`wallet: prepaid pool opt-in check: ${message(err)}`, { cause: err })
+        }
+        if (optedIn) return
+        return this.#ensureDepositForServe(signal)
+    }
+
     async #freeSlots(): Promise<bigint> {
         const ticketMbr = await this.#chain.ticketMbr()
         if (ticketMbr <= 0n) throw new Error('wallet: free-deposit-slots: ticket MBR not loaded')
@@ -393,8 +412,12 @@ export class Wallet implements WalletOpener {
         return wrap('withdraw-deposit', this.#chain.withdrawMbr(this.#signer.address, amount, signal))
     }
 
-    closeDeposit(signal?: AbortSignal): Promise<string> {
-        return wrap('close-deposit', this.#chain.closeDeposit(this.#signer.address, signal))
+    async closeDeposit(signal?: AbortSignal): Promise<string> {
+        const txid = await wrap('close-deposit', this.#chain.closeDeposit(this.#signer.address, signal))
+        // The payer is opted out now, and a node may refuse its next reserve
+        // for that, so the next request must not skip the deposit.
+        this.#depositReady = false
+        return txid
     }
 
     // graceSeconds is the grace global the open was checked against, which

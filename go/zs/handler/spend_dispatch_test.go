@@ -234,6 +234,133 @@ func TestDispatch_MbrPoolUnderfunded_402(t *testing.T) {
 	}
 }
 
+// preparingWallet is a fakeWallet that also funds the prepaid pool before a
+// reserve, recording what the node had seen by then.
+type preparingWallet struct {
+	fakeWallet
+	prepareErr   error
+	prepareCalls int
+	onPrepare    func()
+}
+
+func (p *preparingWallet) PrepareDeposit(context.Context) error {
+	p.prepareCalls++
+	if p.onPrepare != nil {
+		p.onPrepare()
+	}
+	return p.prepareErr
+}
+
+// A node may refuse a payer with no prepaid pool at reserve, so the pool is
+// funded before the first reserve rather than only inside Open.
+func TestDispatch_PreparesDepositBeforeReserve(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
+	cfg := testConfig()
+	opts := setup(t, cfg, node)
+	before := node.callCountValue()
+	reachedNode := -1
+	pw := &preparingWallet{onPrepare: func() { reachedNode = node.callCountValue() - before }}
+	opts.Wallet = pw
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
+	}
+	if pw.prepareCalls != 1 {
+		t.Fatalf("PrepareDeposit calls = %d, want 1", pw.prepareCalls)
+	}
+	if reachedNode != 0 {
+		t.Errorf("the node had %d requests when the pool was prepared, want 0", reachedNode)
+	}
+	if pw.openCalls != 1 {
+		t.Errorf("Open calls = %d, want 1", pw.openCalls)
+	}
+}
+
+// A pool the payer can't fund ends the request before a node holds a slot
+// for it, with the error the open would have given.
+func TestDispatch_PrepareDepositFailure(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{"unaffordable", fmt.Errorf("%w: need 50000 µALGO", zs.ErrDepositUnaffordable), http.StatusPaymentRequired, "mbr_pool_underfunded"},
+		{"below target", fmt.Errorf("%w: 1 of 10 slots", zs.ErrDepositBelowTarget), http.StatusPaymentRequired, "mbr_pool_underfunded"},
+		{"deposit overspends", errors.New("wallet: deposit: TransactionPool.Remember: overspend"), http.StatusPaymentRequired, "wallet_unfunded"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+			cfg := testConfig()
+			opts := setup(t, cfg, node)
+			before := node.callCountValue()
+			pw := &preparingWallet{prepareErr: tc.err}
+			opts.Wallet = pw
+			s := testServer(cfg, opts)
+
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+			if w.Result().StatusCode != tc.wantStatus || !strings.Contains(w.Body.String(), `"`+tc.wantCode+`"`) {
+				t.Fatalf("status = %d body=%s; want %d %s", w.Result().StatusCode, w.Body.String(), tc.wantStatus, tc.wantCode)
+			}
+			if n := node.callCountValue() - before; n != 0 {
+				t.Errorf("the node got %d requests, want 0", n)
+			}
+			if pw.openCalls != 0 {
+				t.Errorf("Open calls = %d, want 0", pw.openCalls)
+			}
+		})
+	}
+}
+
+// A failure that says nothing about funds, such as an unreachable algod,
+// doesn't end the request: Open checks the pool again, and a node that
+// doesn't require the opt-in may still serve.
+func TestDispatch_PrepareDepositReadFailureContinues(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
+	cfg := testConfig()
+	opts := setup(t, cfg, node)
+	pw := &preparingWallet{prepareErr: errors.New("wallet: deposit-shortfall read: dial tcp: connection refused")}
+	opts.Wallet = pw
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
+	}
+	if pw.openCalls != 1 {
+		t.Errorf("Open calls = %d, want 1", pw.openCalls)
+	}
+}
+
+// A request no node can serve funds nothing: the routing error is the answer.
+func TestDispatch_NoCandidateSkipsPrepareDeposit(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{}`)})
+	cfg := testConfig()
+	opts := setup(t, cfg, node)
+	pw := &preparingWallet{prepareErr: zs.ErrDepositUnaffordable}
+	opts.Wallet = pw
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"no-such-model","max_tokens":16}`))
+
+	if !strings.Contains(w.Body.String(), `"no_operator"`) {
+		t.Fatalf("body = %s, want no_operator", w.Body.String())
+	}
+	if pw.prepareCalls != 0 {
+		t.Errorf("PrepareDeposit calls = %d, want 0", pw.prepareCalls)
+	}
+}
+
 // TestDispatch_MbrPoolExhausted_429 is the other half: the wallet HOLDS
 // the ALGO, every prepaid slot is just reserved by an in-flight ticket, so
 // open() reverts on a pool guard. That is a transient concurrency cap with a

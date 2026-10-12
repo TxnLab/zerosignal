@@ -418,3 +418,12 @@ type WalletOpener interface {
 	Open(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error)
 	PayerAddr() string
 }
+
+// DepositPreparer is an optional WalletOpener method that dispatch calls
+// before the first reserve. A node may refuse a reserve from a payer with no
+// prepaid pool (403 payer_not_opted_in), and the pool is otherwise funded only
+// inside Open, after a reserve has succeeded, so a new payer would never get
+// past the reserve. *Wallet implements it.
+type DepositPreparer interface {
+	PrepareDeposit(ctx context.Context) error
+}

@@ -33,6 +33,7 @@ import { newError } from './codes.js'
 import { DuplicateTicketError, type Remedies, type SpendGuard } from './config.js'
 import { ZsError, findError } from './errors.js'
 import { type Estimate, type EstimatePolicy, MaxOutputRequiredError, estimate } from './estimate.js'
+import { MbrDepositUnaffordableError } from './mbr.js'
 import { type ReserveSizeRejection, noFitMessage, reserveSizeFailureMessage } from './nofit.js'
 import { type Operator, isTeeAttested, refOf, servesImageEdit, servesImageGen } from './operator.js'
 import {
@@ -60,10 +61,12 @@ import { reserveWithTransientRetry } from './reserve-retry.js'
 import type { BusyError, PayerRefusalError, SizeError } from './reserve.js'
 import { type RelayHop, relayRef, targetRef } from './routing/relay.js'
 import { type ResweepReason, classifyReserveFailure, nextResweep, reserveRouteFor } from './routing/verdict.js'
+import { isUnderfundedOpenError, openFailure } from './sealed.js'
 import { type SizingRequest, capacityOf, effectiveMaxOutput, reserveInputCount } from './sizing.js'
 import { sleep as sleepFor } from './sleep.js'
 import type { Emitter, Turn } from './turn.js'
 import { type Endpoint, type NodeRef, type Privacy, nodeRefString } from './types.js'
+import { BelowTargetError } from './wallet.js'
 
 /**
  * The most images one request may budget per image tool. It bounds the
@@ -98,13 +101,15 @@ export type RunSealed = (em: Emitter, run: SealedRun, signal?: AbortSignal) => P
 export interface DispatchDeps {
     pick: PickDeps
     reserveClient: ReserveClient
-    wallet: Pick<WalletOpener, 'payerAddr'>
+    wallet: Pick<WalletOpener, 'payerAddr' | 'prepareDeposit'>
     estimatePolicy: EstimatePolicy
     privacy: Privacy
     allowPrivacyOverride: boolean
     requireTeeModels: readonly string[]
     spendGuard?: SpendGuard | undefined
     remedies: Remedies
+    /** The network's name, as failure messages give it. Empty when named only by endpoint. */
+    network: string
     /** The whole request's transient-retry budget, in milliseconds. */
     retryBudget: number
     sweepDelay?: ((sweep: number) => number) | undefined
@@ -133,6 +138,39 @@ const shape = (body: string | Uint8Array, f: Mutator): string | Uint8Array =>
 
 // Go's zero Duration is no hint, so a 0 stays off the error.
 const retryAfterOf = (ms: number): { retryAfter?: number } => (ms > 0 ? { retryAfter: ms } : {})
+
+/**
+ * Opts the payer into the prepaid pool before the first reserve, so a node
+ * that requires the opt-in doesn't refuse a new payer. Resolves false when the
+ * turn has ended. Only a funds failure ends it, and it then outranks whatever
+ * the reserve loop would have answered (busy, no relay, a size refusal): the
+ * open would fail the same way, after a node had held a slot for the ticket.
+ * Any other failure, such as a chain read, is logged and the turn goes on,
+ * since open checks the pool again and a node that doesn't require the opt-in
+ * may still serve. Go's prepareDeposit.
+ */
+async function prepareDeposit(deps: DispatchDeps, em: Emitter, endpoint: Endpoint, signal: AbortSignal | undefined): Promise<boolean> {
+    if (deps.wallet.prepareDeposit === undefined) return true
+    try {
+        await deps.wallet.prepareDeposit(signal)
+        return true
+    } catch (err) {
+        // A cancelled turn ends in the reserve loop, which reads the signal.
+        if (signal?.aborted === true) return true
+        const log = deps.pick.logger
+        if (
+            findError(err, MbrDepositUnaffordableError) !== undefined ||
+            findError(err, BelowTargetError) !== undefined ||
+            isUnderfundedOpenError(err)
+        ) {
+            log.error('prepaid pool could not be funded before reserve', { endpoint, err: errText(err) })
+            em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err))
+            return false
+        }
+        log.warn('prepaid pool check failed before reserve; continuing', { endpoint, err: errText(err) })
+        return true
+    }
+}
 
 function routeCandidates(model: string, ops: readonly Operator[]) {
     return { type: 'route.candidates' as const, model, candidates: ops.map(refOf) }
@@ -320,6 +358,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
             }
         }
     }
+    if (!(await prepareDeposit(deps, em, endpoint, signal))) return
 
     // Sticky across sweeps. anyBusy is any 429, with or without a
     // Retry-After; busyHint is only the largest hint, so 0 doesn't mean

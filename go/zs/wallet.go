@@ -868,6 +868,29 @@ func (w *Wallet) ensureDepositForServe(ctx context.Context) error {
 	return err
 }
 
+// PrepareDeposit makes sure the payer holds the prepaid pool's opt-in before a
+// reserve, the one thing a node checks there. It deposits only for a payer who
+// isn't opted in. Topping up an opted-in pool short of its working set is left
+// to Open: such a pool never latches depositReady, so doing it here too would
+// repeat the whole funding pass on every request. Once the pool is ready it
+// reads nothing.
+func (w *Wallet) PrepareDeposit(ctx context.Context) error {
+	w.depositMu.Lock()
+	ready := w.depositReady
+	w.depositMu.Unlock()
+	if ready {
+		return nil
+	}
+	optedIn, err := w.pool.IsPayerOptedIn(ctx, w.payerAddr)
+	if err != nil {
+		return fmt.Errorf("wallet: prepaid pool opt-in check: %w", err)
+	}
+	if optedIn {
+		return nil
+	}
+	return w.ensureDepositForServe(ctx)
+}
+
 // freeDepositSlots reports how many additional ticket boxes the prepaid pool
 // can currently back: (AlgoBalance − OpenTickets × ticketMbr) / ticketMbr. An
 // open needs only ONE free slot to commit, so ensureDepositForServe uses this
@@ -1234,6 +1257,11 @@ func (w *Wallet) CloseDeposit(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("wallet: close-deposit: %w", err)
 	}
+	// The payer is opted out now, and a node may refuse its next reserve
+	// for that, so the next request must not skip the deposit.
+	w.depositMu.Lock()
+	w.depositReady = false
+	w.depositMu.Unlock()
 	return res.TxID, nil
 }
 

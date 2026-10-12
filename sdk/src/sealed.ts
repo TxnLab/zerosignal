@@ -131,7 +131,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
             ticket_id: ticket.ticket_id,
             err: errText(err),
         })
-        em.fail(openFailure(deps, err))
+        em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err))
         return
     }
     // The ceiling stays on the spend tally: settlement charges less on chain,
@@ -186,10 +186,8 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
     await forwardBuffered(deps, em, out, call, respond)
 }
 
-// openFailure is the error a failed open ends the turn with, most specific
-// first.
-function openFailure(deps: SealedDeps, err: unknown) {
-    const payer = deps.wallet.payerAddr()
+/** openFailure is the error a failed open ends the turn with, most specific first. */
+export function openFailure(payer: string, network: string, remedies: Remedies, err: unknown) {
     // The payer is short of ALGO (not USDC) to grow the prepaid ticket-MBR
     // pool, and no slot is free. A deposit that landed but left the pool short
     // with no slot free is the same condition. Checked before exhaustion: an
@@ -198,7 +196,7 @@ function openFailure(deps: SealedDeps, err: unknown) {
     if (findError(err, MbrDepositUnaffordableError) !== undefined || findError(err, BelowTargetError) !== undefined) {
         return newError(
             'mbr_pool_underfunded',
-            `zerosignal wallet ${payer} needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on ${deps.network} — ${errText(err)}. To fix it, ${deps.remedies.fund}.`,
+            `zerosignal wallet ${payer} needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on ${network} — ${errText(err)}. To fix it, ${remedies.fund}.`,
         )
     }
     // The wallet holds the ALGO but every slot backs an in-flight ticket: a
@@ -206,14 +204,14 @@ function openFailure(deps: SealedDeps, err: unknown) {
     if (isPoolExhaustedOpenError(err)) {
         return newError(
             'mbr_pool_exhausted',
-            `zerosignal wallet ${payer} has all concurrent ticket slots in use by in-flight requests on ${deps.network} — retry once in-flight requests settle, or to allow more at once, ${deps.remedies.raiseSlots}.`,
+            `zerosignal wallet ${payer} has all concurrent ticket slots in use by in-flight requests on ${network} — retry once in-flight requests settle, or to allow more at once, ${remedies.raiseSlots}.`,
             { retryAfter: MBR_POOL_EXHAUSTED_RETRY_AFTER_MS },
         )
     }
     if (isUnderfundedOpenError(err)) {
         return newError(
             'wallet_unfunded',
-            `zerosignal wallet ${payer} can't pay for this request on ${deps.network}. To fix it, ${deps.remedies.fund}.`,
+            `zerosignal wallet ${payer} can't pay for this request on ${network}. To fix it, ${remedies.fund}.`,
         )
     }
     return newError('wallet_open', 'payment group could not be submitted')
