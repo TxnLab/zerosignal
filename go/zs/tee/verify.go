@@ -165,6 +165,17 @@ type Verdict struct {
 	// attested only when this also shows the OS image and the compose release
 	// checked (zs.TEEStatus.Attested).
 	MeasurementChecks *MeasurementChecks
+
+	// UpstreamCarveOuts is the bundle's upstream_attestation.carve_outs on a
+	// passing dstack verdict whose bound posture says the node appraises its
+	// named upstream: each policy rule that appraisal downgraded rather than
+	// enforced, as `<rule>:<detail>` (SPEC § 3e). Reported, never routed on.
+	//
+	// The block is unsigned, so the list is the node's own admission and a
+	// relay could remove it: a non-empty list caps what the upstream
+	// appraisal means, while an empty one proves nothing. Nil on a refusal,
+	// when the posture claims no appraisal, and when the list is empty.
+	UpstreamCarveOuts []string
 }
 
 // MeasurementChecks records which allowlists a passing verdict was matched
@@ -423,6 +434,10 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 			ids = append(ids, m.ModelID)
 		}
 		verdict.AttestedModelIDs = ids
+		if bundle.Posture != nil && bundle.Posture.UpstreamAttested && inject.UpstreamAttested(bundle.UpstreamAttestation) &&
+			len(bundle.UpstreamAttestation.CarveOuts) > 0 {
+			verdict.UpstreamCarveOuts = bundle.UpstreamAttestation.CarveOuts
+		}
 		return verdict
 	case inject.TEEModeNvidiaCCTDX, inject.TEEModeNvidiaCCSEVSNP:
 		// A clearly-named placeholder so operators advertising

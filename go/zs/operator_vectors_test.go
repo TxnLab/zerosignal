@@ -337,6 +337,7 @@ type probeVerdictVector struct {
 	AttestedAtMs      int64                    `json:"attested_at_ms"`
 	AttestedModelIDs  []string                 `json:"attested_model_ids"`
 	MeasurementChecks *measurementChecksVector `json:"measurement_checks"`
+	UpstreamCarveOuts []string                 `json:"upstream_carve_outs,omitempty"`
 }
 
 type measurementChecksVector struct {
@@ -356,6 +357,7 @@ type teeStatusVector struct {
 	OSImageChecked        bool     `json:"osImageChecked"`
 	ComposeReleaseChecked bool     `json:"composeReleaseChecked"`
 	AttestedModelIDs      []string `json:"attestedModelIds"`
+	UpstreamCarveOuts     []string `json:"upstreamCarveOuts,omitempty"`
 }
 
 type teeNodeVector struct {
@@ -455,6 +457,9 @@ func probeAttestationScenarios() []probeAttestationScenario {
 	add("the mode is the advertised one, whatever the bundle says", func(sc *probeAttestationScenario) {
 		sc.EndpointBody = `{"mode":"stub","generated_at":"2026-10-01T00:00:00Z","refresh_seconds":1200}`
 	})
+	add("a passing verdict's upstream carve-outs are copied", func(sc *probeAttestationScenario) {
+		sc.Verdict.UpstreamCarveOuts = []string{"root_backdoor_env:DSTACK_ROOT_PUBLIC_KEY"}
+	})
 	add("a signed empty catalog stays an empty list", func(sc *probeAttestationScenario) { sc.Verdict.AttestedModelIDs = []string{} })
 	add("a failing verdict keeps its tag and evidence time", func(sc *probeAttestationScenario) {
 		sc.Verdict = &probeVerdictVector{FailureTag: tee.FailureMeasurementMismatch, VerifierID: tee.VerifierIDDstack, AttestedAtMs: 1790812800000}
@@ -530,7 +535,10 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 	s := &ChainOperatorSource{}
 	var stub *stubTEEVerifier
 	if sc.Verdict != nil {
-		v := tee.Verdict{Pass: sc.Verdict.Pass, FailureTag: sc.Verdict.FailureTag, VerifierID: sc.Verdict.VerifierID, AttestedModelIDs: sc.Verdict.AttestedModelIDs}
+		v := tee.Verdict{
+			Pass: sc.Verdict.Pass, FailureTag: sc.Verdict.FailureTag, VerifierID: sc.Verdict.VerifierID,
+			AttestedModelIDs: sc.Verdict.AttestedModelIDs, UpstreamCarveOuts: sc.Verdict.UpstreamCarveOuts,
+		}
 		if c := sc.Verdict.MeasurementChecks; c != nil {
 			v.MeasurementChecks = &tee.MeasurementChecks{OSImage: c.OSImage, ComposeRelease: c.ComposeRelease, ComposeHash: c.ComposeHash}
 		}
@@ -555,7 +563,8 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 			Mode: op.TEE.Mode, AttestedAt: ms, VerifierID: op.TEE.VerifierID, Verified: op.TEE.Verified,
 			FailureTag:     op.TEE.FailureTag,
 			OSImageChecked: op.TEE.OSImageChecked, ComposeReleaseChecked: op.TEE.ComposeReleaseChecked,
-			AttestedModelIDs: op.TEE.AttestedModelIDs,
+			AttestedModelIDs:  op.TEE.AttestedModelIDs,
+			UpstreamCarveOuts: op.TEE.UpstreamCarveOuts,
 		}
 	}
 	sc.Attested = op.IsTEEAttested()

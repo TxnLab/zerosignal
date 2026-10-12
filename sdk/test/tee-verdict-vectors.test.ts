@@ -84,6 +84,8 @@ interface Expected {
     carried_called: boolean
     /** null on a refusal and on a stub pass; routing reads it. */
     measurement_checks: { os_image: boolean; compose_release: boolean; compose_hash: boolean } | null
+    /** Absent unless the verdict reports some. */
+    upstream_carve_outs?: string[]
 }
 
 interface VerdictVectors {
@@ -213,6 +215,7 @@ async function replay(c: VerdictCase): Promise<Expected> {
             checks === undefined
                 ? null
                 : { os_image: checks.osImage, compose_release: checks.composeRelease, compose_hash: checks.composeHash },
+        ...(verdict.upstreamCarveOuts !== undefined && { upstream_carve_outs: verdict.upstreamCarveOuts }),
     }
 }
 

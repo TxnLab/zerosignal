@@ -1223,12 +1223,13 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 	}
 	verdict := s.TEEVerifier.Verify(ctx, advertised, bundle, op.TEENode())
 	op.TEE = &TEEStatus{
-		Mode:             advertised.Mode,
-		AttestedAt:       verdict.AttestedAt,
-		VerifierID:       verdict.VerifierID,
-		Verified:         verdict.Pass,
-		FailureTag:       verdict.FailureTag,
-		AttestedModelIDs: verdict.AttestedModelIDs,
+		Mode:              advertised.Mode,
+		AttestedAt:        verdict.AttestedAt,
+		VerifierID:        verdict.VerifierID,
+		Verified:          verdict.Pass,
+		FailureTag:        verdict.FailureTag,
+		AttestedModelIDs:  verdict.AttestedModelIDs,
+		UpstreamCarveOuts: verdict.UpstreamCarveOuts,
 	}
 	if c := verdict.MeasurementChecks; c != nil {
 		op.TEE.OSImageChecked = c.OSImage

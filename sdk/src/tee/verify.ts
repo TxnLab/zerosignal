@@ -15,6 +15,7 @@ import {
     TEE_MODE_DSTACK_TDX,
     epochNanosFromMillis,
     parseRFC3339,
+    upstreamAttested,
 } from '@txnlab/zs-proto/inject'
 import { decodeGoStdBase64 } from '@txnlab/zs-proto/ticket'
 
@@ -150,7 +151,12 @@ export class BundleVerifier implements Verifier {
                 // The list verifyAux just matched, built even when empty: an
                 // empty array is a signed empty catalog.
                 const models = Array.isArray(bundle.app_models) ? (bundle.app_models as { model_id: string }[]) : []
-                return { ...v, pass: true, attestedModelIds: models.map((m) => m.model_id) }
+                const passed: Verdict = { ...v, pass: true, attestedModelIds: models.map((m) => m.model_id) }
+                const carveOuts = bundle.upstream_attestation?.carve_outs ?? []
+                if (boundUpstreamAppraisal(bundle.posture) && upstreamAttested(bundle.upstream_attestation) && carveOuts.length > 0) {
+                    passed.upstreamCarveOuts = carveOuts
+                }
+                return passed
             }
             default:
                 // nvidia-cc-* until NRAS lands, and any mode both sides agree
@@ -158,5 +164,10 @@ export class BundleVerifier implements Verifier {
                 return fail(FailureTag.VerifierNotImplemented)
         }
     }
+}
+
+/** The posture's bound upstream_attested bit; read only after the aux binding verified the posture. */
+function boundUpstreamAppraisal(posture: unknown): boolean {
+    return typeof posture === 'object' && posture !== null && (posture as Record<string, unknown>)['upstream_attested'] === true
 }
 

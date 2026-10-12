@@ -346,6 +346,12 @@ type TEEStatus struct {
 	// empty. Shown on /v1/zs/operators, never used for routing: the list is
 	// the catalog at the node's last mint.
 	AttestedModelIDs []string
+
+	// UpstreamCarveOuts is tee.Verdict.UpstreamCarveOuts: the policy rules
+	// the node's appraisal of its named upstream downgraded (SPEC § 3e).
+	// Reported for a host to show or refuse on, never used for routing; an
+	// empty list proves nothing, since a relay can strip it.
+	UpstreamCarveOuts []string
 }
 
 // TEENode is what a tee.Verifier checks o's evidence against.

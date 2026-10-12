@@ -38,6 +38,7 @@ interface ProbeScenario {
         attested_at_ms: number
         attested_model_ids: string[] | null
         measurement_checks: { os_image: boolean; compose_release: boolean; compose_hash: boolean } | null
+        upstream_carve_outs?: string[]
     } | null
     endpoint_status: number
     endpoint_body: string
@@ -119,6 +120,7 @@ describe('probe_attestation vectors', () => {
                       verifierId: sc.verdict.verifier_id,
                       attestedAt: sc.verdict.attested_at_ms,
                       ...(sc.verdict.attested_model_ids !== null && { attestedModelIds: sc.verdict.attested_model_ids }),
+                      ...(sc.verdict.upstream_carve_outs !== undefined && { upstreamCarveOuts: sc.verdict.upstream_carve_outs }),
                       ...(sc.verdict.measurement_checks !== null && {
                           detail: {
                               measurementChecks: {

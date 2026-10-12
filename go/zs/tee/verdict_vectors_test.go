@@ -135,6 +135,8 @@ type verdictExpect struct {
 	// MeasurementChecks is null on a refusal and on a stub pass. Routing
 	// reads it, so the two verifiers must agree on it as on the pass itself.
 	MeasurementChecks *verdictChecks `json:"measurement_checks"`
+	// UpstreamCarveOuts is absent unless the verdict reports some.
+	UpstreamCarveOuts []string `json:"upstream_carve_outs,omitempty"`
 }
 
 type verdictChecks struct {
@@ -328,11 +330,12 @@ func replayVerdictCase(f *verdictVectorsFile, c verdictCase) (verdictExpect, err
 		EphemeralRecipientPubkey: c.Node.EphemeralRecipientPubkey,
 	})
 	got := verdictExpect{
-		Pass:             verdict.Pass,
-		FailureTag:       &verdict.FailureTag,
-		VerifierID:       verdict.VerifierID,
-		AttestedModelIDs: verdict.AttestedModelIDs,
-		CarriedCalled:    called,
+		Pass:              verdict.Pass,
+		FailureTag:        &verdict.FailureTag,
+		VerifierID:        verdict.VerifierID,
+		AttestedModelIDs:  verdict.AttestedModelIDs,
+		CarriedCalled:     called,
+		UpstreamCarveOuts: verdict.UpstreamCarveOuts,
 	}
 	if c := verdict.MeasurementChecks; c != nil {
 		got.MeasurementChecks = &verdictChecks{OSImage: c.OSImage, ComposeRelease: c.ComposeRelease, ComposeHash: c.ComposeHash}
@@ -1198,6 +1201,39 @@ func (fx *verdictFixture) cases() []verdictCase {
 	}
 	posture("posture_gateway_attested_with_aci", attested, func(c *verdictCase) {
 		c.Bundle["upstream_attestation"] = map[string]any{"protocol": inject.UpstreamProtocolACI1, "base_url": verdictGatewayURL}
+	})
+	carveOuts := []string{"root_backdoor_env:DSTACK_ROOT_PUBLIC_KEY"}
+	posture("posture_gateway_attested_reports_carve_outs", attested, func(c *verdictCase) {
+		c.Bundle["upstream_attestation"] = map[string]any{
+			"protocol": inject.UpstreamProtocolACI1, "base_url": verdictGatewayURL, "carve_outs": carveOuts,
+		}
+		c.Expect.UpstreamCarveOuts = carveOuts
+	})
+	posture("posture_gateway_attested_empty_carve_outs", attested, func(c *verdictCase) {
+		c.Bundle["upstream_attestation"] = map[string]any{
+			"protocol": inject.UpstreamProtocolACI1, "base_url": verdictGatewayURL, "carve_outs": []string{},
+		}
+	})
+	// Without the bound appraisal bit the block is not what the node vouches
+	// for, so its list is not reported either.
+	posture("posture_xai_carve_outs_not_reported", &inject.TEEPosture{
+		PlaintextTerminates: inject.PlaintextNamedUpstream, UpstreamBaseURL: "https://api.x.ai/v1", ZeroRetention: true,
+	}, func(c *verdictCase) {
+		c.Bundle["upstream_attestation"] = map[string]any{
+			"protocol": inject.UpstreamProtocolACI1, "base_url": "https://api.x.ai/v1", "carve_outs": carveOuts,
+		}
+	})
+	// xAI passes on zero retention alone, so the bound bit can be set with no
+	// block the verifier credits: neither case reports a list.
+	xaiClaimsAppraisal := &inject.TEEPosture{
+		PlaintextTerminates: inject.PlaintextNamedUpstream, UpstreamBaseURL: "https://api.x.ai/v1",
+		ZeroRetention: true, UpstreamAttested: true,
+	}
+	posture("posture_appraisal_bit_without_a_block", xaiClaimsAppraisal, none)
+	posture("posture_appraisal_bit_with_an_unknown_protocol", xaiClaimsAppraisal, func(c *verdictCase) {
+		c.Bundle["upstream_attestation"] = map[string]any{
+			"protocol": "other/1", "base_url": "https://api.x.ai/v1", "carve_outs": carveOuts,
+		}
 	})
 	posture("posture_gateway_attested_without_a_block", attested, func(c *verdictCase) {
 		c.refuse(FailurePostureUpstreamUnverifiable, VerifierIDDstack)
