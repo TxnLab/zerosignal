@@ -407,9 +407,10 @@ type PayerDeposit struct {
 // deposit (not opted in) — the contract probes app_opted_in and returns a
 // zero tuple in that case, so callers can treat AlgoBalance == 0 as "no
 // pool yet". The payer rides ForeignAccounts so the contract's local-state
-// read resolves under simulate; the payer is also the (empty-signature)
-// simulate sender, so it must be a funded on-chain account (true for the
-// proxy's own payer wallet).
+// read resolves under simulate. The simulate is sent as the application
+// account, which exists and holds ALGO on any live deployment, as the TS
+// SDK's readonly calls are: sent as the payer it would fail for one whose
+// spendable ALGO is below the fee, a pool that can still serve.
 func (c *Client) ReadPayerDeposit(ctx context.Context, payerAddr string) (PayerDeposit, error) {
 	addr, err := types.DecodeAddress(payerAddr)
 	if err != nil {
@@ -428,7 +429,7 @@ func (c *Client) ReadPayerDeposit(ctx context.Context, payerAddr string) (PayerD
 	if err := atc.AddMethodCall(transaction.AddMethodCallParams{
 		AppID:           c.AppID,
 		Method:          method,
-		Sender:          addr,
+		Sender:          c.AppAddr,
 		SuggestedParams: sp,
 		OnComplete:      types.NoOpOC,
 		Signer:          transaction.EmptyTransactionSigner{},

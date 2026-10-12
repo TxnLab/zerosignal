@@ -503,6 +503,20 @@ The chain arrives as an `MbrPoolChain`: the escrow app's readonly calls, the pay
 balance, and the deposit group. Calls aren't single-flight, so a host that can run two at once
 for one payer serializes them, or both may deposit.
 
+## Doctor
+
+`npx @txnlab/zerosignal doctor --address <address> [--network testnet]` checks what a payer
+address needs before a request can succeed, without signing anything: algod, the escrow app,
+the account's ALGO, its USDC opt-in and balance, the prepaid MBR pool (and what the first
+request will deposit), and one discovery cycle over the fleet. It exits 1 when a check fails,
+2 on a usage error and 3 when the doctor itself fails. `--json` prints the report, `--direct`
+probes nodes without relays, `--allow-staging` and `--allow-private-hosts` match a Client's
+settings of those names, and `--algod-url`, `--algod-token` and `--escrow-app-id` point it at
+another chain. `diagnose(config, address)`
+is the same as a function, taking a `Config` without a signer, and `doctorChecks(readings)` is
+the judgment alone. Go's `zs.Diagnose` and `zs.DoctorChecks` are the twins, and
+`testdata/doctor_vectors.json` pins the checks' statuses and wording across the two.
+
 ## Errors and events
 
 The SDK's own failures are `ZsError`s. Branch on `kind`, the stable contract; `code` is

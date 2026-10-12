@@ -99,7 +99,7 @@ The canonical implementation; it generates every golden vector.
 | `wallet` | A payer's local wallet: generate or import a recovery phrase, held in the OS keychain or a passphrase-encrypted file, shared by every zerosignal program on the machine. Feeds `keystore` through `Wallet.Provider`; `LoadPayer` loads it with the environment's keys and picks a `zs.Signer`. |
 | `httpx` | A tuned, shared `http.Transport` for node↔node and payer↔node calls, with a private-address dial guard. |
 | `gcplog` | `slog` attribute names for Google Cloud Logging. |
-| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts. Used by `zs-proxy`, the TUI's `-direct` mode, and `cmd/zschat`. |
+| `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts, and `Diagnose`, the read-only doctor. Used by `zs-proxy`, the TUI's `-direct` mode, and `cmd/zschat`. |
 | `zs/handler` | The OpenAI-compatible HTTP surface over a `zs.Client`: chat completions, responses, the emulated `/v1/completions`, image generation and edits, model discovery, `/v1/zs/details`. |
 | `zs/tee` | Verifies a node's published attestation evidence: the bundle checks every platform shares, the dstack TDX verifier, and the process-wide Intel collateral cache. |
 | `zs/tokenize` | The safe input-token upper bound a payer reserves against. |

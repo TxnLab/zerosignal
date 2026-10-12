@@ -14,6 +14,7 @@ export {
     type ChainOperatorSourceOptions,
     type ChainReadOptions,
     FETCH_BOX_CONCURRENCY,
+    NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
     SIGNER_BALANCE_TIMEOUT_MS,
     fetchAllOperators,

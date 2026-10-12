@@ -27,6 +27,15 @@ export * from './client.js'
 export * from './config.js'
 export * from './decode.js'
 export * from './details.js'
+export {
+    type DoctorCheck,
+    type DoctorNode,
+    type DoctorReadings,
+    type DoctorReport,
+    type DoctorStatus,
+    diagnose,
+    doctorChecks,
+} from './doctor.js'
 export * from './errors.js'
 export * from './escrow/index.js'
 export * from './estimate.js'

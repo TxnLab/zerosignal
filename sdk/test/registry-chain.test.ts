@@ -30,6 +30,7 @@ import {
     BoxValuesUnsupportedError,
     type ChainReadOptions,
     FETCH_BOX_CONCURRENCY,
+    NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
     fetchAllOperators,
     fetchNodesForOperators,
@@ -530,7 +531,10 @@ describe('the chain read', () => {
         const fake = new FakeAlgod()
         const algod = new algosdk.Algodv2(fake, '')
         await expect(new ChainOperatorSource({ algod, escrowAppId: 0n }).fetchChain()).rejects.toThrow('escrowAppId is 0')
-        await expect(sourceOf(fake).fetchChain()).rejects.toThrow('no operators found on chain for escrow app 1234')
+        // A class, not just a message: the doctor reads an empty fleet off it.
+        const empty = sourceOf(fake).fetchChain()
+        await expect(empty).rejects.toThrow('no operators found on chain for escrow app 1234')
+        await expect(empty).rejects.toBeInstanceOf(NoOperatorsError)
         const noAlgod = new ChainOperatorSource({ algod: undefined as unknown as algosdk.Algodv2, escrowAppId: APP })
         await expect(noAlgod.fetchChain()).rejects.toThrow('algod is not set')
     })
