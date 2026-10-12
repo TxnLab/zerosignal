@@ -88,8 +88,9 @@ export interface Stream {
      * Runs the turn and yields its events in order, then throws the turn's
      * error, if any; err reports it too. A loop that stops reading early is
      * treated as a caller who left: before generation completes the node is
-     * told to stop; after it the receipt is still collected and the ticket
-     * settled, and the loop's exit waits for that. Readable once.
+     * told to stop; after it the receipt is still read for up to the drain
+     * timeout and the ticket settled, and the loop's exit waits for that.
+     * Readable once.
      */
     events(): AsyncIterable<Event>
     /** The terminal error of a turn whose events loop has finished, or undefined. */

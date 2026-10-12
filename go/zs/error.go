@@ -35,8 +35,10 @@ const (
 	KindFunds Kind = "funds"
 	// KindSpendCap: the Config.SpendGuard refused the charge.
 	KindSpendCap Kind = "spend_cap"
-	// KindOperatorFault: the operator misbehaved; the SDK protested or
-	// excluded the node. Paid or not depending on when it was caught.
+	// KindOperatorFault: the operator broke the protocol (a ticket priced
+	// past the caller's limits, a reused ticket, a reply that is unsealed or
+	// unreadable) and the SDK ended the turn. Paid or not depending on when it
+	// was caught: before the open nothing was paid.
 	KindOperatorFault Kind = "operator_fault"
 	// KindUpstream: the provider behind the node failed after payment; the
 	// charge follows the node's receipt, often zero. Err is a *ProviderError

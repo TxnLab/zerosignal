@@ -447,8 +447,10 @@ export async function forwardStream(
                     upstream.abort()
                 }, deps.drainTailTimeoutMs ?? DRAIN_TAIL_TIMEOUT_MS)
             } else {
-                // Left before the node finished: stop it. Nothing was
-                // delivered whole, so a $0 settle is right.
+                // Left before the node finished: stop it. No receipt
+                // arrives, so nothing is acked; a node that had streamed
+                // output claims its estimate alone, one that had not is
+                // refunded.
                 abandonedPreGen = true
                 upstream.abort()
             }
