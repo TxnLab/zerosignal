@@ -41,6 +41,7 @@ func TestErrorKinds(t *testing.T) {
 		"mbr_pool_exhausted":              KindBusy,
 		"canceled":                        KindInterrupted,
 		"free_quota_exhausted":            KindFunds,
+		"payer_not_opted_in":              KindFunds,
 		"wallet_unfunded":                 KindFunds,
 		"mbr_pool_underfunded":            KindFunds,
 		"spend_cap_exceeded":              KindSpendCap,

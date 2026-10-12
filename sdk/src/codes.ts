@@ -42,6 +42,7 @@ export const errorKinds: ReadonlyMap<string, Kind> = new Map<string, Kind>([
     ['canceled', 'interrupted'],
 
     ['free_quota_exhausted', 'funds'],
+    ['payer_not_opted_in', 'funds'],
     ['wallet_unfunded', 'funds'],
     ['mbr_pool_underfunded', 'funds'],
     ['spend_cap_exceeded', 'spend_cap'],
