@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>ZeroSignal OpenAI shim</title>
+        <style>
+            body { font: 15px/1.5 system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+            input, select, textarea, button { font: inherit; width: 100%; box-sizing: border-box; margin: 0.25rem 0; }
+            textarea { min-height: 5rem; }
+            pre { white-space: pre-wrap; background: #f4f4f5; padding: 1rem; border-radius: 6px; min-height: 3rem; }
+            #status { color: #52525b; font-size: 13px; }
+        </style>
+    </head>
+    <body>
+        <h1>ZeroSignal through the OpenAI SDK</h1>
+        <p id="status">Paste the paying account's 25-word mnemonic to start. It stays in this tab's memory.</p>
+        <input id="mnemonic" type="password" autocomplete="off" placeholder="word word …" />
+        <select id="network">
+            <option value="mainnet">mainnet (real USDC)</option>
+            <option value="testnet">testnet</option>
+        </select>
+        <button id="connect">Connect</button>
+        <select id="model" disabled></select>
+        <textarea id="prompt" placeholder="Ask something">Why is the sky blue?</textarea>
+        <button id="send" disabled>Send</button>
+        <pre id="answer"></pre>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

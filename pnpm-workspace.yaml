@@ -5,3 +5,6 @@
 packages:
   - ts
   - sdk
+  # Built against sdk/ as workspace:*, so `make test` typechecks them against
+  # the code they document; never published.
+  - examples/*

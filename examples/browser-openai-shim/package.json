@@ -1,0 +1,19 @@
+{
+    "name": "@zerosignal-examples/browser-openai-shim",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@txnlab/zerosignal": "workspace:*",
+        "algosdk": "3.6.0",
+        "openai": "^6.34.0"
+    },
+    "devDependencies": {
+        "typescript": "5.6.3",
+        "vite": "^8.0.0"
+    }
+}
