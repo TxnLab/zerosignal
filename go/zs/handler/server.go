@@ -288,8 +288,8 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 	// Explicit list rather than `*` so the X-Zs-* response headers stay
 	// readable off cross-origin responses by name. The X-Zs-* entries
-	// mirror setReceiptUsageHeaders in usage.go — keep them in sync
-	// when adding a new non-streaming response header.
+	// mirror setReceiptUsageHeaders in usage.go;
+	// TestCORSExposesEveryUsageHeader fails when one is missing.
 	h.Set("Access-Control-Expose-Headers",
 		"Content-Type, Retry-After, X-Should-Retry, "+
 			"X-Zs-Ticket-Id, X-Zs-Operator-Id, X-Zs-Node-Id, X-Zs-Operator-Owner-Addr, "+
@@ -297,6 +297,8 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 			"X-Zs-Inference-Amount, X-Zs-Inference-Currency, X-Zs-Inference-Decimals, "+
 			"X-Zs-Inference-Amount-Usd, X-Zs-Max-Price-Amount, X-Zs-Min-Price-Amount, "+
 			"X-Zs-Fees-Microalgos, X-Zs-Fees-Usd, X-Zs-Algo-Usd-Rate, "+
+			"X-Zs-Fee-Bps, X-Zs-Discount-Bps, X-Zs-Platform-Fee-Microusdc, X-Zs-Refund-Microusdc, "+
+			"X-Zs-Total-Debit-Microusdc, X-Zs-Total-Debit-Usd, "+
 			"X-Zs-Max-Output-Clamped")
 	h.Set("Access-Control-Max-Age", "600")
 }

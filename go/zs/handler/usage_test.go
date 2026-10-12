@@ -8,6 +8,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -106,5 +107,31 @@ func TestSetUsageHeaders_NamesTheNode(t *testing.T) {
 	})
 	if h.Get("X-Zs-Operator-Id") != "7" || h.Get("X-Zs-Node-Id") != "2" {
 		t.Errorf("headers name operator %q node %q, want 7/2", h.Get("X-Zs-Operator-Id"), h.Get("X-Zs-Node-Id"))
+	}
+}
+
+// A browser reads a response header only when CORS exposes it by name, so a
+// usage header left off the list is invisible to every browser caller.
+func TestCORSExposesEveryUsageHeader(t *testing.T) {
+	h := http.Header{}
+	// Every branch on: a charge, an ALGO rate and a readable fee rate.
+	setReceiptUsageHeaders(h,
+		&ticket.UsageReceipt{TicketID: "tid", AmountCharged: 1_000},
+		&ticket.Ticket{MaxPrice: 2_000},
+		zs.Operator{ID: 7, NodeID: 2, OwnerAddr: "OWNER"},
+		1_000, 0, 0.25, 1000, 0, true)
+	w := httptest.NewRecorder()
+	writeCORSHeaders(w, httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil))
+	exposed := map[string]bool{}
+	for name := range strings.SplitSeq(w.Header().Get("Access-Control-Expose-Headers"), ",") {
+		exposed[http.CanonicalHeaderKey(strings.TrimSpace(name))] = true
+	}
+	for name := range h {
+		if !exposed[name] {
+			t.Errorf("Access-Control-Expose-Headers omits %s", name)
+		}
+	}
+	if len(h) < 21 {
+		t.Fatalf("only %d usage headers set; the fixture no longer reaches every branch", len(h))
 	}
 }
