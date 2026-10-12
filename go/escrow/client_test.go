@@ -1928,6 +1928,46 @@ func newFakeAlgodForSimulate(t *testing.T, failureMessage string) protoalgod.Cli
 	return c
 }
 
+// ReadPayerDeposit simulates as the application account, so it answers for a
+// payer with too little ALGO to send the call itself.
+func TestReadPayerDeposit_SimulatesAsTheApp(t *testing.T) {
+	const appID = uint64(1234)
+	payer := crypto.GenerateAccount()
+	var sender types.Address
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/v2/transactions/params"):
+			w.Header().Set("Content-Type", "application/json")
+			gh := base64.StdEncoding.EncodeToString(make([]byte, 32))
+			_, _ = io.WriteString(w, `{"consensus-version":"v30","fee":1000,"genesis-id":"dev-v1","genesis-hash":"`+gh+`","last-round":100,"min-fee":1000}`)
+		case strings.HasSuffix(r.URL.Path, "/v2/transactions/simulate"):
+			body, _ := io.ReadAll(r.Body)
+			var req models.SimulateRequest
+			if err := msgpack.Decode(body, &req); err != nil || len(req.TxnGroups) != 1 || len(req.TxnGroups[0].Txns) != 1 {
+				t.Errorf("simulate request: %v", err)
+			} else {
+				sender = req.TxnGroups[0].Txns[0].Txn.Sender
+			}
+			http.Error(w, `{"message":"stop here"}`, http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	ac, err := protoalgod.NewClient(srv.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(appID, ac)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = c.ReadPayerDeposit(context.Background(), payer.Address.String())
+	if want := crypto.GetApplicationAddress(appID); sender != want {
+		t.Errorf("simulate sender = %s, want the app account %s", sender, want)
+	}
+}
+
 // ReadFreeQuotaMbr must classify ONLY an ABI-router reject (a logic eval
 // failure) as "this app predates the free-ticket quota". Callers latch that
 // answer for the process lifetime — RefreshConfig maps it to a 0 sizing term —

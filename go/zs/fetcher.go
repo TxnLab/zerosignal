@@ -287,6 +287,10 @@ func (s *ChainOperatorSource) FetchChain(ctx context.Context) ([]Operator, error
 
 // readChainNodes is FetchChain's box walk: operator records, then one
 // Operator per active node.
+// errNoOperators is a chain read that found no operator registered, which the
+// doctor reports as an empty fleet rather than as a failed read.
+var errNoOperators = errors.New("no operators found on chain")
+
 func (s *ChainOperatorSource) readChainNodes(ctx context.Context) ([]Operator, error) {
 	if s.Algod == nil {
 		return nil, errors.New("ChainOperatorSource.Algod is nil")
@@ -300,7 +304,7 @@ func (s *ChainOperatorSource) readChainNodes(ctx context.Context) ([]Operator, e
 		return nil, fmt.Errorf("fetch operators: %w", err)
 	}
 	if len(records) == 0 {
-		return nil, fmt.Errorf("no operators found on chain for escrow app %d", s.EscrowAppID)
+		return nil, fmt.Errorf("%w for escrow app %d", errNoOperators, s.EscrowAppID)
 	}
 
 	return s.resolveActiveNodes(ctx, records)

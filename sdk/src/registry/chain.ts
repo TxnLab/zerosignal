@@ -93,6 +93,17 @@ export class BoxValuesUnsupportedError extends Error {
 }
 
 /**
+ * NoOperatorsError is a chain read that found no operator registered, which
+ * the doctor reports as an empty fleet rather than as a failed read.
+ */
+export class NoOperatorsError extends Error {
+    constructor(appId: bigint) {
+        super(`no operators found on chain for escrow app ${appId}`)
+        this.name = 'NoOperatorsError'
+    }
+}
+
+/**
  * listApplicationBoxes returns every box of the app whose name starts with
  * prefix, values included, paging until algod runs out.
  *
@@ -463,7 +474,7 @@ export class ChainOperatorSource {
         } catch (err) {
             throw new Error(`fetch operators: ${message(err)}`, { cause: err })
         }
-        if (records.length === 0) throw new Error(`no operators found on chain for escrow app ${this.#appId}`)
+        if (records.length === 0) throw new NoOperatorsError(this.#appId)
         return this.#resolveActiveNodes(c, records, signal)
     }
 

@@ -43,6 +43,15 @@ if (!mode) {
             if (!existsSync(new URL(`../${target}`, import.meta.url))) fail(`export ${key}: ${target} is missing`)
         }
     }
+    // Each command npx would run: built, executable by its shebang, and able
+    // to load what it imports.
+    for (const [name, target] of Object.entries(pkg.bin ?? {})) {
+        const file = new URL(`../${target}`, import.meta.url)
+        if (!existsSync(file)) fail(`bin ${name}: ${target} is missing`)
+        if (!readFileSync(file, 'utf8').startsWith('#!/usr/bin/env node\n')) fail(`bin ${name}: ${target} has no node shebang`)
+        const r = spawnSync(process.execPath, [fileURLToPath(file), '--help'], { cwd: pkgDir, encoding: 'utf8' })
+        if (r.status !== 0 || !r.stdout.includes('usage:')) fail(`bin ${name} --help exited ${r.status}: ${r.stderr}`)
+    }
     const runs = [
         [process.execPath, [self, 'guarded']],
         [process.execPath, ['--conditions=bun', self, 'plain']],

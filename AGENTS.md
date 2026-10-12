@@ -45,6 +45,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `zs/reconcile.go` `decideTicket` | `sdk/src/reconcile.ts` `decideTicket` | `reconcile_vectors.json` |
 | `zs/wallet.go` ack-settle | `sdk/src/ack.ts` | `ack_settle_vectors.json` |
 | `zs/wallet.go` deposit / MBR | `sdk/src/mbr.ts` | `deposit_plan_vectors.json` |
+| `zs/doctor.go` `DoctorChecks` | `sdk/src/doctor.ts` `doctorChecks` | `doctor_vectors.json` (ids, statuses and message text; the reads behind them are mirrored but unpinned, below) |
 | `go/escrow` group checks | `sdk/src/escrow/{open,settle}.ts` | `escrow_group_vectors.json` |
 | `zs/decode.go` | `sdk/src/decode.ts` | `stream_events_vectors.json` |
 | `zs/operator.go`, including the TEE routing rule `TEEStatus.Attested` (a pass that rested on both the OS-image and the compose-release check) | `sdk/src/operator.ts` (`isTeeAttested`) | `operator_vectors.json` |
@@ -69,6 +70,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 - `zs/relay_latency.go` ↔ `routing/latency.ts`: the float EWMAs aren't vectored.
 - `zs/malicious_nodes.go` ↔ `routing/exclusion.ts`.
 - `zs/refund_watchdog.go` ↔ `sdk/src/refund-watchdog.ts`: only the `classify` it calls is pinned.
+- `zs/doctor.go` `Diagnose` / `gatherDoctorReadings` ↔ `sdk/src/doctor.ts` `diagnose` / `gatherDoctorReadings`: how the reads become `DoctorReadings`, tested per language against a fake chain. Both simulate as the application account, so they answer for a payer with no ALGO.
 - `zs/assemble.go` (`buildNetworkParts`, `newChainSource`, `registryConfig`) and the store defaults in `New` ↔ `sdk/src/assemble.ts` and `Client.create`: the wiring from `Config` to discovery. Each `Discovery` setting dropped there is a silent no-op, so `sdk/test/client-registry.test.ts` checks the ones it can observe.
 
 An escrow `open()` / `settle()` argument change also touches the hand-written group verifiers (`sdk/src/escrow/open.ts` `OPEN_METHOD_SIGNATURE`, and `go/escrow`'s checks). Regenerate `escrow_group_vectors.json` (`go test ./escrow -run TestGroupVectors -update`) along with `pnpm gen:client`.
