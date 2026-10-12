@@ -344,6 +344,14 @@ describe('reserve', () => {
             expect(err).toMatchObject({ code: 'free_quota_exhausted', nodeMessage: 'spent', retryAfterMs: 76_172_000 })
         })
 
+        // Every node reads the same account, so no other node would accept it.
+        it('reads a 403 payer_not_opted_in as a PayerRefusalError', async () => {
+            const { node, fetch } = await fakeNode(() => refuse(403, 'payer_not_opted_in', 'opt in to USDC'))
+            const err = await reserve(call(node, fetch)).catch((e) => e)
+            expect(err).toBeInstanceOf(PayerRefusalError)
+            expect(err).toMatchObject({ code: 'payer_not_opted_in', nodeMessage: 'opt in to USDC' })
+        })
+
         it('reads another 403 as a ReserveHTTPError', async () => {
             const { node, fetch } = await fakeNode(() => refuse(403, 'forbidden'))
             await expect(reserve(call(node, fetch))).rejects.toMatchObject({ name: 'ReserveHTTPError', status: 403 })

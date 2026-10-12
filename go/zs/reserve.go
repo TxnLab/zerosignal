@@ -200,9 +200,10 @@ func IsSize(err error) bool {
 // congested and inviting a retry storm against a condition that can take a full
 // day to clear. So this is terminal: stop iterating and surface it.
 //
-// (`payer_not_opted_in` is the same shape and a natural addition here; it is
-// left out for now because the proxy's own EnsureDeposit normally prevents it
-// and changing that path is not in this change's blast radius.)
+// `payer_not_opted_in` (the payer holds no prepaid-pool opt-in in the escrow
+// app, SPEC § 3a "Funds gate") is
+// the same shape: every node reads the same account, and each refusal costs
+// the payer a strike on that node.
 type PayerRefusalError struct {
 	Code       string
 	Message    string
@@ -242,6 +243,7 @@ func IsPayerRefusal(err error) bool {
 // dispatch behavior and should match what the node actually emits.
 var payerRefusalCodes = map[string]struct{}{
 	"free_quota_exhausted": {},
+	"payer_not_opted_in":   {},
 }
 
 // parsePayerRefusal decodes an OpenAI-shaped error body and returns a

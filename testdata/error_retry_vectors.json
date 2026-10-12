@@ -120,6 +120,11 @@
     "retryable": true
   },
   {
+    "kind": "funds",
+    "code": "payer_not_opted_in",
+    "retryable": false
+  },
+  {
     "kind": "invalid_request",
     "code": "pin_conflicts_with_continuation",
     "retryable": false

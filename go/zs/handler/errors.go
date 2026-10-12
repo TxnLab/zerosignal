@@ -88,6 +88,7 @@ var errorShapes = map[string]errorShape{
 	"canceled": {499, "proxy_error"},
 
 	"free_quota_exhausted":  {http.StatusForbidden, "invalid_request_error"},
+	"payer_not_opted_in":    {http.StatusForbidden, "invalid_request_error"},
 	"wallet_unfunded":       {http.StatusPaymentRequired, "insufficient_quota"},
 	"mbr_pool_underfunded":  {http.StatusPaymentRequired, "insufficient_quota"},
 	"spend_cap_exceeded":    {http.StatusPaymentRequired, "insufficient_quota"},

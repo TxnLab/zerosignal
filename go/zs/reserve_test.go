@@ -28,6 +28,18 @@ import (
 	"github.com/TxnLab/zerosignal/go/wire"
 )
 
+// The payer-scoped codes end failover to every node; any other code doesn't.
+func TestParsePayerRefusal(t *testing.T) {
+	for code, want := range map[string]bool{"free_quota_exhausted": true, "payer_not_opted_in": true, "forbidden": false} {
+		body := fmt.Appendf(nil, `{"error":{"code":%q,"message":"m"}}`, code)
+		if got := parsePayerRefusal(body, time.Minute); (got != nil) != want {
+			t.Errorf("%s: refusal %v, want %v", code, got, want)
+		} else if got != nil && (got.Code != code || got.Message != "m" || got.RetryAfter != time.Minute) {
+			t.Errorf("%s: %+v", code, got)
+		}
+	}
+}
+
 // reserveTestHarness bundles everything a reserve test needs: a fake
 // node HTTP server, the operator that points at it, and the identity
 // (for sealed-request tests).
