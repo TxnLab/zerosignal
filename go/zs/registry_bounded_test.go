@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -49,6 +50,7 @@ func (b *boundedFakeSource) EnrichSubset(_ context.Context, ops []Operator, prob
 			ops[i].Reachable = true
 			ops[i].Probed = true
 			ops[i].ReachableAsOf = now
+			ops[i].LastRefreshAt = now
 		}
 	}
 }
@@ -185,6 +187,38 @@ func TestDynamicRegistry_DemandPrioritizesFastServers(t *testing.T) {
 		if !probed[NodeRef{Op: id, Node: 0}] {
 			t.Fatalf("fastest demanded 'hot' server node %d not probed; probed=%v", id, probed)
 		}
+	}
+}
+
+// TestDynamicRegistry_ProbesUnknownNodesBeforeTheSweep: a node new on chain,
+// far past the sweep cursor, is probed in the next bounded cycle, while a node
+// that was tried and never answered waits its turn. It fails if the registry
+// stops carrying LastRefreshAt or ReachableAsOf onto the rows before it picks
+// the probe set: every row would then look unknown, and the set would be the
+// plain sweep's.
+func TestDynamicRegistry_ProbesUnknownNodesBeforeTheSweep(t *testing.T) {
+	const N = 20
+	prev := make([]Operator, N)
+	for i := range prev {
+		prev[i] = chainReadOp(uint64(i+1), 0)
+		prev[i].Reachable, prev[i].ReachableAsOf, prev[i].LastRefreshAt = true, time.Now(), time.Now()
+	}
+	// Tried last cycle and down: known, though it never answered.
+	prev[14].Reachable, prev[14].ReachableAsOf = false, time.Time{}
+
+	chain := make([]Operator, N+1)
+	for i := range chain {
+		chain[i] = chainReadOp(uint64(i+1), 0)
+	}
+	src := &boundedFakeSource{chainOps: chain}
+	reg := boundedReg(t, src, prev, DynamicRegistryConfig{
+		RefreshInterval: time.Hour, RefreshTimeout: time.Second, MaxCacheAge: 0, ProbeBudget: 4,
+	})
+	reg.refresh(context.Background())
+
+	want := map[NodeRef]bool{{Op: 1}: true, {Op: 2}: true, {Op: 3}: true, {Op: N + 1}: true}
+	if got := src.probedRefs(); !maps.Equal(got, want) {
+		t.Fatalf("probed %v, want %v: the new node ahead of the sweep, the failed one not", got, want)
 	}
 }
 

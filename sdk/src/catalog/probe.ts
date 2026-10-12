@@ -20,6 +20,12 @@ export interface ProbeNode {
     tokensPerSecEwma?: bigint | number | undefined
     /** The model ids this node was last seen serving. */
     models: readonly string[]
+    /**
+     * Unix ms of the last probe attempt and of the last answer, saved or
+     * carried; 0 or absent is never. A node with neither is untried.
+     */
+    lastRefreshAt?: number | undefined
+    reachableAsOf?: number | undefined
 }
 
 /** The probe set for one cycle and the sweep cursor the next cycle starts from. */
@@ -49,10 +55,13 @@ export function probeResponsivenessScore(n: Pick<ProbeNode, 'ttftEwmaMs' | 'toke
 
 /**
  * The nodes to probe this cycle, bounded by `budget`: each recently demanded
- * model's fastest servers (at most `targetTopK` each, up to three quarters of
- * the budget), then a round-robin sweep from `cursor` that fills the rest, so
- * every node is eventually re-probed and new models found. A fleet within the
- * budget, or no budget, probes every node and leaves the cursor alone.
+ * model's fastest servers (at most `targetTopK` each), then the untried nodes
+ * from `cursor` on, which nothing is known about, together up to three
+ * quarters of the budget (all of it under 4); then a round-robin sweep from
+ * `cursor` that fills the rest, so every node is eventually re-probed and new
+ * models found. A
+ * fleet within the budget, or no budget, probes every node and leaves the
+ * cursor alone.
  *
  * `nodes` must be in (op, node) order and `demand` most recent first. The
  * cursor advances by the nodes the sweep scanned, including ones demand had
@@ -82,6 +91,13 @@ export function selectProbeSet<N extends ProbeNode>(
         for (let i = 0; i < servers.length && i < targetTopK && chosen.size < demandCap; i++) add(servers[i]!.n)
     }
     const total = nodes.length
+    // Untried nodes share demand's cap, so the sweep keeps its quarter (with
+    // a budget of 4 or more), and are scanned from the cursor, so a backlog
+    // larger than the cap rotates. A smaller one is taken whole.
+    for (let i = 0; i < total && chosen.size < demandCap; i++) {
+        const n = nodes[(cursor + i) % total]!
+        if (!n.lastRefreshAt && !n.reachableAsOf) add(n)
+    }
     let scanned = 0
     for (; scanned < total && chosen.size < budget; scanned++) add(nodes[(cursor + scanned) % total]!)
     return { probe: [...chosen.values()], cursor: (cursor + scanned) % total }
