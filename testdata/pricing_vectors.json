@@ -922,6 +922,207 @@
       }
     },
     {
+      "name": "skip_max_price_accepts_any_ceiling",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 1000000,
+        "min_price": 1000,
+        "max_price": 5000,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "skip_max_price": true
+      },
+      "expected": null
+    },
+    {
+      "name": "skip_max_price_still_bounds_rates",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 1000000,
+        "min_price": 1000,
+        "max_price": 5000,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "skip_max_price": true
+      },
+      "expected": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
+    },
+    {
+      "name": "skip_max_price_still_checks_cache_discount",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 2500000,
+        "min_price": 1000,
+        "max_price": 4040,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "skip_max_price": true
+      },
+      "expected": {
+        "check": "cache_read_discount",
+        "field": "cache_read_rate",
+        "want": 2000000,
+        "got": 2500000
+      }
+    },
+    {
+      "name": "max_price_at_most_accepts_equal",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 1000000,
+        "min_price": 1000,
+        "max_price": 4040,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "max_price_at_most": true
+      },
+      "expected": null
+    },
+    {
+      "name": "max_price_at_most_accepts_below",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 1000000,
+        "min_price": 1000,
+        "max_price": 4039,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "max_price_at_most": true
+      },
+      "expected": null
+    },
+    {
+      "name": "max_price_at_most_refuses_above",
+      "ticket": {
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "cache_read_rate": 1000000,
+        "min_price": 1000,
+        "max_price": 4041,
+        "output_usage_type": 0
+      },
+      "advertised": {
+        "input_usd_per_1m": 2,
+        "output_usd_per_1m": 4,
+        "cache_read_rate_usd_per_1m": 1,
+        "min_charge_output_tokens": 1000,
+        "min_charge_micro_usdc": 100,
+        "long_context_threshold_tokens": 0
+      },
+      "fee_bps": 100,
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "policy": {
+        "rate_max_multiple": 2,
+        "input_count_tolerance": 0.1,
+        "fail_open": true,
+        "max_price_at_most": true
+      },
+      "expected": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 4040,
+        "got": 4041
+      }
+    },
+    {
       "name": "input_rate_above_2x",
       "ticket": {
         "input_count": 1000,

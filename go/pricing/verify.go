@@ -69,6 +69,36 @@ type Policy struct {
 	// Recommended true — an honest send must never be blocked by absent catalog
 	// data.
 	FailOpen bool
+	// SkipMaxPrice skips the max_price recompute and runs every other check:
+	// for a caller that can't bound the ceiling at all (a headroom that
+	// overflows). feeBps is then unused.
+	SkipMaxPrice bool
+	// MaxPriceAtMost checks max_price as at most the recomputed value rather
+	// than equal to it: for a caller that recomputes from upper bounds, such
+	// as ProtocolFeeBpsMax when the fee isn't known, or ImageToolHeadroom for
+	// an image-tool budget.
+	MaxPriceAtMost bool
+}
+
+// ProtocolFeeBpsMax is the escrow contract's PROTOCOL_FEE_BPS_MAX:
+// setProtocolFeeBps refuses a fee above it, so a ceiling recomputed at it
+// bounds a ticket priced at any fee the chain can hold.
+const ProtocolFeeBpsMax = 2000
+
+// ImageToolHeadroom bounds what a node folds into max_price for an image-tool
+// budget: budget × the advertised worst-case per-image cost, scaled by
+// RateMaxMultiple. The ticket doesn't carry the per-image cost, so the
+// multiple absorbs a reprice between the details probe and the reserve, as it
+// does for the signed rates. An error means the product overflows a uint64.
+func ImageToolHeadroom(budget, perImageCap uint64, pol Policy) (uint64, error) {
+	if budget == 0 || perImageCap == 0 {
+		return 0, nil
+	}
+	c := scaleByMultiple(perImageCap, pol.RateMaxMultiple)
+	if c > math.MaxUint64/budget {
+		return 0, fmt.Errorf("image-tool headroom overflows: %d images at %d", budget, c)
+	}
+	return budget * c, nil
 }
 
 // DefaultPolicy preserves the interim client gate's 2x rate ceiling, reuses the
@@ -99,7 +129,8 @@ func (v *Violation) Error() string {
 // verification"); each is named by the Violation.Check it reports:
 //
 //   - max_price           max_price == ExpectedMaxPrice(...) (exact, from the
-//     ticket's own signed numbers + the on-chain feeBps)
+//     ticket's own signed numbers + the on-chain feeBps), or <= it under
+//     Policy.MaxPriceAtMost
 //   - rate_bound          input_rate / output_rate <= advertised * RateMaxMultiple
 //   - min_charge_bound    min_price <= advertised MinChargeFloor * RateMaxMultiple
 //   - input_count_bound   input_count <= reserveInputCount * (1 + InputCountTolerance)
@@ -127,28 +158,29 @@ func (v *Violation) Error() string {
 //
 // Image / character / seconds tickets are priced by a different primitive and are
 // skipped (nil) — the caller should verify those with imageprice/videoprice.
+//
+// VerifyUnadvertised is the subset a caller with no advertised pricing for the
+// model can still run.
 func VerifyTicketPrice(t ticket.Ticket, adv Advertised, feeBps, reserveInputCount, imageToolBudget uint64, pol Policy) *Violation {
-	switch t.OutputUsageType {
-	case ticket.UsageTypeImages, ticket.UsageTypeCharacters, ticket.UsageTypeSeconds:
-		return nil // priced per-image / per-char / per-second, not per-token
-	}
-
-	// cache_read_discount — a cache read is always a discount. No external reference needed, so
-	// this runs unconditionally (a ticket violating it is operator misbehaviour;
-	// the node's own startup config rejects it).
-	if t.CacheReadRate > t.InputRate {
-		return &Violation{Check: "cache_read_discount", Field: "cache_read_rate", Want: t.InputRate, Got: t.CacheReadRate,
-			Detail: "cache_read_rate exceeds input_rate; a cache read must be a discount"}
+	if v := VerifyUnadvertised(t); v != nil || !tokenPriced(t) {
+		return v
 	}
 
 	// max_price — internal consistency (exact). Recompute from the ticket's own
 	// signed rates/counts + the on-chain fee; needs no advertised data.
-	if want, err := ExpectedMaxPrice(t.InputCount, t.MaxOutputCount, t.InputRate, t.OutputRate, t.MinPrice, imageToolBudget, feeBps); err != nil {
+	if pol.SkipMaxPrice {
+		// the caller can't reproduce the ceiling; the rate checks still run
+	} else if want, err := ExpectedMaxPrice(t.InputCount, t.MaxOutputCount, t.InputRate, t.OutputRate, t.MinPrice, imageToolBudget, feeBps); err != nil {
 		if !pol.FailOpen {
 			return &Violation{Check: "max_price", Field: "max_price", Got: t.MaxPrice,
 				Detail: "max_price recompute overflowed: " + err.Error()}
 		}
 		// fail-open: cannot recompute the ceiling; skip the max_price recompute, still run the rate checks
+	} else if pol.MaxPriceAtMost {
+		if t.MaxPrice > want {
+			return &Violation{Check: "max_price", Field: "max_price", Want: want, Got: t.MaxPrice,
+				Detail: "max_price exceeds the most the ticket's rates, counts and budgets allow"}
+		}
 	} else if t.MaxPrice != want {
 		return &Violation{Check: "max_price", Field: "max_price", Want: want, Got: t.MaxPrice,
 			Detail: "max_price does not match rates x counts grossed up by the protocol fee"}
@@ -240,6 +272,28 @@ func VerifyTicketPrice(t ticket.Ticket, adv Advertised, feeBps, reserveInputCoun
 	}
 
 	return nil
+}
+
+// VerifyUnadvertised runs the one check that needs neither advertised pricing
+// nor the fee: cache_read_discount, a cache read is always a discount (a
+// ticket violating it is operator misbehaviour; the node's own startup config
+// rejects it). Like VerifyTicketPrice it skips a ticket not priced per token.
+func VerifyUnadvertised(t ticket.Ticket) *Violation {
+	if tokenPriced(t) && t.CacheReadRate > t.InputRate {
+		return &Violation{Check: "cache_read_discount", Field: "cache_read_rate", Want: t.InputRate, Got: t.CacheReadRate,
+			Detail: "cache_read_rate exceeds input_rate; a cache read must be a discount"}
+	}
+	return nil
+}
+
+// tokenPriced is false for image / character / seconds tickets, which
+// imageprice and videoprice price instead.
+func tokenPriced(t ticket.Ticket) bool {
+	switch t.OutputUsageType {
+	case ticket.UsageTypeImages, ticket.UsageTypeCharacters, ticket.UsageTypeSeconds:
+		return false
+	}
+	return true
 }
 
 // checkRateBound bounds a signed micro rate against an advertised USD/1M rate.

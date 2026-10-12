@@ -63,21 +63,26 @@ describe('verifyReservePrice vectors through the operator', () => {
 })
 
 describe('verifyReservePrice fee', () => {
-    const refused = vectors.scenarios.find((s) => s.name === 'an inflated max_price is refused')!
-    const imageBudget = vectors.scenarios.find((s) => s.name === 'an image-tool budget fails open')!
+    const atCap = vectors.scenarios.find((s) => s.name === "an unknown fee accepts a max_price at the fee cap's ceiling")!
+    const overCap = vectors.scenarios.find((s) => s.name === "an unknown fee refuses a max_price above the fee cap's ceiling")!
+    const overflow = vectors.scenarios.find((s) => s.name === 'an image-tool headroom that overflows skips the max_price check')!
 
-    it('fails open when the fee read throws', async () => {
-        const v = await verifyReservePrice({
-            ...call(refused),
-            feeBps: () => Promise.reject(new Error('algod')),
+    // As an unknown fee: max_price is bounded at the contract's fee cap.
+    it('bounds max_price at the fee cap when the fee read throws', async () => {
+        const failing = () => Promise.reject(new Error('algod'))
+        expect(await verifyReservePrice({ ...call(atCap), feeBps: failing })).toBeNull()
+        const v = await verifyReservePrice({ ...call(overCap), feeBps: failing })
+        expect(v && { check: v.check, want: v.want, got: v.got }).toEqual(overCap.want && {
+            check: overCap.want.check,
+            want: overCap.want.want,
+            got: overCap.want.got,
         })
-        expect(v).toBeNull()
     })
 
-    it('reads no fee when an image-tool budget skips the gate', async () => {
+    it('reads no fee when an overflowing headroom skips the max_price check', async () => {
         let reads = 0
         await verifyReservePrice({
-            ...call(imageBudget),
+            ...call(overflow),
             feeBps: async () => {
                 reads++
                 return 100

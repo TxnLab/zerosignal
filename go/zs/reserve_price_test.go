@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -14,6 +15,15 @@ import (
 
 	"github.com/algorand/go-algorand-sdk/v2/types"
 )
+
+func TestAddU64_FitsUpToMaxUint64(t *testing.T) {
+	if got, ok := addU64(math.MaxUint64-1, 1); !ok || got != math.MaxUint64 {
+		t.Fatalf("addU64(MaxUint64-1, 1) = (%d, %v), want (MaxUint64, true)", got, ok)
+	}
+	if _, ok := addU64(math.MaxUint64, 1); ok {
+		t.Fatal("addU64(MaxUint64, 1) overflows, want false")
+	}
+}
 
 // fakeFeeWallet is a minimal WalletOpener that also satisfies feeRateCapable so
 // feeRateNow can read a controllable protocol-fee rate.
@@ -151,12 +161,18 @@ func TestVerifyReservePrice_LongContextHighRateSubThresholdRejected(t *testing.T
 	}
 }
 
-func TestVerifyReservePrice_FailsOpenOnColdFeeCache(t *testing.T) {
+// A cold fee cache bounds max_price at the contract's fee cap: 4000 base
+// grossed up at 2000 bps is 4800.
+func TestVerifyReservePrice_ColdFeeCacheBoundsAtTheFeeCap(t *testing.T) {
 	s := newPriceTestServer(100, false) // fee not cached yet
 	tk := priceTestTicket()
-	tk.MaxPrice = 5000 // would be a max_price violation if the check ran
+	tk.MaxPrice = 4800
 	if v := s.verifyReservePrice(priceTestOperator(), priceTestReq(), tk); v != nil {
-		t.Fatalf("expected fail-open on cold fee cache, got %+v", v)
+		t.Fatalf("a max_price at the fee cap's ceiling was refused: %+v", v)
+	}
+	tk.MaxPrice = 4801
+	if v := s.verifyReservePrice(priceTestOperator(), priceTestReq(), tk); v == nil || v.Check != "max_price" {
+		t.Fatalf("a max_price above the fee cap's ceiling got %+v, want a max_price violation", v)
 	}
 }
 
@@ -171,31 +187,42 @@ func TestVerifyReservePrice_FailsOpenOnCatalogMiss(t *testing.T) {
 	}
 }
 
-func TestVerifyReservePrice_FailsOpenOnImageToolBudget(t *testing.T) {
+// An image-tool budget's headroom is bounded by the advertised per-image cap
+// × the rate multiple: 4 × 250 × 2 = 2000, grossed up 1% to 2020 over the
+// 4040 token ceiling.
+func TestVerifyReservePrice_ImageToolBudgetBoundsByTheAdvertisedCap(t *testing.T) {
 	s := newPriceTestServer(100, true)
+	op := priceTestOperator()
+	mc := op.ModelCapacities["m"]
+	mc.ImageToolRateMicroUSDC = 250
+	op.ModelCapacities["m"] = mc
 	req := priceTestReq()
-	req.ImageToolBudget = 4 // additive budget max_price can't reproduce here => skip
+	req.ImageToolBudget = 4
 	tk := priceTestTicket()
-	tk.MaxPrice = 5000 // would be a max_price violation if the check ran
-	if v := s.verifyReservePrice(priceTestOperator(), req, tk); v != nil {
-		t.Fatalf("expected fail-open with image-tool budget, got %+v", v)
+	tk.MaxPrice = 6060
+	if v := s.verifyReservePrice(op, req, tk); v != nil {
+		t.Fatalf("a max_price at the image budget's bound was refused: %+v", v)
+	}
+	tk.MaxPrice = 6061
+	if v := s.verifyReservePrice(op, req, tk); v == nil || v.Check != "max_price" {
+		t.Fatalf("a max_price above the image budget's bound got %+v, want a max_price violation", v)
 	}
 }
 
-// The image-tool skip comes before the fee read, so a skipped gate never
-// refreshes the fee cache.
-func TestReservePriceViolation_ImageBudgetReadsNoFee(t *testing.T) {
-	for _, req := range []ticket.ReserveRequest{
-		{Model: "m", InputCount: 1000, ImageToolBudget: 4},
-		{Model: "m", InputCount: 1000, ImageEditToolBudget: 2},
-	} {
-		v := reservePriceViolation(priceTestOperator(), req, priceTestTicket(), func() (uint64, bool) {
-			t.Fatal("fee read with an image-tool budget")
-			return 0, false
-		})
-		if v != nil {
-			t.Fatalf("expected the gate skipped, got %+v", v)
-		}
+// A headroom that overflows leaves nothing to bound max_price against, so the
+// fee is not read.
+func TestReservePriceViolation_OverflowingHeadroomReadsNoFee(t *testing.T) {
+	op := priceTestOperator()
+	mc := op.ModelCapacities["m"]
+	mc.ImageToolRateMicroUSDC = 1 << 40
+	op.ModelCapacities["m"] = mc
+	req := ticket.ReserveRequest{Model: "m", InputCount: 1000, ImageToolBudget: 1 << 30}
+	v := reservePriceViolation(op, req, priceTestTicket(), func() (uint64, bool) {
+		t.Fatal("fee read with an overflowing headroom")
+		return 0, false
+	})
+	if v != nil {
+		t.Fatalf("expected max_price skipped, got %+v", v)
 	}
 }
 

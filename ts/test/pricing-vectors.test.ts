@@ -121,7 +121,13 @@ interface VerifyCase {
   fee_bps: number
   reserve_input_count: number
   image_tool_budget: number
-  policy: { rate_max_multiple: number; input_count_tolerance: number; fail_open: boolean }
+  policy: {
+    rate_max_multiple: number
+    input_count_tolerance: number
+    fail_open: boolean
+    skip_max_price?: boolean
+    max_price_at_most?: boolean
+  }
   expected: { check: string; field: string; want: number; got: number } | null
 }
 interface PricingVectorsFile {
@@ -222,7 +228,13 @@ describe('pricing vectors', () => {
         c.fee_bps,
         c.reserve_input_count,
         c.image_tool_budget,
-        { rateMaxMultiple: c.policy.rate_max_multiple, inputCountTolerance: c.policy.input_count_tolerance, failOpen: c.policy.fail_open },
+        {
+          rateMaxMultiple: c.policy.rate_max_multiple,
+          inputCountTolerance: c.policy.input_count_tolerance,
+          failOpen: c.policy.fail_open,
+          skipMaxPrice: c.policy.skip_max_price ?? false,
+          maxPriceAtMost: c.policy.max_price_at_most ?? false,
+        },
       )
       expect(v && { check: v.check, field: v.field, want: v.want, got: v.got }).toEqual(c.expected)
     })

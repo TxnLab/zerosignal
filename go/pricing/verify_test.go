@@ -6,11 +6,25 @@
 package pricing_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/pricing"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
+
+// A headroom of exactly MaxUint64 still fits; one unit past it is refused, which
+// makes the caller skip the ceiling rather than check against a wrapped value.
+func TestImageToolHeadroom_FitsUpToMaxUint64(t *testing.T) {
+	pol := pricing.Policy{RateMaxMultiple: 1}
+	got, err := pricing.ImageToolHeadroom(3, math.MaxUint64/3, pol)
+	if err != nil || got != math.MaxUint64 {
+		t.Fatalf("3 x MaxUint64/3 = (%d, %v), want (MaxUint64, nil)", got, err)
+	}
+	if _, err := pricing.ImageToolHeadroom(3, math.MaxUint64/3+1, pol); err == nil {
+		t.Fatal("3 x (MaxUint64/3 + 1) overflows, want an error")
+	}
+}
 
 // ptr is a tiny helper for the *float64 advertised cache-read rate.
 func ptr(f float64) *float64 { return &f }

@@ -3325,15 +3325,20 @@ func (s *Client) warmFeeRate() {
 //
 // It reads the advertised rates the node published for this model (per-model
 // input/output/cache-read on op.ModelCapacities, operator-level min-charge on op)
-// and the on-chain protocol fee. It fails open — accepts — when a reference is
-// unavailable so an honest send is never blocked by cold catalog/fee state:
-//   - the fee cache hasn't warmed yet (the max_price recompute needs feeBps);
-//   - the operator published no capacity entry for this model (catalog miss) —
-//     without advertised rates a zero ModelCapacity would read as "free" and
-//     false-reject any priced ticket;
+// and the on-chain protocol fee. A missing reference loosens only the checks
+// that need it (SPEC § 3a "Fail-open"), so an honest send is never blocked by
+// cold catalog/fee state and a node can't switch the whole gate off:
+//   - the fee cache hasn't warmed yet: max_price is recomputed at
+//     pricing.ProtocolFeeBpsMax and checked as at most that;
 //   - the reserve carries an image-tool budget, an additive per-image microUSDC
-//     amount folded into max_price that C1 would need to reproduce exactly —
-//     deferred rather than risk false-rejecting an image-tool reserve.
+//     amount folded into max_price that the ticket doesn't carry: it is bounded
+//     from the advertised per-image caps (pricing.ImageToolHeadroom) and
+//     max_price is checked as at most the result;
+//   - the headroom overflows: max_price is skipped;
+//   - the operator published no capacity entry for this model (catalog miss):
+//     only cache_read_discount runs. Without advertised rates a zero
+//     ModelCapacity would read as "free" and false-reject any priced ticket,
+//     and without the model's tool rates max_price can't be reproduced;
 //   - the model prices per-call tools (SPEC.md "Per-call tool pricing"): the
 //     node folds a per-call tool-fee headroom into max_price. Unlike the image
 //     budget this IS reproduced (not skipped) — pricing.ToolFeeReserveMicroUSDC
@@ -3352,19 +3357,13 @@ func (s *Client) verifyReservePrice(op Operator, req ticket.ReserveRequest, t *t
 
 // reservePriceViolation is verifyReservePrice with the fee read injected, so
 // testdata/reserve_price_vectors.json can pin it for the TypeScript SDK. The
-// fee is read only once the image-tool skip has passed, as before.
+// fee is read only when max_price can otherwise be bounded.
 func reservePriceViolation(op Operator, req ticket.ReserveRequest, t *ticket.Ticket, fee func() (uint64, bool)) *pricing.Violation {
-	if req.ImageToolBudget > 0 || req.ImageEditToolBudget > 0 {
-		return nil
-	}
-	feeBps, ok := fee()
-	if !ok {
-		return nil
-	}
 	mc, mcOK := op.ModelCapacities[req.Model]
 	if !mcOK {
-		return nil // no advertised reference for this model — fail open
+		return pricing.VerifyUnadvertised(*t)
 	}
+	pol := pricing.DefaultPolicy()
 	// Reproduce the per-call tool-fee headroom the node folds into max_price so the
 	// max_price recompute reconciles and the advertised-rate / min-charge /
 	// cache-read bounds keep running. 0 for a model that prices no tools (or only
@@ -3383,8 +3382,30 @@ func reservePriceViolation(op Operator, req ticket.ReserveRequest, t *ticket.Tic
 		mc.VendorToolTokensPerCall,
 		t.InputRate,
 	)
-	if terr != nil {
-		return nil // headroom overflow (absurd operator config) — fail open, don't false-reject
+	// The image-tool budget's headroom isn't on the ticket, so it is bounded
+	// from the advertised per-image caps and max_price is checked as at most
+	// the result.
+	genHeadroom, gerr := pricing.ImageToolHeadroom(req.ImageToolBudget, mc.ImageToolRateMicroUSDC, pol)
+	editHeadroom, eerr := pricing.ImageToolHeadroom(req.ImageEditToolBudget, mc.ImageEditToolRateMicroUSDC, pol)
+	extra, sumOK := addU64(toolReserve, genHeadroom, editHeadroom)
+	var feeBps uint64
+	switch {
+	case terr != nil || gerr != nil || eerr != nil || !sumOK:
+		// Headroom overflow (absurd operator config): the ceiling can't be
+		// bounded, but the advertised rates still bound the signed ones.
+		pol.SkipMaxPrice = true
+	default:
+		if req.ImageToolBudget > 0 || req.ImageEditToolBudget > 0 {
+			pol.MaxPriceAtMost = true
+		}
+		if f, ok := fee(); ok {
+			feeBps = f
+		} else {
+			// The fee isn't read yet: the contract's cap bounds every fee
+			// the ticket could have been priced at.
+			feeBps = pricing.ProtocolFeeBpsMax
+			pol.MaxPriceAtMost = true
+		}
 	}
 	adv := pricing.Advertised{
 		InputUsdPer1M:         mc.InputUSDPer1M,
@@ -3404,7 +3425,19 @@ func reservePriceViolation(op Operator, req ticket.ReserveRequest, t *ticket.Tic
 		LongContextOutputUsdPer1M:        mc.LongContextOutputUSDPer1M,
 		LongContextCacheReadRateUsdPer1M: mc.LongContextCacheReadUSDPer1M,
 	}
-	return pricing.VerifyTicketPrice(*t, adv, feeBps, req.InputCount, toolReserve, pricing.DefaultPolicy())
+	return pricing.VerifyTicketPrice(*t, adv, feeBps, req.InputCount, extra, pol)
+}
+
+// addU64 sums vs, reporting false when the sum overflows a uint64.
+func addU64(vs ...uint64) (uint64, bool) {
+	var total uint64
+	for _, v := range vs {
+		if v > math.MaxUint64-total {
+			return 0, false
+		}
+		total += v
+	}
+	return total, true
 }
 
 // verifyNonStreamReceipt decodes + verifies the X-Zs-Receipt

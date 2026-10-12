@@ -102,7 +102,10 @@ interface Call {
     hop: RelayHop | null
 }
 
-/** A signed ticket for req, unpriced, as a node returns it. */
+/**
+ * A signed ticket for req, as a node returns it: unpriced but for a minimum
+ * charge, which is the whole ceiling at no fee.
+ */
 function reservedFor(o: Operator, req: Req, id = `T${o.id}`): Reserved {
     return {
         ticket: {
@@ -116,7 +119,7 @@ function reservedFor(o: Operator, req: Req, id = `T${o.id}`): Reserved {
             output_rate: 0,
             cache_read_rate: 0,
             max_price: 1000,
-            min_price: 0,
+            min_price: 1000,
             stream: req.stream,
             expires_at: 2_000_000_000,
             sig: '',
@@ -633,9 +636,15 @@ describe('admission', () => {
             const high = (dearOnly.deps.spendGuard as ReturnType<typeof guard>).estimates[0]!
             expect(low).toBeLessThan(high)
 
-            // Signed at a rate past the advertised one, so the gate skips each and both are asked.
+            // A ceiling the ticket's own numbers don't add up to, so the price
+            // gate refuses each and both are asked.
+            const misPriced = async (o: Operator, req: Req): Promise<Reserved> => {
+                const r = reservedFor(o, req)
+                r.ticket.min_price = 0
+                return r
+            }
             const g = guard(Math.floor((low + high) / 2))
-            const h = harness([priced(1, 1, 2), priced(2, 10, 20)], { deps: { feeRate: () => 0, spendGuard: g } })
+            const h = harness([priced(1, 1, 2), priced(2, 10, 20)], { deps: { feeRate: () => 0, spendGuard: g }, answer: misPriced })
             await h.run(body)
             expect(g.estimates).toEqual([low])
             const cheap = h.rc.calls.find((c) => c.op.id === 1)!.req
@@ -1407,6 +1416,7 @@ describe('the ticket', () => {
         Object.assign(r.ticket, {
             input_rate: 1_000_000,
             output_rate: 2_000_000,
+            min_price: 0,
             max_price: req.input_count + 2 * req.max_output_count,
         })
         return r
@@ -1488,18 +1498,32 @@ describe('the ticket', () => {
         })
     })
 
-    it('fails open with no fee to price against, and skips an image-tool reserve', async () => {
-        let h = harness([pricedOp(1)], { answer: async (o, req) => overpriced(o, req) })
-        let em = await h.run(chat())
-        expect(em.runs).toHaveLength(1)
+    // SPEC § 3a: with no fee to price against, and for an image-tool reserve,
+    // max_price is bounded from above rather than recomputed exactly, so an
+    // honest ceiling passes and an inflated one or an inflated rate is refused.
+    it('bounds max_price with no fee to price against, and for an image-tool reserve', async () => {
+        const inflatedCeiling = (o: Operator, req: Req): Reserved => {
+            const r = honest(o, req)
+            r.ticket.max_price = 1e9
+            return r
+        }
+        for (const [answer, runs] of [
+            [honest, 1],
+            [inflatedCeiling, 0],
+            [overpriced, 0],
+        ] as const) {
+            let h = harness([pricedOp(1)], { answer: async (o, req) => answer(o, req) })
+            let em = await h.run(chat())
+            expect(em.runs, `no fee, ${answer.name}`).toHaveLength(runs)
 
-        for (const budget of ['"zs_image_generation":{"max_n":1}', '"zs_image_edit":{"max_n":1}']) {
-            const tooled = withCap(pricedOp(1), { inputUsdPer1m: 1, outputUsdPer1m: 2, imageToolRateMicroUsdc: 80_000, imageEditToolRateMicroUsdc: 80_000 })
-            h = harness([tooled], { deps: { feeRate: () => 0 }, answer: async (o, req) => overpriced(o, req) })
-            em = await h.run(`{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{${budget}}}`, {
-                endpoint: '/v1/responses',
-            })
-            expect(em.runs, budget).toHaveLength(1)
+            for (const budget of ['"zs_image_generation":{"max_n":1}', '"zs_image_edit":{"max_n":1}']) {
+                const tooled = withCap(pricedOp(1), { inputUsdPer1m: 1, outputUsdPer1m: 2, imageToolRateMicroUsdc: 80_000, imageEditToolRateMicroUsdc: 80_000 })
+                h = harness([tooled], { deps: { feeRate: () => 0 }, answer: async (o, req) => answer(o, req) })
+                em = await h.run(`{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{${budget}}}`, {
+                    endpoint: '/v1/responses',
+                })
+                expect(em.runs, `${budget}, ${answer.name}`).toHaveLength(runs)
+            }
         }
     })
 

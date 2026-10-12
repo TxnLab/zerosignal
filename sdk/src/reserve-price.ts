@@ -9,19 +9,25 @@
 //
 // A node can sign a well-formed ticket at an inflated rate or an arbitrary
 // max_price, and only this gate compares the ticket against what the node
-// advertised. It fails open when a reference is missing, so cold state never
-// blocks an honest send: the fee not yet read, a model the node's catalog
-// doesn't list, or an image-tool budget, whose per-image amount max_price
-// folds in and this can't reproduce. A per-call tool fee's headroom it does
-// reproduce, so the rate and minimum-charge bounds keep running for a model
-// that prices tools.
+// advertised. A missing reference skips only the checks that need it (SPEC
+// § 3a "Fail-open"), so cold state never blocks an honest send and a node
+// can't switch the whole gate off. The fee not yet read is bounded at the
+// contract's fee cap, and an image-tool budget (whose per-image amount
+// max_price folds in but the ticket doesn't carry) by the advertised per-image
+// caps; max_price is then checked as at most the result. A headroom that
+// overflows skips max_price, and a model the node's catalog doesn't list
+// leaves only cache_read_discount. A per-call tool fee's headroom it
+// reproduces exactly.
 
 import type { OperatorDetails } from '@txnlab/zs-proto/inject'
 import {
     type Advertised,
+    PROTOCOL_FEE_BPS_MAX,
     type Violation,
     defaultPolicy,
+    imageToolHeadroom,
     verifyTicketPrice,
+    verifyUnadvertised,
 } from '@txnlab/zs-proto/pricing'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 
@@ -50,6 +56,9 @@ export interface ModelPricing {
     vendorToolCatchAllMicroUsdc?: number | undefined
     vendorToolCallCap?: number | undefined
     vendorToolTokensPerCall?: number | undefined
+    /** The worst-case microUSDC cost of one image from the gen / edit tool. */
+    imageToolRateMicroUsdc?: number | undefined
+    imageEditToolRateMicroUsdc?: number | undefined
 }
 
 /**
@@ -77,6 +86,8 @@ export function modelPricingOf(d: OperatorDetails, model: string): ModelPricing 
         vendorToolCatchAllMicroUsdc: m.vendor_tool_catchall_micro_usdc,
         vendorToolCallCap: m.vendor_tool_call_cap,
         vendorToolTokensPerCall: m.vendor_tool_tokens_per_call,
+        imageToolRateMicroUsdc: m.image_tool_rate_micro_usdc,
+        imageEditToolRateMicroUsdc: m.image_edit_tool_rate_micro_usdc,
     }
 }
 
@@ -106,6 +117,8 @@ export function operatorPricingOf(
         vendorToolCatchAllMicroUsdc: mc.vendorToolCatchAllMicroUsdc,
         vendorToolCallCap: mc.vendorToolCallCap,
         vendorToolTokensPerCall: mc.vendorToolTokensPerCall,
+        imageToolRateMicroUsdc: mc.imageToolRateMicroUsdc,
+        imageEditToolRateMicroUsdc: mc.imageEditToolRateMicroUsdc,
     }
 }
 
@@ -115,7 +128,8 @@ export interface ReservePriceCall {
     pricing: ModelPricing | null
     /**
      * The on-chain protocol fee in basis points, or null when it can't be read
-     * now. Called only once the image-tool skip has passed; a throw reads as null.
+     * now. Called only when max_price can otherwise be recomputed; a throw
+     * reads as null.
      */
     feeBps(): Promise<number | null>
     /** The payer's own input bound for the request; 0 skips that check. */
@@ -126,16 +140,9 @@ export interface ReservePriceCall {
 
 /** verifyReservePrice returns the ticket's first price violation, or null to accept. */
 export async function verifyReservePrice(call: ReservePriceCall): Promise<Violation | null> {
-    if ((call.imageToolBudget ?? 0) > 0 || (call.imageEditToolBudget ?? 0) > 0) return null
-    let feeBps: number | null
-    try {
-        feeBps = await call.feeBps()
-    } catch {
-        feeBps = null
-    }
-    if (feeBps === null) return null
     const p = call.pricing
-    if (p === null) return null
+    if (p === null) return verifyUnadvertised(call.ticket)
+    const pol = defaultPolicy()
     const { zs, vendor } = maxToolRates(p)
     const toolReserve = toolFeeReserveU64(
         Math.max(p.maxToolIterations ?? 0, 0),
@@ -145,7 +152,37 @@ export async function verifyReservePrice(call: ReservePriceCall): Promise<Violat
         p.vendorToolTokensPerCall ?? 0,
         call.ticket.input_rate,
     )
-    if (toolReserve === null) return null
+    // The image-tool budget's headroom isn't on the ticket, so it is bounded
+    // from the advertised per-image caps and max_price is checked as at most
+    // the result.
+    const imageBudget = call.imageToolBudget ?? 0
+    const editBudget = call.imageEditToolBudget ?? 0
+    const gen = imageToolHeadroom(imageBudget, p.imageToolRateMicroUsdc ?? 0, pol)
+    const edit = imageToolHeadroom(editBudget, p.imageEditToolRateMicroUsdc ?? 0, pol)
+    let extra: bigint | null = null
+    if (toolReserve !== null && gen !== null && edit !== null) {
+        const sum = toolReserve + gen + edit
+        if (sum <= MAX_U64) extra = sum
+    }
+    let feeBps: number | null = null
+    if (extra === null) {
+        // Overflow: the ceiling can't be bounded, but the advertised rates
+        // still bound the signed ones.
+        pol.skipMaxPrice = true
+    } else {
+        if (imageBudget > 0 || editBudget > 0) pol.maxPriceAtMost = true
+        try {
+            feeBps = await call.feeBps()
+        } catch {
+            feeBps = null
+        }
+        if (feeBps === null) {
+            // The fee isn't read yet: the contract's cap bounds every fee the
+            // ticket could have been priced at.
+            feeBps = PROTOCOL_FEE_BPS_MAX
+            pol.maxPriceAtMost = true
+        }
+    }
     const adv: Advertised = {
         inputUsdPer1m: p.inputUsdPer1m ?? 0,
         outputUsdPer1m: p.outputUsdPer1m ?? 0,
@@ -163,16 +200,16 @@ export async function verifyReservePrice(call: ReservePriceCall): Promise<Violat
     // Past 2^53 the number rounds, which moves only a violation's reported
     // want: an expected max_price that large is past any max_price a ticket's
     // number carries, so the gate refuses where Go's does.
-    return verifyTicketPrice(call.ticket, adv, feeBps, call.reserveInputCount, Number(toolReserve), defaultPolicy())
+    return verifyTicketPrice(call.ticket, adv, feeBps ?? 0, call.reserveInputCount, Number(extra ?? 0n), pol)
 }
 
 const MAX_U64 = (1n << 64n) - 1n
 const RATE_DENOMINATOR = 1_000_000n
 
 // toolFeeReserveU64 is zs-proto's toolFeeReserveMicroUSDC in exact uint64
-// arithmetic, or null where Go's ToolFeeReserveMicroUSDC overflows. The gate
-// fails open only there: the advertised values are the node's, so failing open
-// any sooner would let a node switch the gate off.
+// arithmetic, or null where Go's ToolFeeReserveMicroUSDC overflows. max_price
+// is skipped only there: the advertised values are the node's, so skipping any
+// sooner would let a node switch that check off.
 function toolFeeReserveU64(
     maxToolIterations: number,
     maxZsRatePerCall: number,

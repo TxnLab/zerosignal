@@ -421,7 +421,7 @@
       }
     },
     {
-      "name": "an unknown fee fails open",
+      "name": "an unknown fee accepts a max_price at the fee cap's ceiling",
       "details": {
         "models": [
           {
@@ -448,7 +448,7 @@
         "max_output_count": 500,
         "input_rate": 2000000,
         "output_rate": 4000000,
-        "max_price": 5000,
+        "max_price": 4800,
         "min_price": 1000,
         "expires_at": 0,
         "model": "m",
@@ -463,7 +463,185 @@
       "want": null
     },
     {
-      "name": "a catalog miss fails open",
+      "name": "an unknown fee accepts a max_price below the fee cap's ceiling",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 4040,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": null,
+      "want": null
+    },
+    {
+      "name": "an unknown fee refuses a max_price above the fee cap's ceiling",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 4801,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": null,
+      "want": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 4800,
+        "got": 4801
+      }
+    },
+    {
+      "name": "an unknown fee still bounds the rates",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "max_price": 7070,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": null,
+      "want": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
+    },
+    {
+      "name": "a catalog miss skips the advertised bounds",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "other",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "max_price": 5000,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "other",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": null
+    },
+    {
+      "name": "a catalog miss still refuses a cache read above the input rate",
       "details": {
         "models": [
           {
@@ -490,10 +668,58 @@
         "max_output_count": 500,
         "input_rate": 2000000,
         "output_rate": 4000000,
-        "max_price": 5000,
+        "max_price": 4040,
         "min_price": 1000,
         "expires_at": 0,
         "model": "other",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 2500000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "cache_read_discount",
+        "field": "cache_read_rate",
+        "want": 2000000,
+        "got": 2500000
+      }
+    },
+    {
+      "name": "an image-tool budget accepts the node's own headroom",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 8080,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
         "stream": false,
         "commit_k": "",
         "input_usage_type": 0,
@@ -505,7 +731,194 @@
       "want": null
     },
     {
-      "name": "an image-tool budget fails open",
+      "name": "an image-tool budget accepts a repriced cap within the multiple",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 12120,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": null
+    },
+    {
+      "name": "an image-tool budget refuses a max_price above its bound",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 12121,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 12120,
+        "got": 12121
+      }
+    },
+    {
+      "name": "an image-tool budget still bounds the rates",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "max_price": 11110,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
+    },
+    {
+      "name": "an image-tool budget with an unknown fee is bounded at the fee cap",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 14401,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": null,
+      "want": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 14400,
+        "got": 14401
+      }
+    },
+    {
+      "name": "an image-tool budget on a model advertising no cap adds no headroom",
       "details": {
         "models": [
           {
@@ -532,7 +945,55 @@
         "max_output_count": 500,
         "input_rate": 2000000,
         "output_rate": 4000000,
-        "max_price": 5000,
+        "max_price": 8080,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 4040,
+        "got": 8080
+      }
+    },
+    {
+      "name": "an image-edit-tool budget alone accepts the node's own headroom",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_edit_tool_rate_micro_usdc": 500
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 2,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 5050,
         "min_price": 1000,
         "expires_at": 0,
         "model": "m",
@@ -547,14 +1008,16 @@
       "want": null
     },
     {
-      "name": "an image-edit-tool budget fails open",
+      "name": "an image-edit-tool budget is bounded by the edit cap",
       "details": {
         "models": [
           {
             "id": "m",
             "input_rate_usd_per_1m": 2,
             "output_rate_usd_per_1m": 4,
-            "cache_read_rate_usd_per_1m": 1
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000,
+            "image_edit_tool_rate_micro_usdc": 500
           }
         ],
         "oracle_healthy": false,
@@ -566,6 +1029,98 @@
       "reserve_input_count": 1000,
       "image_tool_budget": 0,
       "image_edit_tool_budget": 2,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 6061,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "max_price",
+        "field": "max_price",
+        "want": 6060,
+        "got": 6061
+      }
+    },
+    {
+      "name": "both image budgets add their bounds",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1000,
+            "image_edit_tool_rate_micro_usdc": 500
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 4,
+      "image_edit_tool_budget": 2,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 2000000,
+        "output_rate": 4000000,
+        "max_price": 14140,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": null
+    },
+    {
+      "name": "an image-tool headroom that overflows skips the max_price check",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1099511627776
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 1073741824,
+      "image_edit_tool_budget": 0,
       "ticket": {
         "ticket_id": "",
         "operator_id": 0,
@@ -587,6 +1142,54 @@
       },
       "fee_bps": 100,
       "want": null
+    },
+    {
+      "name": "an image-tool headroom that overflows still bounds the rates",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "image_tool_rate_micro_usdc": 1099511627776
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 1073741824,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "max_price": 5000,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
     },
     {
       "name": "a dedicated image ticket is not priced per token",
@@ -873,7 +1476,7 @@
       }
     },
     {
-      "name": "a tool headroom that overflows fails open",
+      "name": "a tool headroom that overflows skips the max_price check",
       "details": {
         "models": [
           {
@@ -915,6 +1518,55 @@
       },
       "fee_bps": 100,
       "want": null
+    },
+    {
+      "name": "a tool headroom that overflows still bounds the rates",
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "cache_read_rate_usd_per_1m": 1,
+            "vendor_tool_catchall_micro_usdc": 1073741824,
+            "vendor_tool_call_cap": 1099511627776
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "min_charge_output_tokens": 1000,
+        "min_charge_microusdc": 100
+      },
+      "model": "m",
+      "reserve_input_count": 1000,
+      "image_tool_budget": 0,
+      "image_edit_tool_budget": 0,
+      "ticket": {
+        "ticket_id": "",
+        "operator_id": 0,
+        "node_id": 0,
+        "input_count": 1000,
+        "max_output_count": 500,
+        "input_rate": 5000000,
+        "output_rate": 4000000,
+        "max_price": 5000,
+        "min_price": 1000,
+        "expires_at": 0,
+        "model": "m",
+        "stream": false,
+        "commit_k": "",
+        "input_usage_type": 0,
+        "output_usage_type": 0,
+        "cache_read_rate": 1000000,
+        "sig": ""
+      },
+      "fee_bps": 100,
+      "want": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
     },
     {
       "name": "a tool headroom past 2^53 still runs the gate",
@@ -966,7 +1618,7 @@
       }
     },
     {
-      "name": "a per-call token headroom whose price overflows fails open",
+      "name": "a per-call token headroom whose price overflows skips the max_price check",
       "details": {
         "models": [
           {
@@ -1574,7 +2226,7 @@
       "want": null
     },
     {
-      "name": "tool headroom parts whose sum overflows fail open",
+      "name": "tool headroom parts whose sum overflows still bound the rates",
       "details": {
         "models": [
           {
@@ -1619,7 +2271,12 @@
         "sig": ""
       },
       "fee_bps": 100,
-      "want": null
+      "want": {
+        "check": "rate_bound",
+        "field": "input_rate",
+        "want": 4000000,
+        "got": 5000000
+      }
     },
     {
       "name": "an advertised minimum charge above the token floor raises the min_price bound",

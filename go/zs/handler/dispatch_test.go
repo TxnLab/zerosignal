@@ -31,6 +31,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 
 	"github.com/TxnLab/zerosignal/go/inject"
+	"github.com/TxnLab/zerosignal/go/pricing"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
 	"github.com/TxnLab/zerosignal/go/zs"
@@ -382,14 +383,32 @@ func (n *fakeNode) issueTicket(t *testing.T, w http.ResponseWriter, pub ed25519.
 	n.mu.Unlock()
 
 	commit := ticket.CommitResponseKey(k)
+	// An honest node signs the rates it advertises, which the payer's price
+	// gate bounds the ticket by even before it knows the fee.
+	inRate, outRate := uint64(2), uint64(5)
+	var imageHeadroom uint64
+	if mc, ok := n.operator.ModelCapacities[req.Model]; ok {
+		inRate, _ = pricing.USDRateToMicroUSDCPer1M(mc.InputUSDPer1M)
+		outRate, _ = pricing.USDRateToMicroUSDCPer1M(mc.OutputUSDPer1M)
+		imageHeadroom = req.ImageToolBudget*mc.ImageToolRateMicroUSDC + req.ImageEditToolBudget*mc.ImageEditToolRateMicroUSDC
+	}
+	// A minimum charge gives the receipts these tests sign room under the
+	// ceiling; the operator advertises none, so the gate doesn't bound it.
+	// At a zero fee, which the gate accepts whatever fee it reads or assumes.
+	const minPrice = 10_000
+	maxPrice, err := pricing.ExpectedMaxPrice(req.InputCount, req.MaxOutputCount, inRate, outRate, minPrice, imageHeadroom, 0)
+	if err != nil {
+		t.Fatalf("fake node max_price: %v", err)
+	}
 	tkt := ticket.Ticket{
 		TicketID:       tid,
 		OperatorID:     n.operator.ID,
 		InputCount:     req.InputCount,
 		MaxOutputCount: req.MaxOutputCount,
-		InputRate:      2,
-		OutputRate:     5,
-		MaxPrice:       req.InputCount*2 + req.MaxOutputCount*5,
+		InputRate:      inRate,
+		OutputRate:     outRate,
+		MinPrice:       minPrice,
+		MaxPrice:       maxPrice,
 		ExpiresAt:      time.Now().Add(30 * time.Second).Unix(),
 		Model:          req.Model,
 		Stream:         req.Stream,

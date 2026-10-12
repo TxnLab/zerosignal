@@ -451,12 +451,14 @@ So before opening escrow, a payer-side peer (proxy or direct client) **recompute
 
 `long_context_tier` is what makes it safe to choose the comparand from the **signed** count. `input_count_bound` alone allows a signed count up to `reserveInputCount × (1 + 0.10)`. Near the cliff, a ≤10% count inflation would buy a **2× multiplier on the whole request**, and `rate_bound` would accept it, since an exactly-2× surcharge sits right on the base × `RateMaxMultiple` boundary. The tolerance exists to absorb tokenizer drift, not to buy a tier. So this check compares **tiers, not counts**: a signed `input_count` at or above the threshold is refused whenever the peer's own bound is below it. It cannot false-reject an honest node, because a node only ever caps `input_count` **down**. (An older node's `min_input_count` floor, default 256, is far below any real threshold.) Like `input_count_bound`, it is skipped when the peer has no bound of its own (`reserveInputCount == 0`).
 
-**Fail-open.** A missing reference MUST NOT block an honest send:
+**Fail-open.** A missing reference MUST NOT block an honest send, and skips only the checks that need it, so a node cannot switch the rest off:
 
-- No advertised rate or min-charge for the model ⇒ skip the checks that need it. The two reference-free checks (`max_price`, `cache_read_discount`) still run.
+- The model has no entry in the node's details ⇒ only `cache_read_discount` runs. The rate and min-charge bounds have nothing to bound against, and `max_price` cannot be recomputed without the model's per-call tool rates, which set `extraBase`.
 - No advertised `cache_read_rate_usd_per_1m` (no discount offered) ⇒ skip `cache_read_bound`.
 - No advertised long-context tier (no `long_context_threshold_tokens`) ⇒ the rate bounds use the **base** rates for every `input_count`, and neither `long_context_ordering` nor `long_context_tier` runs.
-- No cached on-chain `feeBps` ⇒ skip the recompute entirely.
+- No cached on-chain `feeBps` ⇒ recompute `max_price` at the contract's `PROTOCOL_FEE_BPS_MAX` (2000) and require the signed value to be **at most** that. Every fee the chain can hold is at or below the cap, so an honest ticket passes and an inflated one does not.
+- An in-loop image-tool budget in the reserve ⇒ add `budget × advertised per-image cap × RateMaxMultiple` per tool to `extraBase` (the `image_tool_rate_micro_usdc` / `image_edit_tool_rate_micro_usdc` a node advertises are the worst-case cost of one image) and require `max_price` to be **at most** the recompute. The ticket does not carry the per-image cost, so the multiple absorbs a reprice between the details probe and the reserve, as it does for the signed rates.
+- A headroom (tool-fee or image-tool) that overflows 64 bits ⇒ skip the `max_price` recompute.
 - `output_usage_type` of `Images` / `Characters` / `Seconds` ⇒ the token-price verifier skips the ticket, because a different primitive (`imageprice`, `videoprice`) prices it.
 
 **The one check that fails closed.** Fail-open covers a *missing* reference. `long_context_ordering` judges a reference that is **present and self-contradictory** (high rates below base), so it rejects **every** ticket from that operator, including sub-threshold ones, instead of skipping. An inverted advertisement says nothing trustworthy about either tier, so there is no rate left to bound against, and the payer cannot route around it by choosing a different `input_count`. An honest node never reaches this state, because `validateLongContextPricing` refuses such a config at startup.
