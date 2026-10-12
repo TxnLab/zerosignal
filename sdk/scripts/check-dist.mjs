@@ -2,7 +2,7 @@
 // Checks the built package the way a consumer resolves it: by its name, through
 // package.json's "imports" and "exports". The unit tests alias #default-fetch to
 // source, so this is the only check that the published map hands Node the
-// guarded fetch and Bun the plain one.
+// guarded fetch and Bun the plain one, which checks only the URL's host.
 //
 //   node scripts/check-dist.mjs           guarded (Node's conditions)
 //   node --conditions=bun scripts/...     plain   (Bun's map entry, from Node)
@@ -102,16 +102,38 @@ for (const [sub, fn] of [
     if (refused !== 'Failed to decode quote') fail(`the dist's dcap-qvl verify gave ${refused}, want the library's own refusal`)
 }
 
-try {
-    const outcome = await resolveConfig({ signer, network: testnet() })
+// One class, whichever entry a caller imports it from.
+const { PrivateTargetError } = await import(pkg.name)
+if (typeof PrivateTargetError !== 'function') fail(`${pkg.name} exports no PrivateTargetError`)
+if (nodeEntry && nodeEntry.PrivateTargetError !== PrivateTargetError) fail(`${pkg.name}/node's PrivateTargetError is not the root's`)
+
+// Both builds refuse a loopback literal; where they refuse it tells them apart.
+// The guarded fetch refuses at the dial, so fetch rejects with a TypeError
+// whose cause is the refusal; the plain one refuses the URL before fetching.
+// By name, not class: Bun applies this checkout's tsconfig "paths", so there
+// #default-fetch loads from src with its own copy of the class. The published
+// package carries no tsconfig.
+async function outcomeOf(allowPrivateHosts) {
+    return resolveConfig({ signer, network: testnet(), allowPrivateHosts })
         .fetch(url)
         .then(
             (r) => r.text(),
-            (e) => (nodeEntry && e?.cause instanceof nodeEntry.PrivateTargetError ? 'PrivateTargetError' : String(e?.cause ?? e)),
+            (e) =>
+                e?.cause?.name === 'PrivateTargetError'
+                    ? 'refused at the dial'
+                    : e?.name === 'PrivateTargetError'
+                      ? 'refused on the URL'
+                      : String(e?.cause ?? e),
         )
-    const want = mode === 'guarded' ? 'PrivateTargetError' : 'reached'
-    if (outcome !== want) fail(`${where}: the default fetch to ${url} gave ${outcome}, want ${want}`)
-    console.log(`check-dist: ${where}: ${mode} (${outcome})`)
+}
+
+try {
+    const refused = await outcomeOf(false)
+    const want = mode === 'guarded' ? 'refused at the dial' : 'refused on the URL'
+    if (refused !== want) fail(`${where}: the default fetch to ${url} gave ${refused}, want ${want}`)
+    const allowed = await outcomeOf(true)
+    if (allowed !== 'reached') fail(`${where}: with allowPrivateHosts the default fetch to ${url} gave ${allowed}, want reached`)
+    console.log(`check-dist: ${where}: ${mode} (${refused})`)
 } finally {
     server.close()
 }

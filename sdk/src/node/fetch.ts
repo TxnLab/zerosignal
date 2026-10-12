@@ -23,7 +23,7 @@
 // Node only. Bun answers `import 'undici'` with a stand-in whose Agent is
 // ignored, so there the guard would let every dial through; Deno is untested.
 // nodeFetch refuses to build a guard in either, and package.json gives both the
-// runtime's own fetch, as a browser gets.
+// browser's default fetch, which checks only the URL's host.
 
 import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns'
 import { isIP, type LookupFunction } from 'node:net'
@@ -31,17 +31,11 @@ import { isIP, type LookupFunction } from 'node:net'
 import { Agent, buildConnector, fetch as undiciFetch, Request as UndiciRequest } from 'undici'
 
 import { configError } from '../errors.js'
+import { PrivateTargetError } from '../hostguard.js'
 import type { Fetch } from '../ports.js'
 import { isPrivateAddress } from '../privateip.js'
 
-/** PrivateTargetError fails a dial to a private address: Go's httpx.ErrPrivateTarget. */
-export class PrivateTargetError extends Error {
-    override readonly name = 'PrivateTargetError'
-
-    constructor(readonly host: string, readonly addresses: readonly string[]) {
-        super(`refusing to dial private/loopback/link-local address: ${host}${addresses.length && addresses[0] !== host ? ` (${addresses.join(', ')})` : ''}`)
-    }
-}
+export { PrivateTargetError }
 
 type Resolve = (hostname: string, options: LookupOptions & { all: true }, callback: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void) => void
 

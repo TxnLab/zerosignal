@@ -187,8 +187,8 @@ export interface Config {
     /** Development only. */
     allowStaging?: boolean
     /**
-     * Route to operators whose URL names a private host, and, in Node, let the
-     * default fetch dial a private address. Development only.
+     * Let the default fetch reach a node at a private, loopback or link-local
+     * address, in Node and in a browser alike. Development only.
      */
     allowPrivateHosts?: boolean
 
@@ -216,9 +216,11 @@ export interface Config {
     logger?: Logger
     clock?: Clock
     /**
-     * Carries every request to a node. Unset in Node, a fetch that refuses
-     * private addresses unless allowPrivateHosts (nodeFetch from
-     * `@txnlab/zerosignal/node`); elsewhere the runtime's own. On either, an
+     * Carries every request to a node. Unset, a fetch that refuses a private
+     * node unless allowPrivateHosts: in Node, nodeFetch from
+     * `@txnlab/zerosignal/node`, which judges every address it dials;
+     * elsewhere the runtime's own behind a check of the URL's host
+     * (isBlockedOperatorUrl). On either, an
      * inference request gives up on a node whose response headers take
      * RESPONSE_HEADER_BACKSTOP_MS. One supplied here is used as is, guard,
      * backstop or none.
