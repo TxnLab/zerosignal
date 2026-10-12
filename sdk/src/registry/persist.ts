@@ -16,8 +16,9 @@
 // As in Go, the file keeps identity, the capabilities that are slow to
 // rediscover and the reachableAsOf carry clock, and leaves out what a probe
 // re-establishes or what moves on every settle: the ephemeral seal key, the
-// TEE verdict, the signer's balance, and the this-cycle reachable, probed and
-// lastRefreshAt.
+// TEE verdict, the signer's balance, the this-cycle reachable and probed, and
+// lastRefreshAt, which the registry carries between cycles but which says
+// what this process tried, not what the node serves.
 //
 // Differences from Go:
 //   - The catalog is a string in a StorageAdapter under a key, not a file

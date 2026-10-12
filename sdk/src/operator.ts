@@ -168,7 +168,14 @@ export interface Operator {
      * this cycle's reachable. Never carried across cycles.
      */
     probed?: boolean | undefined
-    /** Unix ms of the last probe attempt; undefined when never probed. */
+    /**
+     * Unix ms of a registry refresh's last probe attempt, whatever came of
+     * it; a probe its cycle's deadline cut off does not count, nor does a
+     * reprobeEphemeral, which never reaches the snapshot. A registry carries
+     * it across the cycles that skip the node, beyond the carry window, while
+     * the chain lists the node, but does not persist it. Undefined when no
+     * refresh in this process has tried the node.
+     */
     lastRefreshAt?: number | undefined
     /**
      * Unix ms of the last successful probe, the clock a registry's carry

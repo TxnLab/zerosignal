@@ -33,6 +33,7 @@ interface CycleOp {
     reachable: boolean
     probed: boolean
     reachable_as_of_ms: number
+    last_refresh_at_ms: number
     staging: boolean
     signer_spendable_microalgos: number | null
     models: string[]
@@ -69,6 +70,7 @@ function operatorOf(c: CycleOp): Operator {
     })
     if (c.probed) op.probed = true
     if (c.reachable_as_of_ms !== 0) op.reachableAsOf = c.reachable_as_of_ms
+    if (c.last_refresh_at_ms !== 0) op.lastRefreshAt = c.last_refresh_at_ms
     if (c.signer_spendable_microalgos !== null) op.signerSpendableMicroAlgos = c.signer_spendable_microalgos
     return op
 }
@@ -80,6 +82,7 @@ function cycleOpOf(op: Operator): CycleOp {
         reachable: op.reachable,
         probed: op.probed === true,
         reachable_as_of_ms: op.reachableAsOf ?? 0,
+        last_refresh_at_ms: op.lastRefreshAt ?? 0,
         staging: op.staging,
         signer_spendable_microalgos: op.signerSpendableMicroAlgos ?? null,
         models: [...op.models],

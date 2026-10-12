@@ -12,6 +12,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -37,6 +38,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": 10000000,
           "models": [],
@@ -54,6 +56,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": 10000000,
           "models": [
@@ -84,6 +87,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -109,6 +113,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -130,6 +135,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -156,6 +162,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799994600000,
+          "last_refresh_at_ms": 1799994600000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -181,6 +188,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -198,6 +206,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1799994600000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -220,6 +229,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799994600001,
+          "last_refresh_at_ms": 1799994600001,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -245,6 +255,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -262,6 +273,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799994600001,
+          "last_refresh_at_ms": 1799994600001,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -282,7 +294,7 @@
       ]
     },
     {
-      "name": "a node never confirmed live carries nothing",
+      "name": "a node never confirmed live carries no capabilities, only its last probe attempt",
       "now_ms": 1800000000000,
       "max_carry_age_ms": 5400000,
       "prev": [
@@ -292,6 +304,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1799999880000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -317,6 +330,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -334,6 +348,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1799999880000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -346,7 +361,7 @@
       ]
     },
     {
-      "name": "a node down last cycle carries until its last success ages out",
+      "name": "a node down last cycle carries until its last success ages out, and its last attempt",
       "now_ms": 1800000000000,
       "max_carry_age_ms": 5400000,
       "prev": [
@@ -356,6 +371,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799998200000,
+          "last_refresh_at_ms": 1799999940000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -381,6 +397,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -398,6 +415,149 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799998200000,
+          "last_refresh_at_ms": 1799999940000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [
+            "m1",
+            "m2"
+          ],
+          "context_windows": {
+            "m1": 8192,
+            "m2": 32768
+          },
+          "builtin_tools": [
+            "zs_web_search"
+          ],
+          "max_tool_iters": 8,
+          "tool_headroom_per_iteration": 2048,
+          "proto_version": "9.11"
+        }
+      ]
+    },
+    {
+      "name": "a node aged out of the window still carries its last probe attempt",
+      "now_ms": 1800000000000,
+      "max_carry_age_ms": 5400000,
+      "prev": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": true,
+          "reachable_as_of_ms": 1799989200000,
+          "last_refresh_at_ms": 1799999940000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [
+            "m1",
+            "m2"
+          ],
+          "context_windows": {
+            "m1": 8192,
+            "m2": 32768
+          },
+          "builtin_tools": [
+            "zs_web_search"
+          ],
+          "max_tool_iters": 8,
+          "tool_headroom_per_iteration": 2048,
+          "proto_version": "9.11"
+        }
+      ],
+      "ops": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": false,
+          "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [],
+          "context_windows": {},
+          "builtin_tools": [],
+          "max_tool_iters": 0,
+          "tool_headroom_per_iteration": 0,
+          "proto_version": ""
+        }
+      ],
+      "want": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": false,
+          "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1799999940000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [],
+          "context_windows": {},
+          "builtin_tools": [],
+          "max_tool_iters": 0,
+          "tool_headroom_per_iteration": 0,
+          "proto_version": ""
+        }
+      ]
+    },
+    {
+      "name": "a probe attempt this cycle is kept over the last one",
+      "now_ms": 1800000000000,
+      "max_carry_age_ms": 5400000,
+      "prev": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": true,
+          "reachable_as_of_ms": 1799998200000,
+          "last_refresh_at_ms": 1799999940000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [
+            "m1",
+            "m2"
+          ],
+          "context_windows": {
+            "m1": 8192,
+            "m2": 32768
+          },
+          "builtin_tools": [
+            "zs_web_search"
+          ],
+          "max_tool_iters": 8,
+          "tool_headroom_per_iteration": 2048,
+          "proto_version": "9.11"
+        }
+      ],
+      "ops": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": false,
+          "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1800000000000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "models": [],
+          "context_windows": {},
+          "builtin_tools": [],
+          "max_tool_iters": 0,
+          "tool_headroom_per_iteration": 0,
+          "proto_version": ""
+        }
+      ],
+      "want": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": false,
+          "probed": false,
+          "reachable_as_of_ms": 1799998200000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -428,6 +588,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -453,6 +614,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -472,6 +634,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -501,6 +664,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -526,6 +690,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -545,6 +710,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -574,6 +740,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -599,6 +766,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -618,6 +786,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -648,6 +817,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -673,6 +843,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -690,6 +861,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -720,6 +892,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -745,6 +918,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -762,6 +936,7 @@
           "reachable": false,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -792,6 +967,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -817,6 +993,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799999700000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -834,6 +1011,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799999700000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -864,6 +1042,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -889,6 +1068,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -906,6 +1086,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -929,6 +1110,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -946,6 +1128,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -968,6 +1151,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -991,6 +1175,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799989200000,
+          "last_refresh_at_ms": 1799989200000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1014,6 +1199,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1799999940000,
+          "last_refresh_at_ms": 1799999940000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1039,6 +1225,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1054,6 +1241,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1069,6 +1257,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1088,6 +1277,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1105,6 +1295,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799999400000,
+          "last_refresh_at_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1128,6 +1319,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 1799989200000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1143,6 +1335,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1162,6 +1355,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1186,6 +1380,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1208,6 +1403,7 @@
         "reachable": false,
         "probed": true,
         "reachable_as_of_ms": 1799999940000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1230,6 +1426,7 @@
         "reachable": false,
         "probed": false,
         "reachable_as_of_ms": 1799999400000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1252,6 +1449,7 @@
         "reachable": false,
         "probed": false,
         "reachable_as_of_ms": 1799994600000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1274,6 +1472,7 @@
         "reachable": false,
         "probed": false,
         "reachable_as_of_ms": 1799994600001,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1296,6 +1495,7 @@
         "reachable": true,
         "probed": false,
         "reachable_as_of_ms": 0,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1318,6 +1518,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": true,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1340,6 +1541,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": true,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1362,6 +1564,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1384,6 +1587,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1406,6 +1610,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": null,
         "models": [],
@@ -1428,6 +1633,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": 4999999,
         "models": [],
@@ -1450,6 +1656,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": 5000000,
         "models": [],
@@ -1472,6 +1679,7 @@
         "reachable": true,
         "probed": true,
         "reachable_as_of_ms": 1800000000000,
+        "last_refresh_at_ms": 0,
         "staging": false,
         "signer_spendable_microalgos": 0,
         "models": [],
@@ -1497,6 +1705,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": 10000000,
           "models": [],
@@ -1514,6 +1723,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799998800000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": 10000000,
           "models": [
@@ -1545,6 +1755,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1562,6 +1773,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1585,6 +1797,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1600,6 +1813,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1617,6 +1831,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799998800000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1640,6 +1855,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1663,6 +1879,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1680,6 +1897,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799998800000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1711,6 +1929,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1732,6 +1951,7 @@
           "reachable": true,
           "probed": true,
           "reachable_as_of_ms": 1800000000000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1759,6 +1979,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1776,6 +1997,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799996400000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1807,6 +2029,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1824,6 +2047,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 1799996400000,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [
@@ -1855,6 +2079,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],
@@ -1872,6 +2097,7 @@
           "reachable": false,
           "probed": false,
           "reachable_as_of_ms": 0,
+          "last_refresh_at_ms": 0,
           "staging": false,
           "signer_spendable_microalgos": null,
           "models": [],

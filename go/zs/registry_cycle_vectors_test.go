@@ -42,6 +42,7 @@ type cycleOp struct {
 	Reachable                 bool              `json:"reachable"`
 	Probed                    bool              `json:"probed"`
 	ReachableAsOfMs           int64             `json:"reachable_as_of_ms"`
+	LastRefreshAtMs           int64             `json:"last_refresh_at_ms"`
 	Staging                   bool              `json:"staging"`
 	SignerSpendableMicroAlgos *uint64           `json:"signer_spendable_microalgos"`
 	Models                    []string          `json:"models"`
@@ -68,6 +69,9 @@ func (c cycleOp) operator() Operator {
 	}
 	if c.ReachableAsOfMs != 0 {
 		op.ReachableAsOf = time.UnixMilli(c.ReachableAsOfMs).UTC()
+	}
+	if c.LastRefreshAtMs != 0 {
+		op.LastRefreshAt = time.UnixMilli(c.LastRefreshAtMs).UTC()
 	}
 	if len(c.Models) > 0 {
 		op.Models = append([]string(nil), c.Models...)
@@ -101,6 +105,9 @@ func cycleOpOf(op Operator) cycleOp {
 	}
 	if !op.ReachableAsOf.IsZero() {
 		c.ReachableAsOfMs = op.ReachableAsOf.UnixMilli()
+	}
+	if !op.LastRefreshAt.IsZero() {
+		c.LastRefreshAtMs = op.LastRefreshAt.UnixMilli()
 	}
 	for m, mc := range op.ModelCapacities {
 		c.ContextWindows[m] = mc.ContextWindow
@@ -167,10 +174,12 @@ const cycleMinuteMs = int64(time.Minute / time.Millisecond)
 var defaultCarryMs = int64(DefaultMaxCarryAge / time.Millisecond)
 
 // cycleLastGood is a node confirmed live asOfMs before now, with capabilities.
+// That probe was its last attempt.
 func cycleLastGood(id, node uint64, agoMs int64) cycleOp {
 	return cycleOp{
 		ID: id, NodeID: node, Reachable: true, Probed: true,
 		ReachableAsOfMs: cycleVectorNowMs - agoMs,
+		LastRefreshAtMs: cycleVectorNowMs - agoMs,
 		Models:          []string{"m1", "m2"},
 		ContextWindows:  map[string]uint64{"m1": 8192, "m2": 32768},
 		BuiltinTools:    []string{"zs_web_search"},
@@ -184,16 +193,22 @@ func cycleChainRow(id, node uint64) cycleOp { return cycleOp{ID: id, NodeID: nod
 
 func carryCases() []carryCase {
 	downLastCycle := cycleLastGood(1, 1, 30*cycleMinuteMs)
-	downLastCycle.Reachable = false
+	downLastCycle.Reachable, downLastCycle.LastRefreshAtMs = false, cycleVectorNowMs-cycleMinuteMs
 	neverLive := cycleLastGood(1, 1, 0)
-	neverLive.Reachable, neverLive.ReachableAsOfMs = false, 0
-	failedWithOwn := cycleOp{ID: 1, NodeID: 1, Probed: true, Models: []string{"own"}, ProtoVersion: "9.12"}
+	neverLive.Reachable, neverLive.ReachableAsOfMs, neverLive.LastRefreshAtMs = false, 0, cycleVectorNowMs-2*cycleMinuteMs
+	agedOutTriedSince := cycleLastGood(1, 1, 2*defaultCarryMs)
+	agedOutTriedSince.Reachable, agedOutTriedSince.LastRefreshAtMs = false, cycleVectorNowMs-cycleMinuteMs
+	failedWithOwn := cycleOp{ID: 1, NodeID: 1, Probed: true, LastRefreshAtMs: cycleVectorNowMs, Models: []string{"own"}, ProtoVersion: "9.12"}
 	stamped := cycleChainRow(1, 1)
 	stamped.ReachableAsOfMs = cycleVectorNowMs - 5*cycleMinuteMs
 	upNow := cycleOp{
-		ID: 1, NodeID: 1, Reachable: true, Probed: true, ReachableAsOfMs: cycleVectorNowMs,
+		ID: 1, NodeID: 1, Reachable: true, Probed: true, ReachableAsOfMs: cycleVectorNowMs, LastRefreshAtMs: cycleVectorNowMs,
 		Models: []string{"fresh"}, ContextWindows: map[string]uint64{"fresh": 4096}, ProtoVersion: "9.11",
 	}
+	// A probe this cycle that never reached the target (no relay, every hop
+	// down) stamps the attempt and nothing else.
+	triedNow := cycleChainRow(1, 1)
+	triedNow.LastRefreshAtMs = cycleVectorNowMs
 	funded := cycleChainRow(1, 1)
 	funded.SignerSpendableMicroAlgos = cycleU64(10_000_000)
 	// A probe-failed row holding one capability of its own, so each field's
@@ -213,10 +228,14 @@ func carryCases() []carryCase {
 			Prev: []cycleOp{cycleLastGood(1, 1, defaultCarryMs)}, Ops: []cycleOp{cycleChainRow(1, 1)}},
 		{Name: "a node last good one millisecond inside max_carry_age carries",
 			Prev: []cycleOp{cycleLastGood(1, 1, defaultCarryMs-1)}, Ops: []cycleOp{cycleChainRow(1, 1)}},
-		{Name: "a node never confirmed live carries nothing",
+		{Name: "a node never confirmed live carries no capabilities, only its last probe attempt",
 			Prev: []cycleOp{neverLive}, Ops: []cycleOp{cycleChainRow(1, 1)}},
-		{Name: "a node down last cycle carries until its last success ages out",
+		{Name: "a node down last cycle carries until its last success ages out, and its last attempt",
 			Prev: []cycleOp{downLastCycle}, Ops: []cycleOp{cycleChainRow(1, 1)}},
+		{Name: "a node aged out of the window still carries its last probe attempt",
+			Prev: []cycleOp{agedOutTriedSince}, Ops: []cycleOp{cycleChainRow(1, 1)}},
+		{Name: "a probe attempt this cycle is kept over the last one",
+			Prev: []cycleOp{downLastCycle}, Ops: []cycleOp{triedNow}},
 		{Name: "a probe-failed node keeps what it has and takes only what it lacks",
 			Prev: []cycleOp{cycleLastGood(1, 1, 10*cycleMinuteMs)}, Ops: []cycleOp{failedWithOwn}},
 		{Name: "a probe-failed node keeps its own model capacities",

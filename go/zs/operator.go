@@ -167,10 +167,12 @@ type Operator struct {
 	// first probe completes.
 	Reachable bool
 
-	// LastRefreshAt records when the registry last probed this operator.
-	// Zero time means "never successfully enriched" — the operator was
-	// discovered on-chain but its details endpoint has never replied
-	// within the probe window.
+	// LastRefreshAt records when a registry refresh last tried to probe this
+	// operator, whatever came of it; a probe its cycle's deadline cut off does
+	// not count, nor does a ReprobeEphemeral, which never reaches the snapshot.
+	// The registry carries it across the cycles that skip the node, beyond the
+	// carry window, while the chain lists the node, but does not persist it.
+	// Zero time means no refresh in this process has tried the node.
 	LastRefreshAt time.Time
 
 	// Probed reports whether this node's /v1/zs/details endpoint was actually
