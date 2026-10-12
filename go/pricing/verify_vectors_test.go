@@ -45,6 +45,8 @@ type verifyPolicyJSON struct {
 	RateMaxMultiple     float64 `json:"rate_max_multiple"`
 	InputCountTolerance float64 `json:"input_count_tolerance"`
 	FailOpen            bool    `json:"fail_open"`
+	SkipMaxPrice        bool    `json:"skip_max_price,omitempty"`
+	MaxPriceAtMost      bool    `json:"max_price_at_most,omitempty"`
 }
 
 // Detail is prose and is not compared.
@@ -167,6 +169,31 @@ func buildVerifyVectors(t *testing.T) []verifyVector {
 		// The recompute lands past 2^53 without overflowing uint64: TS must still
 		// compare exactly, not as a float.
 		with(base("max_price_past_2_53"), func(c *verifyCase) { c.t.MinPrice = 1<<53 - 1 }),
+		// A caller that can't reproduce the ceiling skips that check only.
+		with(base("skip_max_price_accepts_any_ceiling"), func(c *verifyCase) {
+			c.t.MaxPrice = 5000
+			c.pol.SkipMaxPrice = true
+		}),
+		with(base("skip_max_price_still_bounds_rates"), func(c *verifyCase) {
+			c.t.MaxPrice = 5000
+			c.t.InputRate = 5_000_000
+			c.pol.SkipMaxPrice = true
+		}),
+		with(base("skip_max_price_still_checks_cache_discount"), func(c *verifyCase) {
+			c.t.CacheReadRate = 2_500_000
+			c.pol.SkipMaxPrice = true
+		}),
+		// A caller recomputing from upper bounds accepts a ceiling at or below
+		// the recompute and refuses one above it.
+		with(base("max_price_at_most_accepts_equal"), func(c *verifyCase) { c.pol.MaxPriceAtMost = true }),
+		with(base("max_price_at_most_accepts_below"), func(c *verifyCase) {
+			c.t.MaxPrice = 4039
+			c.pol.MaxPriceAtMost = true
+		}),
+		with(base("max_price_at_most_refuses_above"), func(c *verifyCase) {
+			c.t.MaxPrice = 4041
+			c.pol.MaxPriceAtMost = true
+		}),
 
 		// rate_bound
 		with(base("input_rate_above_2x"), func(c *verifyCase) { c.t.InputRate = 5_000_000; c.consistent = true }),
@@ -337,6 +364,7 @@ func buildVerifyVectors(t *testing.T) []verifyVector {
 			FeeBps: c.fee, ReserveInputCount: c.reserve, ImageToolBudget: c.budget,
 			Policy: verifyPolicyJSON{
 				RateMaxMultiple: c.pol.RateMaxMultiple, InputCountTolerance: c.pol.InputCountTolerance, FailOpen: c.pol.FailOpen,
+				SkipMaxPrice: c.pol.SkipMaxPrice, MaxPriceAtMost: c.pol.MaxPriceAtMost,
 			},
 		}
 		if viol := pricing.VerifyTicketPrice(c.t, c.adv, c.fee, c.reserve, c.budget, c.pol); viol != nil {

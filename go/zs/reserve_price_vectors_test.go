@@ -131,21 +131,96 @@ func reservePriceScenarios() []reservePriceScenario {
 		sc.Ticket.InputRate = 5_000_000
 		sc.Ticket = withMaxPrice(sc.Ticket, 0, 100)
 	})
-	add("an unknown fee fails open", func(sc *reservePriceScenario) {
+	// A missing reference loosens only the checks that need it (SPEC § 3a).
+	add("an unknown fee accepts a max_price at the fee cap's ceiling", func(sc *reservePriceScenario) {
 		sc.FeeBps = nil
-		sc.Ticket.MaxPrice = 5000
+		sc.Ticket = withMaxPrice(sc.Ticket, 0, pricing.ProtocolFeeBpsMax)
 	})
-	add("a catalog miss fails open", func(sc *reservePriceScenario) {
+	add("an unknown fee accepts a max_price below the fee cap's ceiling", func(sc *reservePriceScenario) {
+		sc.FeeBps = nil
+	})
+	add("an unknown fee refuses a max_price above the fee cap's ceiling", func(sc *reservePriceScenario) {
+		sc.FeeBps = nil
+		sc.Ticket = withMaxPrice(sc.Ticket, 0, pricing.ProtocolFeeBpsMax)
+		sc.Ticket.MaxPrice++
+	})
+	add("an unknown fee still bounds the rates", func(sc *reservePriceScenario) {
+		sc.FeeBps = nil
+		sc.Ticket.InputRate = 5_000_000
+		sc.Ticket = withMaxPrice(sc.Ticket, 0, 100)
+	})
+	add("a catalog miss skips the advertised bounds", func(sc *reservePriceScenario) {
 		sc.Model = "other"
 		sc.Ticket.Model = "other"
+		sc.Ticket.InputRate = 5_000_000
 		sc.Ticket.MaxPrice = 5000
 	})
-	add("an image-tool budget fails open", func(sc *reservePriceScenario) {
+	add("a catalog miss still refuses a cache read above the input rate", func(sc *reservePriceScenario) {
+		sc.Model = "other"
+		sc.Ticket.Model = "other"
+		sc.Ticket.CacheReadRate = 2_500_000
+	})
+	// The image-tool headroom is bounded by budget × the advertised per-image
+	// cap × the rate multiple: 4 × 1000 × 2 here.
+	imageTool := func(sc *reservePriceScenario) {
+		model(sc).ImageToolRateMicroUSDC = 1000
 		sc.ImageToolBudget = 4
+	}
+	add("an image-tool budget accepts the node's own headroom", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		sc.Ticket = withMaxPrice(sc.Ticket, 4000, 100)
+	})
+	add("an image-tool budget accepts a repriced cap within the multiple", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		sc.Ticket = withMaxPrice(sc.Ticket, 8000, 100)
+	})
+	add("an image-tool budget refuses a max_price above its bound", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		sc.Ticket = withMaxPrice(sc.Ticket, 8000, 100)
+		sc.Ticket.MaxPrice++
+	})
+	add("an image-tool budget still bounds the rates", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		sc.Ticket.InputRate = 5_000_000
+		sc.Ticket = withMaxPrice(sc.Ticket, 4000, 100)
+	})
+	add("an image-tool budget with an unknown fee is bounded at the fee cap", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		sc.FeeBps = nil
+		sc.Ticket = withMaxPrice(sc.Ticket, 8000, pricing.ProtocolFeeBpsMax)
+		sc.Ticket.MaxPrice++
+	})
+	add("an image-tool budget on a model advertising no cap adds no headroom", func(sc *reservePriceScenario) {
+		sc.ImageToolBudget = 4
+		sc.Ticket = withMaxPrice(sc.Ticket, 4000, 100)
+	})
+	add("an image-edit-tool budget alone accepts the node's own headroom", func(sc *reservePriceScenario) {
+		model(sc).ImageEditToolRateMicroUSDC = 500
+		sc.ImageEditToolBudget = 2
+		sc.Ticket = withMaxPrice(sc.Ticket, 1000, 100)
+	})
+	add("an image-edit-tool budget is bounded by the edit cap", func(sc *reservePriceScenario) {
+		model(sc).ImageToolRateMicroUSDC = 1000
+		model(sc).ImageEditToolRateMicroUSDC = 500
+		sc.ImageEditToolBudget = 2
+		sc.Ticket = withMaxPrice(sc.Ticket, 2000, 100)
+		sc.Ticket.MaxPrice++
+	})
+	add("both image budgets add their bounds", func(sc *reservePriceScenario) {
+		imageTool(sc)
+		model(sc).ImageEditToolRateMicroUSDC = 500
+		sc.ImageEditToolBudget = 2
+		sc.Ticket = withMaxPrice(sc.Ticket, 10_000, 100)
+	})
+	add("an image-tool headroom that overflows skips the max_price check", func(sc *reservePriceScenario) {
+		model(sc).ImageToolRateMicroUSDC = 1 << 40
+		sc.ImageToolBudget = 1 << 30
 		sc.Ticket.MaxPrice = 5000
 	})
-	add("an image-edit-tool budget fails open", func(sc *reservePriceScenario) {
-		sc.ImageEditToolBudget = 2
+	add("an image-tool headroom that overflows still bounds the rates", func(sc *reservePriceScenario) {
+		model(sc).ImageToolRateMicroUSDC = 1 << 40
+		sc.ImageToolBudget = 1 << 30
+		sc.Ticket.InputRate = 5_000_000
 		sc.Ticket.MaxPrice = 5000
 	})
 	add("a dedicated image ticket is not priced per token", func(sc *reservePriceScenario) {
@@ -181,9 +256,15 @@ func reservePriceScenarios() []reservePriceScenario {
 		model(sc).ToolCallRatesMicroUSDC = map[string]uint64{"zs_web_read": 500}
 		sc.Ticket = withMaxPrice(sc.Ticket, 2000, 100)
 	})
-	add("a tool headroom that overflows fails open", func(sc *reservePriceScenario) {
+	add("a tool headroom that overflows skips the max_price check", func(sc *reservePriceScenario) {
 		model(sc).VendorToolCatchAllMicroUSDC = 1 << 30
 		model(sc).VendorToolCallCap = 1 << 40
+		sc.Ticket.MaxPrice = 5000
+	})
+	add("a tool headroom that overflows still bounds the rates", func(sc *reservePriceScenario) {
+		model(sc).VendorToolCatchAllMicroUSDC = 1 << 30
+		model(sc).VendorToolCallCap = 1 << 40
+		sc.Ticket.InputRate = 5_000_000
 		sc.Ticket.MaxPrice = 5000
 	})
 	// Between 2^53 and uint64 overflow the headroom is exact in Go, so the gate
@@ -193,7 +274,7 @@ func reservePriceScenarios() []reservePriceScenario {
 		model(sc).VendorToolCallCap = 1 << 24
 		sc.Ticket.MaxPrice = 5000
 	})
-	add("a per-call token headroom whose price overflows fails open", func(sc *reservePriceScenario) {
+	add("a per-call token headroom whose price overflows skips the max_price check", func(sc *reservePriceScenario) {
 		model(sc).VendorToolCallCap = 10_000_000
 		model(sc).VendorToolTokensPerCall = 10_000_000
 		sc.Ticket.MaxPrice = 5000
@@ -269,8 +350,9 @@ func reservePriceScenarios() []reservePriceScenario {
 		first := inject.OperatorDetailsModel{ID: "m", InputRateUSDPer1M: 1, OutputRateUSDPer1M: 1}
 		sc.Details.Models = append([]inject.OperatorDetailsModel{first}, sc.Details.Models...)
 	})
-	// Each part fits a uint64; only their sum overflows.
-	add("tool headroom parts whose sum overflows fail open", func(sc *reservePriceScenario) {
+	// Each part fits a uint64; only their sum overflows. The signed input rate
+	// is over the advertised one, so only the rate bound can refuse it.
+	add("tool headroom parts whose sum overflows still bound the rates", func(sc *reservePriceScenario) {
 		m := model(sc)
 		m.ToolCallRatesMicroUSDC = map[string]uint64{"zs_x": 1 << 52}
 		m.VendorToolCatchAllMicroUSDC = 1 << 52

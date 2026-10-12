@@ -109,6 +109,44 @@ export interface Policy {
    * data.
    */
   failOpen: boolean
+  /**
+   * Skips the max_price recompute and runs every other check: for a caller
+   * that can't bound the ceiling at all (a headroom that overflows). feeBps is
+   * then unused.
+   */
+  skipMaxPrice?: boolean
+  /**
+   * Checks max_price as at most the recomputed value rather than equal to it:
+   * for a caller that recomputes from upper bounds, such as
+   * PROTOCOL_FEE_BPS_MAX when the fee isn't known, or imageToolHeadroom for an
+   * image-tool budget.
+   */
+  maxPriceAtMost?: boolean
+}
+
+/**
+ * The escrow contract's PROTOCOL_FEE_BPS_MAX: setProtocolFeeBps refuses a fee
+ * above it, so a ceiling recomputed at it bounds a ticket priced at any fee
+ * the chain can hold. Go's ProtocolFeeBpsMax.
+ */
+export const PROTOCOL_FEE_BPS_MAX = 2000
+
+const MAX_U64 = (1n << 64n) - 1n
+
+/**
+ * Bounds what a node folds into max_price for an image-tool budget: budget ×
+ * the advertised worst-case per-image cost, scaled by rateMaxMultiple. The
+ * ticket doesn't carry the per-image cost, so the multiple absorbs a reprice
+ * between the details probe and the reserve, as it does for the signed rates.
+ * null where the product overflows a uint64. Go's ImageToolHeadroom.
+ */
+export function imageToolHeadroom(budget: number, perImageCap: number, pol: Policy): bigint | null {
+  if (budget === 0 || perImageCap === 0) return 0n
+  const scaled = scaleByMultiple(perImageCap, pol.rateMaxMultiple)
+  // Go saturates the scaled cap at MaxUint64, which then overflows any budget past 1.
+  const c = scaled >= 2 ** 64 ? MAX_U64 : BigInt(scaled)
+  const product = BigInt(budget) * c
+  return product > MAX_U64 ? null : product
 }
 
 /** Preserves the interim gate's 2x rate ceiling, 0.10 input tolerance, fail-open. */
@@ -185,6 +223,37 @@ function checkLongContextOrdering(adv: Advertised): Violation | null {
   return null
 }
 
+// tokenPriced is false for image / character / seconds tickets, which
+// imageprice and videoprice price instead.
+function tokenPriced(t: Ticket): boolean {
+  return (
+    t.output_usage_type !== UsageType.Images &&
+    t.output_usage_type !== UsageType.Characters &&
+    t.output_usage_type !== UsageType.Seconds
+  )
+}
+
+/**
+ * Runs the one check that needs neither advertised pricing nor the fee:
+ * cache_read_discount, a cache read is always a discount. Like
+ * verifyTicketPrice it skips a ticket not priced per token. Go's
+ * VerifyUnadvertised.
+ */
+export function verifyUnadvertised(t: Ticket): Violation | null {
+  const input = finiteOrZero(t.input_rate)
+  const cacheRead = finiteOrZero(t.cache_read_rate)
+  if (tokenPriced(t) && cacheRead > input) {
+    return {
+      check: 'cache_read_discount',
+      field: 'cache_read_rate',
+      want: input,
+      got: cacheRead,
+      detail: 'cache_read_rate exceeds input_rate; a cache read must be a discount',
+    }
+  }
+  return null
+}
+
 // checkRateBound bounds a signed micro rate against an advertised USD/1M rate.
 function checkRateBound(check: Violation['check'], field: string, ticketRate: number, advUsdPer1m: number, pol: Policy): Violation | null {
   let advMicro: number
@@ -207,7 +276,8 @@ function checkRateBound(check: Violation['check'], field: string, ticketRate: nu
  * by the Violation.check it reports:
  *
  *   - max_price           max_price === expectedMaxPrice(...) (exact, from the
- *                         ticket's own signed numbers + the on-chain feeBps)
+ *                         ticket's own signed numbers + the on-chain feeBps),
+ *                         or <= it under Policy.maxPriceAtMost
  *   - rate_bound          input_rate / output_rate <= advertised * rateMaxMultiple
  *   - min_charge_bound    min_price <= advertised minChargeFloor * rateMaxMultiple
  *   - input_count_bound   input_count <= reserveInputCount * (1 + inputCountTolerance)
@@ -267,24 +337,9 @@ export function verifyTicketPrice(
     longContextCacheReadRateUsdPer1m: optionalFiniteOrZero(adv.longContextCacheReadRateUsdPer1m),
   }
 
-  if (
-    t.output_usage_type === UsageType.Images ||
-    t.output_usage_type === UsageType.Characters ||
-    t.output_usage_type === UsageType.Seconds
-  ) {
-    return null // priced per-image / per-char / per-second, not per-token
-  }
-
-  // cache_read_discount — a cache read is always a discount. No external reference; runs always.
-  if (t.cache_read_rate > t.input_rate) {
-    return {
-      check: 'cache_read_discount',
-      field: 'cache_read_rate',
-      want: t.input_rate,
-      got: t.cache_read_rate,
-      detail: 'cache_read_rate exceeds input_rate; a cache read must be a discount',
-    }
-  }
+  if (!tokenPriced(t)) return null
+  const unadvertised = verifyUnadvertised(t)
+  if (unadvertised !== null) return unadvertised
 
   // max_price — internal consistency (exact). Recompute from the ticket's own
   // signed rates/counts + the on-chain fee.
@@ -293,7 +348,9 @@ export function verifyTicketPrice(
   // one. Here one can arrive, e.g. a budget built from an operator's fractional
   // tool rate. Refusing it under every policy keeps fail-open's skip for Go's
   // overflow alone, so a price nobody can recompute isn't waved through.
-  if (![t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, t.max_price, imageToolBudget, feeBps].every(Number.isInteger)) {
+  if (pol.skipMaxPrice === true) {
+    // the caller can't reproduce the ceiling; the rate checks still run
+  } else if (![t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, t.max_price, imageToolBudget, feeBps].every(Number.isInteger)) {
     return {
       check: 'max_price',
       field: 'max_price',
@@ -301,26 +358,37 @@ export function verifyTicketPrice(
       got: t.max_price,
       detail: 'max_price cannot be recomputed from inputs that are not whole numbers',
     }
-  }
-  const wantMax = expectedMaxPriceExact(t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, imageToolBudget, feeBps)
-  if (wantMax === null) {
-    if (!pol.failOpen) {
+  } else {
+    const wantMax = expectedMaxPriceExact(t.input_count, t.max_output_count, t.input_rate, t.output_rate, t.min_price, imageToolBudget, feeBps)
+    if (wantMax === null) {
+      if (!pol.failOpen) {
+        return {
+          check: 'max_price',
+          field: 'max_price',
+          want: 0,
+          got: t.max_price,
+          detail: 'max_price recompute overflowed',
+        }
+      }
+      // fail-open: cannot recompute the ceiling; skip it, still run the rate checks
+    } else if (pol.maxPriceAtMost === true) {
+      if (BigInt(t.max_price) > wantMax) {
+        return {
+          check: 'max_price',
+          field: 'max_price',
+          want: Number(wantMax),
+          got: t.max_price,
+          detail: "max_price exceeds the most the ticket's rates, counts and budgets allow",
+        }
+      }
+    } else if (BigInt(t.max_price) !== wantMax) {
       return {
         check: 'max_price',
         field: 'max_price',
-        want: 0,
+        want: Number(wantMax),
         got: t.max_price,
-        detail: 'max_price recompute overflowed',
+        detail: 'max_price does not match rates x counts grossed up by the protocol fee',
       }
-    }
-    // fail-open: cannot recompute the ceiling; skip it, still run the rate checks
-  } else if (BigInt(t.max_price) !== wantMax) {
-    return {
-      check: 'max_price',
-      field: 'max_price',
-      want: Number(wantMax),
-      got: t.max_price,
-      detail: 'max_price does not match rates x counts grossed up by the protocol fee',
     }
   }
 
