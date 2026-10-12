@@ -653,7 +653,8 @@ export class DiscoveryRegistry implements RegistryProvider {
  * nodeRefString), when that node's last successful probe is within
  * maxCarryAge of nowMs. That keeps a node routable and advertised across the
  * cycles bounded probing skips it, and lets a node that is really gone age
- * out. No lastGood carries nothing.
+ * out. Its last probe attempt is carried whatever the window. No lastGood
+ * carries nothing.
  */
 export function carryForwardLastGood(
     lastGood: ReadonlyMap<string, Operator> | undefined,
@@ -665,8 +666,13 @@ export function carryForwardLastGood(
     for (const op of ops) {
         if (op.reachable) continue
         const old = lastGood.get(nodeKey(op))
+        if (old === undefined) continue
+        // Not a capability, so the window does not gate it: a node tried and
+        // never answered, or aged out, was still tried, which is what tells
+        // "failing" from "not probed yet" on a cycle that skips the node.
+        if (op.lastRefreshAt === undefined) op.lastRefreshAt = old.lastRefreshAt
         // Never confirmed live is nothing worth carrying.
-        if (old === undefined || !old.reachableAsOf || nowMs - old.reachableAsOf >= maxCarryAge) continue
+        if (!old.reachableAsOf || nowMs - old.reachableAsOf >= maxCarryAge) continue
         carryCaps(op, old)
     }
 }
@@ -687,7 +693,9 @@ export function carryCaps(dst: Operator, src: Operator): void {
  * live taking its saved capabilities from base within maxCarryAge (zero or
  * negative is the default), so a restart routes to a node before the first
  * probe reaches it. A fresh probe result always wins; a saved node gone from
- * fresh is dropped.
+ * fresh is dropped. base is meant to be a loaded catalog: like the carry, the
+ * merge also takes base's lastRefreshAt outside the window, which a saved
+ * catalog never holds.
  */
 export function mergeCatalog(base: readonly Operator[], fresh: readonly Operator[], maxCarryAge: number, nowMs: number): Operator[] {
     const window = maxCarryAge > 0 ? maxCarryAge : defaults.discovery.maxCarryAge

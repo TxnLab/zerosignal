@@ -31,6 +31,15 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — the registry remembers its last probe attempt across cycles (unreleased)
+
+`Operator.LastRefreshAt` (TS `lastRefreshAt`) used to be set only on a cycle that probed the
+node, so on every cycle a bounded probe set skipped it, it was zero again, and a node known to be
+failing looked the same as one never tried. Both registries now carry it from the last snapshot
+onto a node this cycle did not try, beyond the carry window as well as inside it, since it
+records what this process tried and not what the node serves. It is still not saved with the
+catalog. `registry_cycle_vectors.json` carries `last_refresh_at_ms` on every operator.
+
 ### 2026-10-12 — no evidence fetch for a node with no verified ephemeral key (unreleased)
 
 Both SDKs' attestation probe used to fetch and verify a node's evidence even when its ephemeral

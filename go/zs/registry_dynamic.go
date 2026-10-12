@@ -605,7 +605,8 @@ func (p *DynamicRegistryProvider) snapshotDemand() []string {
 // (advertisable) and dispatch (empty Models) until a fresh probe revives it.
 // This is the seam that keeps the model catalog complete while bounded probing
 // re-probes only a fraction of the fleet each cycle, without masking a
-// genuinely-gone node indefinitely.
+// genuinely-gone node indefinitely. LastRefreshAt, the last probe attempt, is
+// carried regardless of the window.
 func (p *DynamicRegistryProvider) carryForwardLastGood(prev *registrySnapshot, newOps []Operator) {
 	if prev == nil {
 		return
@@ -623,6 +624,13 @@ func carryWithin(lastGood map[NodeRef]Operator, ops []Operator, now time.Time, m
 		old, ok := lastGood[RefOf(ops[i])]
 		if !ok {
 			continue
+		}
+		// The last probe attempt is not a capability, so the window does not
+		// gate it: a node that was tried and never answered, or has aged out,
+		// was still tried, which is what tells a host's "failing" from "not
+		// probed yet" on a cycle that skips the node.
+		if ops[i].LastRefreshAt.IsZero() {
+			ops[i].LastRefreshAt = old.LastRefreshAt
 		}
 		// Only carry within the window. ReachableAsOf==zero means the node was
 		// never confirmed live (nothing worth carrying); past the window it has

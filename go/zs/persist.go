@@ -34,7 +34,9 @@ const catalogFormatVersion = 1
 //     skip, and nothing would read it: the catalog seeds routing only when the
 //     startup chain read FAILED, and FetchChain re-reads balances whenever that
 //     read succeeds;
-//   - the this-cycle transients (Reachable / Probed / LastRefreshAt).
+//   - the this-cycle transients (Reachable / Probed), and LastRefreshAt, which
+//     the registry carries between cycles but which says what this process
+//     tried, not what the node serves.
 //
 // It keeps identity + the expensive-to-rediscover capability data + the
 // ReachableAsOf carry clock, so a loaded node is immediately advertised/routable
@@ -238,6 +240,8 @@ func decodeCatalog(data []byte) ([]Operator, error) {
 // registry's carry-forward: a warm restart merges the persisted catalog into a
 // partial or bounded live probe so nodes stay advertised/routable immediately
 // rather than filling in over sweep cycles. Fresh probe results always win.
+// base is meant to be a loaded catalog: like the carry, the merge also takes
+// base's LastRefreshAt outside the window, which a saved catalog never holds.
 func MergeCatalog(base, fresh []Operator, maxCarryAge time.Duration) []Operator {
 	return mergeCatalogAt(base, fresh, maxCarryAge, time.Now())
 }
