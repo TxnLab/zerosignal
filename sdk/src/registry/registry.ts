@@ -68,6 +68,7 @@ import { MIN_SIGNER_SPENDABLE_MICROALGOS, signerSpendableBelowFloor } from '@txn
 import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 
 import { DEFAULT_DEMAND_MAX, ModelDemand, selectProbeSet } from '../catalog/probe.js'
+import { answeredWithin } from '../catalog/reachability.js'
 import { type Discovery, defaults } from '../config.js'
 import { quietLogger } from '../log.js'
 import { type BuiltinToolDef, type Operator, refOf, sealRecipientOf } from '../operator.js'
@@ -749,8 +750,7 @@ function withoutCarriedCaps(op: Operator): Operator {
  */
 export function advertisable(op: Operator, nowMs: number, allowStaging: boolean, maxCarryAge: number): boolean {
     if ((op.staging && !allowStaging) || !protoVersionCompatible(op.protoVersion) || signerUnderfunded(op)) return false
-    if (op.probed === true) return op.reachable
-    return !!op.reachableAsOf && nowMs - op.reachableAsOf < maxCarryAge
+    return answeredWithin(op, nowMs, maxCarryAge)
 }
 
 // ---- helpers ----

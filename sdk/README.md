@@ -404,7 +404,19 @@ node's signed ephemeral seal key and says why one is unusable (`EphemeralVerifyC
 the verdict for an app that rebuilds its rows often, and `recordEphemeralStaleness` charges a
 relay that served a stale key).
 
-`CatalogEngine` folds each node's probe results as the Go registry does. A node keeps its last
+An app that renders a `DiscoveryRegistry` snapshot reads each node's row verdict with
+`reachabilityOf(op, now, maxCarryAge)`, the rule the registry advertises on (`advertisable`,
+which gates `allModels` and `/v1/models`) less the staging and signer-funding terms a picker
+filters on itself: `incompatible` for an answer on another wire major or with no version, `ok`
+while the node's answer stands (`answeredWithin`, the liveness half of `advertisable`),
+`probing` until the registry first tries the node, and `failing` after. `carryLapsesAt` says
+when the next carried answer leaves the window, so rows built from one snapshot can age while
+the registry publishes nothing. Pass the `discovery.maxCarryAge` the registry was built with; 0
+or less is the default, as the registry reads it. Dispatch does not consult the verdict: a node
+probed down keeps its carried models and stays a candidate.
+
+`CatalogEngine` is the other row verdict, for an app that runs the probes itself rather than
+reading a registry: it folds each node's probe results as the Go registry does. A node keeps its last
 answer for `maxCarryAge` after it, through a failed probe, an unreachable relay, or a cycle that
 skipped it. A probe that reached the node and failed reads `failing` but keeps the models. One
 that learned nothing (every relay hop failed) changes nothing. Two readings are more cautious

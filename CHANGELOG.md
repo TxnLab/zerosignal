@@ -31,6 +31,17 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — a catalog row's reachability, from the SDK (unreleased)
+
+`@txnlab/zerosignal/catalog` exports `reachabilityOf`, `answeredWithin` and `carryLapsesAt`, so
+an app rendering a `DiscoveryRegistry` snapshot reads each node's verdict by the rule the
+registry advertises on instead of restating it. `answeredWithin` is now the liveness half of the
+registry's own `advertisable`, and a test holds `reachabilityOf(...) === 'ok'` to `advertisable`
+on every `registry_cycle_vectors.json` case the staging and signer terms don't decide. Whether a
+node has been tried (`probing` or `failing`) is per registry: a registry built anew reads every
+node it has not yet tried as `probing`. A window of 0 or less is the default, as the registry
+reads its setting. TS only: Go's proxy has no picker.
+
 ### 2026-10-12 — a saved catalog is loaded under the probe's rules (unreleased)
 
 Two gaps when a payer starts from its saved catalog, in both SDKs:
