@@ -110,6 +110,10 @@ function memberString(obj: Record<string, unknown>, key: string): string {
  * read the *raw* text: a frame that escapes its way out of them (`"stop"`)
  * is classified non-terminal by both implementations. That is a deliberate
  * bound on cost, and parity matters more here than either answer.
+ *
+ * Unparseable input answers TRUE, as on the responses path: past both
+ * prefilters the text names a terminal value, and SPEC § 5.3 asks a consumer
+ * that can't finish the check to fail toward terminal.
  */
 function chatGenerationComplete(text: string): boolean {
     for (const t of CHAT_GENERATION_COMPLETE_TOKENS) {
@@ -121,10 +125,10 @@ function chatGenerationComplete(text: string): boolean {
     try {
         parsed = JSON.parse(text)
     } catch {
-        return false
+        return true
     }
     const top = asRecord(parsed)
-    if (top === null) return false
+    if (top === null) return true
     const choices = top.choices
     if (!Array.isArray(choices)) return false
     for (const raw of choices) {

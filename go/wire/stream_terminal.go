@@ -129,22 +129,21 @@ func mentionsAny(plaintext []byte, tokens [][]byte) bool {
 // confirmTerminal is the parse half both generation-complete classifiers share:
 // decode the frame as a JSON object and let confirm read its own discriminator.
 //
-// onUnparseable is what the frame means when it is not a JSON object at all,
-// and the two callers deliberately pass OPPOSITE values — so the divergence is
-// an argument you can see at the call site rather than a policy each body
-// restates. Neither answer is the safe one in general: failing to recognize a
-// terminal frame makes the consumer cancel and drop the settlement tail, while
-// a spurious terminal only arms the drain early.
+// A frame that is not a JSON object at all answers terminal. Both callers reach
+// here only once a prefilter has found a terminal value in the bytes, and SPEC
+// § 5.3 asks for that failure to go toward terminal: a missed terminal makes
+// the consumer cancel and drop the settlement tail, while a spurious one only
+// arms the drain early.
 //
 // `top == nil` is the JSON-`null` document: it unmarshals into a map without
 // error, leaving the map nil. Folding it in with the parse failures keeps this
-// uniform — anything that is not a JSON *object* takes onUnparseable — and
-// keeps it identical to the TS mirror, where asRecord() can't tell null from a
+// uniform — anything that is not a JSON *object* answers terminal — and keeps
+// it identical to the TS mirror, where asRecord() can't tell null from a
 // string or an array.
-func confirmTerminal(plaintext []byte, onUnparseable bool, confirm func(top map[string]json.RawMessage) bool) bool {
+func confirmTerminal(plaintext []byte, confirm func(top map[string]json.RawMessage) bool) bool {
 	var top map[string]json.RawMessage
 	if json.Unmarshal(plaintext, &top) != nil || top == nil {
-		return onUnparseable
+		return true
 	}
 	return confirm(top)
 }
@@ -169,13 +168,13 @@ func confirmTerminal(plaintext []byte, onUnparseable bool, confirm func(top map[
 //
 // Unparseable input answers TRUE here: the prefilter has already established
 // that the bytes mention a terminal type, so "malformed and mentions one" is
-// the right place to be generous. The chat path answers false to the same
-// question — see chatGenerationComplete for why nobody has reconciled them.
+// the right place to be generous (SPEC § 5.3: fail toward terminal). The chat
+// path answers the same way.
 func responsesGenerationComplete(plaintext []byte) bool {
 	if !mentionsAny(plaintext, responsesGenerationCompleteTokens) {
 		return false
 	}
-	return confirmTerminal(plaintext, true, func(top map[string]json.RawMessage) bool {
+	return confirmTerminal(plaintext, func(top map[string]json.RawMessage) bool {
 		switch rawString(top["type"]) {
 		case responsesTypeCompleted, responsesTypeIncomplete, responsesTypeFailed:
 			return true
@@ -200,13 +199,11 @@ func responsesGenerationComplete(plaintext []byte) bool {
 // (`"stop"`) is classified non-terminal by both implementations. That is a
 // deliberate bound on cost, and parity matters more here than either answer.
 //
-// Unparseable input answers FALSE, the opposite of the responses path, and the
-// TS mirror reproduces the asymmetry faithfully — so it is a design divergence
-// inside the classifier rather than a port bug. Harmonizing it is a behaviour
-// change on both languages (the chat parse-failure branch is unvectored in
-// both) and has not been argued through; until it is, the two answers stay as
-// they are, spelled as the onUnparseable argument rather than as two bodies
-// that quietly disagree.
+// Unparseable input answers TRUE, as on the responses path: past both
+// prefilters the bytes name a terminal value, and SPEC § 5.3 asks a consumer
+// that can't finish the check to fail toward terminal. Content can't steer
+// this branch, since a quote inside a JSON string arrives escaped and so never
+// spells `"finish_reason"` or `"stop"` in the raw bytes.
 func chatGenerationComplete(plaintext []byte) bool {
 	if mentionsAny(plaintext, chatGenerationCompleteTokens) {
 		return true
@@ -217,7 +214,7 @@ func chatGenerationComplete(plaintext []byte) bool {
 	if !bytes.Contains(plaintext, []byte(`"stop"`)) && !bytes.Contains(plaintext, []byte(`"length"`)) {
 		return false
 	}
-	return confirmTerminal(plaintext, false, func(top map[string]json.RawMessage) bool {
+	return confirmTerminal(plaintext, func(top map[string]json.RawMessage) bool {
 		var choices []json.RawMessage
 		if json.Unmarshal(top["choices"], &choices) != nil {
 			return false
