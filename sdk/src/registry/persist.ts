@@ -38,7 +38,7 @@
 //     SDK writes any of these.
 
 import { base64 } from '@scure/base'
-import type { ModelCoordinates, ModelReasoning } from '@txnlab/zs-proto/inject'
+import { type ModelCoordinates, type ModelReasoning, isKnownRetention } from '@txnlab/zs-proto/inject'
 
 import { restoredProtoVersion } from '../catalog/engine.js'
 import { compareCodePoints, goJSON } from '../gojson.js'
@@ -331,7 +331,9 @@ function decodeCapacity(c: Record<string, unknown>, at: string): ModelCapacity {
         weightsUnverifiable: bool(c.WeightsUnverifiable, field('WeightsUnverifiable')),
         source: string(c.Source, field('Source')),
         canonicalId: string(c.CanonicalID, field('CanonicalID')),
-        retention: string(c.Retention, field('Retention')),
+        // As the probe filters it: a newer build's file, or a hand edit,
+        // would otherwise label the node with a tier this build cannot vouch for.
+        retention: knownRetention(string(c.Retention, field('Retention'))),
         imageToolRateMicroUsdc: uint(c.ImageToolRateMicroUSDC, field('ImageToolRateMicroUSDC')),
         imageEditToolRateMicroUsdc: uint(c.ImageEditToolRateMicroUSDC, field('ImageEditToolRateMicroUSDC')),
         imageToolBaseMicroUsdc: uint(c.ImageToolBaseMicroUSDC, field('ImageToolBaseMicroUSDC')),
@@ -356,6 +358,11 @@ function decodeCapacity(c: Record<string, unknown>, at: string): ModelCapacity {
         out.toolCallRatesMicroUsdc = r
     }
     return out
+}
+
+// Go's knownRetention: a tier this build does not recognise reads as unknown.
+function knownRetention(v: string): string {
+    return isKnownRetention(v) ? v : ''
 }
 
 function decodeReasoning(v: unknown, at: string): ModelReasoning | undefined {

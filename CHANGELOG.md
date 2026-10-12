@@ -31,6 +31,22 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — a saved catalog is loaded under the probe's rules (unreleased)
+
+Two gaps when a payer starts from its saved catalog, in both SDKs:
+
+- **A boot whose chain read failed seeded the file as written.** A node past the carry window
+  kept its models, and dispatch, which applies no carry window of its own, could pick it until a chain
+  read succeeded. The seed now goes through the carry window as a cycle would: past it, a node
+  keeps its identity (it stays in the relay pool) and serves nothing. A boot whose chain read
+  succeeds already merged under the window, and still does.
+- **A retention tier the build does not recognise was loaded as saved.** The probe drops such a
+  tier, but a file written by a newer build, or edited by hand, put it back on the operator
+  until the node's next successful probe. Loading now drops it too.
+
+`registry_cycle_vectors.json` gains a `seed` block, and `persisted_catalog_vectors.json` a load
+case with an unknown tier.
+
 ### 2026-10-12 — the registry remembers its last probe attempt across cycles (unreleased)
 
 `Operator.LastRefreshAt` (TS `lastRefreshAt`) used to be set only on a cycle that probed the

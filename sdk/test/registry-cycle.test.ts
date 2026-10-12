@@ -21,6 +21,7 @@ import {
     advertisable,
     carryForwardLastGood,
     mergeCatalog,
+    seedFromCatalog,
 } from '../src/registry/registry.js'
 import { nodeRefString } from '../src/types.js'
 import { testOperator } from './fixtures.js'
@@ -48,6 +49,7 @@ const cycleVectors = JSON.parse(readFileSync(new URL('../../testdata/registry_cy
     carry: { name: string; now_ms: number; max_carry_age_ms: number; prev: CycleOp[] | null; ops: CycleOp[]; want: CycleOp[] }[]
     advertisable: { name: string; now_ms: number; max_carry_age_ms: number; allow_staging: boolean; op: CycleOp; want: boolean }[]
     merge: { name: string; now_ms: number; max_carry_age_ms: number; saved_catalog: string; fresh: CycleOp[]; want: CycleOp[] }[]
+    seed: { name: string; now_ms: number; max_carry_age_ms: number; saved_catalog: string; want: CycleOp[] }[]
 }
 
 // Go's zero values arrive as unset fields, as a fresh chain row has them.
@@ -116,6 +118,13 @@ describe('registry_cycle vectors', () => {
         expect(merged.map(cycleOpOf)).toEqual(c.want)
         // The fresh rows are copied, as Go's append copies the values.
         expect(fresh.map(cycleOpOf)).toEqual(c.fresh)
+    })
+
+    it.each(cycleVectors.seed.map((c) => [c.name, c] as const))('seed: %s', (_, c) => {
+        const saved = decodeCatalog(c.saved_catalog)
+        const before = saved.map(cycleOpOf)
+        expect(seedFromCatalog(saved, c.max_carry_age_ms, c.now_ms).map(cycleOpOf)).toEqual(c.want)
+        expect(saved.map(cycleOpOf)).toEqual(before)
     })
 })
 
@@ -307,7 +316,8 @@ describe('DiscoveryRegistry', () => {
 
         it('serves the saved catalog alone when the chain read fails, and retries on a stale read', async () => {
             const storage = memoryStorage()
-            await storage.set(CATALOG_STORAGE_KEY, marshalCatalog([row(1, 1, { models: ['m'], reachableAsOf: T0 - MIN })]))
+            const aged = row(2, 1, { models: ['old'], reachableAsOf: T0 - 2 * defaults.discovery.maxCarryAge })
+            await storage.set(CATALOG_STORAGE_KEY, marshalCatalog([row(1, 1, { models: ['m'], reachableAsOf: T0 - MIN }), aged]))
             source.next = [new Error('algod down')]
             source.chain = [row(1), row(3)]
             source.answers.set('3/1', { models: ['x'] })
@@ -316,10 +326,14 @@ describe('DiscoveryRegistry', () => {
             await reg.ready
             expect(log.lines.find((l) => l.msg.startsWith('initial operator fetch failed'))?.attrs).toEqual({
                 err: 'algod down',
-                persisted: 1,
+                persisted: 2,
             })
-            // No first cycle to wait for: the seed is served as Go serves it.
+            // No first cycle to wait for: the seed is served as Go serves it,
+            // each node's models only within the carry window.
             expect((await reg.operators('m')).map((op) => [op.id, op.models])).toEqual([[1, ['m']]])
+            expect(await reg.operators('old')).toEqual([])
+            const seeded = reg.snapshot()!.operators.find((op) => op.id === 2)!
+            expect([seeded.baseUrl, seeded.models, seeded.reachableAsOf]).toEqual([aged.baseUrl, [], undefined])
             expect(await reg.operators('x')).toEqual([])
             expect(source.fetchCalls).toBe(1)
             expect(source.probeSets).toEqual([])
