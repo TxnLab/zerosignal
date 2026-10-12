@@ -72,6 +72,18 @@ type ReservedTicket struct {
 	PreSignedOpenGroup []types.SignedTxn
 }
 
+// Wipe zeroes ResponseKey and AgeIdentity, best effort. SPEC § 3: the payer
+// keeps no per-request ephemeral material past the response handler. Call it
+// once the response is read, or when the ticket is dropped unopened. Safe on
+// nil.
+func (rt *ReservedTicket) Wipe() {
+	if rt == nil {
+		return
+	}
+	clear(rt.ResponseKey[:])
+	wire.ZeroEphemeralIdentity(rt.AgeIdentity)
+}
+
 // BusyError is returned from ReserveClient.Reserve when an operator
 // replies with HTTP 429. RetryAfter is the value the operator hinted,
 // clamped to a sane range; zero means no hint was provided.
@@ -486,6 +498,13 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 	if err != nil {
 		return nil, fmt.Errorf("generate ephemeral identity: %w", err)
 	}
+	// A failed reserve wipes it here; a ticket handed back owns it (Wipe).
+	handedBack := false
+	defer func() {
+		if !handedBack {
+			wire.ZeroEphemeralIdentity(ephemeral)
+		}
+	}()
 	req.ProxyRecipient = ephemeral.Recipient().String()
 
 	// Mandatory forward secrecy: seal ONLY to the operator's verified, unexpired
@@ -551,6 +570,7 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 		}
 		return nil, err
 	}
+	handedBack = true
 	return rt, nil
 }
 
@@ -734,6 +754,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 	// base64(sha256(K)) == ticket.commit_k comparison, using the shared
 	// ticket.CommitResponseKey primitive. SPEC §3a.
 	if commit := ticket.CommitResponseKey(key); base64.StdEncoding.EncodeToString(commit[:]) != parsed.Ticket.CommitK {
+		clear(key[:])
 		return nil, errors.New("reserve commit_k mismatch: wrapped_response_key does not hash to ticket.commit_k")
 	}
 
@@ -741,6 +762,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 	if parsed.PreSignedOpenTxn != "" {
 		presigned, err = escrow.DecodeOpenGroup(parsed.PreSignedOpenTxn)
 		if err != nil {
+			clear(key[:])
 			return nil, fmt.Errorf("decode presigned open group: %w", err)
 		}
 	}

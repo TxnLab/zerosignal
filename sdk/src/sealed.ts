@@ -102,6 +102,16 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
  * bound into the envelope. The responder opens what comes back.
  */
 export async function runSealed(deps: SealedDeps, em: Emitter, run: SealedRun, signal?: AbortSignal): Promise<void> {
+    try {
+        await sealAndSend(deps, em, run, signal)
+    } finally {
+        // Only the seal reads it. The response's own key is a separate copy,
+        // which its reader wipes. The identity is a string, which can't be.
+        run.reserved.responseKey.fill(0)
+    }
+}
+
+async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal?: AbortSignal): Promise<void> {
     const log = deps.logger
     const { endpoint, model, op, reserved: rt, stream, hop } = run
     const ticket = rt.ticket

@@ -63,8 +63,11 @@ export interface OutFrame {
     usage?: UsageReport
 }
 
-/** The per-frame hook: opens the node's sealed frames and settles on its receipt. */
-export type FrameTransform = (f: StreamFrame) => Promise<OutFrame>
+/**
+ * The per-frame hook: opens the node's sealed frames and settles on its
+ * receipt. close, when set, runs once the stream has ended, drain included.
+ */
+export type FrameTransform = ((f: StreamFrame) => Promise<OutFrame>) & { close?: () => void }
 
 /**
  * Builds the hook from the node's response headers, which carry the key the
@@ -372,6 +375,7 @@ export async function forwardStream(
     const clock = deps.clock ?? Date.now
     const { endpoint, hop, signal } = call
     const upstream = new AbortController()
+    let frameFn: FrameTransform | undefined
     try {
         try {
             new URL(out.url)
@@ -419,7 +423,6 @@ export async function forwardStream(
         // this point isn't cleanly the relay's, so nothing later charges it.
         if (hop !== null) deps.relayReputation?.recordRelayOutcome(relayRef(hop), true)
 
-        let frameFn: FrameTransform
         try {
             frameFn = await factory(resp)
         } catch (err) {
@@ -465,13 +468,14 @@ export async function forwardStream(
             upstream.abort(err)
         })
         // The hook settles a receipt inline, reading nothing meanwhile.
+        const hook = frameFn
         const timedFn: FrameTransform =
             idle === undefined
-                ? frameFn
+                ? hook
                 : async (f) => {
                       idle.pause()
                       try {
-                          return await frameFn(f)
+                          return await hook(f)
                       } finally {
                           idle.resume()
                       }
@@ -506,6 +510,7 @@ export async function forwardStream(
         }
     } finally {
         upstream.abort()
+        frameFn?.close?.()
     }
 }
 
@@ -565,7 +570,7 @@ export function frameFactory(
         // settled turn for them would invite a paid retry.
         let tailOpened = false
 
-        return async (f) => {
+        const transform: FrameTransform = async (f) => {
             switch (f.event) {
                 case STREAM_EVENT_MARKER: {
                     if (tailOpened) {
@@ -713,5 +718,9 @@ export function frameFactory(
                     return { frame: f }
             }
         }
+        // SPEC § 3: no per-request key outlives the response. The opener
+        // holds these same bytes, so this waits for the stream's end.
+        transform.close = () => responseKey.fill(0)
+        return transform
     }
 }

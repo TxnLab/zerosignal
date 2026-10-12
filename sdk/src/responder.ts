@@ -207,11 +207,22 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
         const responseKey = await openCommittedKey(wrappedKey, reserved)
         // One opener binds the body and both sealed headers to one (txId, ticketId).
         const opener = new ResponseOpener(responseKey, txId, ticket.ticket_id)
+        const meta: MetaContext = { ticket, op, hop, log }
         let plaintext: Uint8Array
+        let receiptHdr: string
+        let settleGroupHdr: string
         try {
-            plaintext = opener.openBody(body)
-        } catch (err) {
-            throw new Error(`decrypt body: ${errText(err)}`, { cause: err })
+            try {
+                plaintext = opener.openBody(body)
+            } catch (err) {
+                throw new Error(`decrypt body: ${errText(err)}`, { cause: err })
+            }
+            receiptHdr = openSealedResponseMeta(meta, opener, h.get(RECEIPT_HEADER) ?? '', SEALED_HEADER_RECEIPT)
+            settleGroupHdr = openSealedResponseMeta(meta, opener, h.get(SETTLE_GROUP_HEADER) ?? '', SEALED_HEADER_SETTLE_GROUP)
+        } finally {
+            // Nothing else is sealed under it (SPEC § 3: no per-request key
+            // outlives the response). The opener holds these same bytes.
+            responseKey.fill(0)
         }
 
         // A sealed error after admission is diagnosable here without the
@@ -225,10 +236,6 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
                 error: failure,
             })
         }
-
-        const meta: MetaContext = { ticket, op, hop, log }
-        const receiptHdr = openSealedResponseMeta(meta, opener, h.get(RECEIPT_HEADER) ?? '', SEALED_HEADER_RECEIPT)
-        const settleGroupHdr = openSealedResponseMeta(meta, opener, h.get(SETTLE_GROUP_HEADER) ?? '', SEALED_HEADER_SETTLE_GROUP)
 
         let receipt: UsageReceipt | null = null
         let submit: SettleSubmit | null = null

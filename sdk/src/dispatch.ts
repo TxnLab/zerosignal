@@ -603,6 +603,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                         allowed: v.want,
                         signed: v.got,
                     })
+                    rt.responseKey.fill(0)
                     continue
                 }
                 logReserve(log, op, hop, rt)
@@ -622,6 +623,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                                 ticket_id: rt.ticket.ticket_id,
                                 err: errText(err),
                             })
+                            rt.responseKey.fill(0)
                             em.fail(
                                 newError(
                                     'operator_ticket_reuse',
@@ -640,6 +642,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                             max_price_microusdc: rt.ticket.max_price,
                             err: errText(err),
                         })
+                        rt.responseKey.fill(0)
                         continue
                     }
                 }

@@ -589,7 +589,10 @@ describe('runSealed', () => {
     it('opens escrow, seals to the pinned recipient with the app-call txid, and sends it direct', async () => {
         const s = await setup()
         const ac = new AbortController()
+        const key = s.run.reserved.responseKey.slice()
         await runSealed(s.deps, s.em, s.run, ac.signal)
+        // SPEC § 3: the key is wiped once the turn is done with it.
+        expect(s.run.reserved.responseKey).toEqual(new Uint8Array(key.length))
 
         expect(s.opens).toEqual([[s.run.reserved.ticket, s.run.op, 'OPENGROUP', ac.signal]])
         expect(s.em.order).toEqual(['reserved TKT1 9', 'opened', 'committed'])
@@ -611,7 +614,7 @@ describe('runSealed', () => {
         expect(dec.algorandTxID).toBe('APPCALLTXID')
         expect(dec.ticketID).toBe('TKT1')
         expect(dec.replyToRecipient).toBe(s.identity.recipient)
-        expect(dec.admissionTag).toEqual(computeAdmissionTag(s.run.reserved.responseKey, 'TKT1', 'APPCALLTXID', body))
+        expect(dec.admissionTag).toEqual(computeAdmissionTag(key, 'TKT1', 'APPCALLTXID', body))
         await expect(decryptRequest(init.body as Uint8Array, s.current.secret)).rejects.toThrow()
 
         expect(s.calls).toEqual([

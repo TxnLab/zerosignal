@@ -9,7 +9,7 @@
 // group-rejection exclusion, and the receipt, spend and pre-envelope cases of
 // go/zs/handler dispatch_test.go and spend_dispatch_test.go.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { type Ticket, type UsageReceipt, encodeReceiptHeader } from '@txnlab/zs-proto/ticket'
 import {
@@ -51,6 +51,21 @@ import type { SealedCall } from '../src/sealed.js'
 import { Settles } from '../src/settles.js'
 import { testOperator } from './fixtures.js'
 import { TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
+
+// Every response key the responder unwraps, kept so a test can check it was
+// zeroed once the responder is done with it.
+const unwrapped = vi.hoisted((): Uint8Array[] => [])
+vi.mock('../src/seal.js', async (importOriginal) => {
+    const seal = await importOriginal<typeof import('../src/seal.js')>()
+    return {
+        ...seal,
+        openResponseKey: async (...args: Parameters<typeof seal.openResponseKey>) => {
+            const k = await seal.openResponseKey(...args)
+            unwrapped.push(k)
+            return k
+        },
+    }
+})
 
 function depsOf(over: Partial<ReceiptCheckDeps> = {}) {
     const resolved: string[] = []
@@ -812,6 +827,23 @@ describe('bufferedResponder', () => {
         s = await setup()
         const r = sealedResponse(s)
         await expect(bufferedResponder(s.deps, s.call)(s.em, r.resp, new TextEncoder().encode('{"nonce":"","ciphertext":""}'))).rejects.toThrow(/^decrypt body: /)
+    })
+
+    it('zeroes the response key it unwrapped, whether the body opens or not', async () => {
+        unwrapped.length = 0
+        let s = await setup()
+        const ok = sealedResponse(s)
+        await bufferedResponder(s.deps, s.call)(s.em, ok.resp, ok.body)
+
+        s = await setup()
+        const bad = sealedResponse(s)
+        await expect(bufferedResponder(s.deps, s.call)(s.em, bad.resp, new TextEncoder().encode('{"nonce":"","ciphertext":""}'))).rejects.toThrow(/^decrypt body: /)
+
+        expect(unwrapped).toHaveLength(2)
+        for (const k of unwrapped) {
+            expect(k).toHaveLength(32)
+            expect(k.every((b) => b === 0)).toBe(true)
+        }
     })
 
     it('logs a sealed error envelope, still replying', async () => {
