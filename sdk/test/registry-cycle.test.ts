@@ -1025,11 +1025,13 @@ describe('DiscoveryRegistry', () => {
             const reg = registry()
             expect(await reg.allModels()).toEqual(['m'])
             expect(await reg.allBuiltinTools()).toEqual([{ type: 'zs_web_search' }])
+            expect((await reg.allModelDetails()).map((d) => d.id)).toEqual(['m'])
             expect((await reg.allOperators()).map((op) => op.id)).toEqual([1, 2, 3])
             expect((await reg.operators('staged')).map((op) => op.id)).toEqual([2])
 
             const staging = registry({ allowStaging: true })
             expect(await staging.allModels()).toEqual(['m', 'staged'])
+            expect((await staging.allModelDetails()).map((d) => d.id)).toEqual(['m', 'staged'])
         })
 
         it('reprobes through the source when it can, and re-checks the node as it is when not', async () => {

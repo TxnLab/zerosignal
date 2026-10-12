@@ -31,6 +31,26 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — the TS SDK lists its catalog on `/v1/models` (unreleased)
+
+`zs.fetch` answers `GET` and `HEAD` on `/v1/models` and `/v1/models/{id}`, with `/models` and
+`/models/{id}` as aliases, as Go's handler does, so `openai.models.list()` works on it. Both read
+the same aggregates as Go: the models of every node the registry would route to, each listed
+with the lowest rates any of them declared, grossed up by the protocol fee. While the fee is
+unread, or when either rate is 0, an entry carries no `pricing`. `testdata/catalog_aggregate_vectors.json`
+pins the aggregates and `openai_model_vectors.json` the entries against Go.
+
+- `DiscoveryRegistry.allModelDetails` is new, and `allModels` / `allBuiltinTools` now read the
+  same merge rules (`aggregateModels`, `aggregateBuiltinTools`, `aggregateModelDetails`).
+- `RegistryProvider` gains optional `allModels` and `allModelDetails`. A registry without
+  `allModels` has no catalog, and the routes answer 501 `catalog_unavailable`; without
+  `allModelDetails` each model is listed by id alone. A registry read that rejects answers 503,
+  which Go never does, since its aggregates cannot fail.
+- `@txnlab/zs-proto/inject` exports `openAIModelFromDetails`, `usdPerToken` and
+  `huggingFaceRepo`, the twins of Go's `inject.OpenAIModelFromDetails` and its helpers.
+- Go: no behavior change. `AllModels`, `AllBuiltinTools` and `AllModelDetails` share one
+  implementation between the static and dynamic registries, which the vectors pin.
+
 ### 2026-10-11 — the TS SDK's browser fetch refuses private hosts (0.4.1)
 
 Outside Node, `@txnlab/zerosignal`'s default `fetch` was the runtime's own, with no check, and

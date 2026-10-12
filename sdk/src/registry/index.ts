@@ -34,6 +34,7 @@ export {
     applyProbeOutcome,
     classifyProbeFailure,
 } from './probe.js'
+export { aggregateBuiltinTools, aggregateModelDetails, aggregateModels } from './aggregate.js'
 export {
     CATALOG_FORMAT_VERSION,
     CATALOG_STORAGE_KEY,

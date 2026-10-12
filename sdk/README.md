@@ -291,9 +291,12 @@ const openai = new OpenAI({ baseURL: zs.baseURL, fetch: zs.fetch, apiKey: 'unuse
 
 `baseURL` (`FETCH_BASE_URL`) names no server, so a client that loses the fetch fails rather than
 reaching a host. Nothing reads the API key, and the SDK forwards no `Authorization` header. It
-serves `POST` on the four endpoints above and on `/v1/completions`, which it emulates over chat.
-Every other request gets a 404: the catalog `GET` routes (`/v1/models` and the rest) are not
-ported yet, so `openai.models.list()` fails.
+serves `POST` on the four endpoints above and on `/v1/completions`, which it emulates over chat,
+and `GET` / `HEAD` on `/v1/models` and `/v1/models/{id}` (and `/models`), so
+`openai.models.list()` lists the models the registry would route to now. Each entry is
+OpenRouter-shaped, priced at the lowest rates any node declared plus the protocol fee, and has no
+`pricing` until the fee has been read. A `Config.registry` without `allModels` has no catalog,
+and those routes answer 501. Every other request gets a 404.
 
 The response is the node's, as an OpenAI API would send it. Request headers set the turn's
 preferences: `X-Zs-Relay`, and `X-Zs-Require-TEE` and `X-Zs-Usage-Frame`, which any non-blank

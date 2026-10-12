@@ -58,12 +58,12 @@
 //     no nil. The rows carried onto are fresh chain rows, whose lists Go also
 //     leaves nil.
 //   - The node's build id is neither carried nor persisted, since Operator has
-//     none, so there is no allNodeVersions. allModelDetails is not ported:
-//     the display aggregate is sdk/src/catalog's.
+//     none, so there is no allNodeVersions.
 //   - persist compares the catalog text with the last one written rather than
 //     a sha256 of it, and writes to a StorageAdapter key, not a file.
 //   - A logger or subscriber that throws is caught.
 
+import type { OperatorDetailsModel } from '@txnlab/zs-proto/inject'
 import { MIN_SIGNER_SPENDABLE_MICROALGOS, signerSpendableBelowFloor } from '@txnlab/zs-proto/selection'
 import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 
@@ -75,6 +75,7 @@ import type { RegistryProvider } from '../parts.js'
 import { type Clock, type Logger, type StorageAdapter, discardLogger } from '../ports.js'
 import { MAX_TIMER_MS, untilAborted } from '../sleep.js'
 import { type NodeRef, nodeRefString } from '../types.js'
+import { aggregateBuiltinTools, aggregateModelDetails, aggregateModels } from './aggregate.js'
 import { CATALOG_STORAGE_KEY, loadCatalog, marshalCatalog } from './persist.js'
 
 /**
@@ -592,25 +593,29 @@ export class DiscoveryRegistry implements RegistryProvider {
     /** allModels is the models of every advertisable node, first seen first. */
     async allModels(signal?: AbortSignal): Promise<string[]> {
         await this.#ensureFresh(signal)
-        const now = this.#clock()
-        const seen = new Set<string>()
-        for (const op of this.#snap?.view.operators ?? []) {
-            if (!this.advertisable(op, now)) continue
-            for (const m of op.models) seen.add(m)
-        }
-        return [...seen]
+        return aggregateModels(this.#snap?.view.operators ?? [], this.#advertisableNow())
     }
 
     /** allBuiltinTools is the built-in tools of every advertisable node, the first definition of each type kept. */
     async allBuiltinTools(signal?: AbortSignal): Promise<BuiltinToolDef[]> {
         await this.#ensureFresh(signal)
+        return aggregateBuiltinTools(this.#snap?.view.operators ?? [], this.#advertisableNow())
+    }
+
+    /**
+     * allModelDetails is the capability union across every advertisable node
+     * of each model they serve: the figures /v1/models lists. Rates are the
+     * lowest any of them declared; see aggregateModelDetails.
+     */
+    async allModelDetails(signal?: AbortSignal): Promise<OperatorDetailsModel[]> {
+        await this.#ensureFresh(signal)
+        return aggregateModelDetails(this.#snap?.view.operators ?? [], this.#advertisableNow())
+    }
+
+    // One instant for every node an aggregate judges.
+    #advertisableNow(): (op: Operator) => boolean {
         const now = this.#clock()
-        const seen = new Map<string, BuiltinToolDef>()
-        for (const op of this.#snap?.view.operators ?? []) {
-            if (!this.advertisable(op, now)) continue
-            for (const t of op.builtinTools) if (!seen.has(t.type)) seen.set(t.type, { ...t })
-        }
-        return [...seen.values()]
+        return (op) => this.advertisable(op, now)
     }
 
     /** advertisable is the one gate every discovery aggregate shares; see the exported advertisable. */
