@@ -104,7 +104,8 @@ The canonical implementation; it generates every golden vector.
 | `zs/tee` | Verifies a node's published attestation evidence: the bundle checks every platform shares, the dstack TDX verifier, and the process-wide Intel collateral cache. |
 | `zs/tokenize` | The safe input-token upper bound a payer reserves against. |
 | `cmd/releasenotes` | Release-notes generator used by the `zs-proxy` and `zs-node` release builds. |
-| `cmd/zschat` | One chat-completions prompt through `zs`, streamed to stdout: the smallest complete payer. |
+| `cmd/zschat` | One chat-completions prompt through `zs`, streamed to stdout, with the `zs-proxy` wallet and a journal on disk. |
+| `examples/` | Runnable programs: `chatstream`, `discovery`, `openaishim`, each with its own README. [`examples/README.md`](./examples/README.md) indexes them with the TypeScript ones. |
 
 ### TypeScript — [`ts/`](./ts/), npm package `@txnlab/zs-proto`
 
@@ -133,6 +134,15 @@ probe. A host can still supply its own registry, or share one across Clients. It
 `@txnlab/zerosignal/proto`. The names it shares with Go are pinned by
 `testdata/sdk_vocabulary_vectors.json`. See [`sdk/README.md`](./sdk/README.md).
 
+### Examples — [`examples/`](./examples/)
+
+Runnable programs for both SDKs: a streamed chat turn, the OpenAI SDK over `zs.fetch`, a fleet
+listing that pays nothing, one turn built from the SDK's parts, a durable ticket journal, image
+generation, and a localnet setup. The TypeScript ones are pnpm workspace members on
+`@txnlab/zerosignal` `workspace:*`; the Go ones live in [`go/examples/`](./go/examples/) inside the
+module. `make test` compiles all of them but runs none. See
+[`examples/README.md`](./examples/README.md).
+
 ### Golden vectors — [`testdata/`](./testdata/)
 
 Each vectored Go package writes its fixture (`vectors.json`, `selection_vectors.json`, …) from
@@ -159,9 +169,10 @@ changes on purpose, with `make update-sealed-vectors` and `make update-ts-sealed
 ## Build & test
 
 ```bash
-pnpm install               # one workspace: ts/ and sdk/
+pnpm install               # one workspace: ts/, sdk/ and examples/*
 make test                  # guards (check-vector-generators, check-no-hayai, check-lockstep,
                            # check-escrow-client) + Go suite + ts suite + sdk typecheck/test/build/test:dist
+                           # + examples typecheck and the browser example's bundle
 make vet typecheck
 make verify-vectors        # read-only: every fixture matches current Go output; Go opens the TS-sealed one
 make update-vectors        # regenerate fixtures after an intentional format change

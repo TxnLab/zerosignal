@@ -9,6 +9,10 @@ a golden fixture both test suites read.
 > **Status: in development.** `Client.stream` runs a paid turn end to end, over operator
 > discovery the Client builds itself or one the host supplies.
 
+Runnable examples are in [`../examples`](../examples): a streamed chat turn, the OpenAI SDK in a
+browser, discovery, a turn built from the SDK's parts, a durable ticket journal, images and
+localnet.
+
 ## Install
 
 ```bash

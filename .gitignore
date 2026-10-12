@@ -7,3 +7,8 @@ sdk/*.tgz
 .claude/
 ts/*.tgz
 /go/zschat
+# What the examples write when run.
+examples/*/dist/
+examples/*/catalog.json*
+examples/*/journal.json*
+examples/*/*.png

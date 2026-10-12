@@ -19,13 +19,13 @@
 GO   ?= go
 PNPM ?= pnpm
 
-.PHONY: test test-go test-ts test-sdk build-ts check-lockstep verify-vectors update-vectors update-sealed-vectors \
+.PHONY: test test-go test-ts test-sdk test-examples build-ts build-sdk check-lockstep verify-vectors update-vectors update-sealed-vectors \
 	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
 # vector-staleness is caught here too.
-test: check-vector-generators check-no-hayai check-lockstep check-escrow-client test-go test-ts test-sdk
+test: check-vector-generators check-no-hayai check-lockstep check-escrow-client test-go test-ts test-sdk test-examples
 
 test-go:
 	cd go && $(GO) test ./... -count 1
@@ -48,6 +48,17 @@ check-lockstep:
 # sdk/ resolves @txnlab/zs-proto to ts/dist, so it needs a current build.
 build-ts: node_modules
 	cd ts && $(PNPM) build
+
+# examples/ resolve @txnlab/zerosignal to sdk/dist, as an app would.
+build-sdk: build-ts
+	cd sdk && $(PNPM) build
+
+# The examples never run here (they need a funded account and the network);
+# compiling them against the current SDK is what keeps them from rotting. The
+# browser one is bundled too, since a bundle is where a browser breaks.
+test-examples: build-sdk
+	$(PNPM) -r --filter './examples/*' typecheck
+	$(PNPM) --filter ./examples/browser-openai-shim build
 
 # Read-only check that every testdata fixture matches what the current Go code
 # emits, and that Go still opens the TS-sealed fixture. No -update — on drift it
@@ -162,12 +173,13 @@ check-gofmt:
 	@out="$$(cd go && gofmt -l .)" || exit 1; \
 	if [ -n "$$out" ]; then echo "gofmt needed (run: cd go && gofmt -w .):"; echo "$$out"; exit 1; fi
 
-typecheck: build-ts
+typecheck: build-sdk
 	cd ts && $(PNPM) typecheck
 	cd sdk && $(PNPM) typecheck
+	$(PNPM) -r --filter './examples/*' typecheck
 
 # Install (or refresh) the workspace's dependencies so `make test` works from a
 # clean checkout and re-installs when the lockfile changes.
-node_modules: package.json ts/package.json sdk/package.json pnpm-lock.yaml
+node_modules: package.json ts/package.json sdk/package.json $(wildcard examples/*/package.json) pnpm-lock.yaml
 	$(PNPM) install --frozen-lockfile
 	@touch node_modules
