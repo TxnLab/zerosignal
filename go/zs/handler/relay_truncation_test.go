@@ -142,6 +142,42 @@ func TestDispatch_Stream_RelayTruncatesBeforeReceipt_NoProtest(t *testing.T) {
 	}
 }
 
+// SPEC § 5.3: content after the receipt is outside its body_hash. The receipt
+// settles what it priced and the unpriced frame never reaches the client, but
+// the stream does not fail: an honest node writes upstream frames that follow
+// [DONE] after its receipt.
+func TestDispatch_Stream_ContentAfterReceipt_Dropped(t *testing.T) {
+	s, logBuf := streamReceiptServerWith(t, modeStreamContentAfterReceipt, verifyingReceipt)
+	w := driveStream(t, s)
+	body, logs := w.Body.String(), logBuf.String()
+	if !strings.Contains(body, `{"delta":"A"}`) {
+		t.Errorf("content before the receipt missing from the client stream: %s", body)
+	}
+	if strings.Contains(body, `{"delta":"B"}`) {
+		t.Errorf("content after the receipt reached the client: %s", body)
+	}
+	if strings.Contains(body, `"error"`) {
+		t.Errorf("a settled stream ended in an error: %s", body)
+	}
+	if strings.Contains(logs, "receipt verification failed") {
+		t.Errorf("the receipt over the earlier content should verify: %s", logs)
+	}
+}
+
+// A settle group that won't open could be a relay's, so it opens no tail:
+// the content after it still reaches the client and the receipt settles it.
+func TestDispatch_Stream_UnopenableSettleGroupKeepsContent(t *testing.T) {
+	s, logBuf := streamReceiptServerWith(t, modeStreamUnopenableSettleGroup, verifyingReceipt)
+	w := driveStream(t, s)
+	body, logs := w.Body.String(), logBuf.String()
+	if !strings.Contains(body, `{"delta":"A"}`) {
+		t.Errorf("content after an unopenable settle group was dropped: %s", body)
+	}
+	if strings.Contains(logs, "receipt verification failed") {
+		t.Errorf("the receipt over the content should verify: %s", logs)
+	}
+}
+
 // The zs.usage SSE frame is opt-in (usageFrameHeader): its data payload
 // is not a valid OpenAI chat chunk, so strict OpenAI clients (JetBrains/Koog)
 // that parse every data: line throw on it. Default off keeps the stream

@@ -1100,11 +1100,39 @@ describe('frameFactory', () => {
         expect(s.logger.logged.map((l) => l.msg)).toContain('operator emitted more than one zs-receipt frame; ignoring the extra')
     })
 
-    it('opens the settle group without taking an index, the last one sent winning', async () => {
+    // SPEC § 5.3: the receipt hashes the frames before it, so content after
+    // the tail opens was never priced. An honest node writes upstream frames
+    // that follow [DONE] there, so the turn stands.
+    it('drops content after the receipt, having settled on what came before', async () => {
+        const s = await setup({ frames: [CONTENT[0]!] })
+        const fn = await transform(s)
+        await fn(zs(s, s.frames[0]!))
+        expect((await fn(receiptFrame(s))).usage?.check.violation).toBe('')
+        expect(await fn(zs(s, enc.encode('{"delta":"late"}')))).toEqual({})
+        expect(s.logger.logged.map((l) => l.msg)).toContain('frame after the settlement tail dropped')
+        expect(s.handle.acks).toHaveLength(1)
+    })
+
+    it('drops content after the settle group', async () => {
         const s = await setup()
         const fn = await transform(s)
         await fn(groupFrame(s, VALID_GROUP))
+        expect(await fn(zs(s, s.frames[0]!))).toEqual({})
+    })
+
+    // A frame that won't open could be a relay's; it doesn't end the content.
+    it('takes content after a settle group that won’t open', async () => {
+        const s = await setup()
+        const fn = await transform(s)
+        expect(await fn(frameOf({ event: 'zs-settle-group', data: enc.encode('AAAA') }))).toEqual({})
+        expect((await fn(zs(s, s.frames[0]!))).frame?.data).toEqual(s.frames[0])
+    })
+
+    it('opens the settle group without taking an index, the last one sent winning', async () => {
+        const s = await setup()
+        const fn = await transform(s)
         for (const pt of s.frames) await fn(zs(s, pt))
+        await fn(groupFrame(s, VALID_GROUP))
         await fn(groupFrame(s, 'bm90IGEgZ3JvdXA='))
         await fn(receiptFrame(s))
         // The malformed later group replaced the good one: a standalone ack.

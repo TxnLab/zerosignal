@@ -557,10 +557,25 @@ export function frameFactory(
         const recordResponseId = deps.responseAffinity !== undefined && endpoint === '/v1/responses'
         let recordedResponseId = false
         let receiptSeen = false
+        // Set once a settle group or receipt has opened under K_response.
+        // Content after that point is outside the receipt's body_hash, so it
+        // is dropped unopened rather than passed on unverified. Not refused:
+        // an honest node writes upstream frames that follow [DONE] (a trailing
+        // usage chunk, a late provider error) after its receipt, and failing a
+        // settled turn for them would invite a paid retry.
+        let tailOpened = false
 
         return async (f) => {
             switch (f.event) {
                 case STREAM_EVENT_MARKER: {
+                    if (tailOpened) {
+                        log.debug('frame after the settlement tail dropped', {
+                            ...opAttrs(op),
+                            ...relayAttrs(hop),
+                            ticket_id: ticketId,
+                        })
+                        return {}
+                    }
                     let pt: Uint8Array
                     try {
                         pt = opener.openNextFrame(dec.decode(f.data))
@@ -610,6 +625,7 @@ export function frameFactory(
                 case STREAM_EVENT_SETTLE_GROUP: {
                     // Sealed as a header, so it takes no frame index.
                     const sg = openSealedResponseMeta(meta, opener, dec.decode(f.data), SEALED_HEADER_SETTLE_GROUP)
+                    if (sg !== '') tailOpened = true
                     settleGroup = settleGroupOf(meta, sg)
                     return {}
                 }
@@ -627,6 +643,7 @@ export function frameFactory(
                         })
                         return {}
                     }
+                    tailOpened = true
                     let receipt
                     try {
                         receipt = parseReceiptJSON(pt)

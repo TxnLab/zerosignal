@@ -251,6 +251,9 @@ export function openSealedStream(opts: SealedStreamOptions): ReadableStream<Resp
     let settleGroup: string | null = null
     let receiptSeen = false
     let tailPending = false
+    // Set once a settle group or receipt has opened: content after it is
+    // outside the receipt's body_hash, so it is dropped (SPEC § 5.3).
+    let tailOpened = false
 
     const open = (data: string): Uint8Array => {
         const t0 = performance.now()
@@ -263,6 +266,10 @@ export function openSealedStream(opts: SealedStreamOptions): ReadableStream<Resp
         transform(ev, controller) {
             switch (ev.event) {
                 case STREAM_EVENT_MARKER: {
+                    if (tailOpened) {
+                        log.debug('frame after the settlement tail dropped', { ticket_id: opener.ticketId })
+                        return
+                    }
                     const index = opener.frameIndex
                     let pt: Uint8Array
                     try {
@@ -289,6 +296,7 @@ export function openSealedStream(opts: SealedStreamOptions): ReadableStream<Resp
                     tailPending = true
                     try {
                         settleGroup = new TextDecoder().decode(opener.openHeader(ev.data, SEALED_HEADER_SETTLE_GROUP))
+                        tailOpened = true
                     } catch (err) {
                         log.warn('sealed settle group failed to open', { ticket_id: opener.ticketId, err: String(err) })
                         settleGroup = null
@@ -302,6 +310,7 @@ export function openSealedStream(opts: SealedStreamOptions): ReadableStream<Resp
                         log.warn('receipt frame discarded', { ticket_id: opener.ticketId, err: String(err) })
                         return
                     }
+                    tailOpened = true
                     if (receiptSeen) {
                         // Settlement is irreversible and has run; a second receipt
                         // must not get a second, different verdict.
