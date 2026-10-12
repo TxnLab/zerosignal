@@ -462,7 +462,27 @@ func probeAttestationScenarios() []probeAttestationScenario {
 	add("a verdict with no evidence time reports none", func(sc *probeAttestationScenario) {
 		sc.Verdict = &probeVerdictVector{FailureTag: tee.FailureStaleEvidence, VerifierID: tee.VerifierIDBuiltin}
 	})
-	add("a node with no verified recipient is handed none", func(sc *probeAttestationScenario) { sc.EphemeralRecipient = "" })
+	add("a node with no verified recipient is not fetched, and reads ephemeral_unavailable", func(sc *probeAttestationScenario) {
+		sc.EphemeralRecipient = ""
+	})
+	add("ephemeral_unavailable with no advertised time reports none", func(sc *probeAttestationScenario) {
+		sc.EphemeralRecipient = ""
+		sc.Advertised.AttestedAt = time.Time{}
+	})
+	add("a relayed probe of a node with no verified recipient asks the relay for nothing", func(sc *probeAttestationScenario) {
+		sc.Relayed = true
+		sc.EphemeralRecipient = ""
+	})
+	// Neither advertising no TEE nor verification off may turn into a status
+	// for want of a recipient: both come first.
+	add("a node advertising no TEE and with no verified recipient has no status", func(sc *probeAttestationScenario) {
+		sc.Advertised = nil
+		sc.EphemeralRecipient = ""
+	})
+	add("verification off leaves a node with no verified recipient without a status", func(sc *probeAttestationScenario) {
+		sc.Verdict = nil
+		sc.EphemeralRecipient = ""
+	})
 	add("an error status is fetch_failed at the advertised time", func(sc *probeAttestationScenario) { sc.EndpointStatus = 404 })
 	add("a server error is fetch_failed too", func(sc *probeAttestationScenario) { sc.EndpointStatus = 503 })
 	add("fetch_failed with no advertised time reports none", func(sc *probeAttestationScenario) {
@@ -541,6 +561,9 @@ func runProbeAttestationScenario(t *testing.T, sc *probeAttestationScenario) {
 	sc.Attested = op.IsTEEAttested()
 	if sc.Want != nil && sc.Want.FailureTag == tee.FailureFetchFailed && sc.RequestPath == "" {
 		t.Fatalf("%s: fetch_failed without a request", sc.Name)
+	}
+	if sc.Want != nil && sc.Want.FailureTag == tee.FailureEphemeralUnavailable && (sc.RequestPath != "" || sc.VerifiedNode != nil) {
+		t.Fatalf("%s: ephemeral_unavailable after a fetch or a verify", sc.Name)
 	}
 }
 

@@ -155,6 +155,7 @@ var verdictFailureTags = []struct{ goName, tsKey, value string }{
 	{"FailureAdvertisementMismatch", "AdvertisementMismatch", FailureAdvertisementMismatch},
 	{"FailureFetchFailed", "FetchFailed", FailureFetchFailed},
 	{"FailureStaleEvidence", "StaleEvidence", FailureStaleEvidence},
+	{"FailureEphemeralUnavailable", "EphemeralUnavailable", FailureEphemeralUnavailable},
 	{"FailureMeasurementMismatch", "MeasurementMismatch", FailureMeasurementMismatch},
 	{"FailureCollateralUnreachable", "CollateralUnreachable", FailureCollateralUnreachable},
 	{"FailureAuxBindingAbsent", "AuxBindingAbsent", FailureAuxBindingAbsent},
@@ -166,9 +167,9 @@ var verdictFailureTags = []struct{ goName, tsKey, value string }{
 }
 
 // verdictUnreachableTags are tags BundleVerifier never returns: the fetcher
-// owns fetch_failed, and nras_unreachable waits on an NVIDIA verifier. They
-// are pinned as constants only.
-var verdictUnreachableTags = []string{FailureFetchFailed, FailureNRASUnreachable}
+// owns fetch_failed and ephemeral_unavailable, and nras_unreachable waits on
+// an NVIDIA verifier. They are pinned as constants only.
+var verdictUnreachableTags = []string{FailureFetchFailed, FailureEphemeralUnavailable, FailureNRASUnreachable}
 
 const (
 	verdictOtherKey      = "age1someoneelse000000000000000000000000000000000000000"

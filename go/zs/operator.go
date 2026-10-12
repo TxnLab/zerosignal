@@ -320,9 +320,9 @@ func (m OperatorMetrics) LatencyMeanMs() uint64 {
 // mode attestation. Attested() is the routing-relevant answer, read from
 // Verified and the two measurement checks; everything else exists for
 // observability (dashboards, debug logs, alerting). FailureTag is empty
-// when Verified is true and one of the canonical verifier failure tags
-// otherwise (see proto/TEE.md §4.3 and the tee package's Failure*
-// constants for the full list).
+// when Verified is true and otherwise one of the tee package's Failure*
+// constants: a verifier's tag (SPEC.md §3e), or the prober's own
+// fetch_failed or ephemeral_unavailable for evidence it never verified.
 type TEEStatus struct {
 	Mode       string    // "stub" | "dstack-tdx" | "nvidia-cc-tdx" | "nvidia-cc-snp"
 	AttestedAt time.Time // bundle.GeneratedAt of the verified evidence

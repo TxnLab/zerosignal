@@ -1171,6 +1171,8 @@ func relayLogAttr(hop *RelayHop) slog.Attr {
 //   - TEEVerifier nil (Config.DisableTEE) → no TEE verification;
 //     op.TEE = nil (treated as not-attested for routing). This is the
 //     correct behavior for deployments that don't care about TEE.
+//   - No verified ephemeral recipient this cycle → nothing fetched;
+//     op.TEE.Verified=false, FailureTag=ephemeral_unavailable.
 //   - Fetch fails → op.TEE.Verified=false, FailureTag=fetch_failed.
 //   - Verify fails → op.TEE.Verified=false, FailureTag from verdict.
 //   - All checks pass → op.TEE.Verified=true, FailureTag empty.
@@ -1190,6 +1192,16 @@ func (s *ChainOperatorSource) probeAttestation(ctx context.Context, op *Operator
 		return
 	}
 	advertised := *details.TEE
+	if op.EphemeralRecipientPubkey == "" {
+		op.TEE = &TEEStatus{
+			Mode:       advertised.Mode,
+			AttestedAt: advertised.AttestedAt,
+			VerifierID: tee.VerifierIDBuiltin,
+			Verified:   false,
+			FailureTag: tee.FailureEphemeralUnavailable,
+		}
+		return
+	}
 	bundle, err := client.Fetch(ctx, op.BaseURL, advertised.EvidenceURL, hop)
 	if err != nil {
 		op.TEE = &TEEStatus{

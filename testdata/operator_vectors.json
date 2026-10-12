@@ -3436,7 +3436,7 @@
       "attested": false
     },
     {
-      "name": "a node with no verified recipient is handed none",
+      "name": "a node with no verified recipient is not fetched, and reads ephemeral_unavailable",
       "operator_id": 7,
       "node_id": 2,
       "ephemeral_recipient": "",
@@ -3463,29 +3463,166 @@
       },
       "endpoint_status": 200,
       "endpoint_body": "{\"mode\":\"dstack-tdx\",\"generated_at\":\"2026-10-01T00:00:00Z\",\"refresh_seconds\":1200}",
-      "request_method": "GET",
-      "request_path": "/v1/zs/attestation",
+      "request_method": "",
+      "request_path": "",
       "request_relay_path": "",
       "request_relay_target": "",
-      "verified_node": {
-        "operatorId": 7,
-        "nodeId": 2,
-        "ephemeralRecipientPubkey": ""
-      },
+      "verified_node": null,
       "want": {
         "mode": "dstack-tdx",
         "attestedAt": 1790812800000,
-        "verifierId": "dstack-tdx",
-        "verified": true,
-        "failureTag": "",
-        "osImageChecked": true,
-        "composeReleaseChecked": true,
-        "attestedModelIds": [
+        "verifierId": "builtin",
+        "verified": false,
+        "failureTag": "ephemeral_unavailable",
+        "osImageChecked": false,
+        "composeReleaseChecked": false,
+        "attestedModelIds": null
+      },
+      "attested": false
+    },
+    {
+      "name": "ephemeral_unavailable with no advertised time reports none",
+      "operator_id": 7,
+      "node_id": 2,
+      "ephemeral_recipient": "",
+      "advertised": {
+        "mode": "dstack-tdx",
+        "attested_at": "0001-01-01T00:00:00Z",
+        "evidence_url": ""
+      },
+      "relayed": false,
+      "verdict": {
+        "pass": true,
+        "failure_tag": "",
+        "verifier_id": "dstack-tdx",
+        "attested_at_ms": 1790812800000,
+        "attested_model_ids": [
           "m",
           "n"
-        ]
+        ],
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": true,
+          "compose_hash": false
+        }
       },
-      "attested": true
+      "endpoint_status": 200,
+      "endpoint_body": "{\"mode\":\"dstack-tdx\",\"generated_at\":\"2026-10-01T00:00:00Z\",\"refresh_seconds\":1200}",
+      "request_method": "",
+      "request_path": "",
+      "request_relay_path": "",
+      "request_relay_target": "",
+      "verified_node": null,
+      "want": {
+        "mode": "dstack-tdx",
+        "attestedAt": 0,
+        "verifierId": "builtin",
+        "verified": false,
+        "failureTag": "ephemeral_unavailable",
+        "osImageChecked": false,
+        "composeReleaseChecked": false,
+        "attestedModelIds": null
+      },
+      "attested": false
+    },
+    {
+      "name": "a relayed probe of a node with no verified recipient asks the relay for nothing",
+      "operator_id": 7,
+      "node_id": 2,
+      "ephemeral_recipient": "",
+      "advertised": {
+        "mode": "dstack-tdx",
+        "attested_at": "2026-10-01T00:00:00Z",
+        "evidence_url": ""
+      },
+      "relayed": true,
+      "verdict": {
+        "pass": true,
+        "failure_tag": "",
+        "verifier_id": "dstack-tdx",
+        "attested_at_ms": 1790812800000,
+        "attested_model_ids": [
+          "m",
+          "n"
+        ],
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": true,
+          "compose_hash": false
+        }
+      },
+      "endpoint_status": 200,
+      "endpoint_body": "{\"mode\":\"dstack-tdx\",\"generated_at\":\"2026-10-01T00:00:00Z\",\"refresh_seconds\":1200}",
+      "request_method": "",
+      "request_path": "",
+      "request_relay_path": "",
+      "request_relay_target": "",
+      "verified_node": null,
+      "want": {
+        "mode": "dstack-tdx",
+        "attestedAt": 1790812800000,
+        "verifierId": "builtin",
+        "verified": false,
+        "failureTag": "ephemeral_unavailable",
+        "osImageChecked": false,
+        "composeReleaseChecked": false,
+        "attestedModelIds": null
+      },
+      "attested": false
+    },
+    {
+      "name": "a node advertising no TEE and with no verified recipient has no status",
+      "operator_id": 7,
+      "node_id": 2,
+      "ephemeral_recipient": "",
+      "advertised": null,
+      "relayed": false,
+      "verdict": {
+        "pass": true,
+        "failure_tag": "",
+        "verifier_id": "dstack-tdx",
+        "attested_at_ms": 1790812800000,
+        "attested_model_ids": [
+          "m",
+          "n"
+        ],
+        "measurement_checks": {
+          "os_image": true,
+          "compose_release": true,
+          "compose_hash": false
+        }
+      },
+      "endpoint_status": 200,
+      "endpoint_body": "{\"mode\":\"dstack-tdx\",\"generated_at\":\"2026-10-01T00:00:00Z\",\"refresh_seconds\":1200}",
+      "request_method": "",
+      "request_path": "",
+      "request_relay_path": "",
+      "request_relay_target": "",
+      "verified_node": null,
+      "want": null,
+      "attested": false
+    },
+    {
+      "name": "verification off leaves a node with no verified recipient without a status",
+      "operator_id": 7,
+      "node_id": 2,
+      "ephemeral_recipient": "",
+      "advertised": {
+        "mode": "dstack-tdx",
+        "attested_at": "2026-10-01T00:00:00Z",
+        "evidence_url": ""
+      },
+      "relayed": false,
+      "verdict": null,
+      "endpoint_status": 200,
+      "endpoint_body": "{\"mode\":\"dstack-tdx\",\"generated_at\":\"2026-10-01T00:00:00Z\",\"refresh_seconds\":1200}",
+      "request_method": "",
+      "request_path": "",
+      "request_relay_path": "",
+      "request_relay_target": "",
+      "verified_node": null,
+      "want": null,
+      "attested": false
     },
     {
       "name": "an error status is fetch_failed at the advertised time",

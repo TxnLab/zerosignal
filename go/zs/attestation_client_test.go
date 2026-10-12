@@ -19,28 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"filippo.io/age"
-
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
-
-// testOperatorAndPubkey returns an Operator and the string used as the bundle's
-// NodePubkey, in lockstep so the verifier's cross-check passes. The TEE
-// key-binding target is the node's current ephemeral age recipient.
-func testOperatorAndPubkey(t *testing.T, id uint64) (Operator, string) {
-	t.Helper()
-	ageID, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatalf("generate age identity: %v", err)
-	}
-	recipient := ageID.Recipient().String()
-	return Operator{
-		ID:                       id,
-		SigningAddr:              "SIGNING-ADDR-NOT-THE-BINDING-TARGET",
-		EphemeralRecipientPubkey: recipient,
-	}, recipient
-}
 
 // stubBundleFor returns a well-formed stub-mode evidence bundle bound to
 // (nodePubkey, operatorID), as a node running tee.mode=stub serves it.
