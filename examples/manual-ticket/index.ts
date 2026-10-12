@@ -70,13 +70,20 @@ const algod = chainAlgod(cfg)
 //    by price and responsiveness and fails over between them; this takes the
 //    first that can be sealed to.
 const { registry } = buildDiscovery(cfg, algod)
+// sealRecipientOf throws for a node with no current sealing key.
+const sealable = (o: Operator, now: number) => {
+    try {
+        sealRecipientOf(o, now)
+        return true
+    } catch {
+        return false
+    }
+}
 let op: Operator | undefined
 try {
     await registry.ready
     const now = Date.now()
-    op = (await registry.operators(model)).find(
-        (o) => !o.staging && registry.advertisable(o, now) && sealRecipientOf(o, now) !== '',
-    )
+    op = (await registry.operators(model)).find((o) => !o.staging && registry.advertisable(o, now) && sealable(o, now))
 } finally {
     await registry.stop()
 }
