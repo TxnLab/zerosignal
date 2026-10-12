@@ -229,6 +229,7 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
         osImageChecked: checks?.osImage === true,
         composeReleaseChecked: checks?.composeRelease === true,
         ...(verdict.attestedModelIds !== undefined && { attestedModelIds: verdict.attestedModelIds }),
+        ...(verdict.upstreamCarveOuts !== undefined && { upstreamCarveOuts: verdict.upstreamCarveOuts }),
         ...(verdict.detail !== undefined && { detail: verdict.detail }),
     }
     if (verdict.pass && !isTeeAttested({ tee: status })) {

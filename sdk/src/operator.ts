@@ -124,6 +124,12 @@ export interface TEEStatus {
     osImageChecked: boolean
     composeReleaseChecked: boolean
     attestedModelIds?: string[] | undefined
+    /**
+     * The policy rules the node's appraisal of its named upstream downgraded
+     * rather than enforced, as the verdict reports them. For display; routing
+     * never reads it, and an absent list proves nothing (Verdict.upstreamCarveOuts).
+     */
+    upstreamCarveOuts?: string[] | undefined
     /** What the verifier saw, for display; Go logs it instead. Routing reads the two checks above, never this. */
     detail?: VerdictDetail | undefined
 }

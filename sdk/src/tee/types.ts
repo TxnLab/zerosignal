@@ -44,6 +44,17 @@ export interface Verdict {
      */
     attestedModelIds?: string[]
     /**
+     * The bundle's upstream_attestation.carve_outs on a passing dstack verdict
+     * whose bound posture says the node appraises its named upstream: each
+     * policy rule that appraisal downgraded rather than enforced (SPEC § 3e).
+     * Reported, never routed on. The block is unsigned, so this is the node's
+     * own admission and a relay could remove it: a non-empty list caps what
+     * the upstream appraisal means, while an absent one proves nothing.
+     * Undefined on a refusal, when the posture claims no appraisal, and when
+     * the list is empty. Mirrors tee.Verdict.UpstreamCarveOuts.
+     */
+    upstreamCarveOuts?: string[]
+    /**
      * What the verifier saw. Display only, except measurementChecks, which
      * routing reads through probeAttestation's TEEStatus.
      */
