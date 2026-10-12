@@ -166,7 +166,7 @@ func bootRegistry(ctx context.Context, cfg Config, src OperatorSource) (*Dynamic
 	case err != nil:
 		log.Warn("initial operator fetch failed — seeding from persisted catalog (empty if none); background refresh will retry",
 			slog.Any("err", err), slog.Int("persisted", len(saved)))
-		ops = saved
+		ops = seedFromCatalog(saved, d.MaxCarryAge, time.Now())
 	case len(saved) > 0:
 		// Nodes the first probe did not reach keep their saved
 		// capabilities, so a restart routes to them at once.

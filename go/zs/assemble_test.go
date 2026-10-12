@@ -198,12 +198,16 @@ func TestBootRegistry_SeedsFromTheFirstFetchAndSavesIt(t *testing.T) {
 }
 
 // A failed first fetch does not fail New: the saved catalog routes until the
-// refresh loop recovers.
+// refresh loop recovers, but only within the carry window. A node past it
+// keeps its identity, so it stays a relay, and serves nothing.
 func TestBootRegistry_FailedFetchSeedsTheSavedCatalog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.json")
 	op := retryOp(2, "OWNER_B")
 	op.ReachableAsOf = time.Now()
-	if err := SaveCatalog(path, []Operator{op}); err != nil {
+	aged := retryOp(3, "OWNER_C")
+	aged.BaseURL, aged.Models, aged.NodeVersion = "http://aged.example", []string{"old"}, "zs-node 1.0"
+	aged.ReachableAsOf = time.Now().Add(-2 * DefaultMaxCarryAge)
+	if err := SaveCatalog(path, []Operator{op, aged}); err != nil {
 		t.Fatal(err)
 	}
 	src := &fakeSource{err: errors.New("algod down")}
@@ -212,8 +216,18 @@ func TestBootRegistry_FailedFetchSeedsTheSavedCatalog(t *testing.T) {
 		t.Fatalf("a failed fetch failed boot: %v", err)
 	}
 	defer reg.Stop()
-	if ops := reg.AllOperators(context.Background()); len(ops) != 1 || ops[0].ID != 2 {
-		t.Errorf("operators %v, want the saved operator 2", ops)
+	ops := reg.AllOperators(context.Background())
+	if len(ops) != 2 || ops[0].ID != 2 || ops[1].ID != 3 {
+		t.Fatalf("operators %v, want the saved operators 2 and 3", ops)
+	}
+	if got, _ := reg.Operators(context.Background(), "gpt-test"); len(got) != 1 || got[0].ID != 2 {
+		t.Errorf("operators for gpt-test %v, want operator 2, inside the window", got)
+	}
+	if got, _ := reg.Operators(context.Background(), "old"); len(got) != 0 {
+		t.Errorf("operators for old %v, want none: operator 3 aged out", got)
+	}
+	if a := ops[1]; a.BaseURL != "http://aged.example" || a.Models != nil || a.NodeVersion != "" || !a.ReachableAsOf.IsZero() {
+		t.Errorf("aged operator %+v, want its identity alone", a)
 	}
 }
 

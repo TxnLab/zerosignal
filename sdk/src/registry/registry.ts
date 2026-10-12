@@ -301,7 +301,7 @@ export class DiscoveryRegistry implements RegistryProvider {
                 err: message(err),
                 persisted: saved?.length ?? 0,
             })
-            ops = saved
+            ops = saved === undefined ? undefined : seedFromCatalog(saved, this.#maxCarryAge, this.#clock())
         }
         this.#log.info('operators loaded', { count: ops?.length ?? 0 })
 
@@ -310,9 +310,11 @@ export class DiscoveryRegistry implements RegistryProvider {
             this.#snap = snap
             this.#publish(snap)
             // Saved now, not a cycle from now, so a fast restart is covered.
-            // Without a chain read the seed is the catalog just loaded, so
-            // there is nothing new to save, and a stop or a caller's abort is
-            // not held up by the write.
+            // Without a chain read the seed is the catalog just loaded, less
+            // what has aged out: nothing new to save, and a stop or a caller's
+            // abort is not held up by the write. Go saves it, dropping the
+            // aged-out nodes' capabilities from the file; keeping them here
+            // only helps a later boot with a longer window.
             if (chainOps !== undefined) await this.#persist(snap.view.operators)
         }
         // Go's boot probe. Without a chain read there is nothing to probe, and
@@ -703,6 +705,36 @@ export function mergeCatalog(base: readonly Operator[], fresh: readonly Operator
     for (const op of base) byNode.set(nodeKey(op), op)
     const out = fresh.map((op) => ({ ...op }))
     carryForwardLastGood(byNode, out, nowMs, window)
+    return out
+}
+
+/**
+ * seedFromCatalog is Go's seedFromCatalog: what a boot whose chain read
+ * failed seeds the registry with, the saved operators as if a chain read had
+ * returned them and no probe had reached any. Each keeps its capabilities
+ * only within maxCarryAge, since dispatch reads operators(), which applies no
+ * carry window, and would otherwise route to an aged-out node until a chain
+ * read succeeds. Past the window a node keeps its identity, and stays in the
+ * relay pool at the bootstrap version, as an unprobed chain row does.
+ */
+export function seedFromCatalog(saved: readonly Operator[], maxCarryAge: number, nowMs: number): Operator[] {
+    return mergeCatalog(saved, saved.map(withoutCarriedCaps), maxCarryAge, nowMs)
+}
+
+/** op with every capability carryCaps fills left unset. */
+function withoutCarriedCaps(op: Operator): Operator {
+    const out: Operator = {
+        ...op,
+        models: [],
+        // Null-prototype, as a chain row's is, so a model id never reads an
+        // inherited key.
+        modelCapacities: Object.create(null) as Operator['modelCapacities'],
+        builtinTools: [],
+        maxToolIters: 0,
+        toolHeadroomPerIteration: 0,
+        protoVersion: '',
+    }
+    delete out.reachableAsOf
     return out
 }
 

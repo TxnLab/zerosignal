@@ -234,7 +234,7 @@ func catalogCases() []struct {
 				ToolUse:   catalogBool(true), Tags: []string{"coding", "chat"},
 				Coordinates: &inject.ModelCoordinates{Family: "qwen/qwen3-32b", Parameters: 32_000_000_000,
 					ActiveParameters: 32_000_000_000, Quantization: "Q4_K_M", Variant: "instruct"},
-				WeightsDigest: "sha256:abcd", Source: "hf:Qwen/Qwen3-32B@main", Retention: "none",
+				WeightsDigest: "sha256:abcd", Source: "hf:Qwen/Qwen3-32B@main", Retention: inject.RetentionNoUpstream,
 				ImageToolRateMicroUSDC: 40_000, ImageEditToolRateMicroUSDC: 50_000,
 				ImageToolBaseMicroUSDC: 30_000, ImageEditToolBaseMicroUSDC: 35_000,
 				ToolCallRatesMicroUSDC:      map[string]uint64{"zs_web_search": 5000, "web_search": 10_000, "code_interpreter": 30_000},
@@ -327,6 +327,7 @@ func catalogLoadCases(t *testing.T) []catalogLoadCase {
 		{Name: "a time in a local zone with nanoseconds, and a node version", Bytes: string(data)},
 		{Name: "an unknown key and absent fields", Bytes: `{"version":1,"operators":[{"id":3,"node_id":1,"owner_addr":"O","signing_addr":"S","base_url":"https://x.example","reachable_as_of":"2027-01-15T10:00:00Z","metrics":{},"future_field":[1,2]}],"saved_by":"elsewhere"}`},
 		{Name: "null operators", Bytes: `{"version":1,"operators":null}`},
+		{Name: "a retention tier this build does not know is dropped on load, a known one kept", Bytes: `{"version":1,"operators":[{"id":3,"node_id":1,"model_capacities":{"a":{"Retention":"forever-private"},"b":{"Retention":"no_upstream"}}}]}`},
 		{Name: "nulls where Go leaves the zero value", Bytes: `{"version":1,"operators":[{"id":3,"node_id":null,"owner_addr":null,"signing_addr":"S","ticket_signing_key":null,"base_url":"https://x.example","models":null,"model_capacities":{"m":null},"reachable_as_of":null,"metrics":null,"proto_version":"9.4"}]}`},
 		{Name: "whitespace Go does not write", Bytes: "{\n  \"version\": 1,\n  \"operators\": [ { \"id\": 3, \"node_id\": 2, \"base_url\": \"https://x.example\", \"reachable_as_of\": \"2027-01-15T10:00:00.5+00:00\" } ]\n}\n"},
 		// Truncated to the millisecond, as UnixMilli truncates: rounding would

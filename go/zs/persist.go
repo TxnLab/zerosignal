@@ -144,7 +144,7 @@ func (p persistedOperator) toOperator() Operator {
 		BaseURL:                  p.BaseURL,
 		Staging:                  p.Staging,
 		Models:                   p.Models,
-		ModelCapacities:          p.ModelCapacities,
+		ModelCapacities:          knownRetentions(p.ModelCapacities),
 		BuiltinTools:             p.BuiltinTools,
 		MaxToolIters:             p.MaxToolIters,
 		ToolHeadroomPerIteration: p.ToolHeadroom,
@@ -156,6 +156,21 @@ func (p persistedOperator) toOperator() Operator {
 		MinChargeAlgoTxns:        p.MinChargeAlgoTxns,
 		MinChargeMicroUSDC:       p.MinChargeMicroUSDC,
 	}
+}
+
+// knownRetentions applies the probe's knownRetention to a loaded catalog: this
+// build only ever saves filtered tiers, but a file written by a newer build,
+// or edited by hand, would otherwise put an unrecognised label on the
+// operator surfaces until the node's next successful probe. caps is the
+// freshly decoded map, so it is filtered in place.
+func knownRetentions(caps map[string]ModelCapacity) map[string]ModelCapacity {
+	for m, c := range caps {
+		if r := knownRetention(c.Retention); r != c.Retention {
+			c.Retention = r
+			caps[m] = c
+		}
+	}
+	return caps
 }
 
 // marshalCatalog encodes ops in the on-disk form. Split from writeCatalog so a
@@ -259,4 +274,42 @@ func mergeCatalogAt(base, fresh []Operator, maxCarryAge time.Duration, now time.
 	out := append([]Operator(nil), fresh...)
 	carryWithin(byRef, out, now, maxCarryAge)
 	return out
+}
+
+// seedFromCatalog is what a boot whose chain read failed seeds the registry
+// with: the saved operators as if a chain read had returned them and no probe
+// had reached any, so each keeps its capabilities only within the carry
+// window. Seeding the file as is would keep an aged-out node's models routable
+// until a chain read succeeds, since dispatch reads Operators, which applies
+// no carry window. Past the window a node keeps its identity, and stays in the
+// relay pool at the bootstrap version, as an unprobed chain row does.
+//
+// The registry saves its seed at once, so after such a boot the file holds the
+// aged-out nodes without their capabilities. A later boot would drop them
+// anyway under the same window; a boot with a longer window, or a clock that
+// ran ahead, loses them for good, which costs only a colder start. The TS SDK
+// does not save this seed and keeps the file as it was.
+func seedFromCatalog(saved []Operator, maxCarryAge time.Duration, now time.Time) []Operator {
+	// No catalog stays nil: the registry seeds no snapshot from nil.
+	if len(saved) == 0 {
+		return saved
+	}
+	rows := make([]Operator, len(saved))
+	for i, op := range saved {
+		rows[i] = withoutCarriedCaps(op)
+	}
+	return mergeCatalogAt(saved, rows, maxCarryAge, now)
+}
+
+// withoutCarriedCaps is op with every field carryCaps fills left unset.
+func withoutCarriedCaps(op Operator) Operator {
+	op.ReachableAsOf = time.Time{}
+	op.Models = nil
+	op.ModelCapacities = nil
+	op.BuiltinTools = nil
+	op.MaxToolIters = 0
+	op.ToolHeadroomPerIteration = 0
+	op.NodeVersion = ""
+	op.ProtoVersion = ""
+	return op
 }
