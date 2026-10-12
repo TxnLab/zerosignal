@@ -31,7 +31,27 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-12 — a bounded cycle probes the nodes nothing is known about first (unreleased)
+### 2026-10-12 — payer obligations, the pool opt-in and the doctor (0.5.0)
+
+Both SDKs unless noted:
+
+- **The first request opts the payer into the prepaid pool and funds it before reserving**, so a
+  payer that never deposited no longer fails with `payer_not_opted_in`. A node's
+  `payer_not_opted_in` is now a payer refusal (kind `funds`), not retried on another node.
+- **Nothing after the receipt is used.** The receipt's `body_hash` covers only the frames
+  before it (SPEC §5.3), so a content frame after it is dropped. A truncated chat frame that
+  names a terminal value ends the stream.
+- **A missing price reference loosens only the checks that need it**, rather than every price
+  check on the reserve.
+- **The TEE verdict and status report the upstream's carve-outs.**
+- **K_response and the reply-to identity are wiped after each request.**
+- **Go: the algod client reads no proxy variables** (`HTTPS_PROXY`, …) unless `UseEnvProxy` is
+  set, as the node client already did.
+- **The doctor.** `zs.Diagnose` / `diagnose` report, without signing, what an address needs before
+  a request can succeed; the TS package ships it as the `zerosignal doctor` command.
+  `escrow.ReadPayerDeposit` simulates as the app account, so it answers for a payer with no ALGO.
+
+### 2026-10-12 — a bounded cycle probes the nodes nothing is known about first (0.5.0)
 
 With a fleet larger than `probe_budget`, a node no refresh had tried and that had never answered
 (new on chain, aged out of a restored catalog, or cut off by a cycle's deadline) waited for the
@@ -44,7 +64,7 @@ that share rotates. A fleet whose demand fills the three quarters waits as befor
 with an attempt or an answer on record is unchanged. `probe_set_vectors.json` carries each node's `last_refresh_at_ms` and
 `reachable_as_of_ms`; the TS `ProbeNode` gains optional `lastRefreshAt` and `reachableAsOf`.
 
-### 2026-10-12 — a catalog row's reachability, from the SDK (unreleased)
+### 2026-10-12 — a catalog row's reachability, from the SDK (0.5.0)
 
 `@txnlab/zerosignal/catalog` exports `reachabilityOf`, `answeredWithin` and `carryLapsesAt`, so
 an app rendering a `DiscoveryRegistry` snapshot reads each node's verdict by the rule the
@@ -55,7 +75,7 @@ node has been tried (`probing` or `failing`) is per registry: a registry built a
 node it has not yet tried as `probing`. A window of 0 or less is the default, as the registry
 reads its setting. TS only: Go's proxy has no picker.
 
-### 2026-10-12 — a saved catalog is loaded under the probe's rules (unreleased)
+### 2026-10-12 — a saved catalog is loaded under the probe's rules (0.5.0)
 
 Two gaps when a payer starts from its saved catalog, in both SDKs:
 
@@ -71,7 +91,7 @@ Two gaps when a payer starts from its saved catalog, in both SDKs:
 `registry_cycle_vectors.json` gains a `seed` block, and `persisted_catalog_vectors.json` a load
 case with an unknown tier.
 
-### 2026-10-12 — the registry remembers its last probe attempt across cycles (unreleased)
+### 2026-10-12 — the registry remembers its last probe attempt across cycles (0.5.0)
 
 `Operator.LastRefreshAt` (TS `lastRefreshAt`) used to be set only on a cycle that probed the
 node, so on every cycle a bounded probe set skipped it, it was zero again, and a node known to be
@@ -80,7 +100,7 @@ onto a node this cycle did not try, beyond the carry window as well as inside it
 records what this process tried and not what the node serves. It is still not saved with the
 catalog. `registry_cycle_vectors.json` carries `last_refresh_at_ms` on every operator.
 
-### 2026-10-12 — no evidence fetch for a node with no verified ephemeral key (unreleased)
+### 2026-10-12 — no evidence fetch for a node with no verified ephemeral key (0.5.0)
 
 Both SDKs' attestation probe used to fetch and verify a node's evidence even when its ephemeral
 key had not been taken this cycle (absent, expired, unparseable or badly signed). The verifier
@@ -95,7 +115,7 @@ which is a fact about the node (or a relay that altered its advertisement). A ho
 tags should give it a reason of its own. An operator who reads `key_binding_mismatch` as the sign
 of a wrong `node_id` now sees `ephemeral_unavailable` instead.
 
-### 2026-10-12 — the TS SDK lists its catalog on `/v1/models` (unreleased)
+### 2026-10-12 — the TS SDK lists its catalog on `/v1/models` (0.5.0)
 
 `zs.fetch` answers `GET` and `HEAD` on `/v1/models` and `/v1/models/{id}`, with `/models` and
 `/models/{id}` as aliases, as Go's handler does, so `openai.models.list()` works on it. Both read
