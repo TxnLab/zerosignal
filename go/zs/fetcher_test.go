@@ -996,8 +996,18 @@ func TestEnrich_TEEMissingAdvertisement(t *testing.T) {
 func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 	// /v1/zs/details advertises TEE but /v1/zs/attestation
 	// returns 503. The fetcher should populate op.TEE with
-	// FailureFetchFailed and not crash.
-	op, _ := testOperatorAndPubkey(t, 7)
+	// FailureFetchFailed and not crash. The node advertises a signed
+	// ephemeral, or the evidence would not be fetched at all.
+	signingAddr, pub, priv, err := ticket.GenerateAlgorandKeypair()
+	if err != nil {
+		t.Fatalf("generate signing keypair: %v", err)
+	}
+	ageID, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("generate age identity: %v", err)
+	}
+	adv := signEphemeralAdv(t, signingAddr, priv, 7, testEnrichNodeID, ageID.Recipient().String(), time.Now().Add(5*time.Minute).Unix())
+	op := Operator{ID: 7, NodeID: testEnrichNodeID, SigningAddr: signingAddr, TicketSigningKey: pub}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/zs/details":
@@ -1005,6 +1015,10 @@ func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 				Models: []inject.OperatorDetailsModel{
 					{ID: "m1", ContextWindow: 1024},
 				},
+				EphemeralAgePubkey: adv.AgePubkey,
+				EphemeralExpiry:    adv.Expiry,
+				EphemeralIssuedAt:  adv.IssuedAt,
+				EphemeralSig:       adv.Sig,
 				TEE: &inject.TEEAdvertisement{
 					Mode:        inject.TEEModeStub,
 					AttestedAt:  time.Now().UTC(),

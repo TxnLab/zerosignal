@@ -31,6 +31,21 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — no evidence fetch for a node with no verified ephemeral key (unreleased)
+
+Both SDKs' attestation probe used to fetch and verify a node's evidence even when its ephemeral
+key had not been taken this cycle (absent, expired, unparseable or badly signed). The verifier
+then refused it at SPEC §3e step 0 as `key_binding_mismatch`, which reads as the node attesting
+the wrong key, and the fetch cost a request, a relayed one in privacy mode. The probe now fetches
+nothing for such a node and reports `ephemeral_unavailable`, a new tag (`tee.FailureEphemeralUnavailable`,
+TS `FailureTag.EphemeralUnavailable`) that, like `fetch_failed`, comes from the prober and not
+the verifier. Routing is unchanged: the node was unattested before and still is. The verifier
+still refuses an empty key at step 0. The tag is neither a verdict on the evidence nor the
+payer's own outage, as `fetch_failed` is: it says the node had no usable sealing key this cycle,
+which is a fact about the node (or a relay that altered its advertisement). A host that sorts
+tags should give it a reason of its own. An operator who reads `key_binding_mismatch` as the sign
+of a wrong `node_id` now sees `ephemeral_unavailable` instead.
+
 ### 2026-10-12 — the TS SDK lists its catalog on `/v1/models` (unreleased)
 
 `zs.fetch` answers `GET` and `HEAD` on `/v1/models` and `/v1/models/{id}`, with `/models` and

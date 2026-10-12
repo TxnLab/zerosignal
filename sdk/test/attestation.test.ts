@@ -185,6 +185,16 @@ describe('probeAttestation', () => {
         expect(calls[0]!.signal).toBe(ac.signal)
     })
 
+    // The vectors hand the probe no recipient at all; a row can also carry ''.
+    it('reads an empty recipient as none, and fetches nothing', async () => {
+        const { fetch, seen } = answering(200, BUNDLE)
+        const { verifier, calls } = stubVerifier(PASS)
+        const got = await probeAttestation({ operator: { ...operator, ephemeralRecipient: '' }, advertised, verifier, fetch })
+        expect(got?.failureTag).toBe('ephemeral_unavailable')
+        expect(seen).toHaveLength(0)
+        expect(calls).toHaveLength(0)
+    })
+
     it('probes through the hop the details probe used', async () => {
         const { fetch, seen } = answering(200, BUNDLE)
         await probeAttestation({ operator, advertised, verifier: stubVerifier(PASS).verifier, fetch, hop })

@@ -10,6 +10,7 @@
       "AuxBindingAbsent": "aux_binding_absent",
       "AuxBindingMismatch": "aux_binding_mismatch",
       "CollateralUnreachable": "collateral_unreachable",
+      "EphemeralUnavailable": "ephemeral_unavailable",
       "FetchFailed": "fetch_failed",
       "HAppPreimageInvalid": "happ_preimage_invalid",
       "HAppPreimageMissing": "happ_preimage_missing",

@@ -442,7 +442,11 @@ verified ephemeral key, calls
 `probeAttestation` with that row, the details' `tee` advertisement, `client.config.teeVerifier`,
 a `fetch`, and the probe's relay hop and timeout, and sets the `TEEStatus` it returns on the
 operator. That is `undefined` when the node advertises no TEE or verification is off; evidence
-that could not be fetched gives `verified: false` with `failureTag: 'fetch_failed'`.
+that could not be fetched gives `verified: false` with `failureTag: 'fetch_failed'`. For a node
+with no verified ephemeral key the evidence is not fetched at all, and the status has
+`failureTag: 'ephemeral_unavailable'`:
+the verifier would refuse it before reading the evidence, and its `key_binding_mismatch` would
+read as the node attesting the wrong key.
 
 Routing reads `isTeeAttested`, which `requireTee` and `Config.requireTeeModels` filter on. A node
 is attested only when `verified` is true **and** both `osImageChecked` and

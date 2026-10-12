@@ -19,7 +19,10 @@ import {
     nodeBoxKey,
     operatorBoxKey,
 } from '@txnlab/zs-proto/escrow'
+import { ephemeralSigDigest } from '@txnlab/zs-proto/ticket'
 import { PROTO_VERSION, RELAY_PATH, RELAY_PATH_HEADER, RELAY_TARGET_HEADER, RELAY_TARGET_NODE_HEADER } from '@txnlab/zs-proto/wire'
+import * as ed25519 from '@noble/ed25519'
+import { base64, bech32 } from '@scure/base'
 import algosdk from 'algosdk'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -70,11 +73,17 @@ function operatorBox(id: number): Uint8Array {
     return b
 }
 
+// The Ed25519 seed of each node's on-chain signing key, by host, as the
+// latest fakeAlgod wrote it.
+const signingSeeds = new Map<string, Uint8Array>()
+
 function nodeBox(r: NodeRef, staging: boolean): Uint8Array {
     const b = new Uint8Array(NODE_RECORD_SIZE)
     const url = new TextEncoder().encode(host(r))
+    const signing = algosdk.generateAccount()
+    signingSeeds.set(host(r), signing.sk.slice(0, 32))
     b[0] = 1
-    b.set(algosdk.generateAccount().addr.publicKey, 1)
+    b.set(signing.addr.publicKey, 1)
     b[33] = url.length
     b.set(url, 34)
     b[NODE_RECORD_SIZE - 33] = staging ? 1 : 0
@@ -153,6 +162,20 @@ const details = (over: Record<string, unknown> = {}) =>
 /** Every node answers its details probe. */
 const serve = () => details()
 
+/** The ephemeral advertisement the node at target signs under its on-chain key. */
+async function ephemeralOf(target: string): Promise<Record<string, unknown>> {
+    const r = FLEET.find((f) => host(f) === target)!
+    const now = Math.floor(Date.now() / 1000)
+    const adv = {
+        ephemeral_age_pubkey: bech32.encode('age', bech32.toWords(new Uint8Array(32).fill(r.op))),
+        ephemeral_expiry: now + 600,
+        ephemeral_issued_at: now,
+        ephemeral_sig: '',
+    }
+    adv.ephemeral_sig = base64.encode(await ed25519.signAsync(ephemeralSigDigest(r.op, r.node, adv), signingSeeds.get(target)!))
+    return adv
+}
+
 const clients: Client[] = []
 afterEach(async () => {
     await Promise.all(clients.splice(0).map((c) => c.close()))
@@ -228,15 +251,36 @@ describe('Client.create building the registry', () => {
             },
         }
         const { registry } = await clientOver(
-            (call) =>
+            async (call) =>
                 call.path === '/v1/zs/attestation'
                     ? new Response('{"mode":"dstack-tdx","generated_at":"2026-10-01T00:00:00Z"}')
-                    : details({ tee: { mode: 'dstack-tdx' } }),
+                    : details({ tee: { mode: 'dstack-tdx' }, ...(await ephemeralOf(call.target)) }),
             { privacy: 'direct', disableTee: false, teeVerifier },
         )
         const ops = await registry.allOperators()
         expect(verified).toHaveLength(FLEET.length)
         expect(ops.every((o) => isTeeAttested(o))).toBe(true)
+    })
+
+    // The verifier would refuse it before reading the evidence; the probe
+    // says why instead, and spends no request on it.
+    it('fetches no evidence for a node with no verified ephemeral key', async () => {
+        const verified: unknown[] = []
+        const teeVerifier: Verifier = {
+            verify: async (_a, _b, node) => {
+                verified.push(node)
+                return { pass: true, failureTag: '', verifierId: 'dstack-tdx', attestedAt: 5 }
+            },
+        }
+        const { registry, net } = await clientOver(() => details({ tee: { mode: 'dstack-tdx' } }), {
+            privacy: 'direct',
+            disableTee: false,
+            teeVerifier,
+        })
+        const ops = await registry.allOperators()
+        expect(verified).toHaveLength(0)
+        expect(net.calls.filter((c) => c.path === '/v1/zs/attestation')).toHaveLength(0)
+        expect(ops.map((o) => o.tee?.failureTag)).toEqual(FLEET.map(() => 'ephemeral_unavailable'))
     })
 
     it('advertises a staging node only under allowStaging', async () => {

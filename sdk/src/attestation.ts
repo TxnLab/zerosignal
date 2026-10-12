@@ -155,9 +155,11 @@ export interface AttestationProbe {
 /**
  * probeAttestation fetches a node's evidence and verifies it, returning the
  * TEEStatus to set on the operator. undefined, which routes as unattested,
- * when the node advertises no TEE or verification is off. A failed fetch is
- * a status with failureTag fetch_failed; a node that fails either way stays
- * routable for requests that do not require a TEE.
+ * when the node advertises no TEE or verification is off. For a node with
+ * no verified ephemeral recipient its evidence is not fetched, and the status
+ * has failureTag ephemeral_unavailable. A failed fetch is a status with failureTag
+ * fetch_failed. A node that fails any way stays routable for requests that
+ * do not require a TEE.
  */
 export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus | undefined> {
     if (p.advertised === undefined || p.verifier === undefined) return undefined
@@ -165,6 +167,13 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
     const op = p.operator
     const relay =
         p.hop == null ? {} : { relay_operator_id: p.hop.relayId, relay_node_id: p.hop.relayNodeId }
+
+    // The verifier would fail step 0 before reading the bundle, and
+    // key_binding_mismatch reads as the node attesting the wrong key.
+    if (op.ephemeralRecipient === undefined || op.ephemeralRecipient === '') {
+        return unfetchedStatus(p.advertised, FailureTag.EphemeralUnavailable)
+    }
+    const recipient = op.ephemeralRecipient
 
     let bundle: TEEEvidenceBundle
     try {
@@ -195,7 +204,7 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
         {
             operatorId: BigInt(op.id),
             nodeId: BigInt(op.nodeId),
-            ephemeralRecipientPubkey: op.ephemeralRecipient ?? '',
+            ephemeralRecipientPubkey: recipient,
         },
         p.signal,
     )
@@ -243,12 +252,18 @@ export async function probeAttestation(p: AttestationProbe): Promise<TEEStatus |
  * unverified, with the time the node advertised.
  */
 export function fetchFailedStatus(advertised: TEEAdvertisement): TEEStatus {
+    return unfetchedStatus(advertised, FailureTag.FetchFailed)
+}
+
+// A node whose evidence was never verified: the prober's tag, with the time
+// the node advertised.
+function unfetchedStatus(advertised: TEEAdvertisement, failureTag: string): TEEStatus {
     return {
         mode: advertised.mode,
         attestedAt: unixMillis(advertised.attested_at),
         verifierId: VERIFIER_ID_BUILTIN,
         verified: false,
-        failureTag: FailureTag.FetchFailed,
+        failureTag,
         osImageChecked: false,
         composeReleaseChecked: false,
     }

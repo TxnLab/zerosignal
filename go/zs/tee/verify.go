@@ -78,6 +78,12 @@ const (
 	FailureFetchFailed           = "fetch_failed"
 	FailureStaleEvidence         = "stale_evidence"
 
+	// FailureEphemeralUnavailable is the prober's, not a verdict: the node
+	// had no verified ephemeral recipient this cycle, so its evidence was not
+	// fetched. Verifying it would only fail step 0 (key_binding_mismatch),
+	// which reads as the node attesting the wrong key.
+	FailureEphemeralUnavailable = "ephemeral_unavailable"
+
 	// The aux-binding tags come from proto (attest.AuxFailureTag), so the
 	// proxy and client report identical strings; see attest.Err* for each.
 	// They are separate from FailureKeyBindingMismatch because the fix

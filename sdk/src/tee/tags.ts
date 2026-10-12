@@ -19,6 +19,11 @@ export const FailureTag = {
     AdvertisementMismatch: 'advertisement_mismatch',
     FetchFailed: 'fetch_failed',
     StaleEvidence: 'stale_evidence',
+    /**
+     * The prober's, not a verdict: the node had no verified ephemeral
+     * recipient this cycle, so its evidence was not fetched.
+     */
+    EphemeralUnavailable: 'ephemeral_unavailable',
     /** A real quote from software this verifier does not recognise. */
     MeasurementMismatch: 'measurement_mismatch',
     /** Intel's collateral could not be reached: a fact about our link, not the node. */
