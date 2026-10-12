@@ -137,7 +137,7 @@ taking the default:
 |---|---|---|
 | `refreshInterval` | 300 000 | Time between refresh cycles. |
 | `refreshTimeout` | 30 000 | One refresh cycle: the chain read and its probes. |
-| `probeBudget` | 96 | Details probes per cycle; the rest of the fleet carries forward. |
+| `probeBudget` | 96 | Details probes per cycle; the rest of the fleet carries forward. Up to three quarters go to the recently requested models' fastest servers and then to nodes with nothing on record (no attempt in this process, no answer saved or carried); the rest sweeps the fleet in turn. |
 | `targetTopK` | 8 | Targets probed in full per recently requested model. |
 | `maxCacheAge` | 900 000 | A read of a snapshot older than this refreshes first. |
 | `maxCarryAge` | 5 400 000 | How long a node not reached stays routable on its last answer. |
@@ -399,7 +399,8 @@ predicate, its candidate filter, and any per-node fields to carry.
 
 It also holds what a payer does with its nodes' discovery probes, each matching the Go SDK's
 registry under shared vectors: `selectProbeSet` bounds which nodes a cycle probes, steered by
-the recently requested models in `ModelDemand`; `checkEphemeralAdvertisement` verifies a
+the recently requested models in `ModelDemand` and then by the nodes nothing is known about yet
+(no `lastRefreshAt`, no `reachableAsOf`); `checkEphemeralAdvertisement` verifies a
 node's signed ephemeral seal key and says why one is unusable (`EphemeralVerifyCache` reuses
 the verdict for an app that rebuilds its rows often, and `recordEphemeralStaleness` charges a
 relay that served a stale key).

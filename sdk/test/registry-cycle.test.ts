@@ -807,6 +807,22 @@ describe('DiscoveryRegistry', () => {
             expect((await reg.operators('cold')).map((op) => op.id)).toEqual([1, 2, 3, 4, 5, 6])
         })
 
+        // Fails if the registry stops handing selectProbeSet each row's last
+        // attempt and answer, or picks the set before the carry: every row
+        // would then look unknown, and the set would be the plain sweep's.
+        it('probes a node new on chain ahead of the sweep, but not one tried and down', async () => {
+            source.chain = Array.from({ length: 20 }, (_, i) => row(i + 1))
+            for (let i = 1; i <= 20; i++) source.answers.set(`${i}/1`, i === 15 ? 'down' : { models: ['m'] })
+            const reg = registry({ discovery: { probeBudget: 4 } })
+            await reg.allOperators()
+            expect(source.probeSets).toEqual([null])
+
+            source.chain = [...source.chain, row(21)]
+            now += defaults.discovery.maxCacheAge
+            await reg.allOperators()
+            expect(source.probeSets[1]).toEqual(['1/1', '2/1', '21/1', '3/1'])
+        })
+
         it('probes every node of a fleet within the budget', async () => {
             source.chain = [row(2), row(1)]
             const reg = registry({ discovery: { probeBudget: 4 } })

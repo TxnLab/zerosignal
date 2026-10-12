@@ -43,7 +43,8 @@ const DefaultMaxCacheAge = 15 * time.Minute
 // issues once the fleet exceeds it. Sized so budget/DetailsConcurrency ×
 // DetailsTimeout stays inside DefaultRefreshTimeout even when privacy mode
 // rotates every probe through maxDiscoveryRelayAttempts relays
-// (96/24 × 3 × 2s = 24s < 30s), while the rolling sweep still covers a
+// (96/24 × 3 × 2s = 24s < 30s, the rest of the cycle's timeout left to the
+// chain read and the signer-balance pass that share it), while the rolling sweep still covers a
 // ~1000-node fleet within a handful of cycles. A fleet at or under the budget
 // is probed in full (the original probe-everything behavior).
 const DefaultProbeBudget = 96
@@ -466,10 +467,14 @@ func (p *DynamicRegistryProvider) fetchAndProbe(ctx context.Context, prev *regis
 // selectProbeSet chooses which nodes to probe this cycle, bounded by probeBudget.
 // nil means "probe every node" (budget disabled or the fleet fits under it). The
 // set is the union of (1) each recently-requested model's fastest known servers
-// (up to targetTopK), so the nodes we route to stay fresh, and (2) a rolling
-// round-robin sweep that fills the remaining budget so every node is eventually
-// re-probed and new models get discovered. At least a quarter of the budget is
-// reserved for the sweep so coverage always progresses even under heavy demand.
+// (up to targetTopK), so the nodes we route to stay fresh, (2) the nodes no
+// refresh has tried and that never answered (new on chain, aged out of a
+// restored catalog, or cut off by a cycle's deadline), so a node we know nothing
+// about does not wait a whole sweep to be seen, and (3) a rolling round-robin
+// sweep that fills the remaining budget so every node is eventually re-probed
+// and new models get discovered. With a budget of 4 or more, at least a quarter
+// of it is reserved for the sweep so coverage always progresses even under
+// heavy demand; demand and unknown nodes share the rest, demand first.
 func (p *DynamicRegistryProvider) selectProbeSet(ops []Operator) map[NodeRef]bool {
 	set, cursor := probeSelection(ops, p.snapshotDemand(), p.probeBudget, p.targetTopK, p.sweepCursor)
 	p.sweepCursor = cursor
@@ -498,11 +503,28 @@ func probeSelection(ops []Operator, demand []string, budget, targetTopK, cursor 
 		}
 	}
 	n := len(ops)
+	// Untried nodes share demand's cap, so the sweep keeps its quarter (with a
+	// budget of 4 or more). They are scanned from the cursor, so a backlog
+	// larger than the cap rotates instead of the same ones going first every
+	// cycle. A smaller backlog is taken whole; a node in it that the cycle's
+	// deadline cuts off every time (enrich starts probes in node order, not
+	// in this order) holds its slot until a cycle reaches it.
+	for i := 0; i < n && len(set) < demandCap; i++ {
+		if op := ops[(cursor+i)%n]; untriedNode(op) {
+			set[RefOf(op)] = true
+		}
+	}
 	scanned := 0
 	for ; scanned < n && len(set) < budget; scanned++ {
 		set[RefOf(ops[(cursor+scanned)%n])] = true
 	}
 	return set, (cursor + scanned) % n
+}
+
+// untriedNode reports whether no refresh in this process has tried op and it
+// has no answer on record, saved or carried: nothing is known about it.
+func untriedNode(op Operator) bool {
+	return op.LastRefreshAt.IsZero() && op.ReachableAsOf.IsZero()
 }
 
 // serversForModel returns the ops whose (carried-forward or freshly-probed)

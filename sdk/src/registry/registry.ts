@@ -431,6 +431,8 @@ export class DiscoveryRegistry implements RegistryProvider {
             ttftEwmaMs: op.metrics.latencyEwmaMs,
             tokensPerSecEwma: op.metrics.tokensPerSecEwma,
             models: op.models,
+            lastRefreshAt: op.lastRefreshAt,
+            reachableAsOf: op.reachableAsOf,
         }))
         const { probe, cursor } = selectProbeSet(nodes, this.#demand.snapshot(), this.#probeBudget, this.#targetTopK, this.#sweepCursor)
         this.#sweepCursor = cursor

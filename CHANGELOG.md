@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — a bounded cycle probes the nodes nothing is known about first (unreleased)
+
+With a fleet larger than `probe_budget`, a node no refresh had tried and that had never answered
+(new on chain, aged out of a restored catalog, or cut off by a cycle's deadline) waited for the
+round-robin sweep to reach it: with no demand up to fleet ÷ budget cycles, and longer while
+recently requested models held their share. Until then a picker showed it as `probing`. Both
+SDKs' probe selection (`probeSelection` ↔ `selectProbeSet`) now take such nodes after those
+models' servers, from the sweep cursor on, in whatever share of three quarters of the budget
+demand leaves; with a budget of 4 or more the sweep keeps its quarter, and a backlog larger than
+that share rotates. A fleet whose demand fills the three quarters waits as before, and a node
+with an attempt or an answer on record is unchanged. `probe_set_vectors.json` carries each node's `last_refresh_at_ms` and
+`reachable_as_of_ms`; the TS `ProbeNode` gains optional `lastRefreshAt` and `reachableAsOf`.
+
 ### 2026-10-12 — a catalog row's reachability, from the SDK (unreleased)
 
 `@txnlab/zerosignal/catalog` exports `reachabilityOf`, `answeredWithin` and `carryLapsesAt`, so

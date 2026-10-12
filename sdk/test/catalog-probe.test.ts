@@ -14,6 +14,8 @@ interface VectorNode {
     ttft_ewma_ms: number
     tokens_per_sec_ewma: number
     models: string[]
+    last_refresh_at_ms: number
+    reachable_as_of_ms: number
 }
 
 interface Vectors {
@@ -44,6 +46,9 @@ describe('selectProbeSet vectors', () => {
             ttftEwmaMs: BigInt(n.ttft_ewma_ms),
             tokensPerSecEwma: BigInt(n.tokens_per_sec_ewma),
             models: n.models,
+            // Never is absent, as on an operator the registry never tried.
+            ...(n.last_refresh_at_ms !== 0 && { lastRefreshAt: n.last_refresh_at_ms }),
+            ...(n.reachable_as_of_ms !== 0 && { reachableAsOf: n.reachable_as_of_ms }),
         }))
         let cursor = v.cursor
         const got = v.want.map(() => {
@@ -66,6 +71,9 @@ describe('selectProbeSet vectors', () => {
                 ttftEwmaMs: n.ttft_ewma_ms,
                 tokensPerSecEwma: n.tokens_per_sec_ewma,
                 models: n.models,
+                // 0 as given, which reads as never just as absent does.
+                lastRefreshAt: n.last_refresh_at_ms,
+                reachableAsOf: n.reachable_as_of_ms,
             }))
             let cursor = v.cursor
             for (const want of v.want) {
