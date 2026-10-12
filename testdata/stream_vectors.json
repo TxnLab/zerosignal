@@ -190,7 +190,7 @@
       "name": "chat truncated frame mentioning a terminal finish_reason",
       "api": "chat",
       "frame": "{\"choices\":[{\"finish_reason\" : \"stop\"",
-      "terminal": false,
+      "terminal": true,
       "error": false,
       "message": ""
     },
@@ -198,6 +198,22 @@
       "name": "chat truncated frame matching a fast-path needle",
       "api": "chat",
       "frame": "{\"choices\":[{\"finish_reason\":\"stop\"",
+      "terminal": true,
+      "error": false,
+      "message": ""
+    },
+    {
+      "name": "chat needle answers before the parse",
+      "api": "chat",
+      "frame": "{\"choices\":{\"0\":{\"finish_reason\":\"stop\"}}}",
+      "terminal": true,
+      "error": false,
+      "message": ""
+    },
+    {
+      "name": "chat non-object JSON naming a terminal value",
+      "api": "chat",
+      "frame": "[\"finish_reason\",\"stop\"]",
       "terminal": true,
       "error": false,
       "message": ""

@@ -109,21 +109,22 @@ var streamFrameCases = []struct {
 	// for every non-object document — Go folds JSON `null` in with the parse
 	// errors precisely so it can't diverge from TS's asRecord().
 	{"responses truncated frame mentioning a terminal type", wire.StreamAPIResponses, `{"type":"response.completed","response":{"id":`},
-	// The chat side answers the SAME question the OPPOSITE way, and that
-	// divergence is deliberate but was pinned by nothing in either language —
-	// the literal was free to flip, in the direction that drops the settlement
-	// tail, with every suite green. This frame clears both chat prefilters
-	// (`"finish_reason"` and `"stop"`), dodges every fast-path needle (the
-	// space before the colon), and does not parse. Anyone harmonizing the two
-	// classifiers must change this vector deliberately, in both languages.
+	// The chat side answers the same way. This frame clears both chat
+	// prefilters (`"finish_reason"` and `"stop"`), dodges every fast-path
+	// needle (the space before the colon), and does not parse, so only the
+	// parse fallback's own answer decides it.
 	{"chat truncated frame mentioning a terminal finish_reason", wire.StreamAPIChat, `{"choices":[{"finish_reason" : "stop"`},
-	// The same truncation in the COMPACT spelling, which does hit a fast-path
-	// needle — and so answers terminal where the spaced one above answers
-	// non-terminal. This pair is the only thing that distinguishes the fast
-	// path from the parse fallback: they agree on every well-formed input, so
-	// without it the entire needle list could be deleted with a green suite,
-	// and a truncated vLLM/OpenAI stop frame would stop arming the drain.
+	// The same truncation in the COMPACT spelling, which hits a fast-path
+	// needle before any parse.
 	{"chat truncated frame matching a fast-path needle", wire.StreamAPIChat, `{"choices":[{"finish_reason":"stop"`},
+	// A frame the parse would call non-terminal (choices is not an array) but
+	// a fast-path needle calls terminal. The fast path and the parse agree on
+	// every well-formed chat frame, so this is what shows the needles still
+	// decide: delete them and it flips.
+	{"chat needle answers before the parse", wire.StreamAPIChat, `{"choices":{"0":{"finish_reason":"stop"}}}`},
+	// Valid JSON that is not an object, past both prefilters: no parse can
+	// finish the check, so it fails toward terminal like a truncated frame.
+	{"chat non-object JSON naming a terminal value", wire.StreamAPIChat, `["finish_reason","stop"]`},
 	// Parses as an object, clears both prefilters, but `choices` is not an
 	// array — the chat confirm step's other non-terminal exit, previously
 	// unreached by any vector. The `"length"` here is what gets it past the
