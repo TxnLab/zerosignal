@@ -1465,7 +1465,7 @@ Details is **non-binding**. A field on this endpoint expresses the operator's cu
   - Non-binding does **not** mean unbounded. Before escrowing, a payer-side peer bounds the signed ticket against this rate card and the ticket's own internal consistency (§ 3a "Payer-side price verification"). The bound is a generous abuse multiple because an advertised value is a snapshot that may have aged: a legitimate reprice passes, an inflated ticket does not.
   - A `0` advertised rate (a free model) is also just a snapshot of what the operator offers now; the binding price is still the ticket. A client expecting a free reserve that gets non-zero `input_rate` / `output_rate` back (the operator changed config between probe and reserve) is seeing an aged advertisement like any other divergence below, not misbehavior.
 - **Capacity**: the advertised `context_window` and `max_output_tokens` are the values the node consults when accepting a reserve, but the node may change config between the discovery probe and the reserve call. The reserve endpoint is the binding gate: a request that fits at probe time may be rejected if the operator tightens its limits, and vice versa.
-- **Identity**: the reference proxy checks `operator_id`, `owner_addr` and `signing_addr` against the on-chain `ZeroSignalEscrow` registry before trusting them to verify tickets or the ephemeral advertisement. (The on-chain record carries no encryption key; envelope encryption targets the signed ephemeral recipient, § 4.) A mismatch between this advertisement and the on-chain record is a misconfiguration the proxy treats as "operator unavailable", not a slashable offense.
+- **Identity**: the reference SDKs never take `operator_id`, `owner_addr` or `signing_addr` from this endpoint. They read all three from the on-chain `ZeroSignalEscrow` registry and verify tickets and the ephemeral advertisement against the chain's signing key. (The on-chain record carries no encryption key; envelope encryption targets the signed ephemeral recipient, § 4.) An advertised value that differs from the chain is ignored. It is a misconfiguration, not a slashable offense; a node whose signatures fail against the chain key is unusable either way.
 
 A divergence between an advertised value and the eventual ticket is therefore not evidence of misbehavior under § 3b; it is a snapshot that aged. Clients that pre-check capacity through this endpoint should expect occasional reserve rejections and fall through to the next candidate operator.
 
@@ -2694,10 +2694,11 @@ the caller chose. A legacy `user` field is untouched too. Both remain the
 caller's own choice, and a caller that sets either forfeits this property for
 itself.
 
-**Implementation scope.** Only the Go proxy currently performs these strips. `client/`
-composes its own request bodies and has no OpenAI-compatible ingress, so it has
-nothing to strip. If it ever accepts third-party bodies it needs the same pass,
-and `proto/ts` has no `inject` twin to mirror into.
+**Implementation scope.** Both reference SDKs perform these strips before
+sealing: Go's `Client.dispatch` and the TS SDK's dispatch, through
+`inject.DropPromptCacheKey` ↔ `dropPromptCacheKey` (`@txnlab/zs-proto/inject`),
+pinned together by `payer_mutator_vectors.json`. Every host that runs an SDK
+gets them, including one that accepts third-party bodies.
 
 ### Reference implementation
 
@@ -2771,10 +2772,11 @@ Separately, and without gating: on a relayed path, an `ephemeral_issued_at` olde
 
 **Refetch-and-retry on stale-seal decrypt failure.** The ephemeral key is in-memory-only, dies on restart, and rotates out of the decrypt-overlap window (§ 3c, § 8). A sealing party's cached ephemeral can therefore briefly outlive the key the node holds.
 - The node decrypts only with its current and previous-in-overlap identities (there is no anchor identity). When a request was sealed to a recipient it no longer holds, it returns a distinguishable envelope-decrypt error: `400 bad_reserve_envelope` on reserve, and on inference a plaintext error per § 10.
-- When the sealing party gets that error **after sealing to an ephemeral recipient**, it refetches `/v1/zs/details` for the operator's current ephemeral and reseals once against the **same** operator. If no fresh ephemeral qualifies, it falls through to another candidate.
+- When the sealing party gets `bad_reserve_envelope` **on reserve after sealing to an ephemeral recipient**, it refetches `/v1/zs/details` for the operator's current ephemeral and reseals once against the **same** operator. If no fresh ephemeral qualifies, it falls through to another candidate.
 - A failure sealed to the already-current ephemeral is a genuine error and is not retried.
+- **The inference envelope is never resealed.** By then `escrow.open` has committed, and § 10 allows no resend after payment except through a different relay after a relay hop error. The inference is sealed to the recipient the reserve just used, so the exposure is the seconds between the two calls; a decrypt error there ends the turn and the escrow's deadline path returns the payer's funds.
 
-This bounds the post-rotation stale-seal window to a single refetch-and-retry rather than a full discovery-refresh interval, and never falls back to a non-forward-secret recipient, because none exists.
+This bounds the post-rotation stale-seal window to a single refetch-and-retry on reserve rather than a full discovery-refresh interval, and never falls back to a non-forward-secret recipient, because none exists.
 
 ## 5. Response format
 

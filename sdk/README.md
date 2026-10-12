@@ -237,8 +237,9 @@ the turn's error if it has one (`err` holds it too). `text()` runs the turn and 
 answer text. Each `Stream` can be read once.
 
 - **Leaving early.** A loop that stops reading, or a `signal` that aborts, is a caller who left.
-  Before the node finishes generating, the node is told to stop. After that, the receipt is
-  still collected and the ticket settled, and the loop's exit waits for it.
+  Before the node finishes generating, the node is told to stop. After that, the SDK keeps
+  reading for up to 10 s to collect the receipt and submit the settle, and the loop's exit
+  waits for that. A receipt that does not arrive in time is left to the refund watchdog.
 - **Settlement.** `wait()` resolves once the turn's escrow submit has returned, with what it
   submitted; call it after `events()` has started, or it rejects. A failed submit does not
   reject: it comes back as `err` beside a `settlement` that was attempted, not one that took

@@ -166,7 +166,7 @@ func (s *Client) forwardRawStream(
 	// through the zs-receipt tail — where settlement runs — so the operator
 	// is paid for content it already delivered; the node, still seeing the
 	// proxy connected, completes normally and signs a real-usage receipt
-	// instead of its zero-cost disconnect receipt. A disconnect BEFORE
+	// instead of a disconnect receipt estimated from the frames it sent. A disconnect BEFORE
 	// generation completes cancels promptly via the watcher below: we don't pin
 	// a generating node to an abandoned request (the speculative-burst case).
 	upstreamCtx, cancelUpstream := context.WithCancel(context.WithoutCancel(ctx))
@@ -265,8 +265,11 @@ func (s *Client) forwardRawStream(
 				}
 			} else {
 				// Disconnected before any generation-terminal frame — abandoned
-				// before the node produced output. Cancel promptly; settles $0,
-				// which is correct (no delivered content to pay for).
+				// before the node finished. Cancel promptly. The payer never sees
+				// a receipt, so nothing is acked here: a node that had streamed
+				// output claims its estimate of the work alone and is paid after
+				// the grace period (capped at the reserved amount); one that had
+				// not is refunded.
 				//
 				// Flag it and let the diagnostic be emitted after the pump returns.
 				// Reading the tally HERE would race the pump: this runs before the

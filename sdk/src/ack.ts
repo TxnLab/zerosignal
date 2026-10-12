@@ -7,11 +7,8 @@
 // chain, through the node's pre-signed settle group when it sent one and the
 // payer's standalone settle otherwise. Mirrors proto/go/zs's checkReceipt and
 // OpenHandle.AckSettle; testdata/ack_settle_vectors.json pins ackSettle's
-// decision against Go's.
-//
-// Go protests a body_hash violation on chain; this does not yet, so a
-// violation here only releases the turn: nothing is acked, and the escrow
-// refunds or lapses.
+// decision against Go's. A body_hash violation is protested on chain by
+// receipt-check.ts, as Go does, rather than acked.
 
 import algosdk from 'algosdk'
 
