@@ -23,6 +23,7 @@ import { DuplicateTicketError, type SpendGuard } from '../src/config.js'
 import { type DispatchDeps, type SealedRun, dispatch } from '../src/dispatch.js'
 import type { ZsError } from '../src/errors.js'
 import type { Event } from '../src/events.js'
+import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import type { ModelCapacity, Operator } from '../src/operator.js'
 import type { RegistryProvider, Reserved, ReserveClient } from '../src/parts.js'
 import type { PickDeps } from '../src/pick.js'
@@ -41,6 +42,7 @@ import { type RelayHop, relayRef, targetRef } from '../src/routing/relay.js'
 import { RelayReputationStore } from '../src/routing/reputation.js'
 import { type Request, turnOf } from '../src/turn.js'
 import type { Endpoint } from '../src/types.js'
+import { BelowTargetError } from '../src/wallet.js'
 import { testOperator } from './fixtures.js'
 
 const MODEL = 'gpt-test'
@@ -264,6 +266,7 @@ function harness(ops: Operator[], o: HarnessOptions = {}): Harness {
         allowPrivacyOverride: false,
         requireTeeModels: [],
         remedies: { fund: 'fund it', raiseSlots: 'add slots', raiseSpendCap: 'raise the cap remedy', recoverTicket: 'recover it' },
+        network: 'testnet',
         retryBudget: 60_000,
         feeRate: () => null,
         runSealed: async (e, run) => {
@@ -1131,6 +1134,90 @@ describe('the caller’s admitNode check', () => {
             ac.signal,
         )
         expect(h.logged.filter((l) => l.msg === 'admit check failed; refusing operator')).toEqual([])
+    })
+})
+
+// A node may refuse a payer with no prepaid pool at reserve, so the pool is
+// funded before the first reserve rather than only inside open.
+describe('the prepaid pool before reserve', () => {
+    const body = chat(',"max_tokens":100')
+    const preparing = (fail?: unknown, deps: Partial<DispatchDeps> = {}, onPrepare?: () => void, ops = [op(1)]) => {
+        const h: { calls: number; reservesBefore: number; signal?: AbortSignal | undefined } = { calls: 0, reservesBefore: -1 }
+        let rc: ReserveClient & { calls: Call[] }
+        const wallet = {
+            payerAddr: () => 'PAYER',
+            prepareDeposit: async (signal?: AbortSignal) => {
+                h.calls++
+                h.reservesBefore = rc.calls.length
+                h.signal = signal
+                onPrepare?.()
+                if (fail !== undefined) throw fail
+            },
+        }
+        const harnessed = harness(ops, { deps: { wallet, ...deps } })
+        rc = harnessed.rc
+        return { ...harnessed, prep: h }
+    }
+
+    it('is not funded for a request the spend cap refuses', async () => {
+        const refuseAll: SpendGuard = {
+            admit() {
+                throw new Error('over the cap')
+            },
+            reserve() {},
+            settle() {},
+            release() {},
+        }
+        const priced = withCap(op(1), { inputUsdPer1m: 1, outputUsdPer1m: 2 })
+        const h = preparing(undefined, { feeRate: () => 0, spendGuard: refuseAll }, undefined, [priced])
+        const em = await h.run(body)
+        expect(em.failed?.code).toBe('spend_cap_exceeded')
+        expect(h.prep.calls).toBe(0)
+    })
+
+    it('runs under the turn’s signal, and a turn aborted during it ends without a funds error', async () => {
+        const ac = new AbortController()
+        const h = preparing(new MbrDepositUnaffordableError(0n, 10n, 50_000n, 1_000n), {}, () => ac.abort())
+        const em = await h.run(body, {}, ac.signal)
+        expect(h.prep.signal).toBe(ac.signal)
+        expect(em.failed?.code).not.toBe('mbr_pool_underfunded')
+        expect(h.logged.some((l) => l.msg.startsWith('prepaid pool'))).toBe(false)
+    })
+
+    it('is funded once, before the first reserve', async () => {
+        const h = preparing()
+        const em = await h.run(body)
+        expect(em.failed).toBeUndefined()
+        expect(h.prep).toEqual({ calls: 1, reservesBefore: 0 })
+        expect(em.runs).toHaveLength(1)
+    })
+
+    it.each([
+        ['unaffordable', new MbrDepositUnaffordableError(0n, 10n, 50_000n, 1_000n), 'mbr_pool_underfunded'],
+        ['below target', new BelowTargetError(115_000n), 'mbr_pool_underfunded'],
+        ['a deposit that overspends', new Error('wallet: deposit: TransactionPool.Remember: overspend'), 'wallet_unfunded'],
+    ])('a pool the payer can’t fund (%s) ends the turn before any reserve', async (_name, err, code) => {
+        const h = preparing(err)
+        const em = await h.run(body)
+        expect(em.failed).toMatchObject({ code, kind: 'funds' })
+        expect(em.failed!.message).toContain('PAYER')
+        expect(em.failed!.message).toContain('fund it')
+        expect(h.rc.calls).toEqual([])
+    })
+
+    it('goes on past a failure that says nothing about funds', async () => {
+        const h = preparing(new Error('wallet: deposit-shortfall read: connection refused'))
+        const em = await h.run(body)
+        expect(em.failed).toBeUndefined()
+        expect(h.rc.calls).toHaveLength(1)
+        expect(h.logged.some((l) => l.level === 'warn' && l.msg === 'prepaid pool check failed before reserve; continuing')).toBe(true)
+    })
+
+    it('is not funded for a request no node can serve', async () => {
+        const h = preparing(new MbrDepositUnaffordableError(0n, 10n, 50_000n, 1_000n))
+        const em = await h.run(`{"model":"no-such-model","messages":[],"max_tokens":100}`)
+        expect(em.failed?.code).toBe('no_operator')
+        expect(h.prep.calls).toBe(0)
     })
 })
 

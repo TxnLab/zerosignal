@@ -149,6 +149,107 @@ func newPoolWallet(p *fakePool) *Wallet {
 
 const testTicketMbr = 115_000
 
+// A payer with no pool opts in and funds it before any reserve; once the pool
+// covers the working set, a later call reads nothing.
+func TestPrepareDeposit_OptsInANewPayerOnce(t *testing.T) {
+	ctx := context.Background()
+	pool := &fakePool{ticketMbr: testTicketMbr, minFee: 1_000, spendable: 100_000_000}
+	w := newPoolWallet(pool)
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("PrepareDeposit: %v", err)
+	}
+	if pool.depositCalls != 1 || !pool.lastOptIn {
+		t.Fatalf("deposits = %d, optIn = %v; want one opt-in deposit", pool.depositCalls, pool.lastOptIn)
+	}
+	pool.depErr = errors.New("read after the pool was ready")
+	pool.optedInErr = errors.New("opt-in read after the pool was ready")
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("second PrepareDeposit: %v", err)
+	}
+	if pool.depositCalls != 1 {
+		t.Errorf("deposits = %d after the pool was ready, want 1", pool.depositCalls)
+	}
+}
+
+// Closing the pool opts the payer out, so the next request makes the first
+// deposit again rather than reaching a node that refuses it unopted.
+func TestPrepareDeposit_DepositsAgainAfterClose(t *testing.T) {
+	ctx := context.Background()
+	client, err := escrow.NewClient(1234, algodAnsweringSubmit(t, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"txId":"CLOSED"}`)
+	}))
+	if err != nil {
+		t.Fatalf("escrow.NewClient: %v", err)
+	}
+	pool := &fakePool{ticketMbr: testTicketMbr, minFee: 1_000, spendable: 100_000_000}
+	w := newPoolWallet(pool)
+	w.escrow = client
+	w.keystore = encodingSigner{}
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("PrepareDeposit: %v", err)
+	}
+	if _, err := w.CloseDeposit(ctx); err != nil {
+		t.Fatalf("CloseDeposit: %v", err)
+	}
+	pool.optedIn = false
+	pool.dep = escrow.PayerDeposit{}
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("PrepareDeposit after close: %v", err)
+	}
+	if pool.depositCalls != 2 || !pool.lastOptIn {
+		t.Errorf("deposits = %d, optIn = %v; want a second opt-in deposit", pool.depositCalls, pool.lastOptIn)
+	}
+}
+
+// An opted-in pool short of its working set is left to Open: a node checks
+// only the opt-in at reserve, and such a pool never latches, so a top-up here
+// would repeat the whole funding pass on every request.
+func TestPrepareDeposit_LeavesAnOptedInPoolToOpen(t *testing.T) {
+	pool := &fakePool{
+		ticketMbr: testTicketMbr,
+		minFee:    1_000,
+		optedIn:   true,
+		dep:       escrow.PayerDeposit{AlgoBalance: testTicketMbr},
+		depErr:    errors.New("the pool was read"),
+	}
+	w := newPoolWallet(pool)
+	for range 2 {
+		if err := w.PrepareDeposit(context.Background()); err != nil {
+			t.Fatalf("PrepareDeposit: %v", err)
+		}
+	}
+	if pool.depositCalls != 0 {
+		t.Errorf("deposits = %d, want 0", pool.depositCalls)
+	}
+}
+
+// An opt-in that can't be read is not a funds answer, so dispatch goes on to
+// the reserve.
+func TestPrepareDeposit_UnreadableOptIn(t *testing.T) {
+	pool := &fakePool{ticketMbr: testTicketMbr, optedInErr: errors.New("algod down")}
+	err := newPoolWallet(pool).PrepareDeposit(context.Background())
+	if err == nil || errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
+		t.Fatalf("err = %v, want a read error that isn't a funds answer", err)
+	}
+	if pool.depositCalls != 0 {
+		t.Errorf("deposits = %d, want 0", pool.depositCalls)
+	}
+}
+
+// With no ALGO for a first deposit and no pool to serve from, the payer is
+// told before any reserve.
+func TestPrepareDeposit_UnaffordableWithNoPool(t *testing.T) {
+	pool := &fakePool{ticketMbr: testTicketMbr, minFee: 1_000, spendable: 1_000}
+	err := newPoolWallet(pool).PrepareDeposit(context.Background())
+	if !errors.Is(err, ErrDepositUnaffordable) {
+		t.Fatalf("err = %v, want ErrDepositUnaffordable", err)
+	}
+	if pool.depositCalls != 0 {
+		t.Errorf("deposits = %d, want 0", pool.depositCalls)
+	}
+}
+
 func TestEnsureDeposit(t *testing.T) {
 	ctx := context.Background()
 	const minFee = 1_000
@@ -680,6 +781,15 @@ func TestOpen_DepositRevert_TopUpFailureRidesAlong(t *testing.T) {
 // about the contract's assert strings — a PC is the whole signal on the wire.
 func algodRejectingSubmit(t *testing.T, pc uint64) algod.Client {
 	t.Helper()
+	return algodAnsweringSubmit(t, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"message":"TransactionPool.Remember: logic eval error: assert failed pc=%d. Details: pc=%d"}`, pc, pc)
+	})
+}
+
+func algodAnsweringSubmit(t *testing.T, submit func(http.ResponseWriter)) algod.Client {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v2/transactions/params"):
@@ -688,9 +798,7 @@ func algodRejectingSubmit(t *testing.T, pc uint64) algod.Client {
 			_, _ = io.WriteString(w, `{"consensus-version":"v30","fee":1000,"genesis-id":"dev-v1","genesis-hash":"`+gh+`","last-round":100,"min-fee":1000}`)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/transactions"):
 			_, _ = io.Copy(io.Discard, r.Body)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, `{"message":"TransactionPool.Remember: logic eval error: assert failed pc=%d. Details: pc=%d"}`, pc, pc)
+			submit(w)
 		default:
 			http.NotFound(w, r)
 		}

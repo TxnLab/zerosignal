@@ -37,6 +37,7 @@ import {
 import { retryable } from '../src/codes.js'
 import { ZsError, findError } from '../src/errors.js'
 import { IdleWatchdog, StreamIdleTimeoutError } from '../src/idle.js'
+import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import { NodeExclusionStore } from '../src/routing/exclusion.js'
 import { RelayReputationStore } from '../src/routing/reputation.js'
 import type { Request } from '../src/turn.js'
@@ -112,6 +113,8 @@ interface HarnessOptions {
     /** Route through a relay of another owner. */
     relay?: boolean
     openErr?: unknown
+    /** The wallet's prepaid-pool check before the reserve fails with this. */
+    prepareErr?: unknown
     feeBps?: number
     /** Leave Config.fetch unset, so the Client builds its default. */
     defaultFetch?: boolean
@@ -270,6 +273,13 @@ async function harness(o: HarnessOptions = {}) {
                 return handle as unknown as OpenHandle
             },
             ...(o.feeBps !== undefined ? { protocolFeeBps: async () => o.feeBps! } : {}),
+            ...(o.prepareErr !== undefined
+                ? {
+                      prepareDeposit: async () => {
+                          throw o.prepareErr
+                      },
+                  }
+                : {}),
         },
         ...(o.defaultFetch ? {} : { fetch: nodeFetch }),
         ...o.config,
@@ -577,6 +587,14 @@ describe('Client.stream’s wiring', () => {
         await expect(st.text()).rejects.toMatchObject({ code: 'wallet_unfunded' })
         expect(st.err!.message).toContain('on testnet')
         expect(s.calls).toContain(`release ${TICKET_ID}`)
+        await h.c.close()
+    })
+
+    it('names the network when the pool can’t be funded before the reserve', async () => {
+        const h = await harness({ prepareErr: new MbrDepositUnaffordableError(0n, 1n, 120_000n, 1_000n) })
+        const st = h.c.stream({ endpoint: CHAT, body: h.body })
+        await expect(st.text()).rejects.toMatchObject({ code: 'mbr_pool_underfunded' })
+        expect(st.err!.message).toContain('on testnet')
         await h.c.close()
     })
 

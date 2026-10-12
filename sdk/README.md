@@ -486,7 +486,10 @@ committed copy differs.
 ## Prepaid MBR pool
 
 Each open ticket's box is paid for out of the payer's prepaid ALGO pool in escrow, so a request
-carries no ALGO. `ensureMbrDeposit(chain, payer, slots)` funds the pool toward a working set of
+carries no ALGO. A node may refuse a reserve from a payer who isn't opted into the pool
+(`payer_not_opted_in`), so the SDK's `Wallet` makes the first deposit before the payer's first
+reserve; a wallet you supply does the same if it implements `WalletOpener.prepareDeposit`.
+`ensureMbrDeposit(chain, payer, slots)` funds the pool toward a working set of
 `slots` concurrent tickets (`Config.concurrentSlots` by default), opting in on the first
 deposit. The working set is an ideal rather than a requirement: a wallet that can't reach it
 funds as many whole slots as it affords and reports `belowTarget`, and one that can't afford a

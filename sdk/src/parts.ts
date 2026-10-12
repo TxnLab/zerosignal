@@ -203,6 +203,13 @@ export interface WalletOpener {
     /** The address reserve requests name as the payer. */
     payerAddr(): string
     /**
+     * Funds the payer's prepaid pool before the first reserve. Optional. A node
+     * may refuse a reserve from a payer with no pool (403 payer_not_opted_in),
+     * and open funds the pool only after a reserve has succeeded, so without
+     * this a new payer never gets past the reserve. Go's DepositPreparer.
+     */
+    prepareDeposit?(signal?: AbortSignal): Promise<void>
+    /**
      * The live protocol fee in basis points. Optional: without it responses
      * carry no fee breakdown.
      */

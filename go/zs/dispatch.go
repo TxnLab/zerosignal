@@ -492,6 +492,9 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			}
 		}
 	}
+	if !s.prepareDeposit(ctx, em, endpoint) {
+		return
+	}
 
 	var busyHint time.Duration
 	// anyBusy records that SOME candidate answered 429, sticky across sweeps.
@@ -2489,56 +2492,7 @@ func (s *Client) runSealed(
 			relayAttr(hop),
 			slog.String("ticket_id", ticket.TicketID),
 			slog.Any("err", err))
-		// Prepaid MBR pool can't be funded: the payer holds USDC but is short on
-		// ALGO to grow the ticket-MBR pool (and has no free slot to serve on).
-		// This is specifically an ALGO shortfall, NOT a USDC/"unfunded wallet"
-		// problem — surface the sentinel's precise µALGO breakdown and say
-		// "ALGO", so the owner doesn't go looking at USDC. Distinct code from
-		// wallet_unfunded (which reads as the USDC/onboarding case) and from the
-		// transient 429 mbr_pool_exhausted. Checked before isUnderfundedOpenError
-		// so the actionable detail isn't swallowed by the generic branch.
-		// ErrDepositBelowTarget lands here too: a partial deposit (some slots,
-		// or the quota term alone) that left the pool short of the working set
-		// AND with no free slot to serve on is the same actionable condition —
-		// the wallet needs more ALGO — and its message names the remaining
-		// shortfall the same way.
-		//
-		// Checked before exhaustion: Wallet.Open wraps the pool revert with the
-		// top-up that failed, and that revert alone reads as exhaustion.
-		if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
-			em.fail(newError("mbr_pool_underfunded",
-				fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
-					"To fix it, %s.", s.wallet.PayerAddr(), s.networkName(), err, s.remedies().Fund)))
-			return
-		}
-		// Pool exhaustion (vs a balance shortfall): the wallet HOLDS the ALGO,
-		// but every prepaid-pool slot is reserved by an in-flight ticket, so
-		// open() reverted 'insufficient MBR deposit'. That's a transient
-		// concurrency cap, not an unfunded wallet — surface a 429 that points
-		// at the knob rather than a misleading "fund me" 402 or an opaque 502.
-		// Self-heals as in-flight tickets settle, so a retry-after nudge is
-		// honest.
-		if isPoolExhaustedOpenError(err) {
-			e := newError("mbr_pool_exhausted",
-				fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
-					"retry once in-flight requests settle, or to allow more at once, %s.",
-					s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
-			e.RetryAfter = 2 * time.Second
-			em.fail(e)
-			return
-		}
-		// "Always up, tells you what it needs": an open that fails because the
-		// payer can't cover ALGO fees / locked USDC (or isn't USDC-opted-in)
-		// surfaces an actionable 402 with the deposit address, not a generic 502.
-		// The daemon binds unfunded (the escrow-config read simulates from the
-		// fee sink), so this is the path an unfunded wallet hits per request.
-		if isUnderfundedOpenError(err) {
-			em.fail(newError("wallet_unfunded",
-				fmt.Sprintf("zerosignal wallet %s can't pay for this request on %s. To fix it, %s.",
-					s.wallet.PayerAddr(), s.networkName(), s.remedies().Fund)))
-			return
-		}
-		em.fail(newError("wallet_open", "payment group could not be submitted"))
+		em.fail(s.openFailure(err))
 		return
 	}
 	// Open committed: the reservation stays on the tally (settlement reconciles
@@ -3426,6 +3380,90 @@ func reservePriceViolation(op Operator, req ticket.ReserveRequest, t *ticket.Tic
 		LongContextCacheReadRateUsdPer1M: mc.LongContextCacheReadUSDPer1M,
 	}
 	return pricing.VerifyTicketPrice(*t, adv, feeBps, req.InputCount, extra, pol)
+}
+
+// openFailure is the error a failed Wallet.Open ends the request with, most
+// specific first.
+func (s *Client) openFailure(err error) *Error {
+	// Prepaid MBR pool can't be funded: the payer holds USDC but is short on
+	// ALGO to grow the ticket-MBR pool (and has no free slot to serve on).
+	// This is specifically an ALGO shortfall, NOT a USDC/"unfunded wallet"
+	// problem — surface the sentinel's precise µALGO breakdown and say
+	// "ALGO", so the owner doesn't go looking at USDC. Distinct code from
+	// wallet_unfunded (which reads as the USDC/onboarding case) and from the
+	// transient 429 mbr_pool_exhausted. Checked before isUnderfundedOpenError
+	// so the actionable detail isn't swallowed by the generic branch.
+	// ErrDepositBelowTarget lands here too: a partial deposit (some slots,
+	// or the quota term alone) that left the pool short of the working set
+	// AND with no free slot to serve on is the same actionable condition —
+	// the wallet needs more ALGO — and its message names the remaining
+	// shortfall the same way.
+	//
+	// Checked before exhaustion: Wallet.Open wraps the pool revert with the
+	// top-up that failed, and that revert alone reads as exhaustion.
+	if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
+		return newError("mbr_pool_underfunded",
+			fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
+				"To fix it, %s.", s.wallet.PayerAddr(), s.networkName(), err, s.remedies().Fund))
+	}
+	// Pool exhaustion (vs a balance shortfall): the wallet HOLDS the ALGO,
+	// but every prepaid-pool slot is reserved by an in-flight ticket, so
+	// open() reverted 'insufficient MBR deposit'. That's a transient
+	// concurrency cap, not an unfunded wallet — surface a 429 that points
+	// at the knob rather than a misleading "fund me" 402 or an opaque 502.
+	// Self-heals as in-flight tickets settle, so a retry-after nudge is
+	// honest.
+	if isPoolExhaustedOpenError(err) {
+		e := newError("mbr_pool_exhausted",
+			fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
+				"retry once in-flight requests settle, or to allow more at once, %s.",
+				s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
+		e.RetryAfter = 2 * time.Second
+		return e
+	}
+	// "Always up, tells you what it needs": an open that fails because the
+	// payer can't cover ALGO fees / locked USDC (or isn't USDC-opted-in)
+	// surfaces an actionable 402 with the deposit address, not a generic 502.
+	// The daemon binds unfunded (the escrow-config read simulates from the
+	// fee sink), so this is the path an unfunded wallet hits per request.
+	if isUnderfundedOpenError(err) {
+		return newError("wallet_unfunded",
+			fmt.Sprintf("zerosignal wallet %s can't pay for this request on %s. To fix it, %s.",
+				s.wallet.PayerAddr(), s.networkName(), s.remedies().Fund))
+	}
+	return newError("wallet_open", "payment group could not be submitted")
+}
+
+// prepareDeposit opts the payer into the prepaid pool before the first
+// reserve, so a node that requires the opt-in doesn't refuse a new payer. It
+// reports false when the request has ended. Only a funds failure ends it, and
+// it then outranks whatever the reserve loop would have answered (busy, no
+// relay, a size refusal): the open would fail the same way, after a node had
+// held a slot for the ticket. Any other failure, such as a chain read, is
+// logged and the request goes on, since Open checks the pool again and a node
+// that doesn't require the opt-in may still serve.
+func (s *Client) prepareDeposit(ctx context.Context, em emitter, endpoint string) bool {
+	p, ok := s.wallet.(DepositPreparer)
+	if !ok {
+		return true
+	}
+	err := p.PrepareDeposit(ctx)
+	// A cancelled request ends in the reserve loop, which reads ctx. Checked
+	// first: a read cut off by the cancellation can surface as a shortfall.
+	if err == nil || ctx.Err() != nil {
+		return true
+	}
+	if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) || isUnderfundedOpenError(err) {
+		s.log.Error("prepaid pool could not be funded before reserve",
+			slog.String("endpoint", endpoint),
+			slog.Any("err", err))
+		em.fail(s.openFailure(err))
+		return false
+	}
+	s.log.Warn("prepaid pool check failed before reserve; continuing",
+		slog.String("endpoint", endpoint),
+		slog.Any("err", err))
+	return true
 }
 
 // addU64 sums vs, reporting false when the sum overflows a uint64.

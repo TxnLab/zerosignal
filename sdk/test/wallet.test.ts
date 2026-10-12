@@ -320,6 +320,53 @@ describe('Wallet.open', () => {
         expect(chain.sent).toHaveLength(1)
     })
 
+    // TestPrepareDeposit_OptsInANewPayerOnce
+    it('funds an empty pool before a reserve, and the open after it reads nothing', async () => {
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.optedIn = false
+        chain.spendable = 10n * FULL
+        await wallet.prepareDeposit()
+        expect(chain.deposits).toEqual([{ amount: FULL, optIn: true }])
+        expect(chain.sent).toEqual([])
+        const reads = chain.reads
+        chain.isPayerOptedIn = async () => {
+            throw new Error('opt-in read after the pool was ready')
+        }
+        await wallet.prepareDeposit()
+        await wallet.open(ticket, op, openGroup('valid'))
+        expect(chain.reads).toBe(reads)
+        expect(chain.deposits).toHaveLength(1)
+    })
+
+    // TestPrepareDeposit_LeavesAnOptedInPoolToOpen
+    it('leaves an opted-in pool short of its working set to the open', async () => {
+        chain.deposit = { algoBalance: MBR, openTickets: 0n }
+        chain.spendable = 10n * FULL
+        await wallet.prepareDeposit()
+        await wallet.prepareDeposit()
+        expect(chain.reads).toBe(0)
+        expect(chain.deposits).toEqual([])
+    })
+
+    it('makes the first deposit again after closing the pool', async () => {
+        await wallet.open(ticket, op, openGroup('valid'))
+        await wallet.closeDeposit()
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.optedIn = false
+        chain.spendable = 10n * FULL
+        await wallet.prepareDeposit()
+        expect(chain.deposits).toEqual([{ amount: FULL, optIn: true }])
+    })
+
+    // TestPrepareDeposit_UnaffordableWithNoPool
+    it('refuses before a reserve when no pool can be funded', async () => {
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.optedIn = false
+        const err = await wallet.prepareDeposit().catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(MbrDepositUnaffordableError)
+        expect(chain.deposits).toEqual([])
+    })
+
     it('funds the configured working set', async () => {
         wallet = new Wallet({ chain, signer, depositSlots: 3 })
         chain.deposit = { algoBalance: 0n, openTickets: 0n }
