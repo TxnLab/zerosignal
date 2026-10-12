@@ -7,6 +7,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
+	"github.com/TxnLab/zerosignal/go/zs"
 )
 
 // Deliverable 6a: the streaming receipt frame is frame-index-bound (AAD carries
@@ -175,6 +177,49 @@ func TestDispatch_Stream_UnopenableSettleGroupKeepsContent(t *testing.T) {
 	}
 	if strings.Contains(logs, "receipt verification failed") {
 		t.Errorf("the receipt over the content should verify: %s", logs)
+	}
+}
+
+// keepingReserveClient remembers every ticket it hands out, and the identity
+// each held when it did.
+type keepingReserveClient struct {
+	zs.ReserveClient
+	got        []*zs.ReservedTicket
+	identities []string
+}
+
+func (k *keepingReserveClient) Reserve(ctx context.Context, op zs.Operator, req ticket.ReserveRequest, hop *zs.RelayHop) (*zs.ReservedTicket, error) {
+	rt, err := k.ReserveClient.Reserve(ctx, op, req, hop)
+	if rt != nil {
+		k.got = append(k.got, rt)
+		k.identities = append(k.identities, rt.AgeIdentity.String())
+	}
+	return rt, err
+}
+
+// SPEC § 3: no per-request ephemeral material outlives the response handler.
+func TestDispatch_Stream_WipesReservedKeys(t *testing.T) {
+	node := newFakeNode(t, &nodeConfig{
+		mode:         modeStreamReceiptIntact,
+		streamFrames: [][]byte{[]byte(`{"delta":"A"}`)},
+		buildReceipt: verifyingReceipt,
+	})
+	cfg := testConfig()
+	opts := setup(t, cfg, node)
+	keep := &keepingReserveClient{ReserveClient: opts.ReserveClient}
+	opts.ReserveClient = keep
+	var logBuf bytes.Buffer
+	s := newServer(&cfg.policy, capturingLogger(&logBuf), nil, nil, opts)
+	driveStream(t, s)
+	if len(keep.got) != 1 {
+		t.Fatalf("%d tickets reserved, want 1", len(keep.got))
+	}
+	rt := keep.got[0]
+	if rt.ResponseKey != ([wire.ResponseKeySize]byte{}) {
+		t.Error("K_response still held after the stream ended")
+	}
+	if rt.AgeIdentity.String() == keep.identities[0] {
+		t.Error("the reply-to identity was not wiped")
 	}
 }
 

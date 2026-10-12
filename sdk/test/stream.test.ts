@@ -542,6 +542,19 @@ describe('forwardStream', () => {
         expect(t.em.outs).toEqual([])
     })
 
+    // The hook's close wipes the response key, so it runs only once nothing
+    // more will be opened, and on every path that built the hook.
+    it('closes the frame hook once the stream has been read, and not before', async () => {
+        for (const openResult of [true, false]) {
+            const t = setup(() => new Response(bodyOf('data: a\n\ndata: b\n\n'), { headers: SSE }))
+            t.em.openResult = openResult
+            const seen: string[] = []
+            const hook = Object.assign(async (f: StreamFrame) => (seen.push('frame'), { frame: f }), { close: () => seen.push('close') })
+            await forwardStream(t.deps, t.em as never, out, call(), async () => hook, noFallback, { value: false })
+            expect(seen).toEqual(openResult ? ['frame', 'frame', 'close'] : ['close'])
+        }
+    })
+
     it('logs a clean stream’s profile at debug', async () => {
         const t = setup(() => new Response(bodyOf('data: a\n\ndata: b\n\n'), { status: 201, headers: SSE }))
         await forwardStream(t.deps, t.em as never, out, call(), async () => identity, noFallback, { value: false })
@@ -1098,6 +1111,15 @@ describe('frameFactory', () => {
         expect(await fn(receiptFrame(s))).toEqual({})
         expect(s.handle.acks).toHaveLength(1)
         expect(s.logger.logged.map((l) => l.msg)).toContain('operator emitted more than one zs-receipt frame; ignoring the extra')
+    })
+
+    // SPEC § 3: no per-request key outlives the response.
+    it('wipes the response key on close, after which nothing opens', async () => {
+        const s = await setup()
+        const fn = await transform(s)
+        await fn(zs(s, s.frames[0]!))
+        fn.close?.()
+        await expect(fn(zs(s, s.frames[1]!))).rejects.toThrow(/^decrypt sse frame: /)
     })
 
     // SPEC § 5.3: the receipt hashes the frames before it, so content after

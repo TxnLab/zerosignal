@@ -832,6 +832,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 						slog.String("field", v.Field),
 						slog.Uint64("allowed", v.Want),
 						slog.Uint64("signed", v.Got))
+					rt.Wipe()
 					continue
 				}
 				if s.log.Enabled(ctx, slog.LevelDebug) {
@@ -880,6 +881,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 								relayAttr(hop),
 								slog.String("ticket_id", rt.Ticket.TicketID),
 								slog.Any("err", err))
+							rt.Wipe()
 							em.fail(newError("operator_ticket_reuse",
 								"the operator issued a ticket id that is already in flight for this payer; no payment was made"))
 							return
@@ -893,6 +895,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 							relayAttr(hop),
 							slog.Uint64("max_price_microusdc", rt.Ticket.MaxPrice),
 							slog.Any("err", err))
+						rt.Wipe()
 						continue
 					}
 				}
@@ -2458,6 +2461,9 @@ func (s *Client) runSealed(
 	wantsStream bool,
 	hop *RelayHop,
 ) {
+	// Every response path below reads the response synchronously, so nothing
+	// needs K_response or the reply-to identity once this returns.
+	defer rt.Wipe()
 	ticket := rt.Ticket
 	algoUSDPrice := rt.AlgoUSDPrice
 	em.reserved(rt, op)
@@ -2592,7 +2598,6 @@ func (s *Client) runSealed(
 		em.fail(newError("wrap_request", "request could not be wrapped"))
 		return
 	}
-	defer wire.ZeroEphemeralIdentity(ephemeral)
 
 	// Upcast to settlementHandle once so the builders share a single
 	// typed reference to the open handle. Fee value pulled off the
@@ -3101,6 +3106,8 @@ func (s *Client) buildNonStreamResponder(
 		if err != nil {
 			return fmt.Errorf("unwrap response key: %w", err)
 		}
+		// The opener keeps its own copy in the AEAD.
+		defer clear(responseKey[:])
 
 		if err := verifyCommitK(ticket, responseKey); err != nil {
 			return err
@@ -4095,6 +4102,8 @@ func (s *Client) buildFrameFactory(
 		if err != nil {
 			return nil, fmt.Errorf("unwrap response key: %w", err)
 		}
+		// The opener keeps its own copy in the AEAD.
+		defer clear(responseKey[:])
 
 		// Same commit_k check as the non-stream responder: the operator must
 		// seal with the K it committed at reserve (ticket.commit_k =

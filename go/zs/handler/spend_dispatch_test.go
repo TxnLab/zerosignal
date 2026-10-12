@@ -49,6 +49,24 @@ type fakeSpendGuard struct {
 
 type settleCall struct{ maxPrice, spent uint64 }
 
+// assertAllWiped fails unless every ticket k handed out had its response key
+// and reply-to identity wiped. The fake node's keys are random, so a zero key
+// can only be the wipe.
+func (k *keepingReserveClient) assertAllWiped(t *testing.T) {
+	t.Helper()
+	if len(k.got) == 0 {
+		t.Fatal("no ticket was reserved")
+	}
+	for i, rt := range k.got {
+		if rt.ResponseKey != ([wire.ResponseKeySize]byte{}) {
+			t.Errorf("ticket %d: K_response still held", i)
+		}
+		if rt.AgeIdentity.String() == k.identities[i] {
+			t.Errorf("ticket %d: the reply-to identity was not wiped", i)
+		}
+	}
+}
+
 func (f *fakeSpendGuard) Reserve(ticketID string, amt uint64) error {
 	f.asks++
 	if f.reserveErr != nil {
@@ -324,7 +342,10 @@ func TestDispatch_SpendCapExceeded_402(t *testing.T) {
 	opts.Wallet = fw
 	opts.SpendGuard = &fakeSpendGuard{reserveErr: errors.New("daily spend cap exceeded")}
 	opts.Remedies.RaiseSpendCap = "raise the cap remedy"
+	keep := &keepingReserveClient{ReserveClient: opts.ReserveClient}
+	opts.ReserveClient = keep
 	s := testServer(cfg, opts)
+	defer keep.assertAllWiped(t)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
@@ -438,7 +459,10 @@ func TestDispatch_DuplicateTicketID_502(t *testing.T) {
 	opts.SpendGuard = &fakeSpendGuard{
 		reserveErr: fmt.Errorf("%w: %q (operator reused a ticket id)", zs.ErrDuplicateTicket, "tid"),
 	}
+	keep := &keepingReserveClient{ReserveClient: opts.ReserveClient}
+	opts.ReserveClient = keep
 	s := testServer(cfg, opts)
+	defer keep.assertAllWiped(t)
 
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))

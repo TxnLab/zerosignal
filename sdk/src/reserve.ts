@@ -65,7 +65,7 @@ export interface OpenReserveOptions {
 
 export interface ReservedTicket {
     ticket: Ticket & { sig: string }
-    /** K_response. The caller zeroes it when the turn ends. */
+    /** K_response. The caller zeroes it once the request is sealed, or the ticket dropped. */
     responseKey: Uint8Array
     /** ALGO/USD at reserve, for display; 0 when the node sent none. */
     algoUsdPrice: number
