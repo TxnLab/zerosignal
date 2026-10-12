@@ -322,6 +322,23 @@ describe('openSealedStream', () => {
         }
     })
 
+    // SPEC § 5.3: content after the tail opens is outside the receipt's
+    // body_hash, so it never reaches the reader, and the stream stands.
+    it('drops content after the receipt or an opened settle group', async () => {
+        for (const tailEvent of ['zs-settle-group', 'zs-receipt'] as const) {
+            const w = await wire()
+            const a = chat('a')
+            const frame0 = w.sealer.sealStreamFrame(a)
+            const tail =
+                tailEvent === 'zs-settle-group'
+                    ? ev('zs-settle-group', w.sealer.sealHeader(SEALED_HEADER_SETTLE_GROUP, enc.encode('G')))
+                    : ev('zs-receipt', w.sealer.sealStreamFrame(receiptJSON(1)))
+            const body = [ev('zs', frame0), tail, ev('zs', w.sealer.sealStreamFrame(chat('late'))), plain('[DONE]')]
+            const { stream } = run(w, source(body).stream)
+            expect(texts(await collect(stream))).toEqual([`c:${dec.decode(a)}`])
+        }
+    })
+
     it('settles on the first receipt only', async () => {
         const w = await wire()
         const body = [

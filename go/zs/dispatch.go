@@ -4137,10 +4137,24 @@ func (s *Client) buildFrameFactory(
 			// That makes every charge invisible to spend.daily_cap_usdc, which is
 			// the payer's only defense against exactly that operator.
 			receiptSeen bool
+			// tailOpened is set once a settle group or receipt has opened under
+			// K_response. Content after that point is outside the receipt's
+			// body_hash, so it is dropped unopened rather than passed on
+			// unverified. Not refused: an honest node writes upstream frames
+			// that follow [DONE] (a trailing usage chunk, a late provider
+			// error) after its receipt, and failing a settled turn for them
+			// would invite a paid retry.
+			tailOpened bool
 		)
 		return func(f Frame) (outFrame, error) {
 			switch f.Event {
 			case wire.StreamEventMarker:
+				if tailOpened {
+					s.log.Debug("frame after the settlement tail dropped",
+						opAttr(op), relayAttr(hop),
+						slog.String("ticket_id", tkt.TicketID))
+					return outFrame{}, nil
+				}
 				// Sealed zs frame. Shape of the plaintext is opaque
 				// to the proxy — it could be an OpenAI content delta, a
 				// function-call fragment, or a zs-specific event the
@@ -4237,6 +4251,9 @@ func (s *Client) buildFrameFactory(
 				// method that cannot advance, so that is now structural rather
 				// than a rule this branch has to remember.
 				sg := openSealedResponseMeta(s, string(f.Data), opener, tkt, wire.SealedHeaderSettleGroup, op, hop)
+				if sg != "" {
+					tailOpened = true
+				}
 				presignedSettleGroup = decodeSettleGroupHeader(s, sg, op, tkt, hop)
 				return outFrame{}, nil // swallowed; client doesn't see it
 
@@ -4256,6 +4273,7 @@ func (s *Client) buildFrameFactory(
 					// two only because the receipt is the last sealed frame.
 					return outFrame{}, nil // swallow; client doesn't see the receipt
 				}
+				tailOpened = true
 				var receipt ticket.UsageReceipt
 				if err := json.Unmarshal(plaintext, &receipt); err != nil {
 					s.log.Warn("parse receipt frame failed",

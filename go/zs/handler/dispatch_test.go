@@ -80,6 +80,12 @@ const (
 	// runReceiptChecks runs (and protests on a body_hash mismatch). Proves the
 	// drop/truncate negative tests aren't vacuous. Requires buildReceipt.
 	modeStreamReceiptIntact
+	// modeStreamContentAfterReceipt sends a valid receipt over every content
+	// frame but the last, then that last frame, sealed at the next index.
+	modeStreamContentAfterReceipt
+	// modeStreamUnopenableSettleGroup sends a settle group that won't open,
+	// as a relay could inject, ahead of the content and a valid receipt.
+	modeStreamUnopenableSettleGroup
 	// modeInferenceGatewayHTMLError models an operator's CDN answering the
 	// INFERENCE forward instead of its node: a code-less HTML 504 with no
 	// response key. This is the shape a bunny.net origin failure produced in
@@ -578,13 +584,41 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 		writeEncryptedStream(t, w, bogus, cfg.streamFrames, ephemeral, txID, ticketID, false)
 	case modeStreamReceiptDropTail:
 		rcpt := n.buildSignedStreamReceipt(t, cfg, ticketID)
-		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, true, false)
+		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, true, false, nil)
 	case modeStreamReceiptTruncated:
 		rcpt := n.buildSignedStreamReceipt(t, cfg, ticketID)
-		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, false, true)
+		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, false, true, nil)
 	case modeStreamReceiptIntact:
 		rcpt := n.buildSignedStreamReceipt(t, cfg, ticketID)
-		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, false, false)
+		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, false, false, nil)
+	case modeStreamContentAfterReceipt:
+		// The receipt prices every frame but the last, which follows it.
+		last := len(cfg.streamFrames) - 1
+		head := *cfg
+		head.streamFrames = cfg.streamFrames[:last]
+		rcpt := n.buildSignedStreamReceipt(t, &head, ticketID)
+		writeEncryptedStreamWithReceipt(t, w, k, head.streamFrames, rcpt, ephemeral, txID, ticketID, false, false, cfg.streamFrames[last])
+	case modeStreamUnopenableSettleGroup:
+		rcpt := n.buildSignedStreamReceipt(t, cfg, ticketID)
+		lead := &leadAfterHeader{ResponseWriter: w, lead: []byte("event: " + wire.StreamEventSettleGroup + "\ndata: AAAA\n\n")}
+		writeEncryptedStreamWithReceipt(t, lead, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, false, false, nil)
+	}
+}
+
+// leadAfterHeader writes lead right after the status line, ahead of the body.
+type leadAfterHeader struct {
+	http.ResponseWriter
+	lead []byte
+}
+
+func (w *leadAfterHeader) WriteHeader(code int) {
+	w.ResponseWriter.WriteHeader(code)
+	_, _ = w.ResponseWriter.Write(w.lead)
+}
+
+func (w *leadAfterHeader) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 
@@ -601,6 +635,9 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 //   - omitReceipt: the receipt frame is dropped entirely (truncation before the
 //     receipt). runReceiptChecks never runs, so no protest.
 //
+// A non-nil trailing is a content frame the node sends after its receipt, at
+// the next index, which SPEC § 5.3 makes a protocol violation.
+//
 // Either way [DONE] is always emitted last (it's plaintext, §5.3).
 func writeEncryptedStreamWithReceipt(
 	t *testing.T,
@@ -611,6 +648,7 @@ func writeEncryptedStreamWithReceipt(
 	ephemeral age.Recipient,
 	txID, ticketID string,
 	dropTailContent, omitReceipt bool,
+	trailing []byte,
 ) {
 	t.Helper()
 	var wrapped bytes.Buffer
@@ -658,6 +696,9 @@ func writeEncryptedStreamWithReceipt(
 			t.Fatal(err)
 		}
 		writeFrame(wire.StreamEventReceipt, len(frames), rb)
+	}
+	if trailing != nil {
+		writeFrame(wire.StreamEventMarker, len(frames)+1, trailing)
 	}
 
 	_, _ = w.Write([]byte("data: [DONE]\n\n"))
