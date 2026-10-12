@@ -198,12 +198,15 @@ type Config struct {
 	// they can fix, in the caller's own terms; see Remedies.
 	Remedies Remedies
 
-	// UseEnvProxy sends node traffic (discovery, reserve, inference) through
-	// the proxy named by HTTPS_PROXY / HTTP_PROXY / NO_PROXY. The
-	// private-address guard then checks only the proxy's own address: the
-	// proxy dials the node, so a node on a private address is no longer
-	// refused, and a proxy on a private address is, unless AllowPrivateHosts.
-	// An HTTPClient the caller supplies keeps its own proxy setting.
+	// UseEnvProxy sends node traffic (discovery, reserve, inference) and the
+	// Algorand API calls through the proxy named by HTTPS_PROXY / HTTP_PROXY /
+	// NO_PROXY. The private-address guard then checks only the proxy's own
+	// address: the proxy dials the node, so a node on a private address is no
+	// longer refused, and a proxy on a private address is, unless
+	// AllowPrivateHosts. An HTTPClient the caller supplies keeps its own proxy
+	// setting. Fetches of Intel's attestation collateral always honour those
+	// variables: the collateral cache is shared by every Client in the
+	// process, and the request names only Intel's own host.
 	UseEnvProxy bool
 
 	// Registry, ReserveClient and Wallet are the network-facing parts:
@@ -285,6 +288,16 @@ func (c Config) nodeHTTPClient(timeout, headerTimeout time.Duration) *http.Clien
 		hc.Transport.(*http.Transport).Proxy = nil
 	}
 	return hc
+}
+
+// algodTransport is algod's pooled, retrying transport, with no environment
+// proxy unless UseEnvProxy, for the same reason as nodeHTTPClient.
+func (c Config) algodTransport() *algod.RetryRoundTripper {
+	rt := algod.DefaultTransport()
+	if !c.UseEnvProxy {
+		rt.Transport.Proxy = nil
+	}
+	return rt
 }
 
 const (

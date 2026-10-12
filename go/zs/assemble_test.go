@@ -24,6 +24,19 @@ import (
 // A keystore is a Signer once an address is chosen.
 var _ Signer = keystore.AccountSigner{}
 
+// The SDK reads no proxy variables unless UseEnvProxy: http.DefaultTransport
+// does, and both clients start from a clone of it.
+func TestEnvProxyOnlyWithUseEnvProxy(t *testing.T) {
+	for _, use := range []bool{false, true} {
+		c := Config{UseEnvProxy: use}
+		node := c.nodeHTTPClient(0, 0).Transport.(*http.Transport).Proxy != nil
+		chain := c.algodTransport().Transport.Proxy != nil
+		if node != use || chain != use {
+			t.Errorf("UseEnvProxy %v: node client proxy %v, algod proxy %v", use, node, chain)
+		}
+	}
+}
+
 // running reports whether the refresh loop was started and not stopped.
 func (p *DynamicRegistryProvider) running() bool {
 	p.lifecycleMu.Lock()

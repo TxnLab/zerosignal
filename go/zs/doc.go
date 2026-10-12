@@ -8,8 +8,11 @@
 // and retry, between "I have a prompt and a funded account" and "I have the
 // answer and a verified receipt".
 //
-// Applications keep presentation, key custody and spending policy. The SDK
-// reads no environment: every setting arrives through Config, and every
+// Applications keep presentation, key custody and spending policy. A Client
+// reads no environment, apart from the proxy variables for Intel's
+// attestation collateral (see Config.UseEnvProxy): every setting arrives
+// through Config. (NewDetailsClient and NewAttestationClient given a nil
+// client fall back to one that does honour the proxy variables.) Every
 // stateful routing signal sits behind a store interface with an in-memory
 // default, so a long-running process can persist what a short one forgets.
 //

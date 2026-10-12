@@ -46,7 +46,7 @@ func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID u
 	var chain algod.Client
 	if p.registry == nil || p.wallet == nil {
 		var err error
-		if chain, err = algod.NewClient(ac.ResolvedEndpoint, ac.ResolvedToken); err != nil {
+		if chain, err = algod.NewClient(ac.ResolvedEndpoint, ac.ResolvedToken, algod.WithTransport(cfg.algodTransport())); err != nil {
 			return networkParts{}, configError(err.Error())
 		}
 	}
