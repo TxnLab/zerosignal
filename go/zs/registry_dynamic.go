@@ -903,21 +903,14 @@ func (p *DynamicRegistryProvider) AllModels(ctx context.Context) []string {
 	if snap == nil {
 		return nil
 	}
+	return aggregateModels(snap.operators, p.advertisableNow())
+}
+
+// advertisableNow is advertisable with now fixed once, so one aggregate judges
+// every node against the same instant.
+func (p *DynamicRegistryProvider) advertisableNow() func(Operator) bool {
 	now := time.Now()
-	seen := make(map[string]struct{})
-	var out []string
-	for _, op := range snap.operators {
-		if !p.advertisable(op, now) {
-			continue
-		}
-		for _, m := range op.Models {
-			if _, ok := seen[m]; !ok {
-				seen[m] = struct{}{}
-				out = append(out, m)
-			}
-		}
-	}
-	return out
+	return func(op Operator) bool { return p.advertisable(op, now) }
 }
 
 // AllBuiltinTools implements RegistryProvider. Triggers a lazy refresh
@@ -928,22 +921,7 @@ func (p *DynamicRegistryProvider) AllBuiltinTools(ctx context.Context) []Builtin
 	if snap == nil {
 		return nil
 	}
-	now := time.Now()
-	seen := make(map[string]struct{})
-	var out []BuiltinToolDef
-	for _, op := range snap.operators {
-		if !p.advertisable(op, now) {
-			continue
-		}
-		for _, t := range op.BuiltinTools {
-			if _, ok := seen[t.Type]; ok {
-				continue
-			}
-			seen[t.Type] = struct{}{}
-			out = append(out, t)
-		}
-	}
-	return out
+	return aggregateBuiltinTools(snap.operators, p.advertisableNow())
 }
 
 // AllNodeVersions implements RegistryProvider. Triggers a lazy refresh
@@ -965,156 +943,7 @@ func (p *DynamicRegistryProvider) AllModelDetails(ctx context.Context) []inject.
 	if snap == nil {
 		return nil
 	}
-	now := time.Now()
-	seen := make(map[string]*inject.OperatorDetailsModel)
-	// Coordinates: collected here and folded in a second pass (mirrors the
-	// static impl — the streaming merge below can't compute a mode). One vote
-	// per reachable node, like the rest of this aggregate. Advisory.
-	coordsByModel := make(map[string][]*inject.ModelCoordinates)
-	// Collected for the cross-operator weights consensus/mismatch folded in the
-	// second pass (mirrors coordsByModel; keep in sync with the static registry).
-	digestsByModel := make(map[string][]string)
-	// Model IDENTITY keys (declared HF source, else the frontier canonical),
-	// consensus-folded in the second pass (mirrors the static registry).
-	sourcesByModel := make(map[string][]string)
-	canonicalsByModel := make(map[string][]string)
-	for _, op := range snap.operators {
-		if !p.advertisable(op, now) {
-			continue
-		}
-		for _, m := range op.Models {
-			cap := op.ModelCapacities[m]
-			if cap.Coordinates != nil {
-				coordsByModel[m] = append(coordsByModel[m], cap.Coordinates)
-			}
-			if cap.WeightsDigest != "" {
-				digestsByModel[m] = append(digestsByModel[m], cap.WeightsDigest)
-			}
-			if cap.Source != "" {
-				sourcesByModel[m] = append(sourcesByModel[m], cap.Source)
-			}
-			if cap.CanonicalID != "" {
-				canonicalsByModel[m] = append(canonicalsByModel[m], cap.CanonicalID)
-			}
-			if existing, ok := seen[m]; ok {
-				existing.InputModalities = unionStrings(existing.InputModalities, cap.InputModalities)
-				existing.OutputModalities = unionStrings(existing.OutputModalities, cap.OutputModalities)
-				existing.Tags = unionStrings(existing.Tags, cap.Tags)
-				existing.ToolUse = aggregateBool(existing.ToolUse, cap.ToolUse)
-				existing.Reasoning = aggregateReasoning(existing.Reasoning, cap.Reasoning)
-				if cap.ContextWindow > 0 && (existing.ContextWindow == 0 || cap.ContextWindow < existing.ContextWindow) {
-					existing.ContextWindow = cap.ContextWindow
-				}
-				if cap.MaxOutputTokens > 0 && (existing.MaxOutputTokens == 0 || cap.MaxOutputTokens < existing.MaxOutputTokens) {
-					existing.MaxOutputTokens = cap.MaxOutputTokens
-				}
-				// Pricing: surface the cheapest declared rate across
-				// operators (a "from $X" advertising number). The
-				// authoritative per-request rate is whichever operator
-				// actually serves the reserve, signed into the ticket.
-				if cap.InputUSDPer1M > 0 && (existing.InputRateUSDPer1M == 0 || cap.InputUSDPer1M < existing.InputRateUSDPer1M) {
-					existing.InputRateUSDPer1M = cap.InputUSDPer1M
-				}
-				if cap.OutputUSDPer1M > 0 && (existing.OutputRateUSDPer1M == 0 || cap.OutputUSDPer1M < existing.OutputRateUSDPer1M) {
-					existing.OutputRateUSDPer1M = cap.OutputUSDPer1M
-				}
-				// Cache-read discount: lowest advertised across operators
-				// ("from $X"), nil-preserving so a model no operator discounts
-				// stays without a cache line.
-				existing.CacheReadRateUSDPer1M = minRatePtr(existing.CacheReadRateUSDPer1M, cap.CacheReadUSDPer1M)
-				// Long-context (surcharge) tier: display-only cross-operator min,
-				// mirroring registry.go's AllModelDetails — lowest threshold among
-				// tier-advertising operators and lowest of each high rate. Per-operator
-				// values stay intact on op.ModelCapacities (that is what
-				// verifyReservePrice uses); this aggregate is discovery display only.
-				existing.LongContextThresholdTokens = minNonZero(existing.LongContextThresholdTokens, cap.LongContextThresholdTokens)
-				existing.LongContextInputRateUSDPer1M = minRatePtr(existing.LongContextInputRateUSDPer1M, cap.LongContextInputUSDPer1M)
-				existing.LongContextOutputRateUSDPer1M = minRatePtr(existing.LongContextOutputRateUSDPer1M, cap.LongContextOutputUSDPer1M)
-				existing.LongContextCacheReadRateUSDPer1M = minRatePtr(existing.LongContextCacheReadRateUSDPer1M, cap.LongContextCacheReadUSDPer1M)
-				// Image factors: surface the lowest declared (non-zero)
-				// value across operators — consistent with the rate
-				// fields' "from $X" semantics. Absence on every operator
-				// means the model is not wired for that endpoint.
-				if cap.ImageToolRateMicroUSDC > 0 && (existing.ImageToolRateMicroUSDC == 0 || cap.ImageToolRateMicroUSDC < existing.ImageToolRateMicroUSDC) {
-					existing.ImageToolRateMicroUSDC = cap.ImageToolRateMicroUSDC
-				}
-				if cap.ImageEditToolRateMicroUSDC > 0 && (existing.ImageEditToolRateMicroUSDC == 0 || cap.ImageEditToolRateMicroUSDC < existing.ImageEditToolRateMicroUSDC) {
-					existing.ImageEditToolRateMicroUSDC = cap.ImageEditToolRateMicroUSDC
-				}
-				if cap.ImageRateMicroUSDC > 0 && (existing.ImageRateMicroUSDC == 0 || cap.ImageRateMicroUSDC < existing.ImageRateMicroUSDC) {
-					existing.ImageRateMicroUSDC = cap.ImageRateMicroUSDC
-				}
-				if cap.ImageEditRateMicroUSDC > 0 && (existing.ImageEditRateMicroUSDC == 0 || cap.ImageEditRateMicroUSDC < existing.ImageEditRateMicroUSDC) {
-					existing.ImageEditRateMicroUSDC = cap.ImageEditRateMicroUSDC
-				}
-				// Display-only companions (representative price at the operator's
-				// default size, and its per-image ceiling) — same rule; see the
-				// coherence note in registry.go's AllModelDetails.
-				existing.ImageToolBaseMicroUSDC = minNonZero(existing.ImageToolBaseMicroUSDC, cap.ImageToolBaseMicroUSDC)
-				existing.ImageEditToolBaseMicroUSDC = minNonZero(existing.ImageEditToolBaseMicroUSDC, cap.ImageEditToolBaseMicroUSDC)
-				existing.ImageDefaultMicroUSDC = minNonZero(existing.ImageDefaultMicroUSDC, cap.ImageDefaultMicroUSDC)
-				existing.ImageEditDefaultMicroUSDC = minNonZero(existing.ImageEditDefaultMicroUSDC, cap.ImageEditDefaultMicroUSDC)
-				existing.ImageCapMicroUSDC = minNonZero(existing.ImageCapMicroUSDC, cap.ImageCapMicroUSDC)
-				existing.ImageEditCapMicroUSDC = minNonZero(existing.ImageEditCapMicroUSDC, cap.ImageEditCapMicroUSDC)
-				// Eligibility is price-independent (free rate routes advertise a 0
-				// rate): any operator serving the route makes the aggregate serve it.
-				if cap.ServesImageGen() {
-					existing.ServesImageGen = true
-				}
-				if cap.ServesImageEdit() {
-					existing.ServesImageEdit = true
-				}
-			} else {
-				seen[m] = &inject.OperatorDetailsModel{
-					ID:                               m,
-					ContextWindow:                    cap.ContextWindow,
-					MaxOutputTokens:                  cap.MaxOutputTokens,
-					InputModalities:                  append([]string(nil), cap.InputModalities...),
-					OutputModalities:                 append([]string(nil), cap.OutputModalities...),
-					InputRateUSDPer1M:                cap.InputUSDPer1M,
-					OutputRateUSDPer1M:               cap.OutputUSDPer1M,
-					CacheReadRateUSDPer1M:            minRatePtr(nil, cap.CacheReadUSDPer1M),
-					LongContextThresholdTokens:       cap.LongContextThresholdTokens,
-					LongContextInputRateUSDPer1M:     minRatePtr(nil, cap.LongContextInputUSDPer1M),
-					LongContextOutputRateUSDPer1M:    minRatePtr(nil, cap.LongContextOutputUSDPer1M),
-					LongContextCacheReadRateUSDPer1M: minRatePtr(nil, cap.LongContextCacheReadUSDPer1M),
-					Reasoning:                        aggregateReasoning(nil, cap.Reasoning),
-					ToolUse:                          aggregateBool(nil, cap.ToolUse),
-					Tags:                             append([]string(nil), cap.Tags...),
-					ImageToolRateMicroUSDC:           cap.ImageToolRateMicroUSDC,
-					ImageEditToolRateMicroUSDC:       cap.ImageEditToolRateMicroUSDC,
-					ImageToolBaseMicroUSDC:           cap.ImageToolBaseMicroUSDC,
-					ImageEditToolBaseMicroUSDC:       cap.ImageEditToolBaseMicroUSDC,
-					ImageRateMicroUSDC:               cap.ImageRateMicroUSDC,
-					ImageEditRateMicroUSDC:           cap.ImageEditRateMicroUSDC,
-					ImageDefaultMicroUSDC:            cap.ImageDefaultMicroUSDC,
-					ImageEditDefaultMicroUSDC:        cap.ImageEditDefaultMicroUSDC,
-					ImageCapMicroUSDC:                cap.ImageCapMicroUSDC,
-					ImageEditCapMicroUSDC:            cap.ImageEditCapMicroUSDC,
-					ServesImageGen:                   cap.ServesImageGen(),
-					ServesImageEdit:                  cap.ServesImageEdit(),
-				}
-			}
-		}
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	for m, d := range seen {
-		d.Coordinates = aggregateCoordinates(coordsByModel[m])
-		d.WeightsDigest, d.WeightsMismatch = aggregateDigest(digestsByModel[m])
-		d.Source = aggregateSource(sourcesByModel[m])
-		// canonical_id only rides when there is no source (mirror the node's
-		// per-model rule and the static registry).
-		if d.Source == "" {
-			d.CanonicalID = aggregateIdentity(canonicalsByModel[m])
-		}
-	}
-	out := make([]inject.OperatorDetailsModel, 0, len(seen))
-	for _, d := range seen {
-		out = append(out, *d)
-	}
-	return out
+	return aggregateModelDetails(snap.operators, p.advertisableNow())
 }
 
 // AllOperators implements RegistryProvider. Triggers a lazy refresh

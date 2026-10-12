@@ -69,9 +69,10 @@ export class Client {
     private constructor(p: Parts) {
         this.#p = p
         partsOf.set(this, p)
-        // FetchTarget.config is optional, so only this pins that a Client
-        // still hands zs.fetch its network and logger.
-        this.fetch = openAIFetch(this satisfies Required<Pick<FetchTarget, 'config'>>)
+        // FetchTarget's config, registry and feeRate are optional, so only
+        // this pins that a Client still hands zs.fetch its network and logger
+        // and the catalog and fee its model routes read.
+        this.fetch = openAIFetch(this satisfies Required<Pick<FetchTarget, 'config' | 'registry' | 'feeRate'>>)
     }
 
     /** The base URL for an OpenAI client whose fetch is this Client's fetch. */

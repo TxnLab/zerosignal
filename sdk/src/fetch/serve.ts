@@ -11,8 +11,9 @@
 //
 // What the Go handler adds as an HTTP server and this leaves out: CORS (the
 // caller is in-process, never a cross-origin browser), the per-request log
-// line (the Client already logs each turn's outcome), and the catalog GET
-// routes, which are not ported yet.
+// line (the Client already logs each turn's outcome), /healthz, and the
+// /v1/zs/details and /v1/zs/operators GETs. The model catalog GETs are
+// models.ts's.
 
 import { NodeReply, findError, isZsError } from '../errors.js'
 import type { Event, ReceiptVerified, ResponseStarted } from '../events.js'
@@ -26,6 +27,7 @@ import type { Endpoint } from '../types.js'
 import { chatRequestFromCompletions, completionsChunkFromChat, completionsResponseFromChat } from './completions.js'
 import { errorResponse, openAIErrorResponse, setRetryAfter, setShouldRetry, shouldRetry } from './errors.js'
 import { copyResponseHeaders, snapshotZsHeaders, stripNodeZsHeaders } from './headers.js'
+import { type CatalogSource, catalogRoute, serveCatalog } from './models.js'
 import { USAGE_FRAME_HEADER, setUsageHeaders, usageFrame } from './usage.js'
 
 /**
@@ -48,7 +50,7 @@ export const MAX_CLIENT_BODY_BYTES = 16 << 20
  * read as Go's handler.New reads the zs.Client's, and its logger stands in
  * for the separate logger argument Go's New takes and openAIFetch does not.
  */
-export interface FetchTarget {
+export interface FetchTarget extends CatalogSource {
     stream(request: TurnRequest, signal?: AbortSignal): Stream
     readonly config?: { readonly network: { readonly network: string }; readonly logger?: Logger }
 }
@@ -103,6 +105,16 @@ export function openAIFetch(target: FetchTarget, opts: FetchOptions = {}): Fetch
             path = decodeURIComponent(new URL(req.url).pathname)
         } catch {
             return plainError(400, 'Bad Request')
+        }
+        const catalog = catalogRoute(path)
+        if (catalog !== undefined) {
+            // Go's mux serves HEAD wherever it serves GET.
+            if (req.method !== 'GET' && req.method !== 'HEAD') {
+                const r = plainError(405, 'Method Not Allowed')
+                r.headers.set('Allow', 'GET, HEAD')
+                return r
+            }
+            return serveCatalog(target, catalog.id, req.method === 'HEAD', req.signal)
         }
         const route = ROUTES.get(path)
         if (route === undefined) return plainError(404, '404 page not found')

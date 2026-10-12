@@ -79,7 +79,7 @@ type Constraints struct {
 	// Endpoint is one of the Endpoint* constants. Only the image endpoints
 	// change selection; any other value (chat / responses) is treated alike.
 	Endpoint string `json:"endpoint"`
-	// RequireTEE drops operators without a current passing attestation.
+	// RequireTEE drops operators that are not Operator.TEEAttested.
 	RequireTEE bool `json:"require_tee"`
 	// AllowStaging includes nodes whose on-chain `staging` flag is set (see
 	// Operator.Staging) in target selection. Default false: staging nodes are

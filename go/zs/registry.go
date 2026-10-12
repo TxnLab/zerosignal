@@ -271,10 +271,24 @@ func (p *StaticRegistryProvider) RecordModelDemand(_ string) {}
 // advertisable operators, so the discovery surface only advertises what dispatch
 // can currently serve.
 func (p *StaticRegistryProvider) AllModels(_ context.Context) []string {
+	return aggregateModels(p.operators, p.advertisable)
+}
+
+// AllBuiltinTools returns the deduplicated union of every built-in tool
+// advertised by any advertisable operator; see aggregateBuiltinTools.
+func (p *StaticRegistryProvider) AllBuiltinTools(_ context.Context) []BuiltinToolDef {
+	return aggregateBuiltinTools(p.operators, p.advertisable)
+}
+
+// aggregateModels is the models of every node keep admits, first seen first.
+// Both registries' AllModels are this over their own gate, and the TS SDK's
+// DiscoveryRegistry.allModels replays it through
+// testdata/catalog_aggregate_vectors.json.
+func aggregateModels(ops []Operator, keep func(Operator) bool) []string {
 	seen := make(map[string]struct{})
 	var out []string
-	for _, op := range p.operators {
-		if !p.advertisable(op) {
+	for _, op := range ops {
+		if !keep(op) {
 			continue
 		}
 		for _, m := range op.Models {
@@ -287,18 +301,17 @@ func (p *StaticRegistryProvider) AllModels(_ context.Context) []string {
 	return out
 }
 
-// AllBuiltinTools returns the deduplicated union of every built-in tool
-// advertised by any operator. First-seen wins on collision: the
-// downstream client only needs the Type to advertise on the wire, and
-// the node's rewriter uses its own local definition when a request
-// arrives, so a disagreement on Name/Description/Parameters between
-// operators is harmless as long as one operator is available to serve
+// aggregateBuiltinTools is the built-in tools of every node keep admits.
+// First-seen wins on collision: the downstream client only needs the Type to
+// advertise on the wire, and the node's rewriter uses its own local definition
+// when a request arrives, so a disagreement on Name/Description/Parameters
+// between operators is harmless as long as one operator is available to serve
 // the request.
-func (p *StaticRegistryProvider) AllBuiltinTools(_ context.Context) []BuiltinToolDef {
+func aggregateBuiltinTools(ops []Operator, keep func(Operator) bool) []BuiltinToolDef {
 	seen := make(map[string]struct{})
 	var out []BuiltinToolDef
-	for _, op := range p.operators {
-		if !p.advertisable(op) {
+	for _, op := range ops {
+		if !keep(op) {
 			continue
 		}
 		for _, t := range op.BuiltinTools {
@@ -323,15 +336,20 @@ func (p *StaticRegistryProvider) AllNodeVersions(_ context.Context) []string {
 }
 
 // AllModelDetails returns the deduplicated union of model capability info
-// across all operators. Modalities are unioned; sizing fields take the
-// minimum of declared (non-zero) values across operators. Pricing fields
-// take the lowest declared (non-zero) USD/1M rate across operators — a
-// "from $X" advertising number. The authoritative per-request rate is
-// whichever operator's ticket the proxy actually consumes.
+// across all advertisable operators; see aggregateModelDetails.
 func (p *StaticRegistryProvider) AllModelDetails(_ context.Context) []inject.OperatorDetailsModel {
-	type entry struct {
-		inject.OperatorDetailsModel
-	}
+	return aggregateModelDetails(p.operators, p.advertisable)
+}
+
+// aggregateModelDetails is the deduplicated union of model capability info
+// across every node keep admits, in no particular order. Modalities are
+// unioned; sizing fields take the minimum of declared (non-zero) values across
+// operators. Pricing fields take the lowest declared (non-zero) USD/1M rate
+// across operators — a "from $X" advertising number. The authoritative
+// per-request rate is whichever operator's ticket the proxy actually consumes.
+// Both registries' AllModelDetails are this over their own gate, and the TS
+// SDK replays it through testdata/catalog_aggregate_vectors.json.
+func aggregateModelDetails(ops []Operator, keep func(Operator) bool) []inject.OperatorDetailsModel {
 	seen := make(map[string]*inject.OperatorDetailsModel)
 	// Coordinates need every value before a majority can be picked, so they are
 	// collected here and folded in a second pass (the streaming merge below
@@ -349,8 +367,8 @@ func (p *StaticRegistryProvider) AllModelDetails(_ context.Context) []inject.Ope
 	// second pass, so the aggregate carries a value only when operators agree.
 	sourcesByModel := make(map[string][]string)
 	canonicalsByModel := make(map[string][]string)
-	for _, op := range p.operators {
-		if !p.advertisable(op) {
+	for _, op := range ops {
+		if !keep(op) {
 			continue
 		}
 		for _, m := range op.Models {

@@ -6,6 +6,7 @@
 export * from './tools.js'
 export * from './dialect.js'
 export * from './details.js'
+export * from './openaimodel.js'
 export * from './mutators.js'
 export * from './tee.js'
 export * from './rfc3339.js'

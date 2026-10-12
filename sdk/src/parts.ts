@@ -8,6 +8,7 @@
 // (WalletOpener), and the ticket journal. A host supplies any it builds
 // itself; the Client builds the rest from Config.
 
+import type { OperatorDetailsModel } from '@txnlab/zs-proto/inject'
 import type { BytesSigner, Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
 import type { AckSettleResult } from './ack.js'
@@ -45,6 +46,16 @@ export interface RegistryProvider {
     reprobeEphemeral(op: Operator, signal?: AbortSignal): Promise<Operator | null>
     /** Notes that model was just requested, so a refresh can probe its servers first. Advisory. */
     recordModelDemand(model: string): void
+    /**
+     * The models dispatch can route to now. Optional: without it zs.fetch
+     * has no catalog to list, and answers its GET /v1/models routes 501.
+     */
+    allModels?(signal?: AbortSignal): Promise<string[]>
+    /**
+     * Each listed model's capabilities, unioned across the nodes that serve
+     * it. Optional: without it each model is listed by id alone.
+     */
+    allModelDetails?(signal?: AbortSignal): Promise<OperatorDetailsModel[]>
 }
 
 /** Reserved is a reservation and the recipient its body was sealed to. */
