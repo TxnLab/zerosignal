@@ -134,6 +134,6 @@
         "@types/node": "^22.10.0",
         "algosdk": "3.6.0",
         "typescript": "5.6.3",
-        "vitest": "3.2.6"
+        "vitest": "4.1.11"
     }
 }
