@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-11 — the TS SDK's browser fetch refuses private hosts
+### 2026-10-11 — the TS SDK's browser fetch refuses private hosts (0.4.1)
 
 Outside Node, `@txnlab/zerosignal`'s default `fetch` was the runtime's own, with no check, and
 the SDK never called `operatorUrlAllowed`. With `privacy: 'direct'` a browser payer would probe,
