@@ -329,14 +329,16 @@ func ExtractRoutingPreferences(body []byte) RoutingPreferences {
 	// AllowFallbacks is left nil — FallbacksAllowed reads that as true, so an
 	// absent or malformed `provider` never silently pins.
 	var prefs RoutingPreferences
-	var top struct {
-		Provider json.RawMessage `json:"provider"`
-	}
-	if json.Unmarshal(body, &top) != nil || len(top.Provider) == 0 {
+	// A map, not a tagged struct: encoding/json matches a struct tag case-
+	// insensitively, so `"Provider"` would set preferences here while
+	// inject.DropRoutingPreferences (exact key) left it in the sealed body and
+	// the ts extractor read nothing.
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil || len(top["provider"]) == 0 {
 		return prefs
 	}
 	var prov map[string]json.RawMessage
-	if json.Unmarshal(top.Provider, &prov) != nil {
+	if json.Unmarshal(top["provider"], &prov) != nil {
 		// provider present but not an object (string / array / number / etc.):
 		// no fields to read → defaults. Matches the ts non-object short-circuit.
 		return prefs

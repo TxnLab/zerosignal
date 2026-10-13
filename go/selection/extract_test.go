@@ -237,6 +237,15 @@ func TestExtractRoutingPreferences(t *testing.T) {
 		}
 	})
 
+	// The key is exact, as inject.DropRoutingPreferences and the ts extractor
+	// read it: a "Provider" the drop leaves in the body must not route.
+	t.Run("a differently-cased key is not the provider", func(t *testing.T) {
+		got := selection.ExtractRoutingPreferences([]byte(`{"model":"m1","Provider":{"only":["7"],"allow_fallbacks":false}}`))
+		if got.Only != nil || got.AllowFallbacks != nil {
+			t.Fatalf("got only=%v allow_fallbacks=%v, want the defaults", got.Only, got.AllowFallbacks)
+		}
+	})
+
 	t.Run("full provider object", func(t *testing.T) {
 		body := `{"model":"m1","provider":{
 			"order":["3:1","x","2"],

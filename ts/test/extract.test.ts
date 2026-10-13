@@ -232,6 +232,12 @@ describe('extractRoutingPreferences', () => {
         expect(got.relay).toBe('')
     })
 
+    it('a differently-cased key is not the provider', () => {
+        const got = extractRoutingPreferences('{"model":"m1","Provider":{"only":["7"],"allow_fallbacks":false}}')
+        expect(got.only).toEqual([])
+        expect(got.allow_fallbacks).toBe(true)
+    })
+
     it('full provider object', () => {
         const body = JSON.stringify({
             model: 'm1',

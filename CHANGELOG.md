@@ -31,6 +31,12 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — Go reads the `provider` routing key exactly (unreleased)
+
+Go's `ExtractRoutingPreferences` matched the top-level key case-insensitively, so a body carrying
+`"Provider"` set routing preferences in Go but not in TS, and Go's `DropRoutingPreferences`
+(exact key) left it in the sealed body. Go now reads `provider` exactly, as TS and the drop do.
+
 ### 2026-10-13 — a Responses tool turn returns to the node that issued the call (unreleased)
 
 The tool-call pin read only chat shapes (`messages[].tool_call_id`, `tool_calls[].id`), so a
