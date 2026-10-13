@@ -780,6 +780,42 @@ func TestPickCandidates_NewestPinToAGoneNodeIsNoPreference(t *testing.T) {
 	}
 }
 
+// listMissesNode is a registry whose per-model list omits one node that
+// Resolve still finds, as when the model list missed the node a pin names.
+type listMissesNode struct {
+	RegistryProvider
+	hide NodeRef
+}
+
+func (r listMissesNode) Operators(ctx context.Context, model string) ([]Operator, error) {
+	ops, err := r.RegistryProvider.Operators(ctx, model)
+	out := make([]Operator, 0, len(ops))
+	for _, op := range ops {
+		if RefOf(op) != r.hide {
+			out = append(out, op)
+		}
+	}
+	return out, err
+}
+
+// The pinned node leads even when the model list missed it: it is dispatched
+// as the operator Resolve returned, never as a zero Operator. Mirrors the TS
+// "leads with the pinned node though the model list missed it".
+func TestPickCandidates_PinnedNodeLeadsThoughTheModelListMissedIt(t *testing.T) {
+	const model = "gpt-4o-mini"
+	pinned := signerOp(9, model, nil)
+	srv := minimalTEEServer(t, []Operator{signerOp(7, model, nil), signerOp(8, model, nil), pinned})
+	srv.registryProvider = listMissesNode{RegistryProvider: srv.registryProvider, hide: RefOf(pinned)}
+	srv.cfg.Affinity.Policy = AffinityPrefer
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
+
+	got := pickChat(t, srv, model, []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`))
+	if len(got.Operators) != 3 || !reflect.DeepEqual(got.Operators[0], pinned) {
+		t.Fatalf("got %v, want the resolved pinned node 9 first of three", opIDsOf(got.Operators))
+	}
+}
+
 func opIDsOf(ops []Operator) []uint64 {
 	ids := make([]uint64, len(ops))
 	for i, op := range ops {
