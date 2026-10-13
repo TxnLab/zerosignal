@@ -172,6 +172,24 @@ describe('RefundWatchdog', () => {
         })
     })
 
+    // The refunded hook is the host's. One that throws is logged; left
+    // unobserved, its rejection would end a Node process.
+    it('logs a refunded hook that throws, and ends the run', async () => {
+        const { rw, log } = testWatchdog({
+            refunded: () => {
+                throw new Error('guard bug')
+            },
+        })
+        rw.arm('tik-1', Date.now(), liveBox(), counter().call('TXID'), noLapse)
+        await waitFor('the run to end', () => !rw.watching('tik-1'))
+        await rw.handOff()
+        expect(log.logged).toContainEqual({
+            level: 'error',
+            msg: 'refund watchdog: ticket driver failed',
+            attrs: { ticket_id: 'tik-1', err: 'guard bug' },
+        })
+    })
+
     // The operator settled standalone after the payer lost sight of it.
     it('does nothing when the box is already gone', async () => {
         const { rw } = testWatchdog()

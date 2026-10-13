@@ -368,6 +368,20 @@ func shortConfirmWatch(t *testing.T, timeout time.Duration) {
 // chain keeps its row for the reconciler: a settle dropped from the pool, one
 // never confirmed, one whose lookups fail, and every kind but a landed
 // atomic group.
+// The charge is decided before the guard hears of it: a host guard that
+// panics can't stop the settle, or the protest, that follows.
+func TestCheckReceipt_SettlesPastAPanickingSpendGuard(t *testing.T) {
+	f := newSettleFixture(t)
+	c := settleClient()
+	c.spend = panicGuard{}
+	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "A"}, true, nil); submit == nil {
+		t.Error("no settle after Settle panicked")
+	}
+	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "P"}, false, nil); submit == nil {
+		t.Error("no protest after Release panicked")
+	}
+}
+
 func TestConfirmSettled_DropsTheRowOnceTheSettleIsConfirmed(t *testing.T) {
 	shortConfirmWatch(t, 300*time.Millisecond)
 	pending, landed, dropped := watchStep{out: settlePending}, watchStep{out: settleLanded}, watchStep{out: settleDropped}

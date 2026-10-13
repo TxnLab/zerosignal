@@ -234,6 +234,27 @@ describe('checkTurnReceipt', () => {
         expect(calls).toEqual([`settle ${TICKET_ID} 50000`])
     })
 
+    // The charge is already decided; a guard that throws can't stop the
+    // receipt being journaled, or a restart would lose the settle.
+    it('journals the receipt when the spend guard throws', async () => {
+        const calls: string[] = []
+        const spendGuard: SpendGuard = {
+            admit() {},
+            reserve() {},
+            settle() {
+                throw new Error('guard bug')
+            },
+            release() {
+                throw new Error('guard bug')
+            },
+        }
+        const f = await fixture()
+        const journalReceipt = () => void calls.push('journal')
+        await check(depsOf({ spendGuard, journalReceipt }).deps, f, handleOf())
+        expect(calls).toEqual(['journal'])
+        await expect(check(depsOf({ spendGuard, journalReceipt }).deps, f, handleOf(), { matching: false })).resolves.toBeDefined()
+    })
+
     it('logs each paying request with its usage and charge', async () => {
         const f = await fixture()
         const { deps, logger } = depsOf()

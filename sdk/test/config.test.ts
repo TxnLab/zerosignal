@@ -37,6 +37,30 @@ const signer: Signer = {
 
 const base: Config = { signer, network: testnet() }
 
+// A void return would accept an async method, whose refusal lands after the
+// money it was meant to stop. The @ts-expect-error lines are the assertions:
+// `make typecheck` fails if any of them compiles.
+describe('SpendGuard', () => {
+    it('takes a synchronous method returning anything but an object, and no async one', () => {
+        const held = new Map<string, number>()
+        const sync: SpendGuard = {
+            admit() {},
+            reserve: (id, max) => void held.set(id, max),
+            settle: () => held.size,
+            release: (id) => held.delete(id),
+        }
+        // @ts-expect-error an async admit
+        const admit: SpendGuard = { async admit() {}, reserve() {}, settle() {}, release() {} }
+        // @ts-expect-error an async reserve
+        const reserve: SpendGuard = { admit() {}, reserve: async () => {}, settle() {}, release() {} }
+        // @ts-expect-error an async settle
+        const settle: SpendGuard = { admit() {}, reserve() {}, async settle() {}, release() {} }
+        // @ts-expect-error an async release
+        const release: SpendGuard = { admit() {}, reserve() {}, settle() {}, release: async () => {} }
+        expect([sync, admit, reserve, settle, release]).toHaveLength(5)
+    })
+})
+
 describe('resolveConfig', () => {
     it('requires a signer with an address', () => {
         expect(() => resolveConfig({} as Config)).toThrow(ZsError)

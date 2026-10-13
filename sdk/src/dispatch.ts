@@ -35,6 +35,7 @@ import { ZsError, findError } from './errors.js'
 import { type Estimate, type EstimatePolicy, MaxOutputRequiredError, estimate } from './estimate.js'
 import { MbrDepositUnaffordableError } from './mbr.js'
 import { type ReserveSizeRejection, noFitMessage, reserveSizeFailureMessage } from './nofit.js'
+import { AsyncSpendGuardError, guardDecides } from './spend-guard.js'
 import { type Operator, isTeeAttested, refOf, servesImageEdit, servesImageGen } from './operator.js'
 import {
     BUSY_RETRIES,
@@ -341,7 +342,8 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         const admit = admitEstimate(candidates, model, body, sizing, deps.feeRate())
         if (admit !== null) {
             try {
-                deps.spendGuard.admit(admit)
+                const guard = deps.spendGuard
+                guardDecides('admit', () => guard.admit(admit))
             } catch (err) {
                 log.warn('spend cap reached before reserve; refusing request', {
                     endpoint,
@@ -349,10 +351,12 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     err: errText(err),
                 })
                 em.fail(
-                    newError(
-                        'spend_cap_exceeded',
-                        `spend cap reached (${errText(err)}): the cheapest available operator would escrow more than the limit allows. No reservation was made. To fix it, ${deps.remedies.raiseSpendCap}.`,
-                    ),
+                    err instanceof AsyncSpendGuardError
+                        ? asyncGuardFailure(err)
+                        : newError(
+                              'spend_cap_exceeded',
+                              `spend cap reached (${errText(err)}): the cheapest available operator would escrow more than the limit allows. No reservation was made. To fix it, ${deps.remedies.raiseSpendCap}.`,
+                          ),
                 )
                 return
             }
@@ -648,9 +652,10 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                 logReserve(log, op, hop, rt)
                 // Bounds the aggregate drain before money moves. The next
                 // candidate may be cheaper, and this ticket just expires unopened.
-                if (deps.spendGuard) {
+                const guard = deps.spendGuard
+                if (guard) {
                     try {
-                        deps.spendGuard.reserve(rt.ticket.ticket_id, rt.ticket.max_price)
+                        guardDecides('reserve', () => guard.reserve(rt.ticket.ticket_id, rt.ticket.max_price))
                     } catch (err) {
                         // The operator reused a ticket id it already handed
                         // out, which no local config can fix: not a cap breach.
@@ -669,6 +674,14 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                                     'the operator issued a ticket id that is already in flight for this payer; no payment was made',
                                 ),
                             )
+                            return
+                        }
+                        // Every candidate would get the same Promise, and a
+                        // ticket each that expires unopened.
+                        if (err instanceof AsyncSpendGuardError) {
+                            log.warn('spend guard answered with a Promise; refusing request', { endpoint, ticket_id: rt.ticket.ticket_id })
+                            rt.responseKey.fill(0)
+                            em.fail(asyncGuardFailure(err))
                             return
                         }
                         capRefused = true
@@ -929,6 +942,12 @@ function logReserve(log: PickDeps['logger'], op: Operator, hop: RelayHop | null,
 
 // The refusal for a request no candidate survived selection for, most
 // specific cause first.
+// The code a cap refusal carries, since the guard's answer stands in for one;
+// the message names the integration bug, which raising a cap can't cure.
+function asyncGuardFailure(err: AsyncSpendGuardError): ZsError {
+    return newError('spend_cap_exceeded', `${err.message}. No payment was made. The host's SpendGuard must decide before the SDK reserves or opens.`)
+}
+
 function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest, pick: PickResult): ZsError {
     const q = quoted(model)
     if (pick.versionBlocked) {

@@ -733,6 +733,23 @@ describe('runSealed', () => {
             expect(s.sent).toEqual([])
         })
 
+        // The guard is host code: one that throws while the failed open is
+        // backed out still leaves the turn failed with the open's own error.
+        it('fails the turn with the open error when the guard throws on release', async () => {
+            const s = await setup({ openErr: noPool() })
+            s.deps.spendGuard = {
+                admit() {},
+                reserve() {},
+                settle() {},
+                release() {
+                    throw new Error('guard bug')
+                },
+            }
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.em.order).toEqual(['reserved TKT1 9', 'fail mbr_pool_exhausted'])
+            expect(s.sent).toEqual([])
+        })
+
         it('names the payer, the network, the shortfall and the remedy', async () => {
             let s = await setup({ openErr: ensureFailed() })
             await runSealed(s.deps, s.em, s.run)

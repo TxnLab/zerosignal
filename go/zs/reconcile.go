@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"reflect"
@@ -213,11 +214,13 @@ func (r *reconciler) start() {
 func (r *reconciler) close(beforeRelease func()) {
 	r.cancel()
 	<-r.done
+	// A claim never given back bars every later Client from sweeping this
+	// journal, so it goes even if beforeRelease panics.
+	if r.release != nil {
+		defer r.release()
+	}
 	if beforeRelease != nil {
 		beforeRelease()
-	}
-	if r.release != nil {
-		r.release()
 	}
 }
 
@@ -266,6 +269,7 @@ func (r *reconciler) stopped() bool { return r.ctx.Err() != nil }
 // sweep acts once on every journaled ticket nobody else is driving. It never
 // fails: whatever goes wrong is retried next sweep.
 func (r *reconciler) sweep() {
+	defer r.recoverHook()
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
 	recs, err := r.journal.List(ctx, r.payer, r.appID)
 	cancel()
@@ -280,7 +284,26 @@ func (r *reconciler) sweep() {
 		if r.watching(rec.TicketID) || r.exhausted(rec.TicketID) {
 			continue
 		}
-		r.reconcile(rec)
+		r.reconcileRow(rec)
+	}
+}
+
+// reconcileRow keeps a panic in one row, from the journal or chain code the
+// host supplied, from ending the sweep goroutine and with it the process. It
+// counts as a failed attempt, so a row that always panics is given up on.
+func (r *reconciler) reconcileRow(rec TicketRecord) {
+	defer func() {
+		if p := recover(); p != nil {
+			r.failed(rec, "reconcile", fmt.Errorf("panic: %v", p))
+		}
+	}()
+	r.reconcile(rec)
+}
+
+// recoverHook keeps a panicking journal List from ending the sweep goroutine.
+func (r *reconciler) recoverHook() {
+	if p := recover(); p != nil {
+		r.log.Error("ticket reconciler: journal read panicked; retrying next sweep", slog.Any("panic", p))
 	}
 }
 
@@ -333,23 +356,27 @@ func (r *reconciler) reconcile(rec TicketRecord) {
 			// what reservation is left, rather than counting a second charge.
 			switch {
 			case action == reconcileRefund, action == reconcileLapse && rec.Settle != nil:
-				r.spend.Release(rec.TicketID)
+				recordSpend(r.log, "release", rec.TicketID, func() { r.spend.Release(rec.TicketID) })
 			case action == reconcileLapse:
-				r.spend.Settle(rec.TicketID, box.PendingAmount)
+				recordSpend(r.log, "settle", rec.TicketID, func() { r.spend.Settle(rec.TicketID, box.PendingAmount) })
 			}
 		}
 		return
 	}
+	r.failed(rec, action.String(), err)
+}
+
+func (r *reconciler) failed(rec TicketRecord, what string, err error) {
 	r.mu.Lock()
 	r.failures[rec.TicketID]++
 	n := r.failures[rec.TicketID]
 	r.mu.Unlock()
 	if n >= reconcileMaxFailures {
-		r.log.Warn("ticket reconciler: "+action.String()+" keeps failing; leaving the ticket for the next start",
+		r.log.Warn("ticket reconciler: "+what+" keeps failing; leaving the ticket for the next start",
 			slog.String("ticket_id", rec.TicketID), slog.Int("attempts", n), slog.Any("err", err), slog.String("remedy", r.remedy))
 		return
 	}
-	r.log.Debug("ticket reconciler: "+action.String()+" failed; retrying next sweep",
+	r.log.Debug("ticket reconciler: "+what+" failed; retrying next sweep",
 		slog.String("ticket_id", rec.TicketID), slog.Int("attempt", n), slog.Any("err", err))
 }
 
@@ -415,7 +442,7 @@ func (r *reconciler) forget(rec TicketRecord, box *escrow.TicketRecord) {
 		// two writes, and settling it again would count the charge twice.
 		// With no receipt nothing here says what the ticket cost, so its
 		// reservation ages out.
-		r.spend.Release(rec.TicketID)
+		recordSpend(r.log, "release", rec.TicketID, func() { r.spend.Release(rec.TicketID) })
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
 	defer cancel()

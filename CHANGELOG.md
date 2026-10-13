@@ -31,6 +31,23 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — host hooks can't bypass the spend cap or stop the SDK (unreleased)
+
+A `SpendGuard` method that returns a Promise no longer slips past the cap: the TS methods now
+return `SpendGuardResult`, so an async one is a compile error, and an async `admit` or `reserve`
+ends the request (`spend_cap_exceeded`, naming the async guard) whatever it resolves to.
+Previously it was ignored, so its refusal never reached the request, and its rejection could end
+a Node process. A `settle` or `release` that throws (Go: panics) is logged rather than failing
+the request, the reconciler sweep or the refund watchdog. The reconciler now carries on past a
+row that throws or panics, counting it as a failed attempt, and gives back its journal claim
+even when its shutdown step fails; the TS `Client.close` stops the registry and the sweep
+whatever the other throws. A source whose `reprobeEphemeral` rejects reads as a node the SDK
+can't seal to, as Go's does.
+
+**TS hosts:** a synchronous guard whose method returns `void` or a primitive needs no change.
+One that returns an object no longer compiles, e.g. `reserve: (id, p) => this.held.set(id, p)`,
+which returns the `Map`; give the arrow a block body.
+
 ### 2026-10-12 — the private-target guard judges translated IPv6 (unreleased)
 
 Go's `httpx.IsPrivateIP` (the `BlockPrivateTargets` dial guard, used by the node's relay, web

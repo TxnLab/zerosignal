@@ -2484,7 +2484,7 @@ func (s *Client) runSealed(
 		// The open didn't commit — back the reservation out so a failed attempt
 		// doesn't permanently consume the cap.
 		if s.spend != nil {
-			s.spend.Release(ticket.TicketID)
+			recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 		}
 		s.log.Error("wallet open failed",
 			slog.String("endpoint", endpoint),
@@ -3925,7 +3925,7 @@ func (s *Client) checkReceipt(
 		// It stays ahead of journalReceipt: the reconciler reads a journaled
 		// receipt as a charge already counted.
 		if s.spend != nil {
-			s.spend.Settle(ticket.TicketID, receipt.AmountCharged)
+			recordSpend(s.log, "settle", ticket.TicketID, func() { s.spend.Settle(ticket.TicketID, receipt.AmountCharged) })
 		}
 		if handle == nil {
 			return nil, check
@@ -4023,7 +4023,7 @@ func (s *Client) checkReceipt(
 	// refunds/lapses on-chain). Drop the ticket's reserved ceiling without
 	// recording any spend.
 	if s.spend != nil {
-		s.spend.Release(ticket.TicketID)
+		recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 	}
 	if handle == nil || re.Violation != ReceiptViolationBodyHash {
 		return nil, check

@@ -311,7 +311,10 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.SpendGuard != nil {
 		// A ticket whose request failed after its escrow opened keeps its
 		// reservation in dispatch; its refund is what frees it.
-		c.refunds.refunded = cfg.SpendGuard.Release
+		guard, log := cfg.SpendGuard, c.log
+		c.refunds.refunded = func(ticketID string) {
+			recordSpend(log, "release", ticketID, func() { guard.Release(ticketID) })
+		}
 	}
 	if sdkWallet != nil {
 		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.SpendGuard, cfg.Logger)

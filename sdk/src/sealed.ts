@@ -28,6 +28,7 @@ import { recordRelayHopAction, relayHopAction } from './routing/attribution.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import type { RelayReputationStore } from './routing/reputation.js'
 import { sealRequest } from './seal.js'
+import { guardRecords } from './spend-guard.js'
 import type { Emitter } from './turn.js'
 import type { Endpoint } from './types.js'
 import { BelowTargetError } from './wallet.js'
@@ -123,7 +124,8 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
         handle = await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
     } catch (err) {
         // The open didn't commit, so a failed attempt doesn't keep the cap.
-        deps.spendGuard?.release(ticket.ticket_id)
+        const guard = deps.spendGuard
+        if (guard) guardRecords(log, 'release', ticket.ticket_id, () => guard.release(ticket.ticket_id))
         log.error('wallet open failed', {
             endpoint,
             ...opAttrs(op),

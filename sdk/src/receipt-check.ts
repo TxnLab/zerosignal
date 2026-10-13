@@ -16,6 +16,7 @@ import type { SpendGuard } from './config.js'
 import { type Operator, refOf } from './operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from './parts.js'
 import type { LogAttrs, Logger } from './ports.js'
+import { guardRecords } from './spend-guard.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
 import type { RelayHop } from './routing/relay.js'
 import type { Settlement, SettleKind } from './types.js'
@@ -209,7 +210,8 @@ export async function checkTurnReceipt(
         log.info('zs request paid', paid)
         // The settled charge replaces the reserved ceiling. Ahead of the
         // journal: the reconciler reads a journaled receipt as counted.
-        deps.spendGuard?.settle(ticketId, receipt.amount_charged)
+        const guard = deps.spendGuard
+        if (guard) guardRecords(log, 'settle', ticketId, () => guard.settle(ticketId, receipt.amount_charged))
         if (handle === null) return { submit: null, check }
         await journal(deps, handle, receipt)
         return {
@@ -277,7 +279,8 @@ export async function checkTurnReceipt(
     })
     // A receipt that didn't verify charged nothing legitimately: the ticket is
     // protested, or refunds or lapses on chain.
-    deps.spendGuard?.release(ticketId)
+    const guard = deps.spendGuard
+    if (guard) guardRecords(log, 'release', ticketId, () => guard.release(ticketId))
     // The contract refuses a protest over the signature or the amount.
     if (handle === null || violation !== 'body_hash') return { submit: null, check }
     const excerpt = t.plaintext.slice(0, DISPUTE_EXCERPT_CAP)

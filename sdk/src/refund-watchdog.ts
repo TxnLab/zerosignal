@@ -188,9 +188,15 @@ export class Watchdog implements RefundWatchdog {
         if (this.#handedOff || this.#pending.has(ticketId)) return
         const cancel = new AbortController()
         this.#pending.set(ticketId, cancel)
-        const run = this.#run(ticketId, deadlineMs, cancel.signal, probe, refund, lapse).finally(() => {
-            this.#running.delete(run)
-        })
+        const run = this.#run(ticketId, deadlineMs, cancel.signal, probe, refund, lapse)
+            // The calls and the refunded hook are the host's: a rejection
+            // nothing observes would end a Node process.
+            .catch((err: unknown) => {
+                this.#log.error('refund watchdog: ticket driver failed', { ticket_id: ticketId, err: message(err) })
+            })
+            .finally(() => {
+                this.#running.delete(run)
+            })
         this.#running.add(run)
     }
 

@@ -147,6 +147,23 @@ func TestRefundWatchdog_FiresRefundAfterDeadline(t *testing.T) {
 	waitFor(t, "refund attempt", func() bool { return refunds.Load() == 1 })
 }
 
+// A refunded hook that panics is the host's bug: the ticket's goroutine ends
+// and the process does not. Unrecovered, the panic fails the whole test binary.
+func TestRefundWatchdog_RefundedPanicIsContained(t *testing.T) {
+	rw := testWatchdog()
+	var heard atomic.Int32
+	rw.refunded = func(string) {
+		heard.Add(1)
+		panic("guard bug")
+	}
+	rw.track("tik", time.Now(), liveBox(), func(context.Context) (string, error) { return "TX", nil }, noLapse(t))
+	waitFor(t, "the refunded hook", func() bool { return heard.Load() == 1 })
+	rw.handOff()
+	if rw.watching("tik") {
+		t.Error("the ticket is still pending after its driver panicked")
+	}
+}
+
 // A box already deleted at deadline (operator settled standalone after the
 // proxy lost sight of it) is a no-op — no refund attempt.
 func TestRefundWatchdog_BoxGoneIsNoOp(t *testing.T) {

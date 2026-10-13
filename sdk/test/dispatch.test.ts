@@ -1175,6 +1175,24 @@ describe('the prepaid pool before reserve', () => {
         expect(h.prep.calls).toBe(0)
     })
 
+    // An async guard's refusal would land after the reserve it was meant to
+    // stop, and unobserved it ends a Node process: refused, its rejection caught.
+    it('refuses an admit guard that answers with a Promise', async () => {
+        const asyncAdmit = {
+            admit: () => Promise.reject(new Error('over the cap')),
+            reserve() {},
+            settle() {},
+            release() {},
+        } as unknown as SpendGuard
+        const priced = withCap(op(1), { inputUsdPer1m: 1, outputUsdPer1m: 2 })
+        const h = preparing(undefined, { feeRate: () => 0, spendGuard: asyncAdmit }, undefined, [priced])
+        const em = await h.run(body)
+        expect(em.failed?.code).toBe('spend_cap_exceeded')
+        expect(em.failed?.message).toContain('SpendGuard.admit returned a Promise')
+        expect(em.failed?.message).not.toContain('raise')
+        expect(h.prep.calls).toBe(0)
+    })
+
     it('runs under the turn’s signal, and a turn aborted during it ends without a funds error', async () => {
         const ac = new AbortController()
         const h = preparing(new MbrDepositUnaffordableError(0n, 10n, 50_000n, 1_000n), {}, () => ac.abort())
@@ -1624,6 +1642,28 @@ describe('the ticket', () => {
         })
         const em = await h.run(chat())
         expect(em.failed).toMatchObject({ code: 'operators_busy', retryAfter: 2000 })
+    })
+
+    // Whatever the Promise would resolve to: an allowing one is still too late.
+    // No other candidate can cure it, so the request ends at the first.
+    it('ends the request at a reserve guard that answers with a Promise, even an allowing one', async () => {
+        let asks = 0
+        const asyncReserve = {
+            admit() {},
+            reserve: () => {
+                asks++
+                return Promise.resolve()
+            },
+            settle() {},
+            release() {},
+        } as unknown as SpendGuard
+        const h = harness([op(1), op(2)], { deps: { spendGuard: asyncReserve } })
+        const em = await h.run(chat())
+        expect(em.failed).toMatchObject({ code: 'spend_cap_exceeded', kind: 'spend_cap' })
+        expect(em.failed!.message).toContain('SpendGuard.reserve returned a Promise')
+        expect(em.failed!.message).not.toContain('raise')
+        expect(asks).toBe(1)
+        expect(em.runs).toEqual([])
     })
 
     it('moves on past a ticket over the cap, and fails spend_cap_exceeded when every one is', async () => {
