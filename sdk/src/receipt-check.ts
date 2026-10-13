@@ -135,7 +135,6 @@ export interface TurnReceipt {
     computedHash: Uint8Array
     /** What the node delivered: the protest's excerpt. */
     plaintext: Uint8Array
-    algoUsdPrice: number
     /** The node's settle group, base64, when it sent one that decodes; else null. */
     settleGroup: string | null
     hop: RelayHop | null

@@ -96,7 +96,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 
 	check := srv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",
-		tkt, op, handle, receipt, computed, plaintext, 0.20, group, nil,
+		tkt, op, handle, receipt, computed, plaintext, group, nil,
 	)
 
 	if !check.excluded {
@@ -114,7 +114,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 	honestHandle := &fakeSettlementHandle{groupRejected: false}
 	honest := honestSrv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",
-		tkt, op, honestHandle, receipt, computed, plaintext, 0.20, group, nil,
+		tkt, op, honestHandle, receipt, computed, plaintext, group, nil,
 	)
 	if honest.excluded {
 		t.Error("an honest settle reported an exclusion")

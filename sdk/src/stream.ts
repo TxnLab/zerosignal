@@ -701,7 +701,6 @@ export function frameFactory(
                         computedHash: bodyHashFromFrames(contentFrames),
                         // The excerpt a protest carries: the frames the hash covers, in order.
                         plaintext: concat(contentFrames),
-                        algoUsdPrice: reserved.algoUsdPrice,
                         settleGroup,
                         hop,
                         slot,
