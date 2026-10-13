@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,6 +72,96 @@ var failedTEE = &TEEStatus{
 	VerifierID: tee.VerifierIDBuiltin,
 	Verified:   false,
 	FailureTag: tee.FailureStubNotAllowed,
+}
+
+// A strict tool-call pin whose node lost its attestation blocks, and the 503
+// names the pin and the prefer escape rather than claiming the pool has no
+// attested node: here op 1 is attested and serves the model.
+func TestPickCandidates_ToolAffinityStrict_UnattestedNamesThePin(t *testing.T) {
+	const model = "gpt-4o-mini"
+	pinned := teeOp(7, model, nil)
+	pick := func(policy AffinityPolicy) pickResult {
+		srv := minimalTEEServer(t, []Operator{teeOp(1, model, attestedTEE), pinned})
+		srv.cfg.Affinity.Policy = policy
+		srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+		srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
+		res, err := srv.pickCandidates(context.Background(), endpointChatCompletions, model,
+			[]byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`),
+			SizingRequest{Model: model, InputTokens: 100, MaxOutputTokens: 100}, true, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+		if err != nil {
+			t.Fatalf("pickCandidates: %v", err)
+		}
+		return res
+	}
+
+	res := pick(AffinityStrict)
+	if !res.TEEBlocked || len(res.Operators) != 0 {
+		t.Fatalf("strict: got %+v, want empty + TEEBlocked", res)
+	}
+	if r := res.TEEBlockedReason; !strings.Contains(r, "operator 7 node") || !strings.Contains(r, "affinity policy to prefer") {
+		t.Errorf("reason = %q, want the pinned node and the prefer hint", r)
+	}
+
+	res = pick(AffinityPrefer)
+	if res.TEEBlocked || res.TEEBlockedReason != "" || len(res.Operators) != 1 || res.Operators[0].ID != 1 {
+		t.Fatalf("prefer: got %+v, want only the attested op 1 and no reason", res)
+	}
+}
+
+// The pin-specific reason is only for a strict pin that lost its attestation.
+// When the pool itself has no attested node the pool's message stands: under
+// prefer, and under strict when the pin is attested but was dropped earlier.
+func TestPickCandidates_TEEBlockedReasonOnlyBlamesAStrictUnattestedPin(t *testing.T) {
+	const model = "gpt-4o-mini"
+	body := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`)
+	cases := []struct {
+		name   string
+		policy AffinityPolicy
+		pinned Operator
+	}{
+		{"prefer, unattested pin", AffinityPrefer, teeOp(7, model, nil)},
+		{"strict, attested pin on another wire generation", AffinityStrict, func() Operator {
+			o := teeOp(7, model, attestedTEE)
+			o.ProtoVersion = "1.0"
+			return o
+		}()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := minimalTEEServer(t, []Operator{teeOp(1, model, nil), tc.pinned})
+			srv.cfg.Affinity.Policy = tc.policy
+			srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+			srv.toolAffinity.Record(tc.pinned.ID, tc.pinned.NodeID, []string{"call_1"})
+			res, err := srv.pickCandidates(context.Background(), endpointChatCompletions, model, body,
+				SizingRequest{Model: model, InputTokens: 100, MaxOutputTokens: 100}, true, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+			if err != nil {
+				t.Fatalf("pickCandidates: %v", err)
+			}
+			if !res.TEEBlocked || res.TEEBlockedReason != "" {
+				t.Fatalf("got TEEBlocked=%v reason=%q, want the pool's block with no pin reason", res.TEEBlocked, res.TEEBlockedReason)
+			}
+		})
+	}
+}
+
+// End to end: the strict pin's reason is the error the caller sees.
+func TestDispatch_StrictUnattestedPinNamesThePin(t *testing.T) {
+	const model = "gpt-4o-mini"
+	pinned := teeOp(7, model, nil)
+	srv := minimalTEEServer(t, []Operator{teeOp(1, model, attestedTEE), pinned})
+	srv.tokenizer = testTokenizer()
+	srv.cfg.Affinity.Policy = AffinityStrict
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
+
+	ze := requestErr(t, srv, Request{
+		Endpoint:   EndpointChatCompletions,
+		Body:       []byte(`{"model":"gpt-4o-mini","max_completion_tokens":100,"messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`),
+		RequireTEE: true,
+	})
+	if ze.Code != "no_tee_capacity" || !strings.Contains(ze.Message, "pinned (strict affinity) to operator 7") {
+		t.Fatalf("error = %s: %q, want no_tee_capacity naming the pin", ze.Code, ze.Message)
+	}
 }
 
 func TestPickCandidates_TEEFilter_KeepsOnlyAttested(t *testing.T) {

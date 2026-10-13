@@ -364,8 +364,11 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			// client can retry on a different cadence (TEE recovery
 			// usually means a node refreshing its evidence rather
 			// than provisioning new capacity).
-			em.fail(newError("no_tee_capacity",
-				"no operator with current TEE attestation can serve this request"))
+			msg := pick.TEEBlockedReason
+			if msg == "" {
+				msg = "no operator with current TEE attestation can serve this request"
+			}
+			em.fail(newError("no_tee_capacity", msg))
 		case pick.StagingBlocked:
 			// Operators advertise the model but every otherwise-fitting node is
 			// flagged on-chain as `staging` and this proxy isn't configured to use
@@ -1338,6 +1341,10 @@ type pickResult struct {
 	// a pin to one drained node says nothing about the model's other nodes,
 	// and "pick another model" would abandon the session for no reason.
 	SignerUnderfundedReason string
+	// TEEBlockedReason, when set, replaces the pool-wide no_tee_capacity
+	// message: a strict tool-call pin to one node whose attestation lapsed
+	// says nothing about the model's attested nodes.
+	TEEBlockedReason string
 
 	// VersionBlocked is set when the registry has otherwise-fitting
 	// operators for this model but none of them advertise a
@@ -1823,6 +1830,13 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	// tr.Diagnostics.RegistryCount.
 	res.VersionBlocked = tr.Diagnostics.VersionBlocked
 	res.TEEBlocked = tr.Diagnostics.TEEBlocked
+	if res.TEEBlocked && preferredOp != nil && !preferredOp.IsTEEAttested() &&
+		s.cfg.Affinity.Policy == AffinityStrict {
+		res.TEEBlockedReason = fmt.Sprintf(
+			"this tool-call continuation is pinned (strict affinity) to operator %d node %d, which no longer has "+
+				"current TEE attestation; retry once it refreshes its evidence, or set the affinity policy to prefer so an attested node can continue it",
+			preferredOp.ID, preferredOp.NodeID)
+	}
 	res.StagingBlocked = tr.Diagnostics.StagingBlocked
 	res.SignerUnderfundedBlocked = tr.Diagnostics.SignerUnderfundedBlocked
 	if res.SignerUnderfundedBlocked && preferredOp != nil && preferredOp.SignerUnderfunded() &&

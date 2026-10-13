@@ -82,6 +82,8 @@ export interface PickResult {
     affinityBlockReason: string
     sizingMisses: SizingMiss[]
     teeBlocked: boolean
+    /** Replaces the pool-wide message when a strict pin, not the pool, lost attestation. */
+    teeBlockedReason: string
     stagingBlocked: boolean
     signerUnderfundedBlocked: boolean
     /** Replaces the model-wide message when a pin, not the pool, is underfunded. */
@@ -103,6 +105,7 @@ function emptyResult(registryCount: number): PickResult {
         affinityBlockReason: '',
         sizingMisses: [],
         teeBlocked: false,
+        teeBlockedReason: '',
         stagingBlocked: false,
         signerUnderfundedBlocked: false,
         signerUnderfundedReason: '',
@@ -364,6 +367,16 @@ export async function pickCandidates(deps: PickDeps, req: PickRequest, signal?: 
     const d = tr.diagnostics
     res.versionBlocked = d.version_blocked
     res.teeBlocked = d.tee_blocked
+    if (
+        res.teeBlocked &&
+        preferredOp !== undefined &&
+        !selectionOf(preferredOp).tee_attested &&
+        deps.affinityPolicy === 'strict'
+    ) {
+        res.teeBlockedReason =
+            `this tool-call continuation is pinned (strict affinity) to operator ${preferredOp.id} node ${preferredOp.nodeId}, which no longer has ` +
+            `current TEE attestation; retry once it refreshes its evidence, or set the affinity policy to prefer so an attested node can continue it`
+    }
     res.stagingBlocked = d.staging_blocked
     res.signerUnderfundedBlocked = d.signer_underfunded_blocked
     if (

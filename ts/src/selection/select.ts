@@ -398,15 +398,26 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
         }
     }
 
-    // 11. Affinity reorder. Like the proxy, the tool-affinity path checks only
-    //     serves + fits + signer funding on the preferred operator (NOT
-    //     wire-version / TEE), plus the caller's own only/ignore/order below.
-    //     Funding is re-checked because a pinned node can drain mid-loop.
-    //     Mirror of select.go step 11.
+    // 11. Affinity reorder. The preferred operator comes from the full registry
+    //     and is re-checked on serves, TEE, the caller's only/ignore/order, fit,
+    //     and signer funding — not wire version, since selectTargetsForOperator
+    //     (sdk/src/routing/seed.ts) seeds the payer's own pick here so it is
+    //     still tried after the version filter dropped it. Mirror of select.go
+    //     step 11.
     if (c.affinity_policy === AFFINITY_NONE || preferred === null) {
         return { operators: fitList, diagnostics }
     }
     if (!servesModel(preferred, c.model)) {
+        return { operators: fitList, diagnostics }
+    }
+    // A confidential request must never reach an unattested node, and a pinned
+    // node's attestation can lapse between turns. Strict blocks with
+    // tee_blocked; prefer yields to fitList. Mirror of select.go step 11.
+    if (c.require_tee && !preferred.tee_attested) {
+        if (c.affinity_policy === AFFINITY_STRICT) {
+            diagnostics.tee_blocked = true
+            return { operators: [], diagnostics }
+        }
         return { operators: fitList, diagnostics }
     }
     // The caller's HARD constraints bind the continuation target too: an

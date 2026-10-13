@@ -31,6 +31,17 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — the tool-call pin passes the TEE gate (unreleased)
+
+A tool-calling turn is pinned to the node that issued its `tool_call_id`, and `SelectTargets`
+put that node first without checking, for a request requiring TEE, its attestation. So a
+confidential tool loop whose node lost its attestation between turns sent the tool results back
+to it. Both languages now check it on the pinned node: under `prefer` the pin yields to the other
+candidates, and under `strict` selection reports `tee_blocked`, as the `previous_response_id`
+pin already did. The wire version stays unchecked there on purpose, since
+`selectTargetsForOperator` relies on it to still try the payer's own pick. Pinned by new
+`selection_vectors.json` cases.
+
 ### 2026-10-13 — a node's `payer_not_opted_in` refusal makes the wallet check the MBR deposit again (unreleased)
 
 Once the wallet has seen the payer opted into the escrow app with its MBR deposit covering the

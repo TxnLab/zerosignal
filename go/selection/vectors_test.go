@@ -121,6 +121,16 @@ func allRef(operatorID uint64) selection.OperatorRef {
 
 func uptr(v uint64) *uint64 { return &v }
 
+// attestedExcept returns operators 1–3 (owners A–C), all TEE-attested except
+// the one with id unattested (0 ⇒ none).
+func attestedExcept(unattested uint64) []selection.Operator {
+	ops := []selection.Operator{baseOp(1, "A"), baseOp(2, "B"), baseOp(3, "C")}
+	for i := range ops {
+		ops[i].TEEAttested = ops[i].ID != unattested
+	}
+	return ops
+}
+
 // deriveConstraints builds chat constraints for the caller-omitted-max_output
 // path: MaxOutputUnspecified switches the sizing filter to per-operator
 // derivation against baseCeiling.
@@ -518,6 +528,75 @@ func buildTargetCases() []targetCase {
 				o.ModelCapacities = map[string]selection.ModelCapacity{"m1": {ContextWindow: 100}}
 				return &o
 			}(),
+		},
+		{
+			// A confidential tool loop whose pinned node lost its attestation
+			// between turns: under prefer the pin yields, so the tool results go
+			// to an attested node rather than back to the unattested one.
+			Name:      "affinity_prefer_unattested_yields",
+			Operators: attestedExcept(3),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.RequireTEE = true
+				c.AffinityPolicy = selection.AffinityPrefer
+				return c
+			}(),
+			Preferred: func() *selection.Operator { o := baseOp(3, "C"); return &o }(),
+		},
+		{
+			Name:      "affinity_strict_unattested_blocked",
+			Operators: attestedExcept(3),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.RequireTEE = true
+				c.AffinityPolicy = selection.AffinityStrict
+				return c
+			}(),
+			Preferred: func() *selection.Operator { o := baseOp(3, "C"); return &o }(),
+		},
+		{
+			// The TEE gate is the request's, so it outranks the caller's own
+			// `only` conflict, as on the previous_response_id pin.
+			Name:      "affinity_strict_unattested_before_ref_conflict",
+			Operators: attestedExcept(3),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.RequireTEE = true
+				c.Only = []selection.OperatorRef{allRef(1)}
+				c.AffinityPolicy = selection.AffinityStrict
+				return c
+			}(),
+			Preferred: func() *selection.Operator { o := baseOp(3, "C"); return &o }(),
+		},
+		{
+			// An attested pin under RequireTEE is still honored.
+			Name:      "affinity_strict_attested_kept",
+			Operators: attestedExcept(0),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.RequireTEE = true
+				c.AffinityPolicy = selection.AffinityStrict
+				return c
+			}(),
+			Preferred: func() *selection.Operator { o := baseOp(2, "B"); o.TEEAttested = true; return &o }(),
+		},
+		{
+			// The wire version is deliberately NOT re-checked on the preferred
+			// node: the TS SDK's selectTargetsForOperator seeds the payer's own
+			// operator pick through this step so it is still tried after the
+			// version filter dropped it.
+			Name: "affinity_prefer_incompatible_version_still_leads",
+			Operators: func() []selection.Operator {
+				op3 := baseOp(3, "C")
+				op3.ProtoVersion = "1.0"
+				return []selection.Operator{baseOp(1, "A"), baseOp(2, "B"), op3}
+			}(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.AffinityPolicy = selection.AffinityPrefer
+				return c
+			}(),
+			Preferred: func() *selection.Operator { o := baseOp(3, "C"); o.ProtoVersion = "1.0"; return &o }(),
 		},
 		{
 			Name:        "registry_empty",
