@@ -12,6 +12,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
+import { MAX_REPLY_BYTES } from '../src/idle.js'
+
 import {
     type AffinityPolicy,
     type Attribution,
@@ -285,6 +287,7 @@ describe('vocabulary shared with the Go SDK', () => {
             streamIdlePreStreamMs: DEFAULT_STREAM_IDLE.preStream,
             streamIdleMidStreamMs: DEFAULT_STREAM_IDLE.midStream,
             streamIdleToolActiveMs: DEFAULT_STREAM_IDLE.toolActive,
+            maxReplyBytes: MAX_REPLY_BYTES,
         }).toEqual(vocab.defaults)
     })
 })

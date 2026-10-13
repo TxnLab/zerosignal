@@ -104,6 +104,8 @@ interface HarnessOptions {
     plaintext?: string
     /** Streamed: send the first frame, then hold the stream open until the request is aborted. */
     hold?: boolean
+    /** A whole reply: send the start of the sealed body, then hold until the request is aborted. */
+    holdReply?: boolean
     /** The plaintext of the frame a held stream sends, the first content frame by default. */
     holdFrame?: string
     /** Streamed: send the content, then the receipt tail a moment later, unless the request is aborted first. */
@@ -211,7 +213,17 @@ async function harness(o: HarnessOptions = {}) {
                     [RESPONSE_KEY_HEADER]: s.wrappedKeyHeader(),
                     [RECEIPT_HEADER]: s.sealHeader(SEALED_HEADER_RECEIPT, enc.encode(encodeReceiptHeader(f.receipt))),
                 })
-                return new Response(s.sealBody(f.plaintext), { headers })
+                const sealed = s.sealBody(f.plaintext)
+                if (o.holdReply) {
+                    const body = new ReadableStream<Uint8Array>({
+                        start(ctl) {
+                            ctl.enqueue(sealed.slice(0, 8))
+                            init.signal?.addEventListener('abort', () => ctl.error(init.signal!.reason), { once: true })
+                        },
+                    })
+                    return new Response(body, { headers })
+                }
+                return new Response(sealed, { headers })
             }
             let sse = ''
             for (const pt of frames) sse += `event: zs\ndata: ${s.sealStreamFrame(pt)}\n\n`
@@ -449,6 +461,27 @@ describe('Client.stream', () => {
                 start.mockRestore()
             }
         })
+    })
+
+    // Config.streamIdle reaches the whole reply's read as well as the stream's.
+    it('ends a whole reply silent mid-body read_upstream at the configured bound', async () => {
+        async function silentReply(config: Partial<Config>) {
+            const h = await harness({ holdReply: true, config })
+            const ac = new AbortController()
+            const timer = setTimeout(() => ac.abort(), 500)
+            const err = (await h.c
+                .stream({ endpoint: CHAT, body: h.body }, ac.signal)
+                .text()
+                .catch((e: unknown) => e)) as ZsError
+            clearTimeout(timer)
+            await h.c.close()
+            return err
+        }
+        const cut = await silentReply({ streamIdle: { midStream: 20 } })
+        expect(cut).toMatchObject({ code: 'read_upstream' })
+        expect(findError(cut, StreamIdleTimeoutError)?.timeoutMs).toBe(20)
+        const off = await silentReply({ streamIdle: false })
+        expect(findError(off, StreamIdleTimeoutError)).toBeUndefined()
     })
 
     // A caller who stops reading once generation has finished still has the

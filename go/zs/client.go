@@ -32,6 +32,8 @@ type Client struct {
 	cfg        Config
 	log        *slog.Logger
 	httpClient *http.Client
+	// replyLimit is a test's cap on a buffered reply; zero is maxReplyBytes.
+	replyLimit int64
 
 	// Providers. The registry feeds operator selection, the reserve
 	// client handles the pre-payment admission call, and the affinity cache

@@ -405,6 +405,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         fetch: cfg.inferenceFetch,
         relayReputation: st.relayReputation,
         logger,
+        streamIdle: cfg.streamIdle,
         // With USDC locked on chain, the watchdog recovers it if no settlement
         // resolves the ticket, and the journal keeps it past a restart.
         opened: async (h, ticket) => {

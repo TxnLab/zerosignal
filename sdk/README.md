@@ -251,7 +251,9 @@ answer text. Each `Stream` can be read once.
 - **Stalls.** A streamed answer that stops sending ends with a `StreamIdleTimeoutError` in the
   error's `cause` chain: by default after 300 s with no first byte, 60 s between bytes after
   that, or 300 s while a tool the node runs is working. `Config.streamIdle` sets each bound, and
-  `false` turns it off. A whole reply has no such bound. The Go SDK's is `Config.StreamIdle`.
+  `false` turns it off. A whole reply's body is held to the between-bytes bound, and one over
+  256 MiB is refused; either ends the turn `read_upstream`, with the cause in its chain. The Go
+  SDK's is `Config.StreamIdle`.
 
 A `Request` is the OpenAI-shaped `body` for one `endpoint` (`/v1/chat/completions`,
 `/v1/responses`, `/v1/images/generations`, `/v1/images/edits`) plus the routing preferences that

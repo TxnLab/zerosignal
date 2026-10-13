@@ -21,8 +21,9 @@ import (
 // and its spend reservation until the caller's context ends. The bound is on
 // bytes, not frames: a node's keepalive comment proves the hop is alive.
 
-// StreamIdle is the silence a streamed answer may keep, by phase. A zero
-// field takes DefaultStreamIdle's; Off turns the bound off.
+// StreamIdle is the silence a streamed answer may keep, by phase. A whole
+// reply's body is held to MidStream. A zero field takes DefaultStreamIdle's;
+// Off turns the bound off.
 type StreamIdle struct {
 	// PreStream is before the first byte of the body. A reasoning model can
 	// buffer its whole thinking window before the first frame.
@@ -276,6 +277,42 @@ func (r idleReader) Read(p []byte) (int, error) {
 		r.w.stop()
 	}
 	return n, err
+}
+
+// maxReplyBytes caps a buffered reply's body. The node puts generated media in
+// the body, base64, and caps none of it, so without this a node or relay that
+// never ends a body holds the turn, its escrow and the payer's memory.
+const maxReplyBytes = 256 << 20
+
+// readReply reads a buffered reply's body whole, refusing one over limit. The
+// node writes a buffered reply's body with its headers, so every silence in
+// it is measured against MidStream, unless the bound is off. A silence past
+// that calls cancel, which must end the request, and the error is the
+// *StreamIdleTimeoutError.
+func readReply(body io.Reader, b StreamIdle, limit int64, cancel func()) ([]byte, error) {
+	b = b.withDefaults()
+	idle := newIdleWatchdog(StreamIdle{PreStream: b.MidStream, MidStream: b.MidStream, ToolActive: b.MidStream, Off: b.Off})
+	idle.start(func(*StreamIdleTimeoutError) { cancel() })
+	defer idle.stop()
+	got, err := io.ReadAll(io.LimitReader(idleReader{r: body, w: idle}, limit+1))
+	if idleErr := idle.stop(); idleErr != nil {
+		return nil, idleErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(got)) > limit {
+		return nil, fmt.Errorf("the node's reply is over %d bytes", limit)
+	}
+	return got, nil
+}
+
+// readUpstreamError is the turn's error for a buffered reply that couldn't be
+// read, with why as its Err.
+func readUpstreamError(err error) *Error {
+	e := newError("read_upstream", err.Error())
+	e.Err = err
+	return e
 }
 
 // bracket runs f with the watchdog paused, and stops it if f fails, since the

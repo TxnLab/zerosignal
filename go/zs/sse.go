@@ -180,19 +180,23 @@ func (s *Client) forwardRawStream(
 	}
 	upstreamReq.Header.Set("Accept", "text/event-stream")
 
+	// Until the node answers, a caller who leaves cancels the request: nothing
+	// has been generated that a drain could pay for, and the wait for headers
+	// can run to minutes. Once it answers, a buffered reply is the whole
+	// generation, so its body is read for the receipt (bounded by readReply),
+	// and a stream is the watcher's below.
+	stopEarlyLeave := context.AfterFunc(ctx, cancelUpstream)
 	upstreamResp, err := s.httpClient.Do(upstreamReq)
+	stopEarlyLeave()
 	if err != nil {
 		// Relayed mode: a transport error reaching the relay is a relay-hop
 		// failure — attribute it (no-op for a direct route), don't flip the target.
 		//
-		// upstreamCtx, not ctx: it is the context this request actually rode, and
-		// CallerAborted must describe THAT one. It is WithoutCancel and the
-		// disconnect watcher below only starts once Do has returned, so a payer
-		// hang-up cannot reach it and the abort arm is false here by
-		// construction. Passing the payer's ctx instead would exonerate a relay
-		// whose transport genuinely failed while the payer happened to be gone.
+		// upstreamCtx: it is the context this request actually rode, and
+		// CallerAborted must describe that one. A payer's leaving reaches it
+		// only through the cancel above.
 		s.attributeRelayHop(upstreamCtx, hop, transient.TransportFailureStatus, nil, nil)
-		s.log.Error("upstream request failed", slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
+		s.logForwardFailure(upstreamCtx, slog.LevelError, "upstream request failed", endpoint, hop, err)
 		em.fail(newError("upstream_unreachable", err.Error()))
 		return
 	}
@@ -200,9 +204,10 @@ func (s *Client) forwardRawStream(
 
 	ct := upstreamResp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "text/event-stream") {
-		respBody, err := io.ReadAll(upstreamResp.Body)
+		respBody, err := readReply(upstreamResp.Body, s.cfg.StreamIdle, s.replyCap(), cancelUpstream)
 		if err != nil {
-			em.fail(newError("read_upstream", err.Error()))
+			s.logForwardFailure(upstreamCtx, slog.LevelWarn, "upstream reply read failed", endpoint, hop, err)
+			em.fail(readUpstreamError(err))
 			return
 		}
 		// Non-stream response on the streaming path: classify it as a relay

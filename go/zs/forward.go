@@ -105,7 +105,11 @@ func (s *Client) forwardRawNonStream(
 	hop *RelayHop,
 	respond nonStreamResponder,
 ) {
-	upstreamReq, err := s.buildOperatorRequest(ctx, baseURL, http.MethodPost, endpoint, body, outboundContentType, extraHeaders)
+	// Its own cancel, so a silent body can be cut. ctx stays what attribution
+	// reads: the idle bound runs only after the response arrived.
+	reqCtx, cancelReq := context.WithCancel(ctx)
+	defer cancelReq()
+	upstreamReq, err := s.buildOperatorRequest(reqCtx, baseURL, http.MethodPost, endpoint, body, outboundContentType, extraHeaders)
 	if err != nil {
 		em.fail(newError("build_request", err.Error()))
 		return
@@ -121,15 +125,16 @@ func (s *Client) forwardRawNonStream(
 		// for a socket the proxy tore down itself is what this seam did while it
 		// wrote to the reputation store directly.
 		s.attributeRelayHop(ctx, hop, transient.TransportFailureStatus, nil, nil)
-		s.log.Error("operator request failed", slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
+		s.logForwardFailure(ctx, slog.LevelError, "operator request failed", endpoint, hop, err)
 		em.fail(newError("upstream_unreachable", err.Error()))
 		return
 	}
 	defer upstreamResp.Body.Close()
 
-	respBody, err := io.ReadAll(upstreamResp.Body)
+	respBody, err := readReply(upstreamResp.Body, s.cfg.StreamIdle, s.replyCap(), cancelReq)
 	if err != nil {
-		em.fail(newError("read_upstream", err.Error()))
+		s.logForwardFailure(ctx, slog.LevelWarn, "operator reply read failed", endpoint, hop, err)
+		em.fail(readUpstreamError(err))
 		return
 	}
 
@@ -143,6 +148,22 @@ func (s *Client) forwardRawNonStream(
 		s.log.Error("response handling failed", slog.String("endpoint", endpoint), slog.Any("err", err))
 		em.fail(newError("response_handler", "operator response could not be processed"))
 	}
+}
+
+// logForwardFailure logs a forward that failed at level. One the caller ended
+// by leaving is expected, so it is logged at debug.
+func (s *Client) logForwardFailure(ctx context.Context, level slog.Level, msg, endpoint string, hop *RelayHop, err error) {
+	if ctx.Err() != nil {
+		level = slog.LevelDebug
+	}
+	s.log.Log(ctx, level, msg, slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
+}
+
+func (s *Client) replyCap() int64 {
+	if s.replyLimit > 0 {
+		return s.replyLimit
+	}
+	return maxReplyBytes
 }
 
 // nodeHeader is the node's response header set as the caller sees it: a copy

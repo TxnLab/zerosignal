@@ -31,6 +31,21 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a whole reply is bounded, and a caller's leaving reaches a stream before its headers (unreleased)
+
+Both SDKs now read a whole (non-streamed) reply's body under the stream idle bound's
+between-bytes budget, 60 s by default, and refuse one over 256 MiB. Either ends the turn
+`read_upstream`, with the `StreamIdleTimeoutError` or the size error as its cause. This covers
+the buffered forward and a buffered reply to a streamed request. Previously a node or relay
+that stopped sending mid-body, or never ended it, held the turn and its escrow until the caller
+gave up. `StreamIdle{Off: true}` (TS `streamIdle: false`) turns off the time bound but not the
+size cap.
+
+A caller who cancels a streamed request before the node's headers arrive now ends it at once.
+Previously the request ran on until the headers came, or the 5-minute header backstop. The
+relay is no longer charged for that request, and the failure is logged at debug rather than
+error.
+
 ### 2026-10-13 — the Go SDK cuts a silent stream (unreleased)
 
 A streamed answer whose node or relay stops sending without closing now ends

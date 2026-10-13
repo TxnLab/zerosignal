@@ -199,6 +199,7 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"streamIdlePreStreamMs":  Config{}.withDefaults().StreamIdle.PreStream.Milliseconds(),
 			"streamIdleMidStreamMs":  Config{}.withDefaults().StreamIdle.MidStream.Milliseconds(),
 			"streamIdleToolActiveMs": Config{}.withDefaults().StreamIdle.ToolActive.Milliseconds(),
+			"maxReplyBytes":          int64(maxReplyBytes),
 		},
 	}
 	for _, c := range eventTypeCases {

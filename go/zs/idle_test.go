@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -383,6 +384,158 @@ func TestIdleWatchdog_StopReportsTheTimeout(t *testing.T) {
 	c.advance(time.Second)
 	if e := w.stop(); e == nil || e.Phase != IdlePreStream {
 		t.Errorf("stop after firing = %v, want the pre-stream timeout", e)
+	}
+}
+
+// replyPipe is a body whose bytes the test writes; cancel ends it as a
+// cancelled request ends a response body.
+func replyPipe() (*io.PipeReader, *io.PipeWriter, func(), *atomic.Bool) {
+	pr, pw := io.Pipe()
+	var cancelled atomic.Bool
+	return pr, pw, func() {
+		cancelled.Store(true)
+		pw.CloseWithError(context.Canceled)
+	}, &cancelled
+}
+
+func TestReadReply_CutsASilenceAtTheMidStreamBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first string
+		phase string
+	}{
+		// Before the first byte too: the node writes a buffered body with its
+		// headers, so the pre-stream budget doesn't apply.
+		{"before the first byte", "", IdlePreStream},
+		{"between bytes", "ab", IdleMidStream},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, pw, cancel, cancelled := replyPipe()
+			if tc.first != "" {
+				go func() { _, _ = io.WriteString(pw, tc.first) }()
+			}
+			_, err := readReply(pr, StreamIdle{PreStream: time.Hour, MidStream: 30 * time.Millisecond}, 1<<20, cancel)
+			var idleErr *StreamIdleTimeoutError
+			if !errors.As(err, &idleErr) || idleErr.Phase != tc.phase || idleErr.Timeout != 30*time.Millisecond {
+				t.Errorf("err = %v, want the %s cut at the mid-stream budget", err, tc.phase)
+			}
+			if !cancelled.Load() {
+				t.Error("the cut did not cancel the request")
+			}
+		})
+	}
+}
+
+func TestReadReply_ABodyStillFlowingIsRead(t *testing.T) {
+	pr, pw, cancel, _ := replyPipe()
+	go func() {
+		for range 10 {
+			_, _ = io.WriteString(pw, "x")
+			time.Sleep(10 * time.Millisecond)
+		}
+		pw.Close()
+	}()
+	got, err := readReply(pr, StreamIdle{MidStream: 100 * time.Millisecond}, 1<<20, cancel)
+	if err != nil || string(got) != "xxxxxxxxxx" {
+		t.Errorf("got %q, %v; want the whole body", got, err)
+	}
+}
+
+func TestReadReply_OffWaitsOutTheSilence(t *testing.T) {
+	pr, pw, cancel, _ := replyPipe()
+	go func() {
+		_, _ = io.WriteString(pw, "a")
+		time.Sleep(60 * time.Millisecond)
+		_, _ = io.WriteString(pw, "b")
+		pw.Close()
+	}()
+	got, err := readReply(pr, StreamIdle{Off: true, MidStream: 10 * time.Millisecond}, 1<<20, cancel)
+	if err != nil || string(got) != "ab" {
+		t.Errorf("got %q, %v; want the whole body", got, err)
+	}
+}
+
+func TestReadReply_RefusesABodyOverTheLimit(t *testing.T) {
+	got, err := readReply(strings.NewReader("12345"), StreamIdle{}, 5, func() {})
+	if err != nil || string(got) != "12345" {
+		t.Errorf("at the limit: got %q, %v; want the body", got, err)
+	}
+	_, err = readReply(strings.NewReader("123456"), StreamIdle{}, 5, func() {})
+	var idleErr *StreamIdleTimeoutError
+	if err == nil || errors.As(err, &idleErr) || err.Error() != "the node's reply is over 5 bytes" {
+		t.Errorf("over the limit: err = %v, want refused for size", err)
+	}
+}
+
+// bufferedNode answers with a JSON body: the whole of it, or its first part
+// and then silence until the test ends.
+func bufferedNode(t *testing.T, body string, silent bool) string {
+	t.Helper()
+	release := make(chan struct{})
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		sseWrite(w, body)
+		if silent {
+			<-release
+		}
+	}))
+	t.Cleanup(node.Close)
+	t.Cleanup(func() { close(release) })
+	return node.URL
+}
+
+// forwardBuffered runs the buffered reply at url through forwardRawNonStream,
+// or through forwardRawStream's fallback, under c, and reports the error and
+// the body the responder got.
+func forwardBuffered(t *testing.T, s *Client, url string, streaming bool) (*Error, []byte) {
+	t.Helper()
+	em := &recEmitter{}
+	var got []byte
+	respond := func(_ emitter, _ *http.Response, b []byte) error { got = b; return nil }
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if streaming {
+			var genComplete atomic.Bool
+			s.forwardRawStream(context.Background(), em, url, "", []byte("{}"), "application/json", nil, nil,
+				passFrames, respond, &genComplete, nil)
+		} else {
+			s.forwardRawNonStream(context.Background(), em, url, "", []byte("{}"), "application/json", nil, nil, respond)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the forward did not return")
+	}
+	return em.failed, got
+}
+
+func TestForwardBuffered_CutsASilentBody(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		s := forwardAttributionServer(nil)
+		s.cfg.StreamIdle = StreamIdle{MidStream: 50 * time.Millisecond}
+		failed, _ := forwardBuffered(t, s, bufferedNode(t, `{"partial":`, true), streaming)
+		var idleErr *StreamIdleTimeoutError
+		if failed == nil || failed.Code != "read_upstream" || !errors.As(failed, &idleErr) || idleErr.Timeout != 50*time.Millisecond {
+			t.Errorf("streaming=%v: failed with %v, want read_upstream caused by the configured bound", streaming, failed)
+		}
+	}
+}
+
+func TestForwardBuffered_CapsTheBody(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		s := forwardAttributionServer(nil)
+		s.replyLimit = 8
+		if failed, got := forwardBuffered(t, s, bufferedNode(t, `{"a":12}`, false), streaming); failed != nil || string(got) != `{"a":12}` {
+			t.Errorf("streaming=%v, at the cap: failed %v, got %q", streaming, failed, got)
+		}
+		if failed, got := forwardBuffered(t, s, bufferedNode(t, `{"a":123}`, false), streaming); failed == nil || failed.Code != "read_upstream" || got != nil {
+			t.Errorf("streaming=%v, over the cap: failed %v, got %q; want read_upstream", streaming, failed, got)
+		}
+	}
+	if (&Client{}).replyCap() != 256<<20 {
+		t.Error("the default cap is not 256 MiB")
 	}
 }
 

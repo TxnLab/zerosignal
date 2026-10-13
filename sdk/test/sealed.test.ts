@@ -463,6 +463,66 @@ describe('forwardBuffered', () => {
         expect(order).toEqual(['attributed', 'responded'])
     })
 
+    it('reads the body under the idle bound and the size cap', async () => {
+        const silent = new Response(
+            new ReadableStream({
+                start(c) {
+                    c.enqueue(new TextEncoder().encode('{"partial":'))
+                },
+            }),
+        )
+        let em = new Recorder()
+        const bound = { preStream: 60_000, midStream: 30, toolActive: 60_000 }
+        await forwardBuffered({ fetch: async () => silent, logger, streamIdle: bound }, em, out, { endpoint: ENDPOINT, hop: null }, ok)
+        expect(em.failed).toMatchObject({ code: 'read_upstream' })
+        expect(em.failed?.cause).toMatchObject({ name: 'StreamIdleTimeoutError', timeoutMs: 30 })
+
+        for (const [body, whole] of [
+            ['{"a":12}', true],
+            ['{"a":123}', false],
+        ] as const) {
+            em = new Recorder()
+            let got: string | undefined
+            await forwardBuffered({ fetch: async () => new Response(body), logger, maxReplyBytes: 8 }, em, out, { endpoint: ENDPOINT, hop: null }, async (_e, _r, b) => {
+                got = new TextDecoder().decode(b)
+            })
+            if (whole) expect([em.failed, got]).toEqual([undefined, body])
+            else expect([em.failed?.code, got]).toEqual(['read_upstream', undefined])
+        }
+    })
+
+    it('logs a request the caller ended at debug', async () => {
+        const logged: string[] = []
+        const ac = new AbortController()
+        const fetch = async () => {
+            ac.abort()
+            throw new DOMException('aborted', 'AbortError')
+        }
+        const log = {
+            ...logger,
+            debug: (m: string) => logged.push(`debug ${m}`),
+            warn: (m: string) => logged.push(`warn ${m}`),
+            error: (m: string) => logged.push(`error ${m}`),
+        }
+        await forwardBuffered({ fetch, logger: log }, new Recorder(), out, { endpoint: ENDPOINT, hop: null, signal: ac.signal }, ok)
+        await forwardBuffered({ fetch: async () => Promise.reject(new TypeError('fetch failed')), logger: log }, new Recorder(), out, { endpoint: ENDPOINT, hop: null }, ok)
+        // This request rides the caller's signal, so a caller who leaves
+        // mid-body ends it.
+        const leaving = new AbortController()
+        const midBody = async () =>
+            new Response(
+                new ReadableStream({
+                    start(c) {
+                        c.enqueue(new TextEncoder().encode('{"partial":'))
+                        leaving.abort()
+                        c.error(new DOMException('aborted', 'AbortError'))
+                    },
+                }),
+            )
+        await forwardBuffered({ fetch: midBody, logger: log }, new Recorder(), out, { endpoint: ENDPOINT, hop: null, signal: leaving.signal }, ok)
+        expect(logged).toEqual(['debug operator request failed', 'error operator request failed', 'debug operator reply read failed'])
+    })
+
     it('fails read_upstream when the body won’t read, and response_handler when the responder throws', async () => {
         const broken = new Response(
             new ReadableStream({

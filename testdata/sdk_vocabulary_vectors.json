@@ -284,6 +284,7 @@
     "maxCacheAgeMs": 900000,
     "maxCarryAgeMs": 5400000,
     "maxOutputCeiling": 32768,
+    "maxReplyBytes": 268435456,
     "probeBudget": 96,
     "refreshIntervalMs": 300000,
     "refreshTimeoutMs": 30000,

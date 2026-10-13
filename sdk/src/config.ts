@@ -183,7 +183,8 @@ export interface Config {
      * stream_interrupted, caused by a StreamIdleTimeoutError; false for no
      * bound. A browser's fetch has no read timeout and the SDK's Node fetch
      * sets none, so without one a node or relay that stops sending without
-     * closing holds the turn until the caller gives up. Go's is
+     * closing holds the turn until the caller gives up. A whole reply's body
+     * is held to midStream, and ends read_upstream. Go's is
      * Config.StreamIdle. A budget past setTimeout's limit, about 24.8 days,
      * is held to it.
      */
