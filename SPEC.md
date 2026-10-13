@@ -2248,7 +2248,19 @@ On receipt the relay:
 
    2a. **Refuses a private dial target (SSRF guard).** The relay's forwarding
    HTTP client rejects any *resolved* IP in a loopback / RFC1918 / link-local /
-   CGNAT / ULA range (v4 and v6). A malicious operator that registers a private
+   CGNAT / ULA range (v4 and v6), and an IPv6 address that reaches one through a
+   well-known embedding: NAT64 `64:ff9b::/96`, SIIT `::ffff:0:0:0/96` and 6to4
+   `2002::/16` are judged by the IPv4 address they carry, and the
+   IPv4-compatible `::/96`, local-use NAT64 `64:ff9b:1::/48` and Teredo
+   `2001::/32` are refused whole. On a DNS64 network a name with a private A
+   record resolves into `64:ff9b::/96`, so without this the guard passes it.
+   Two limits follow from judging the address alone. A NAT64 under a
+   network-specific prefix (RFC 6052 §2.2, carved from the network's own space)
+   is not recognisable, so a private A record synthesised under one still
+   passes. And a host whose DNS64 uses the local-use prefix cannot reach an
+   IPv4-only target through the guard, because that prefix's length, and so
+   where the IPv4 address sits, is the network's choice. A
+   malicious operator that registers a private
    `base_url`, or a hostname resolving into private space, therefore cannot turn
    a relay into a prober against its own LAN: the dial fails before any bytes
    are sent, surfacing as `relay_upstream_unreachable`. Because the check

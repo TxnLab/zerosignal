@@ -26,6 +26,8 @@
 // host would never fire, and it keeps a trailing root dot (localhost.), which
 // resolves like the bare name.
 
+import { isPrivateAddress } from './privateip.js'
+
 function ipv4Octets(host: string): [number, number, number, number] | null {
     const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
     if (!m) return null
@@ -47,7 +49,8 @@ function isPrivateIPv4([a, b]: [number, number, number, number]): boolean {
 }
 
 // Blocks all of ::/96 (unspecified, loopback, IPv4-compatible, IPv4-mapped),
-// ULA fc00::/7, link-local fe80::/10 and multicast ff00::/8.
+// ULA fc00::/7, link-local fe80::/10 and multicast ff00::/8, and whatever the
+// dial guard refuses.
 function isPrivateIPv6(host: string): boolean {
     const h = host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host
     if (!h.includes(':')) return false
@@ -61,7 +64,10 @@ function isPrivateIPv6(host: string): boolean {
     return (
         (first >= 0xfc00 && first <= 0xfdff) || // ULA
         (first >= 0xfe80 && first <= 0xfebf) || // link-local
-        first >= 0xff00 // multicast
+        first >= 0xff00 || // multicast
+        // NAT64 (both prefixes), 6to4 and Teredo reach an IPv4 address; the
+        // dial guard's judgment of them holds for a literal too.
+        isPrivateAddress(h)
     )
 }
 

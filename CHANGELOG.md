@@ -31,6 +31,17 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-12 — the private-target guard judges translated IPv6 (unreleased)
+
+Go's `httpx.IsPrivateIP` (the `BlockPrivateTargets` dial guard, used by the node's relay, web
+read and favicon fetches and by the Go SDK's operator clients) and the TS SDK's `isPrivateAddress` /
+`isBlockedOperatorUrl` now refuse an IPv6 address that reaches a private IPv4 address. NAT64
+`64:ff9b::/96`, SIIT `::ffff:0:0:0/96` and 6to4 `2002::/16` are judged by the IPv4 address they
+carry; `::/96`, local-use NAT64 `64:ff9b:1::/48` and Teredo `2001::/32` are refused whole. On a
+DNS64 network a name with a private A record resolved into `64:ff9b::/96` and passed the guard.
+A NAT64 under a network-specific prefix is still not recognisable, and a host whose DNS64 uses
+the local-use prefix can't reach IPv4-only targets through the guard (SPEC §3f, step 2a).
+
 ### 2026-10-12 — payer obligations, the pool opt-in and the doctor (0.5.0)
 
 Both SDKs unless noted:

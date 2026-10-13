@@ -54,7 +54,9 @@ reads as reachable. Outside Node it refuses a URL whose host is literally privat
 `PrivateTargetError`. In Node it checks every address it is about to dial: a name that
 resolves into a private, loopback, link-local, multicast or CGNAT range is refused at the dial,
 against the same resolution the socket uses, so a DNS rebind can't slip between the check and
-the connection. That fetch rejects with a `TypeError` whose `cause` is a `PrivateTargetError`.
+the connection. The same goes for an IPv6 address that reaches such a range through NAT64, SIIT
+or 6to4, and for the IPv6 ranges whose target can't be read off the address (`::/96`, local-use
+NAT64 `64:ff9b:1::/48`, Teredo), which are refused whole. That fetch rejects with a `TypeError` whose `cause` is a `PrivateTargetError`.
 `allowPrivateHosts: true` lifts the check, for localnet.
 
 The guard is `nodeFetch` from `@txnlab/zerosignal/node`, built on
