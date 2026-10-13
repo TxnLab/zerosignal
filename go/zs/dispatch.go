@@ -1753,7 +1753,14 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	var preferred *selection.Operator
 	var preferredOp *Operator
 	if s.cfg.Affinity.Policy != AffinityNone && s.toolAffinity != nil {
-		for _, id := range ExtractInputToolCallIDs(body) {
+		// Newest id first: a client resends its whole history, so the oldest
+		// live id names the node that served the conversation's start, which a
+		// pin that yielded since has left. The latest turn's node holds the KV
+		// cache and, on Responses, the account that encrypted the reasoning the
+		// request replays.
+		ids := ExtractInputToolCallIDs(body)
+		for i := len(ids) - 1; i >= 0; i-- {
+			id := ids[i]
 			if opID, nodeID, ok := s.toolAffinity.Lookup(id); ok {
 				// Resolve the EXACT (operator, node) that served the prior turn
 				// — KV-cache reuse is per-node, so the preferred descriptor must
