@@ -90,7 +90,7 @@ func (f settleFixture) check(c *Client, slot *settleSlot, h settlementHandle, ma
 		computed = wire.BodyHashOfBody([]byte("other content"))
 	}
 	ctx := withSettleSlot(context.Background(), slot)
-	submit, _ := c.checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op, h, f.receipt, computed, f.plaintext, 0, group, nil)
+	submit, _ := c.checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op, h, f.receipt, computed, f.plaintext, group, nil)
 	return submit
 }
 
@@ -175,7 +175,7 @@ func TestRunReceiptChecks_ReturnsTheSubmitsFee(t *testing.T) {
 	f := newSettleFixture(t)
 	check := settleClient().runReceiptChecks(withSettleSlot(context.Background(), newSettleSlot()),
 		endpointChatCompletions, "m", f.tkt, f.op, &scriptedSettleHandle{txid: "ACKTX", fee: 1000},
-		f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, 0, nil, nil)
+		f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, nil, nil)
 	if check.settled.FeesMicroAlgos != 1000 || check.settled.TxID != "ACKTX" || check.violation != "" {
 		t.Errorf("check = %+v, want the ack's ACKTX and 1000, no violation", check)
 	}

@@ -8,11 +8,9 @@ package zs
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
-	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // errorKinds is the Kind of every code dispatch reports. The code decides it,
@@ -86,28 +84,6 @@ func newError(code, message string) *Error {
 		kind = KindInternal
 	}
 	return &Error{Kind: kind, Code: code, Message: message}
-}
-
-// inferenceDenom is the (currency, decimals) the inference charge is
-// denominated in: the contract escrows USDC (SPEC.md §3.3a).
-func inferenceDenom(_ *ticket.Ticket) (currency string, decimals int) {
-	return "USDC", 6
-}
-
-// inferenceUSD converts an inference charge to USD: USDC is dollar-pegged;
-// ALGO needs the rate and is 0 without it. Unknown currencies return 0.
-func inferenceUSD(amount uint64, currency string, decimals int, algoUSDPrice float64) float64 {
-	scale := math.Pow10(decimals)
-	switch currency {
-	case "USDC":
-		return float64(amount) / scale
-	case "ALGO":
-		if algoUSDPrice <= 0 {
-			return 0
-		}
-		return float64(amount) / scale * algoUSDPrice
-	}
-	return 0
 }
 
 // openAIErrorBody is an OpenAI-shaped error body, newline included, for a

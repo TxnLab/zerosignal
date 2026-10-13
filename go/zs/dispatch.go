@@ -3128,7 +3128,7 @@ func (s *Client) buildNonStreamResponder(
 		// and (step 8) drives escrow.protest.
 		receiptHdr := openSealedResponseMeta(s, upstreamResp.Header.Get(wire.ReceiptHeader), opener, ticket, wire.SealedHeaderReceipt, op, hop)
 		settleGroupHdr := openSealedResponseMeta(s, upstreamResp.Header.Get(wire.SettleGroupHeader), opener, ticket, wire.SealedHeaderSettleGroup, op, hop)
-		receipt, submitSettle, violation := s.verifyNonStreamReceipt(ctx, receiptHdr, settleGroupHdr, endpoint, model, ticket, op, handle, plaintext, algoUSDPrice, hop)
+		receipt, submitSettle, violation := s.verifyNonStreamReceipt(ctx, receiptHdr, settleGroupHdr, endpoint, model, ticket, op, handle, plaintext, hop)
 		// The escrow submit is launched asynchronously so the handler never
 		// blocks the client's response on an algod round-trip. The price is the
 		// fee headers below: they cannot include the payer's settle fee, which is
@@ -3517,7 +3517,7 @@ func addU64(vs ...uint64) (uint64, bool) {
 // malformed — receipt-shape problems are recorded evidence, not a reason
 // to withhold the already-decrypted response. submit is nil when there is
 // nothing to put on chain.
-func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op Operator, handle settlementHandle, plaintext []byte, algoUSDPrice float64, hop *RelayHop) (*ticket.UsageReceipt, settleSubmit, string) {
+func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGroupHeaderVal, endpoint, model string, tkt *ticket.Ticket, op Operator, handle settlementHandle, plaintext []byte, hop *RelayHop) (*ticket.UsageReceipt, settleSubmit, string) {
 	if headerVal == "" {
 		s.log.Debug("no receipt header on zs response; tolerating",
 			opAttr(op),
@@ -3536,7 +3536,7 @@ func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGr
 	}
 	presignedSettleGroup := decodeSettleGroupHeader(s, settleGroupHeaderVal, op, tkt, hop)
 	// Only the violation is known before the reply: the submit runs after it.
-	submit, check := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, algoUSDPrice, presignedSettleGroup, hop)
+	submit, check := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, presignedSettleGroup, hop)
 	return &receipt, submit, check.violation
 }
 
@@ -3832,11 +3832,10 @@ func (s *Client) runReceiptChecks(
 	receipt *ticket.UsageReceipt,
 	computed [32]byte,
 	plaintext []byte,
-	algoUSDPrice float64,
 	presignedSettleGroup []types.SignedTxn,
 	hop *RelayHop,
 ) receiptCheck {
-	submit, check := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, algoUSDPrice, presignedSettleGroup, hop)
+	submit, check := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, presignedSettleGroup, hop)
 	if submit != nil {
 		_, _ = submit()
 	}
@@ -3874,7 +3873,6 @@ func (s *Client) checkReceipt(
 	receipt *ticket.UsageReceipt,
 	computed [32]byte,
 	plaintext []byte,
-	algoUSDPrice float64,
 	presignedSettleGroup []types.SignedTxn,
 	hop *RelayHop,
 ) (settleSubmit, *receiptCheck) {
@@ -3930,7 +3928,6 @@ func (s *Client) checkReceipt(
 		// node-authoritative usage + microUSDC charge. This is the
 		// primary observability hook the operator reads to watch
 		// spend in real time.
-		currency, decimals := inferenceDenom(ticket)
 		paidAttrs := []slog.Attr{
 			slog.String("endpoint", endpoint),
 			slog.String("model", model),
@@ -3942,7 +3939,8 @@ func (s *Client) checkReceipt(
 			slog.Uint64("actual_output_count", receipt.ActualOutputCount),
 			slog.Uint64("amount_microusdc", receipt.AmountCharged),
 		}
-		if usd := inferenceUSD(receipt.AmountCharged, currency, decimals, algoUSDPrice); usd > 0 {
+		// Inference is denominated in USDC, which is dollar-pegged.
+		if usd := float64(receipt.AmountCharged) / 1_000_000; usd > 0 {
 			paidAttrs = append(paidAttrs, slog.String("amount_usd", fmt.Sprintf("$%.6f", usd)))
 		}
 		s.log.LogAttrs(ctx, slog.LevelInfo, "zs request paid", paidAttrs...)
@@ -4420,7 +4418,6 @@ func (s *Client) buildFrameFactory(
 					&receipt,
 					wire.BodyHashFromFrames(contentFrames),
 					flat,
-					algoUSDPrice,
 					presignedSettleGroup,
 					hop,
 				)

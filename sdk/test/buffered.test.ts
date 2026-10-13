@@ -98,7 +98,6 @@ function check(
         receipt: f.receipt,
         computedHash: computed,
         plaintext: f.plaintext,
-        algoUsdPrice: 0,
         settleGroup: o.group ?? null,
         hop: null,
         slot: o.slot,

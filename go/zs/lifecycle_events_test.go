@@ -172,7 +172,7 @@ func TestCheckReceipt_SettleCarriesNoNote(t *testing.T) {
 	var log noteLog
 	ctx := withNote(withSettleSlot(context.Background(), newSettleSlot()), log.note)
 	submit, _ := settleClient().checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op,
-		&noteSpyHandle{scriptedSettleHandle{txid: "ACK"}}, f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, 0, nil, nil)
+		&noteSpyHandle{scriptedSettleHandle{txid: "ACK"}}, f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, nil, nil)
 	if submit == nil {
 		t.Fatal("a verified receipt built no submit")
 	}

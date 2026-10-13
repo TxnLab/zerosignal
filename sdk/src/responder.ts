@@ -263,7 +263,6 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
                     receipt,
                     computedHash: bodyHashOfBody(plaintext),
                     plaintext,
-                    algoUsdPrice: reserved.algoUsdPrice,
                     settleGroup: settleGroupOf(meta, settleGroupHdr),
                     hop,
                     slot,
