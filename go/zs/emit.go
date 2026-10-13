@@ -41,8 +41,9 @@ type emitter interface {
 	// frame delivers one stream frame and returns its size on the wire, for
 	// the stream tally; a usage report is not a frame and counts 0.
 	frame(f outFrame) (int, error)
-	// interrupt ends an open stream that broke before its end.
-	interrupt()
+	// interrupt ends an open stream that broke before its end; cause, when
+	// known, is the stream_interrupted error's Err.
+	interrupt(cause error)
 }
 
 type noteKey struct{}
@@ -317,10 +318,12 @@ func (e *streamEmitter) frame(out outFrame) (int, error) {
 
 // interrupt ends a stream that broke. A failure the node already reported is
 // the better account of why, so it wins.
-func (e *streamEmitter) interrupt() {
+func (e *streamEmitter) interrupt(cause error) {
 	if e.dec != nil && e.dec.failure != nil {
 		e.end(e.dec.failure)
 		return
 	}
-	e.end(newError("stream_interrupted", "the stream broke before its end"))
+	err := newError("stream_interrupted", "the stream broke before its end")
+	err.Err = cause
+	e.end(err)
 }

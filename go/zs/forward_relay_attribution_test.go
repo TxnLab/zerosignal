@@ -118,7 +118,7 @@ func TestForwardRawStream_UnreachableRelayIsChargedDespiteCallerHangUp(t *testin
 	s.forwardRawStream(ctx, &recEmitter{}, deadURL, "", []byte("{}"), "application/json", nil, hop,
 		passFrames,
 		func(emitter, *http.Response, []byte) error { return nil },
-		&genComplete)
+		&genComplete, nil)
 
 	got, ok := rep.last(hop.RelayRef())
 	if !ok {

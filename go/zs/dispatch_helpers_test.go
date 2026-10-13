@@ -66,6 +66,7 @@ type recEmitter struct {
 	replied *NodeReply
 	opened  int
 	broken  bool
+	cause   error
 }
 
 func (e *recEmitter) note(ev Event) {
@@ -105,10 +106,11 @@ func (e *recEmitter) frame(out outFrame) (int, error) {
 	e.frames = append(e.frames, out.frame)
 	return len(out.frame.SSE()), nil
 }
-func (e *recEmitter) interrupt() {
+func (e *recEmitter) interrupt(cause error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.broken = true
+	e.cause = cause
 }
 
 // passFrames is a frameTransformFactory that forwards each frame unchanged.

@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — the Go SDK cuts a silent stream (unreleased)
+
+A streamed answer whose node or relay stops sending without closing now ends
+`stream_interrupted`, its `Err` a `*StreamIdleTimeoutError`, as in TS: by default after 300 s
+with no first byte, 60 s between bytes after that, or 300 s while the node runs an image tool.
+Previously the Go SDK waited as long as the caller's context allowed, and the turn's escrow
+with it. `Config.StreamIdle` sets each bound, and `StreamIdle{Off: true}` turns it off.
+
 ### 2026-10-13 — host hooks can't bypass the spend cap or stop the SDK (unreleased)
 
 A `SpendGuard` method that returns a Promise no longer slips past the cap: the TS methods now

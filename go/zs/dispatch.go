@@ -2588,8 +2588,9 @@ func (s *Client) runSealed(
 		// (node already done → pay the operator for delivered content) or
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
-		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete)
-		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
+		idle := newIdleWatchdog(s.cfg.StreamIdle)
+		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, idle)
+		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete, idle)
 		return
 	}
 	s.forwardRawNonStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
@@ -4154,6 +4155,7 @@ func (s *Client) buildFrameFactory(
 	openFees uint64,
 	hop *RelayHop,
 	genComplete *atomic.Bool,
+	idle *idleWatchdog,
 ) frameTransformFactory {
 	return func(upstreamResp *http.Response) (frameTransform, error) {
 		wrappedKey := upstreamResp.Header.Get(wire.ResponseKeyHeader)
@@ -4288,6 +4290,8 @@ func (s *Client) buildFrameFactory(
 				if genComplete != nil && verdict.Terminal && !genComplete.Load() {
 					genComplete.Store(true)
 				}
+				// An image tool's round is silent while it runs.
+				idle.frame(plaintext)
 				// So the next turn of a tool-calling conversation routes back
 				// here, as a buffered reply's tool calls do. Each id rides its
 				// call's first chunk only, so ids are recorded as they arrive.

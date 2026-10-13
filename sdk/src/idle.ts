@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The read-side silence bound on a streamed answer. The Go SDK has none: its
-// callers bound a turn with their context's deadline. A fetch in a browser
-// has no read timeout at all, and the SDK's Node fetch sets none, so a stream
+// The read-side silence bound on a streamed answer. A fetch in a browser has
+// no read timeout at all, and the SDK's Node fetch sets none, so a stream
 // whose node or relay stops sending, without closing, would hold the turn and
 // its escrow until the caller gave up. The bound is on bytes, not frames: a
 // node's keepalive comment proves the hop is alive.
 //
 // Ported from the chat app's envelope-fetch watchdog, with its three budgets.
+// Go's twin is go/zs/idle.go, tested per language.
 
 /** Which budget a silence was measured against. */
 export type StreamIdlePhase = 'pre-stream' | 'mid-stream' | 'tool-active'

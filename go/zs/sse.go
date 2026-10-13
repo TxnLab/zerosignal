@@ -159,6 +159,7 @@ func (s *Client) forwardRawStream(
 	frameFnFactory frameTransformFactory,
 	nonStreamFallback nonStreamResponder,
 	genComplete *atomic.Bool,
+	idle *idleWatchdog,
 ) {
 	// Detach the upstream read from the client request. If the client
 	// disconnects AFTER the node has finished generating (genComplete is set by
@@ -282,11 +283,40 @@ func (s *Client) forwardRawStream(
 		}
 	}()
 
+	// idle bounds the node's silences, the tail drain included: a silence past
+	// its budget cancels the upstream, and the turn ends stream_interrupted
+	// with the *StreamIdleTimeoutError as its cause.
+	idle.start(func(err *StreamIdleTimeoutError) {
+		s.log.Warn("upstream stream idle; cancelling upstream",
+			slog.String("endpoint", endpoint), relayAttr(hop),
+			slog.String("phase", err.Phase), slog.Int64("timeout_ms", err.Timeout.Milliseconds()))
+		cancelUpstream()
+	})
+	// Deferred too, so a caller's loop body that panics through the pump
+	// leaves no timer behind.
+	defer idle.stop()
+	var upstreamBody io.Reader = upstreamResp.Body
+	timedFn, emit := frameFn, em.frame
+	if idle != nil {
+		upstreamBody = idleReader{r: upstreamBody, w: idle}
+		// The hook settles a receipt inline, and the emitter runs the
+		// caller's loop body inline; neither reads the node meanwhile.
+		timedFn = func(f Frame) (outFrame, error) {
+			return bracket(idle, func() (outFrame, error) { return frameFn(f) })
+		}
+		emit = func(o outFrame) (int, error) {
+			return bracket(idle, func() (int, error) { return em.frame(o) })
+		}
+	}
+
 	// The emitter swallows frames once the caller is gone, so a dead-socket
 	// write error can't abort a tail drain before it reaches the receipt frame.
-	// The pump itself stops on upstreamCtx (clean EOF, or cancelUpstream from
-	// the watcher).
-	pumpErr := pumpSSE(upstreamCtx, em.frame, upstreamResp.Body, frameFn, &tally)
+	// The pump itself stops on upstreamCtx (clean EOF, cancelUpstream from the
+	// watcher, or the idle bound).
+	pumpErr := pumpSSE(upstreamCtx, emit, upstreamBody, timedFn, &tally)
+	// Every way the pump ends stops the watchdog first, so a timeout here is
+	// what ended it.
+	idleErr := idle.stop()
 	close(pumpDone)
 	// The pump has stopped, so the tally is settled and safe to read.
 	//
@@ -312,7 +342,11 @@ func (s *Client) forwardRawStream(
 		// Only surface a stream error to the client if it's still connected; a
 		// drain that ended because the client left has nothing to write to.
 		if ctx.Err() == nil {
-			em.interrupt()
+			var cause error
+			if idleErr != nil {
+				cause = idleErr
+			}
+			em.interrupt(cause)
 		}
 	}
 }

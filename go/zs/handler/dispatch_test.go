@@ -154,6 +154,9 @@ type nodeConfig struct {
 	// returns the unsigned receipt for the harness to sign. Return
 	// nil from the builder to skip attaching.
 	buildReceipt func(plaintext []byte) *ticket.UsageReceipt
+	// beforeFrame, when set, runs before a modeStreamEncrypted node writes
+	// frame i: a node that pauses there.
+	beforeFrame func(i int)
 }
 
 type fakeNode struct {
@@ -587,20 +590,20 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 		if cfg.replyStatus != 0 {
 			w = statusOverride{w, cfg.replyStatus}
 		}
-		writeEncryptedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID, false)
+		writeEncryptedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID, false, cfg.beforeFrame)
 	case modeStreamPlaintext:
 		writePlainStream(t, w, cfg.streamFrames)
 	case modeStreamMixedEvents:
 		writeMixedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID)
 	case modeStreamTamperedFrame:
-		writeEncryptedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID, true)
+		writeEncryptedStream(t, w, k, cfg.streamFrames, ephemeral, txID, ticketID, true, nil)
 	case modeStreamCommitKMismatch:
 		// Seal the stream (and wrap the response-key header) with a freshly
 		// generated K instead of the committed one — the proxy's stream-setup
 		// commit_k check must refuse before pumping any frame.
 		var bogus [wire.ResponseKeySize]byte
 		_, _ = rand.Read(bogus[:])
-		writeEncryptedStream(t, w, bogus, cfg.streamFrames, ephemeral, txID, ticketID, false)
+		writeEncryptedStream(t, w, bogus, cfg.streamFrames, ephemeral, txID, ticketID, false, nil)
 	case modeStreamReceiptDropTail:
 		rcpt := n.buildSignedStreamReceipt(t, cfg, ticketID)
 		writeEncryptedStreamWithReceipt(t, w, k, cfg.streamFrames, rcpt, ephemeral, txID, ticketID, true, false, nil)
@@ -795,6 +798,7 @@ func writeEncryptedStream(
 	ephemeral age.Recipient,
 	txID, ticketID string,
 	tamperLast bool,
+	beforeFrame func(i int),
 ) {
 	t.Helper()
 	var wrapped bytes.Buffer
@@ -819,6 +823,9 @@ func writeEncryptedStream(
 	}
 
 	for i, plaintext := range frames {
+		if beforeFrame != nil {
+			beforeFrame(i)
+		}
 		nonce := make([]byte, wire.NonceSize)
 		_, _ = rand.Read(nonce)
 		ct := aead.Seal(nil, nonce, plaintext, wire.BuildFrameAAD(txID, ticketID, uint64(i)))

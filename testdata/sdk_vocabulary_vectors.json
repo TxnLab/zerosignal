@@ -291,6 +291,9 @@
     "responseHeaderBackstopMs": 300000,
     "retryBudgetMs": 60000,
     "settlePendingGraceMs": 120000,
+    "streamIdleMidStreamMs": 60000,
+    "streamIdlePreStreamMs": 300000,
+    "streamIdleToolActiveMs": 300000,
     "targetTopK": 8
   }
 }

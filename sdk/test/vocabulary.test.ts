@@ -35,6 +35,7 @@ import {
     type ZsErrorInit,
     DEFAULT_ATTESTATION_TIMEOUT_MS,
     DEFAULT_LAPSE_FALLBACK_MS,
+    DEFAULT_STREAM_IDLE,
     ESCROW_CONFIG_TIMEOUT_MS,
     FEE_RATE_CACHE_TTL_MS,
     FEE_RATE_REFRESH_TIMEOUT_MS,
@@ -281,6 +282,9 @@ describe('vocabulary shared with the Go SDK', () => {
             feeRateRefreshMs: FEE_RATE_REFRESH_TIMEOUT_MS,
             escrowConfigTimeoutMs: ESCROW_CONFIG_TIMEOUT_MS,
             responseHeaderBackstopMs: RESPONSE_HEADER_BACKSTOP_MS,
+            streamIdlePreStreamMs: DEFAULT_STREAM_IDLE.preStream,
+            streamIdleMidStreamMs: DEFAULT_STREAM_IDLE.midStream,
+            streamIdleToolActiveMs: DEFAULT_STREAM_IDLE.toolActive,
         }).toEqual(vocab.defaults)
     })
 })

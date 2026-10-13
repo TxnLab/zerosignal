@@ -83,7 +83,7 @@ func TestForwardRawStream_TallyNoRaceOnMidStreamDisconnect(t *testing.T) {
 			nil, // direct route: no relay hop
 			passFrames,
 			func(emitter, *http.Response, []byte) error { return nil },
-			&genComplete,
+			&genComplete, nil,
 		)
 	}()
 

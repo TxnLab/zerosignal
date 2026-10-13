@@ -195,6 +195,10 @@ func buildVocabulary(t *testing.T) vocabulary {
 			// The default inference client's wait for a node's response
 			// headers, read off the client so a change there moves it.
 			"responseHeaderBackstopMs": Config{}.defaultHTTPClient().Transport.(*http.Transport).ResponseHeaderTimeout.Milliseconds(),
+			// Read through withDefaults, so a zero field left unfilled moves it.
+			"streamIdlePreStreamMs":  Config{}.withDefaults().StreamIdle.PreStream.Milliseconds(),
+			"streamIdleMidStreamMs":  Config{}.withDefaults().StreamIdle.MidStream.Milliseconds(),
+			"streamIdleToolActiveMs": Config{}.withDefaults().StreamIdle.ToolActive.Milliseconds(),
 		},
 	}
 	for _, c := range eventTypeCases {
