@@ -492,8 +492,9 @@ func ackSettle(atomic bool, d ackSettleDeps) (txid string, feeMicroalgos uint64,
 	if atomic {
 		spec, specErr := d.spec()
 		if specErr != nil {
-			// Spec build failed (address / ticket-id decode) — shouldn't happen
-			// for a signature-verified ticket. Log and fall through to the
+			// Spec build failed (address / ticket-id decode). Unreachable for a
+			// handle Open returned, since Open decoded the same three values
+			// before opening the ticket. Log and fall through to the
 			// standalone receipt-sourced ack rather than block settlement. NOT a
 			// node fault, so groupRejected stays false.
 			d.log.Warn("ack-settle: settle-group spec build failed; falling back to standalone", "err", specErr)
