@@ -99,6 +99,16 @@ func TestExtractStreamToolCallIDs(t *testing.T) {
 		{`{"choices":[{"delta":{"tool_calls":"x"}},{"delta":{"tool_calls":[{"id":"a"}]}}]}`, nil},
 		{`{"choices":[{"delta":{"tool_calls":[5,{"id":"a"}]}}]}`, nil},
 		{`{"type":"response.function_call_arguments.delta","item_id":"fc_1"}`, nil},
+		// A Responses item event carries its call's id on the item.
+		{`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_r","name":"f","arguments":""}}`, []string{"call_r"}},
+		{`{"type":"response.output_item.done","item":{"type":"custom_tool_call","call_id":"call_c"}}`, []string{"call_c"}},
+		{`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}`, nil},
+		{`{"type":"response.output_item.added","item":{"call_id":""}}`, nil},
+		{`{"type":"response.output_item.added","item":null}`, nil},
+		{`{"item":{"call_id":5}}`, nil},
+		{`{"item":"x"}`, nil},
+		// A wrong-typed item fails the decode, ids beside it included.
+		{`{"choices":[{"delta":{"tool_calls":[{"id":"a"}]}}],"item":5}`, nil},
 		{`null`, nil},
 		{`[]`, nil},
 		{`[DONE]`, nil},
@@ -106,6 +116,70 @@ func TestExtractStreamToolCallIDs(t *testing.T) {
 	for _, c := range cases {
 		if got := selection.ExtractStreamToolCallIDs([]byte(c.body)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("ExtractStreamToolCallIDs(%s) = %q, want %q", c.body, got, c.want)
+		}
+	}
+}
+
+// TestExtractInputToolCallIDs mirrors proto/ts/test/extract.test.ts
+// (extractInputToolCallIDs): the keys a request answers, chat and Responses.
+func TestExtractInputToolCallIDs(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`{"messages":[{"role":"user","content":"x"},{"role":"tool","tool_call_id":"call_a"},{"role":"tool","tool_call_id":""}]}`, []string{"call_a"}},
+		// Every Responses item with a call_id: the call, its output, any call type.
+		{`{"input":[{"role":"user","content":"x"},{"type":"reasoning","id":"rs_1","encrypted_content":"e"},{"type":"function_call","call_id":"call_f"},{"type":"function_call_output","call_id":"call_f","output":"o"},{"type":"custom_tool_call_output","call_id":"call_c"}]}`, []string{"call_f", "call_f", "call_c"}},
+		{`{"input":"just a prompt"}`, nil},
+		{`{"input":null}`, nil},
+		{`{"input":[null,{"call_id":null},{"call_id":"call_n"}]}`, []string{"call_n"}},
+		// An empty id is no key: it would pin every other empty-id call.
+		{`{"input":[{"call_id":""}]}`, nil},
+		// A wrong-typed item or call_id yields none from the list.
+		{`{"input":[{"call_id":"ok"},{"call_id":5}]}`, nil},
+		{`{"input":[{"call_id":"ok"},"x"]}`, nil},
+		{`{"input":{"call_id":"x"}}`, nil},
+		// Chat ids come before Responses ids; the pin walks the list newest last.
+		{`{"messages":[{"role":"tool","tool_call_id":"A"}],"input":[{"call_id":"B"}]}`, []string{"A", "B"}},
+		// The item list is read apart from a malformed chat field beside it.
+		{`{"messages":[{"role":"tool","tool_call_id":5}],"input":[{"call_id":"x"}]}`, []string{"x"}},
+		{`{"messages":"x","input":[{"call_id":"x"}]}`, []string{"x"}},
+		// Keys are exact at both levels; a duplicate's last value wins.
+		{`{"Input":[{"call_id":"x"}]}`, nil},
+		{`{"input":[{"CALL_ID":"x"}]}`, nil},
+		{`{"input":[{"call_id":"a","Call_Id":"b"}]}`, []string{"a"}},
+		{`{"input":[{"call_id":"a","call_id":"b"}]}`, []string{"b"}},
+		{`null`, nil},
+		{`[]`, nil},
+	}
+	for _, c := range cases {
+		if got := selection.ExtractInputToolCallIDs([]byte(c.body)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ExtractInputToolCallIDs(%s) = %q, want %q", c.body, got, c.want)
+		}
+	}
+}
+
+// TestExtractResponseToolCallIDs mirrors proto/ts/test/extract.test.ts
+// (extractResponseToolCallIDs): the keys a buffered response issues.
+func TestExtractResponseToolCallIDs(t *testing.T) {
+	cases := []struct {
+		body string
+		want []string
+	}{
+		{`{"choices":[{"message":{"tool_calls":[{"id":"a"},{"id":""}]}},{"message":{"tool_calls":[{"id":"b"}]}}]}`, []string{"a", "b"}},
+		{`{"object":"response","output":[{"type":"reasoning","id":"rs_1"},{"type":"function_call","id":"fc_1","call_id":"call_r"},{"type":"local_shell_call","call_id":"call_s"},{"type":"message","id":"msg_1"}]}`, []string{"call_r", "call_s"}},
+		{`{"output":[{"call_id":"ok"},{"call_id":5}]}`, nil},
+		{`{"output":"x"}`, nil},
+		{`{"output":[{"call_id":""},{"call_id":"call_o"}]}`, []string{"call_o"}},
+		{`{"choices":[{"message":{"tool_calls":[{"id":"A"}]}}],"output":[{"call_id":"B"}]}`, []string{"A", "B"}},
+		{`{"choices":[{"message":{"tool_calls":[{"id":5}]}}],"output":[{"call_id":"x"}]}`, []string{"x"}},
+		{`{"Output":[{"call_id":"x"}]}`, nil},
+		{`{"error":{"message":"m"}}`, nil},
+		{`null`, nil},
+	}
+	for _, c := range cases {
+		if got := selection.ExtractResponseToolCallIDs([]byte(c.body)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ExtractResponseToolCallIDs(%s) = %q, want %q", c.body, got, c.want)
 		}
 	}
 }

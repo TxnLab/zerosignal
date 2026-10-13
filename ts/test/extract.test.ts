@@ -10,8 +10,10 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+    extractInputToolCallIDs,
     extractRequestedBuiltinTools,
     extractResponseID,
+    extractResponseToolCallIDs,
     extractRoutingPreferences,
     extractStreamToolCallIDs,
     normalizeRelay,
@@ -65,11 +67,63 @@ describe('extractStreamToolCallIDs', () => {
         ['{"choices":[{"delta":{"tool_calls":"x"}},{"delta":{"tool_calls":[{"id":"a"}]}}]}', []],
         ['{"choices":[{"delta":{"tool_calls":[5,{"id":"a"}]}}]}', []],
         ['{"type":"response.function_call_arguments.delta","item_id":"fc_1"}', []],
+        ['{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_r","name":"f","arguments":""}}', ['call_r']],
+        ['{"type":"response.output_item.done","item":{"type":"custom_tool_call","call_id":"call_c"}}', ['call_c']],
+        ['{"type":"response.output_item.added","item":{"type":"message","id":"msg_1"}}', []],
+        ['{"type":"response.output_item.added","item":{"call_id":""}}', []],
+        ['{"type":"response.output_item.added","item":null}', []],
+        ['{"item":{"call_id":5}}', []],
+        ['{"item":"x"}', []],
+        ['{"choices":[{"delta":{"tool_calls":[{"id":"a"}]}}],"item":5}', []],
         ['null', []],
         ['[]', []],
         ['[DONE]', []],
     ])('reads %s as %j', (body, want) => {
         expect(extractStreamToolCallIDs(body)).toEqual(want)
+    })
+})
+
+// The same table as Go's TestExtractInputToolCallIDs.
+describe('extractInputToolCallIDs', () => {
+    it.each([
+        ['{"messages":[{"role":"user","content":"x"},{"role":"tool","tool_call_id":"call_a"},{"role":"tool","tool_call_id":""}]}', ['call_a']],
+        ['{"input":[{"role":"user","content":"x"},{"type":"reasoning","id":"rs_1","encrypted_content":"e"},{"type":"function_call","call_id":"call_f"},{"type":"function_call_output","call_id":"call_f","output":"o"},{"type":"custom_tool_call_output","call_id":"call_c"}]}', ['call_f', 'call_f', 'call_c']],
+        ['{"input":"just a prompt"}', []],
+        ['{"input":null}', []],
+        ['{"input":[null,{"call_id":null},{"call_id":"call_n"}]}', ['call_n']],
+        ['{"input":[{"call_id":""}]}', []],
+        ['{"input":[{"call_id":"ok"},{"call_id":5}]}', []],
+        ['{"input":[{"call_id":"ok"},"x"]}', []],
+        ['{"input":{"call_id":"x"}}', []],
+        ['{"messages":[{"role":"tool","tool_call_id":"A"}],"input":[{"call_id":"B"}]}', ['A', 'B']],
+        ['{"messages":[{"role":"tool","tool_call_id":5}],"input":[{"call_id":"x"}]}', ['x']],
+        ['{"messages":"x","input":[{"call_id":"x"}]}', ['x']],
+        ['{"Input":[{"call_id":"x"}]}', []],
+        ['{"input":[{"CALL_ID":"x"}]}', []],
+        ['{"input":[{"call_id":"a","Call_Id":"b"}]}', ['a']],
+        ['{"input":[{"call_id":"a","call_id":"b"}]}', ['b']],
+        ['null', []],
+        ['[]', []],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractInputToolCallIDs(body)).toEqual(want)
+    })
+})
+
+// The same table as Go's TestExtractResponseToolCallIDs.
+describe('extractResponseToolCallIDs', () => {
+    it.each([
+        ['{"choices":[{"message":{"tool_calls":[{"id":"a"},{"id":""}]}},{"message":{"tool_calls":[{"id":"b"}]}}]}', ['a', 'b']],
+        ['{"object":"response","output":[{"type":"reasoning","id":"rs_1"},{"type":"function_call","id":"fc_1","call_id":"call_r"},{"type":"local_shell_call","call_id":"call_s"},{"type":"message","id":"msg_1"}]}', ['call_r', 'call_s']],
+        ['{"output":[{"call_id":"ok"},{"call_id":5}]}', []],
+        ['{"output":"x"}', []],
+        ['{"output":[{"call_id":""},{"call_id":"call_o"}]}', ['call_o']],
+        ['{"choices":[{"message":{"tool_calls":[{"id":"A"}]}}],"output":[{"call_id":"B"}]}', ['A', 'B']],
+        ['{"choices":[{"message":{"tool_calls":[{"id":5}]}}],"output":[{"call_id":"x"}]}', ['x']],
+        ['{"Output":[{"call_id":"x"}]}', []],
+        ['{"error":{"message":"m"}}', []],
+        ['null', []],
+    ])('reads %s as %j', (body, want) => {
+        expect(extractResponseToolCallIDs(body)).toEqual(want)
     })
 })
 

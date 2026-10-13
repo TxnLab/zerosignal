@@ -81,50 +81,83 @@ export function parseToolBudgets(body: string): ImageToolBudgets {
     }
 }
 
-/** Scans a chat-completions request body for role:tool messages' tool_call_id values, in order. */
+/**
+ * The tool-call ids a request body answers, in order: a chat request's role:tool
+ * tool_call_id values, then the call_id of every Responses `input[]` item
+ * carrying one (any call type, as Codex mixes them). Mirror of
+ * proto/go/selection ExtractInputToolCallIDs.
+ */
 export function extractInputToolCallIDs(body: string): string[] {
-    const o = parse(body) as { messages?: Array<{ role?: unknown; tool_call_id?: unknown }> } | undefined
-    if (!Array.isArray(o?.messages)) return []
+    const o = parse(body) as
+        | { messages?: Array<{ role?: unknown; tool_call_id?: unknown }>; input?: unknown }
+        | undefined
     const out: string[] = []
-    for (const m of o.messages) {
-        if (m?.role === 'tool' && typeof m.tool_call_id === 'string' && m.tool_call_id !== '') {
-            out.push(m.tool_call_id)
+    if (Array.isArray(o?.messages)) {
+        for (const m of o.messages) {
+            if (m?.role === 'tool' && typeof m.tool_call_id === 'string' && m.tool_call_id !== '') {
+                out.push(m.tool_call_id)
+            }
         }
     }
-    return out
+    return out.concat(itemCallIDs(o?.input))
 }
 
-/** Scans a chat-completions response body for tool_calls[].id across every choice. */
+/**
+ * The tool-call ids a response body issues: a chat response's tool_calls[].id
+ * across every choice, then the call_id of every Responses `output[]` item
+ * carrying one. Mirror of proto/go/selection ExtractResponseToolCallIDs.
+ */
 export function extractResponseToolCallIDs(body: string): string[] {
     const o = parse(body) as
-        | { choices?: Array<{ message?: { tool_calls?: Array<{ id?: unknown }> } }> }
+        | { choices?: Array<{ message?: { tool_calls?: Array<{ id?: unknown }> } }>; output?: unknown }
         | undefined
-    if (!Array.isArray(o?.choices)) return []
     const out: string[] = []
-    for (const ch of o.choices) {
-        const calls = ch?.message?.tool_calls
-        if (!Array.isArray(calls)) continue
-        for (const tc of calls) {
-            if (typeof tc?.id === 'string' && tc.id !== '') out.push(tc.id)
+    if (Array.isArray(o?.choices)) {
+        for (const ch of o.choices) {
+            const calls = ch?.message?.tool_calls
+            if (!Array.isArray(calls)) continue
+            for (const tc of calls) {
+                if (typeof tc?.id === 'string' && tc.id !== '') out.push(tc.id)
+            }
         }
+    }
+    return out.concat(itemCallIDs(o?.output))
+}
+
+// The non-empty call_id of each item in a Responses item list. As Go's
+// itemCallIDs decodes it (exact keys, apart from the chat fields), a list that
+// isn't an array, or any item or call_id of the wrong type, yields none.
+function itemCallIDs(items: unknown): string[] {
+    if (!Array.isArray(items)) return []
+    const out: string[] = []
+    for (const it of items) {
+        if (!objectOrNull(it)) return []
+        const id = (it as { call_id?: unknown } | null)?.call_id
+        if (id !== undefined && id !== null && typeof id !== 'string') return []
+        if (typeof id === 'string' && id !== '') out.push(id)
     }
     return out
 }
 
 /**
  * extractStreamToolCallIDs is extractResponseToolCallIDs for one decrypted
- * chat-completions stream chunk: the tool_calls[].id values in its choices'
- * deltas. A tool call's id rides only its first chunk. As in Go, a field of
- * the wrong type yields no ids at all, and null reads as absent. Mirror of
- * proto/go/selection ExtractStreamToolCallIDs, short of Go's decoder on a
- * duplicate key, nesting past 10000 and an escaped lone surrogate, where
- * JSON.parse differs.
+ * stream frame: the tool_calls[].id values in a chat chunk's choice deltas, or
+ * the call_id of a Responses event's `item`. A chat tool call's id rides only
+ * its first chunk. As in Go, a field of the wrong type yields no ids at all,
+ * and null reads as absent. Mirror of proto/go/selection
+ * ExtractStreamToolCallIDs, short of Go's decoder on a duplicate key, a key
+ * differing only in case, nesting past 10000 and an escaped lone surrogate,
+ * where JSON.parse differs.
  */
 export function extractStreamToolCallIDs(frameData: string): string[] {
     const o = parse(frameData)
     if (!objectOrNull(o)) return []
     const choices = (o as { choices?: unknown } | null)?.choices
     if (!arrayOrUnset(choices)) return []
+    const item = (o as { item?: unknown } | null)?.item
+    if (!objectOrUnset(item)) return []
+    const callID = (item as { call_id?: unknown } | null | undefined)?.call_id
+    if (callID !== undefined && callID !== null && typeof callID !== 'string') return []
     const out: string[] = []
     for (const ch of choices ?? []) {
         if (!objectOrNull(ch)) return []
@@ -139,6 +172,7 @@ export function extractStreamToolCallIDs(frameData: string): string[] {
             if (typeof id === 'string' && id !== '') out.push(id)
         }
     }
+    if (typeof callID === 'string' && callID !== '') out.push(callID)
     return out
 }
 

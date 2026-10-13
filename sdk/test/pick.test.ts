@@ -489,6 +489,14 @@ describe('pickCandidates', () => {
             expect(ids(res.operators)).toEqual(['7/1'])
         })
 
+        // A stateless Responses tool turn answers its call by call_id in input[],
+        // and only the issuing node's upstream reads the replayed reasoning.
+        it('pins a Responses tool turn by the call_id it answers', async () => {
+            const responses = `{"model":"${MODEL}","store":false,"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"e"},{"type":"function_call","call_id":"call_1","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"x"}]}`
+            const res = await pickCandidates(withPin({ affinityPolicy: 'strict' }), request({ body: responses }))
+            expect(ids(res.operators)).toEqual(['7/1'])
+        })
+
         it('is off under policy none', async () => {
             const res = await pickCandidates(withPin({ affinityPolicy: 'none' }), request({ body }))
             expect(ids(res.operators)).toEqual(['1/1', '2/1', '7/1'])

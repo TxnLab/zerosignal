@@ -40,8 +40,9 @@ type Client struct {
 	// pins continuation requests to the same operator.
 	registryProvider RegistryProvider
 	reserveClient    ReserveClient
-	// toolAffinity pins continuations of tool-calling chat conversations
-	// to the operator that emitted the matching tool_call_id. Honors the
+	// toolAffinity pins continuations of tool-calling conversations to the
+	// operator that emitted the matching tool_call_id (chat) or call_id
+	// (Responses). Honors the
 	// configured affinity_policy (prefer/strict/none).
 	toolAffinity *IDAffinity
 	// responseAffinity pins /v1/responses continuations to the operator

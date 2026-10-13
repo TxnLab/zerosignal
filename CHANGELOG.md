@@ -31,6 +31,16 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a Responses tool turn returns to the node that issued the call (unreleased)
+
+The tool-call pin read only chat shapes (`messages[].tool_call_id`, `tool_calls[].id`), so a
+`/v1/responses` tool turn was routed from scratch and could land on another node. For a stateless
+client (`store: false`, such as Codex) that turn replays the earlier reasoning items'
+`encrypted_content`, which an upstream encrypts under its own account and refuses from any other
+(OpenAI answers an organization mismatch). Both SDKs now record the `call_id` of every Responses
+`output[]` item and streamed `item`, and pin a request by the `call_id` of its `input[]` items,
+under the same `affinity_policy` as chat.
+
 ### 2026-10-13 — the tool-call pin passes the TEE gate (unreleased)
 
 A tool-calling turn is pinned to the node that issued its `tool_call_id`, and `SelectTargets`

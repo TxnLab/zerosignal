@@ -126,9 +126,9 @@ type Stores struct {
 	TargetBackoff   TargetBackoff
 	NodeExclusions  NodeExcluder
 
-	// ToolAffinity pins tool-call continuations by tool_call_id, and
-	// ResponseAffinity pins previous_response_id continuations by response
-	// id. Nil builds one from Config.Affinity.
+	// ToolAffinity pins tool-call continuations by tool_call_id or Responses
+	// call_id, and ResponseAffinity pins previous_response_id continuations by
+	// response id. Nil builds one from Config.Affinity.
 	ToolAffinity     *IDAffinity
 	ResponseAffinity *IDAffinity
 }
