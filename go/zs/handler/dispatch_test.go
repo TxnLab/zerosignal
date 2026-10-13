@@ -157,6 +157,9 @@ type nodeConfig struct {
 	// beforeFrame, when set, runs before a modeStreamEncrypted node writes
 	// frame i: a node that pauses there.
 	beforeFrame func(i int)
+	// signedInputCount, when set, is the input count the node signs (and
+	// prices max_price from) in place of the reserve's: an inflating node.
+	signedInputCount func(req ticket.ReserveRequest) uint64
 }
 
 type fakeNode struct {
@@ -305,6 +308,9 @@ func newFakeNode(t *testing.T, cfg *nodeConfig) *fakeNode {
 		}
 		if cfg.onReserve != nil {
 			cfg.onReserve(req)
+		}
+		if cfg.signedInputCount != nil {
+			req.InputCount = cfg.signedInputCount(req)
 		}
 		node.issueTicket(t, w, pub, req)
 	})
@@ -1800,6 +1806,68 @@ func TestDispatch_NoEphemeral_ReprobeSelfHeals(t *testing.T) {
 	}
 	if reserves[0].InputCount != direct[0].InputCount {
 		t.Errorf("re-probed reserve input_count = %d, want %d (what a healthy first attempt sends)", reserves[0].InputCount, direct[0].InputCount)
+	}
+}
+
+// The re-probed node raised its tool-iteration limit, so the re-sized reserve
+// carries a much larger input count, which an honest node signs. The price
+// check must read the request the ticket answers, not the first one built, or
+// it refuses an honest node after its own re-probe.
+func TestDispatch_ReprobedTicketIsCheckedAgainstTheResizedRequest(t *testing.T) {
+	var reserves []ticket.ReserveRequest
+	op := newFakeNode(t, &nodeConfig{
+		mode:           modeNonStreamEncrypted,
+		replyPlaintext: []byte(`{"ok":true}`),
+		onReserve:      func(req ticket.ReserveRequest) { reserves = append(reserves, req) },
+	})
+	op.operator.ModelCapacities = map[string]zs.ModelCapacity{"gpt-test": {InputUSDPer1M: 1, OutputUSDPer1M: 2}}
+	healed := op.operator
+	healed.MaxToolIters = 20
+	op.operator.EphemeralRecipient = nil
+	op.operator.EphemeralRecipientPubkey = ""
+	op.operator.EphemeralExpiry = 0
+	op.operator.EphemeralIssuedAt = 0
+
+	cfg := testConfig()
+	opts := setup(t, cfg, op)
+	static, err := zs.NewStaticRegistryProvider(cfg.ResolvedOperators)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.RegistryProvider = &healingRegistry{
+		StaticRegistryProvider: static,
+		heal:                   func(zs.Operator) (zs.Operator, bool) { return healed, true },
+	}
+	s := testServer(cfg, opts)
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions",
+		`{"model":"gpt-test","max_tokens":50,"tools":[{"type":"web_search"}]}`))
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body=%s; want 200: the re-sized ticket is honest", w.Result().StatusCode, w.Body.String())
+	}
+	if len(reserves) != 1 || reserves[0].InputCount < 10_000 {
+		t.Fatalf("reserves = %+v; want one carrying the raised limit's headroom", reserves)
+	}
+}
+
+// A node that signs more input than the reserve asked for is refused before
+// anything is escrowed, so the check must run against the request that was
+// sent, not an empty one.
+func TestDispatch_InflatedTicketIsRefused(t *testing.T) {
+	op := newFakeNode(t, &nodeConfig{
+		mode:             modeNonStreamEncrypted,
+		replyPlaintext:   []byte(`{"ok":true}`),
+		signedInputCount: func(req ticket.ReserveRequest) uint64 { return req.InputCount * 4 },
+	})
+	op.operator.ModelCapacities = map[string]zs.ModelCapacity{"gpt-test": {InputUSDPer1M: 1, OutputUSDPer1M: 2}}
+	cfg := testConfig()
+	s := testServer(cfg, setup(t, cfg, op))
+
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test","max_tokens":50}`))
+	if w.Result().StatusCode != http.StatusBadGateway || !strings.Contains(w.Body.String(), "ticket_price_rejected") {
+		t.Fatalf("status = %d body=%s; want 502 ticket_price_rejected", w.Result().StatusCode, w.Body.String())
 	}
 }
 

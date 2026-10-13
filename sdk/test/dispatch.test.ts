@@ -908,6 +908,25 @@ describe('the reserve request', () => {
         }
     })
 
+    // The re-probed node raised its tool-iteration limit, so the re-sized
+    // reserve carries a much larger input count, which an honest node signs.
+    // The price check must read the request the ticket answers, not the first.
+    it('checks a re-probed ticket against the re-sized request', async () => {
+        const healed = withCap(op(1, { maxToolIters: 20 }), {})
+        const h = harness([withCap(op(1), {})], {
+            registry: { reprobeEphemeral: async () => healed },
+            answer: async (o, req, _hop, n) => {
+                if (n === 0) throw new NoEphemeralError()
+                return reservedFor(o, req)
+            },
+        })
+        const em = await h.run(`{"model":"${MODEL}","messages":[],"max_tokens":50,"tools":[{"type":"web_search"}]}`)
+        const [first, resized] = h.rc.calls.map((c) => c.req.input_count)
+        expect(resized).toBeGreaterThan(first! * 2)
+        expect(em.failed).toBeUndefined()
+        expect(em.runs[0]!.op).toBe(healed)
+    })
+
     // Pick admitted the node under its old key; the re-probe swaps the key
     // after pick has run, so the TEE gate must be applied again.
     it('takes a re-probed node for a TEE-required request only if attested under its new key', async () => {

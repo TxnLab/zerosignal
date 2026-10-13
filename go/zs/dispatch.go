@@ -826,7 +826,8 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				// against this operator, but another may be honest — skip it like a size
 				// rejection. Fails open when a reference is unavailable (see
 				// verifyReservePrice).
-				if v := s.verifyReservePrice(op, reserveReq, rt.Ticket); v != nil {
+				// Against the request this ticket answers: a re-probe re-sizes it.
+				if v := s.verifyReservePrice(op, attempt.Req, rt.Ticket); v != nil {
 					priceRejected = true
 					s.log.Warn("reserve refused: ticket price failed verification; trying next operator",
 						opAttr(op),

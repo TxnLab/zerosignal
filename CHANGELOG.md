@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a re-probed node's ticket is checked against the request it answers (unreleased)
+
+When a reserve hit a stale ephemeral key, both SDKs re-probe the node and re-size the reserve
+against what it now advertises, but the price check still read the request as first built. A
+node that came back with a different bound version or tool limit signed an honest ticket for the
+re-sized request and was refused `ticket_price_rejected`. The check now reads the request the
+ticket answers.
+
 ### 2026-10-13 — the slot pool counts a part slot (unreleased)
 
 Funding the prepaid ticket-MBR pool now counts a part slot already in the pool toward the next
