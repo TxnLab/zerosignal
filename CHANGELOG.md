@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — `CatalogEngine` and `EphemeralVerifyCache` are gone (unreleased)
+
+The TS SDK no longer exports `CatalogEngine` (with `CatalogEngineOptions`, `ProbeObservation`,
+`CatalogNodeRef` and `CatalogNodeView`) or `EphemeralVerifyCache` (with its options type).
+`DiscoveryRegistry` replaced the first when the SDK took over discovery, and nothing used the
+second. `restoredProtoVersion`, `checkEphemeralAdvertisement` and `recordEphemeralStaleness`
+stay exported from `@txnlab/zerosignal/catalog`.
+
 ### 2026-10-13 — the newest tool-call id decides the pin (unreleased)
 
 A client resends its whole history, so a request carries every earlier tool-call id, and both

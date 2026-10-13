@@ -7,7 +7,7 @@
 // large fleet routes at once instead of filling in over bounded-probing sweeps.
 // Mirrors go/zs persist.go (marshalCatalog, decodeCatalog, LoadCatalog,
 // SaveCatalog) in Go's format version 1, so either SDK reads a catalog the
-// other wrote. Go's minorFloor is restoredProtoVersion in catalog/engine.ts,
+// other wrote. Go's minorFloor is restoredProtoVersion in catalog/version.ts,
 // pinned by testdata/persisted_proto_version_vectors.json. testdata/persisted_catalog_vectors.json pins it:
 // what marshalCatalog writes is byte for byte what Go writes for the same
 // operators, and what decodeCatalog reads is what Go reads. MergeCatalog is
@@ -40,7 +40,7 @@
 import { base64 } from '@scure/base'
 import { type ModelCoordinates, type ModelReasoning, isKnownRetention } from '@txnlab/zs-proto/inject'
 
-import { restoredProtoVersion } from '../catalog/engine.js'
+import { restoredProtoVersion } from '../catalog/version.js'
 import { compareCodePoints, goJSON } from '../gojson.js'
 import { wellFormed } from '../gotext.js'
 import type { BuiltinToolDef, ModelCapacity, Operator, OperatorMetrics } from '../operator.js'

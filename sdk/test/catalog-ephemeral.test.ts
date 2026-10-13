@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
     type EphemeralVerdict,
-    EphemeralVerifyCache,
     ageX25519RecipientError,
     checkEphemeralAdvertisement,
     recordEphemeralStaleness,
@@ -150,90 +149,5 @@ describe('recordEphemeralStaleness', () => {
         recordEphemeralStaleness(s, relay, { outcome: 'unparseable', error: new Error('x') })
         expect(s.recordRelayStaleEphemeral).not.toHaveBeenCalled()
         expect(s.recordRelayFreshEphemeral).not.toHaveBeenCalled()
-    })
-})
-
-describe('EphemeralVerifyCache', () => {
-    const c = caseNamed('a fresh, genuine block')
-    const key = hexToBytes(c.signing_key)
-    const target = { op: c.operator_id, node: c.node_id }
-    const setup = (startSec = c.now) => {
-        let nowMs = startSec * 1000
-        const onVerdict = vi.fn()
-        const cache = new EphemeralVerifyCache({ clock: () => nowMs, onVerdict })
-        return { cache, onVerdict, advance: (sec: number) => (nowMs += sec * 1000) }
-    }
-
-    it('reuses a verdict within its bucket and recomputes in the next', () => {
-        // At a bucket's start, so 14s stays in it and 15s leaves.
-        const { cache, onVerdict, advance } = setup(Math.floor(c.now / 15) * 15)
-        expect(cache.check(target, key, c.advertisement).outcome).toBe('verified')
-        advance(14)
-        cache.check(target, key, c.advertisement)
-        expect(onVerdict).toHaveBeenCalledTimes(1)
-        advance(1)
-        cache.check(target, key, c.advertisement)
-        expect(onVerdict).toHaveBeenCalledTimes(2)
-    })
-
-    it('verifies at the clock it was given', () => {
-        const expired = caseNamed('past expiry plus skew is expired')
-        const { cache } = setup(expired.now)
-        expect(cache.check(target, key, expired.advertisement).outcome).toBe('expired')
-    })
-
-    it('never hands one node a sibling node’s verdict', () => {
-        const { cache } = setup()
-        expect(cache.check(target, key, c.advertisement).outcome).toBe('verified')
-        expect(cache.check({ ...target, node: target.node + 1 }, key, c.advertisement).outcome).toBe('rejected')
-    })
-
-    it('never answers for one signing key with a verdict reached under another', () => {
-        // Ids repeat across networks and survive a key rotation; the key doesn't.
-        const { cache } = setup()
-        expect(cache.check(target, key, c.advertisement).outcome).toBe('verified')
-        const other = hexToBytes('ab'.repeat(32))
-        expect(cache.check(target, other, c.advertisement).outcome).toBe('rejected')
-        // ...and the other way round, starting from the refusal.
-        const { cache: fresh } = setup()
-        expect(fresh.check(target, other, c.advertisement).outcome).toBe('rejected')
-        expect(fresh.check(target, key, c.advertisement).outcome).toBe('verified')
-    })
-
-    it('keeps a mistyped field from sharing a verdict with its well-typed twin', () => {
-        const { cache } = setup()
-        const asString = { ...c.advertisement, ephemeral_expiry: String(c.advertisement.ephemeral_expiry) } as never
-        expect(cache.check(target, key, asString).outcome).toBe('rejected')
-        expect(cache.check(target, key, c.advertisement).outcome).toBe('verified')
-    })
-
-    it('rechecks a block whose issued_at changed', () => {
-        const { cache } = setup()
-        expect(cache.check(target, key, c.advertisement).outcome).toBe('verified')
-        const tampered = { ...c.advertisement, ephemeral_issued_at: c.advertisement.ephemeral_issued_at + 1 }
-        expect(cache.check(target, key, tampered).outcome).toBe('rejected')
-    })
-
-    it('hands onVerdict the target as passed', () => {
-        const onVerdict = vi.fn()
-        const cache = new EphemeralVerifyCache<{ op: number; node: number; label: string }>({
-            clock: () => c.now * 1000,
-            onVerdict,
-        })
-        const labelled = { ...target, label: 'n1' }
-        const v = cache.check(labelled, key, c.advertisement)
-        expect(onVerdict).toHaveBeenCalledWith(labelled, v)
-    })
-
-    it('starts over once full', () => {
-        const onVerdict = vi.fn()
-        const cache = new EphemeralVerifyCache({ clock: () => c.now * 1000, maxEntries: 2, onVerdict })
-        cache.check(target, key, c.advertisement)
-        cache.check({ ...target, node: 100 }, key, c.advertisement)
-        cache.check(target, key, c.advertisement)
-        expect(onVerdict).toHaveBeenCalledTimes(2)
-        cache.check({ ...target, node: 101 }, key, c.advertisement)
-        cache.check(target, key, c.advertisement)
-        expect(onVerdict).toHaveBeenCalledTimes(4)
     })
 })

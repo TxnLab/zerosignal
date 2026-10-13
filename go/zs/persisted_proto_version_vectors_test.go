@@ -7,7 +7,7 @@ package zs
 
 // Generates / verifies proto/testdata/persisted_proto_version_vectors.json: the
 // protocol version a restored catalog entry carries (minorFloor). The TS SDK
-// mirrors it as restoredProtoVersion in sdk/src/catalog/engine.ts.
+// mirrors it as restoredProtoVersion in sdk/src/catalog/version.ts.
 //
 //	cd proto/go && go test ./zs -run TestPersistedProtoVersionVectors -update
 

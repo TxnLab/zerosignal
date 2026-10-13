@@ -9,7 +9,6 @@
 // seal target this cycle. Mirrors Go's checkEphemeral (go/zs/fetcher.go),
 // pinned by testdata/ephemeral_verdict_vectors.json.
 
-import { bytesToHex } from '@noble/hashes/utils.js'
 import { bech32 } from '@scure/base'
 import {
     DEFAULT_EPHEMERAL_SKEW_SEC,
@@ -18,7 +17,6 @@ import {
     verifyEphemeral,
 } from '@txnlab/zs-proto/ticket'
 
-import type { Clock } from '../ports.js'
 import type { NodeRef } from '../types.js'
 
 /** The advertisement's fields as /v1/zs/details carries them; any may be absent. */
@@ -145,76 +143,6 @@ export function recordEphemeralStaleness(
     if (relay === null || verdict.outcome !== 'verified') return
     if (verdict.stale) sink.recordRelayStaleEphemeral(relay)
     else sink.recordRelayFreshEphemeral(relay)
-}
-
-export interface EphemeralVerifyCacheOptions<T extends EphemeralTarget = EphemeralTarget> {
-    /** Milliseconds since the epoch; defaults to Date.now. */
-    clock?: Clock
-    /** Seconds a verdict is reused for, so an expiry still lands within one. Default 15. */
-    bucketSec?: number
-    /** Entries kept before the cache starts over. Default 512. */
-    maxEntries?: number
-    /**
-     * Called with each verdict the cache computes, not with one it reuses, so an
-     * app can log a refused block once rather than on every rebuild. It gets the
-     * target exactly as passed to check, with whatever else the app put on it.
-     */
-    onVerdict?: (target: T, verdict: EphemeralVerdict) => void
-}
-
-/**
- * EphemeralVerifyCache reuses a verdict for the same node and advertisement
- * within one time bucket. An app that rebuilds its rows often (a React render
- * per streamed token) would otherwise run an Ed25519 verify per node per
- * rebuild.
- */
-export class EphemeralVerifyCache<T extends EphemeralTarget = EphemeralTarget> {
-    readonly #clock: Clock
-    readonly #bucketSec: number
-    readonly #maxEntries: number
-    readonly #onVerdict: ((target: T, verdict: EphemeralVerdict) => void) | undefined
-    readonly #entries = new Map<string, EphemeralVerdict>()
-
-    constructor(opts: EphemeralVerifyCacheOptions<T> = {}) {
-        this.#clock = opts.clock ?? Date.now
-        this.#bucketSec = opts.bucketSec ?? 15
-        this.#maxEntries = opts.maxEntries ?? 512
-        this.#onVerdict = opts.onVerdict
-    }
-
-    check(target: T, signingPubKey: Uint8Array, wire: EphemeralWireFields): EphemeralVerdict {
-        const nowSec = Math.floor(this.#clock() / 1000)
-        // Keyed by the exact node and its signing key: a sibling's
-        // advertisement replayed into this node must verify under this node's
-        // key, and ids repeat across networks and outlive a key rotation, so a
-        // verdict under one key never answers for another. issued_at is in the
-        // key because the staleness flag reads it. Each wire field carries its
-        // type, so a string "123" never shares a verdict with the number 123.
-        // JSON-quoting each part keeps a separator inside a node-authored string
-        // from making two different blocks share a key.
-        const field = (v: unknown) => `${typeof v}:${String(v)}`
-        const key = JSON.stringify([
-            `${target.op}:${target.node}`,
-            bytesToHex(signingPubKey),
-            field(wire.ephemeral_age_pubkey),
-            field(wire.ephemeral_expiry),
-            field(wire.ephemeral_issued_at),
-            field(wire.ephemeral_sig),
-            Math.floor(nowSec / this.#bucketSec),
-        ])
-        const cached = this.#entries.get(key)
-        if (cached !== undefined) return cached
-        const verdict = checkEphemeralAdvertisement(target, signingPubKey, wire, nowSec)
-        // Bucketing leaves superseded keys behind; bound them.
-        if (this.#entries.size >= this.#maxEntries) this.#entries.clear()
-        this.#entries.set(key, verdict)
-        this.#onVerdict?.(target, verdict)
-        return verdict
-    }
-
-    clear(): void {
-        this.#entries.clear()
-    }
 }
 
 // A missing field reads as Go's zero value; a present one must have its type.
