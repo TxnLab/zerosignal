@@ -391,6 +391,39 @@ func TestRefundWatchdog_UnknownStateAttemptsNothing(t *testing.T) {
 	}
 }
 
+// The box can change while the lapse fallback runs: a freeze or a state these
+// bindings can't read stops the lapse as it stops the refund.
+func TestRefundWatchdog_LapseStopsOnABoxThatTurnsDuringTheFallback(t *testing.T) {
+	for _, verdict := range []escrow.Verdict{escrow.VerdictArbitrate, escrow.VerdictUnknown} {
+		t.Run(verdict.String(), func(t *testing.T) {
+			rw := testWatchdog()
+			var probes atomic.Int32
+			rw.track("tik-turned", time.Now().Add(2*time.Millisecond),
+				func(context.Context) (ticketProbe, error) {
+					v := verdict
+					if probes.Add(1) == 1 {
+						v = escrow.VerdictLapse
+					}
+					return ticketProbe{exists: true, verdict: v, deadline: time.Now().Add(-time.Minute)}, nil
+				},
+				func(context.Context) (string, error) {
+					t.Error("refundInactive on an operator-pending ticket")
+					return "", nil
+				},
+				func(context.Context) (string, error) {
+					t.Error("settleLapsed on a box that froze or turned unclassifiable during the fallback")
+					return "", errors.New("unexpected settleLapsed")
+				},
+			)
+			waitFor(t, "post-fallback re-probe", func() bool { return probes.Load() >= 2 })
+			time.Sleep(3 * rw.retryDelay)
+			if got := probes.Load(); got != 2 {
+				t.Fatalf("probes = %d, want exactly 2 — the turned box ends the run", got)
+			}
+		})
+	}
+}
+
 // A PENDING_SETTLE box whose claim is the PAYER's own standalone ack IS
 // refundable — the operator never matched it, so refundInactive is exactly the
 // deadline path. Guards the operator-pending skip from over-reaching.
