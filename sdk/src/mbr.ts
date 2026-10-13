@@ -37,7 +37,8 @@ export interface MbrDepositPlan {
     unaffordable: boolean
     /**
      * What the next useful deposit costs the wallet: the free-quota term a pool
-     * backing a slot still lacks, else one more slot; fees and any opt-in
+     * backing a slot still lacks, else what the pool's part slot lacks of a
+     * whole one; fees and any opt-in
      * included. Set when nothing is deposited for want of ALGO.
      */
     need: bigint
@@ -73,10 +74,14 @@ export function planMbrDeposit(i: MbrDepositInputs): MbrDepositPlan {
 
     const overhead = 2n * i.minFee + (i.optedIn ? 0n : DEPOSIT_OPT_IN_MBR)
     const net = i.spendable > overhead ? i.spendable - overhead : 0n
-    const need = i.ticketMbr + overhead
+    // The next slot costs only what the pool's part slot lacks.
+    const need = i.ticketMbr - (bal % i.ticketMbr) + overhead
 
     const current = bal / i.ticketMbr
-    const affordable = current + net / i.ticketMbr
+    // The pool and the wallet together, so a part slot already in the pool
+    // counts toward the next one; saturating as Go's does.
+    const reach = bal + net > MAX_UINT64 ? MAX_UINT64 : bal + net
+    const affordable = reach / i.ticketMbr
     const targetSlots = affordable < i.slots ? affordable : i.slots
     if (targetSlots <= current) {
         const quota = quotaOnlyShortfall(i.ticketMbr, i.quotaDue, bal)

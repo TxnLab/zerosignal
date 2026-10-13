@@ -195,7 +195,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "1",
@@ -206,10 +206,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "1",
       "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -223,7 +223,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "1",
@@ -234,10 +234,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "1",
       "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -248,10 +248,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "1",
       "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -262,10 +262,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "1",
       "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -1833,7 +1833,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "1",
@@ -1844,10 +1844,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -1861,7 +1861,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "1",
@@ -1872,10 +1872,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -1886,10 +1886,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -1900,10 +1900,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "22501",
       "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "1",
@@ -3471,7 +3471,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "2",
@@ -3482,10 +3482,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -3499,7 +3499,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "2",
@@ -3510,10 +3510,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -3524,10 +3524,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -3538,10 +3538,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -3566,8 +3566,8 @@
       "optedIn": true,
       "spendable": "139499",
       "minFee": "1000",
-      "amount": "1",
-      "belowTarget": true,
+      "amount": "115001",
+      "belowTarget": false,
       "unaffordable": false,
       "need": "0"
     },
@@ -3580,8 +3580,8 @@
       "optedIn": true,
       "spendable": "139500",
       "minFee": "1000",
-      "amount": "1",
-      "belowTarget": true,
+      "amount": "115001",
+      "belowTarget": false,
       "unaffordable": false,
       "need": "0"
     },
@@ -5109,7 +5109,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "2",
@@ -5120,10 +5120,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -5137,7 +5137,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "2",
@@ -5148,10 +5148,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -5162,10 +5162,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -5176,10 +5176,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "22501",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "2",
@@ -5204,7 +5204,7 @@
       "optedIn": true,
       "spendable": "139499",
       "minFee": "1000",
-      "amount": "22501",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -5218,7 +5218,7 @@
       "optedIn": true,
       "spendable": "139500",
       "minFee": "1000",
-      "amount": "22501",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -6747,7 +6747,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "10",
@@ -6758,10 +6758,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -6775,7 +6775,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "10",
@@ -6786,10 +6786,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -6800,10 +6800,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -6814,10 +6814,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -6842,7 +6842,7 @@
       "optedIn": true,
       "spendable": "139499",
       "minFee": "1000",
-      "amount": "1",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -6856,7 +6856,7 @@
       "optedIn": true,
       "spendable": "139500",
       "minFee": "1000",
-      "amount": "1",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -6884,7 +6884,7 @@
       "optedIn": true,
       "spendable": "829499",
       "minFee": "1000",
-      "amount": "690001",
+      "amount": "805001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -6898,7 +6898,7 @@
       "optedIn": true,
       "spendable": "829500",
       "minFee": "1000",
-      "amount": "690001",
+      "amount": "805001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -7293,7 +7293,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "107000"
     },
     {
       "slots": "10",
@@ -7307,7 +7307,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "107000"
     },
     {
       "slots": "10",
@@ -7321,7 +7321,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "107000"
     },
     {
       "slots": "10",
@@ -7335,7 +7335,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "107000"
     },
     {
       "slots": "10",
@@ -7349,7 +7349,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "107000"
     },
     {
       "slots": "10",
@@ -7360,10 +7360,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "105000",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "0"
     },
     {
       "slots": "10",
@@ -7475,7 +7475,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -7489,7 +7489,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -7503,7 +7503,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -7517,7 +7517,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -7531,7 +7531,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -7542,10 +7542,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "92500",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "0"
     },
     {
       "slots": "10",
@@ -8385,7 +8385,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "10",
@@ -8396,10 +8396,10 @@
       "optedIn": true,
       "spendable": "5000",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -8413,7 +8413,7 @@
       "amount": "0",
       "belowTarget": false,
       "unaffordable": true,
-      "need": "117000"
+      "need": "2001"
     },
     {
       "slots": "10",
@@ -8424,10 +8424,10 @@
       "optedIn": true,
       "spendable": "24499",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -8438,10 +8438,10 @@
       "optedIn": true,
       "spendable": "24500",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "1",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -8452,10 +8452,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
-      "belowTarget": false,
-      "unaffordable": true,
-      "need": "117000"
+      "amount": "22501",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",
@@ -8480,7 +8480,7 @@
       "optedIn": true,
       "spendable": "139499",
       "minFee": "1000",
-      "amount": "22501",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -8494,7 +8494,7 @@
       "optedIn": true,
       "spendable": "139500",
       "minFee": "1000",
-      "amount": "22501",
+      "amount": "115001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -8522,7 +8522,7 @@
       "optedIn": true,
       "spendable": "829499",
       "minFee": "1000",
-      "amount": "712501",
+      "amount": "805001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -8536,7 +8536,7 @@
       "optedIn": true,
       "spendable": "829500",
       "minFee": "1000",
-      "amount": "712501",
+      "amount": "805001",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -8998,7 +8998,7 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "12500",
+      "amount": "105000",
       "belowTarget": true,
       "unaffordable": false,
       "need": "0"
@@ -9113,7 +9113,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -9127,7 +9127,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -9141,7 +9141,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -9155,7 +9155,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -9169,7 +9169,7 @@
       "amount": "0",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "94500"
     },
     {
       "slots": "10",
@@ -9180,10 +9180,10 @@
       "optedIn": true,
       "spendable": "116999",
       "minFee": "1000",
-      "amount": "0",
+      "amount": "92500",
       "belowTarget": true,
       "unaffordable": false,
-      "need": "117000"
+      "need": "0"
     },
     {
       "slots": "10",
@@ -10010,6 +10010,76 @@
       "belowTarget": true,
       "unaffordable": false,
       "need": "14500"
+    },
+    {
+      "slots": "10",
+      "ticketMbr": "115000",
+      "quotaDue": "0",
+      "algoBalance": "445000",
+      "openTickets": "0",
+      "optedIn": true,
+      "spendable": "17000",
+      "minFee": "1000",
+      "amount": "15000",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
+    },
+    {
+      "slots": "10",
+      "ticketMbr": "115000",
+      "quotaDue": "0",
+      "algoBalance": "445000",
+      "openTickets": "0",
+      "optedIn": true,
+      "spendable": "16999",
+      "minFee": "1000",
+      "amount": "0",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "17000"
+    },
+    {
+      "slots": "10",
+      "ticketMbr": "115000",
+      "quotaDue": "22500",
+      "algoBalance": "445000",
+      "openTickets": "0",
+      "optedIn": true,
+      "spendable": "39500",
+      "minFee": "1000",
+      "amount": "37500",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
+    },
+    {
+      "slots": "10",
+      "ticketMbr": "115000",
+      "quotaDue": "22500",
+      "algoBalance": "445000",
+      "openTickets": "0",
+      "optedIn": true,
+      "spendable": "39499",
+      "minFee": "1000",
+      "amount": "15000",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
+    },
+    {
+      "slots": "18446744073709551615",
+      "ticketMbr": "115000",
+      "quotaDue": "0",
+      "algoBalance": "18446744073709501615",
+      "openTickets": "0",
+      "optedIn": true,
+      "spendable": "100000000",
+      "minFee": "1000",
+      "amount": "48385",
+      "belowTarget": true,
+      "unaffordable": false,
+      "need": "0"
     },
     {
       "slots": "10",

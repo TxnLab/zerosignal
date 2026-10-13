@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 
@@ -799,7 +800,7 @@ const DefaultDepositSlots = 10
 const depositOptInMBR = 100_000 + 6*28_500
 
 // ErrDepositUnaffordable is the sentinel EnsureDeposit returns when the payer's
-// spendable ALGO can't cover another whole slot + the deposit group fee (+ the
+// spendable ALGO can't complete another slot + the deposit group fee (+ the
 // opt-in MBR on a first deposit), and nothing smaller is worth depositing.
 // Distinct from a deposit that fails at algod:
 // this is caught BEFORE submit so callers (the CLI, the dispatch 402 path) can
@@ -1065,7 +1066,8 @@ type depositPlan struct {
 	BelowTarget  bool
 	Unaffordable bool
 	// Need is what the next useful deposit costs the wallet: the free-quota
-	// term a pool backing a slot still lacks, else one more slot; plus the
+	// term a pool backing a slot still lacks, else what the pool's part slot
+	// lacks of a whole one; plus the
 	// 2-txn group fee and, on a first deposit, the opt-in MBR. Set when nothing
 	// is deposited for want of ALGO.
 	Need uint64
@@ -1077,8 +1079,9 @@ type depositPlan struct {
 // seeded with exactly enough for two; an all-or-nothing rule would leave it
 // with none.
 //
-//   - Whole slots first, counted out of spendable ALGO less the group fee and,
-//     on a first deposit, the opt-in MBR, up to `slots`.
+//   - Whole slots first, up to `slots`, counted out of the pool and spendable
+//     ALGO together (less the group fee and, on a first deposit, the opt-in
+//     MBR), so a part slot already in the pool counts toward the next one.
 //   - The free-quota term rides on top only if the wallet still covers it.
 //     Slots serve requests and the box alone serves none, so the term is the
 //     one dropped at the boundary; the next pass funds it on its own, below.
@@ -1102,10 +1105,15 @@ func planDeposit(slots, ticketMbr, quotaDue uint64, dep escrow.PayerDeposit, opt
 	if spendable > overhead {
 		net = spendable - overhead
 	}
-	need := ticketMbr + overhead
+	// The next slot costs only what the pool's part slot lacks.
+	need := ticketMbr - dep.AlgoBalance%ticketMbr + overhead
 
 	current := dep.AlgoBalance / ticketMbr
-	targetSlots := min(current+net/ticketMbr, slots)
+	reach, carry := bits.Add64(dep.AlgoBalance, net, 0)
+	if carry != 0 {
+		reach = math.MaxUint64
+	}
+	targetSlots := min(reach/ticketMbr, slots)
 	if targetSlots <= current {
 		quota := quotaOnlyShortfall(ticketMbr, quotaDue, dep)
 		if current >= 1 && quota > 0 {
@@ -1202,7 +1210,7 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 		// serve (ensureDepositForServe checks for a free one); one that backs
 		// none can't.
 		backed := dep.AlgoBalance / ticketMbr
-		what, part := "one more slot", ticketMbr
+		what, part := "one more slot", ticketMbr-dep.AlgoBalance%ticketMbr
 		if q := quotaOnlyShortfall(ticketMbr, quotaDue, dep); backed >= 1 && q > 0 {
 			what, part = "the free-quota box", q
 		}

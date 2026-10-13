@@ -250,6 +250,26 @@ func TestPrepareDeposit_UnaffordableWithNoPool(t *testing.T) {
 	}
 }
 
+// The refusal names what the pool's part slot lacks, the same figure as the
+// plan's need, not a whole slot.
+func TestEnsureDeposit_UnaffordableNamesThePartSlotShortfall(t *testing.T) {
+	part := uint64(testTicketMbr / 3)
+	pool := &fakePool{
+		ticketMbr: testTicketMbr,
+		minFee:    1_000,
+		optedIn:   true,
+		dep:       escrow.PayerDeposit{AlgoBalance: part},
+		spendable: 2_000,
+	}
+	_, _, err := newPoolWallet(pool).EnsureDeposit(context.Background(), 1)
+	if !errors.Is(err, ErrDepositUnaffordable) {
+		t.Fatalf("err = %v, want ErrDepositUnaffordable", err)
+	}
+	if want := fmt.Sprintf("(%d + 2000 fee", testTicketMbr-part); !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want it to contain %q", err, want)
+	}
+}
+
 func TestEnsureDeposit(t *testing.T) {
 	ctx := context.Background()
 	const minFee = 1_000
