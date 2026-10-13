@@ -15,13 +15,9 @@ import (
 // order — context-window first, max_output cap second — and a 0 limit
 // must not be blamed as the cause (Fits treats 0 as unbounded).
 //
-// The gap math reads the miss's own EffectiveMaxOutput, never
-// req.MaxOutputTokens — so req carries a deliberately large flat display
-// ceiling (a flat display ceiling the caller never sent) that must NOT
-// leak into any message; a regression to req.MaxOutputTokens would blow every
-// expected number up by ~32k.
+// Every number is the miss's own: the input count and max_output the filter
+// charged, and its verdict on the window.
 func TestDescribeMiss(t *testing.T) {
-	req := SizingRequest{Model: "m", InputTokens: 8, MaxOutputTokens: 32000, DeriveMaxOutput: true}
 	cases := []struct {
 		name string
 		miss sizingMiss
@@ -29,26 +25,25 @@ func TestDescribeMiss(t *testing.T) {
 	}{
 		{
 			name: "context_window violation",
-			miss: sizingMiss{OperatorID: 7, ContextWindow: 4, EffectiveMaxOutput: 128},
-			want: "op 7: context_window=4 (request needs 136)",
+			miss: sizingMiss{OperatorID: 7, ContextWindow: 4, EffectiveMaxOutput: 128, InputTokens: 8, ContextWindowExceeded: true},
+			want: "op 7: context_window=4 (request needs 136 = input 8 + max_output 128)",
 		},
 		{
 			name: "max_output_tokens violation",
-			miss: sizingMiss{OperatorID: 11, MaxOutputTokens: 64, EffectiveMaxOutput: 128},
+			miss: sizingMiss{OperatorID: 11, MaxOutputTokens: 64, EffectiveMaxOutput: 128, InputTokens: 8},
 			want: "op 11: max_output_tokens=64 (over by 64)",
 		},
 		{
 			name: "context_window prioritised over max_output",
-			miss: sizingMiss{OperatorID: 13, ContextWindow: 4, MaxOutputTokens: 64, EffectiveMaxOutput: 128},
-			want: "op 13: context_window=4 (request needs 136)",
+			miss: sizingMiss{OperatorID: 13, ContextWindow: 4, MaxOutputTokens: 64, EffectiveMaxOutput: 128, InputTokens: 8, ContextWindowExceeded: true},
+			want: "op 13: context_window=4 (request needs 136 = input 8 + max_output 128)",
 		},
 		{
-			// Derive mode: the operator was fit-checked against its own derived
-			// ctx/4=1024 slice, not the flat 32000. The reported gap must be the
-			// derived one (8+1024=1032), proving the flat display ceiling is ignored.
-			name: "derive mode uses per-operator effective, not flat ceiling",
-			miss: sizingMiss{OperatorID: 15, ContextWindow: 512, EffectiveMaxOutput: 1024},
-			want: "op 15: context_window=512 (request needs 1032)",
+			// The window passed although input + max_output exceeds it, as for
+			// a node deferring fit upstream: the cap is what failed.
+			name: "the filter's window verdict, not a recomputed one",
+			miss: sizingMiss{OperatorID: 19, ContextWindow: 100, MaxOutputTokens: 64, EffectiveMaxOutput: 80, InputTokens: 60},
+			want: "op 19: max_output_tokens=64 (over by 16)",
 		},
 		{
 			name: "all-zero (defensive fallback)",
@@ -58,7 +53,7 @@ func TestDescribeMiss(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := describeMiss(tc.miss, req); got != tc.want {
+			if got := describeMiss(tc.miss); got != tc.want {
 				t.Errorf("describeMiss = %q\nwant %q", got, tc.want)
 			}
 		})

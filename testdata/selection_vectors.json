@@ -172,7 +172,9 @@
                             "operator_id": 2,
                             "context_window": 100,
                             "max_output_tokens": 0,
-                            "effective_max_output": 100
+                            "effective_max_output": 100,
+                            "input_tokens": 100,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -272,7 +274,9 @@
                             "operator_id": 1,
                             "context_window": 3000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 100
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -367,13 +371,228 @@
                             "operator_id": 1,
                             "context_window": 3000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 100
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": true
                         },
                         {
                             "operator_id": 2,
                             "context_window": 3000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 100
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": true
+                        }
+                    ],
+                    "version_blocked": false,
+                    "tee_blocked": false,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "sizing_miss_records_the_charged_input",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.1",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {
+                        "m1": {
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "serves_image_gen": false,
+                            "serves_image_edit": false,
+                            "offers_image_gen_tool": false,
+                            "offers_image_edit_tool": false,
+                            "input_usd_per_1m": 0,
+                            "output_usd_per_1m": 0,
+                            "image_rate_micro_usdc": 0,
+                            "image_edit_rate_micro_usdc": 0
+                        }
+                    },
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.2",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {
+                        "m1": {
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "serves_image_gen": false,
+                            "serves_image_edit": false,
+                            "offers_image_gen_tool": false,
+                            "offers_image_edit_tool": false,
+                            "input_usd_per_1m": 0,
+                            "output_usd_per_1m": 0,
+                            "image_rate_micro_usdc": 0,
+                            "image_edit_rate_micro_usdc": 0
+                        }
+                    },
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 2950,
+                "max_output_tokens": 100,
+                "input_tokens_v2": 300,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": false,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "none",
+                "allow_fallbacks": true
+            },
+            "expected": {
+                "operator_ids": [],
+                "node_ids": [],
+                "diagnostics": {
+                    "registry_count": 2,
+                    "sizing_misses": [
+                        {
+                            "operator_id": 1,
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": true
+                        },
+                        {
+                            "operator_id": 2,
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "effective_max_output": 100,
+                            "input_tokens": 300,
+                            "context_window_exceeded": false
+                        }
+                    ],
+                    "version_blocked": false,
+                    "tee_blocked": false,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "sizing_miss_records_a_deferred_window_pass",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.2",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {
+                        "m1": {
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "serves_image_gen": false,
+                            "serves_image_edit": false,
+                            "offers_image_gen_tool": false,
+                            "offers_image_edit_tool": false,
+                            "input_usd_per_1m": 0,
+                            "output_usd_per_1m": 0,
+                            "image_rate_micro_usdc": 0,
+                            "image_edit_rate_micro_usdc": 0
+                        }
+                    },
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {
+                        "m1": {
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "serves_image_gen": false,
+                            "serves_image_edit": false,
+                            "offers_image_gen_tool": false,
+                            "offers_image_edit_tool": false,
+                            "input_usd_per_1m": 0,
+                            "output_usd_per_1m": 0,
+                            "image_rate_micro_usdc": 0,
+                            "image_edit_rate_micro_usdc": 0
+                        }
+                    },
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 2950,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": false,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "none",
+                "allow_fallbacks": true
+            },
+            "expected": {
+                "operator_ids": [],
+                "node_ids": [],
+                "diagnostics": {
+                    "registry_count": 2,
+                    "sizing_misses": [
+                        {
+                            "operator_id": 1,
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": true
+                        },
+                        {
+                            "operator_id": 2,
+                            "context_window": 3000,
+                            "max_output_tokens": 50,
+                            "effective_max_output": 100,
+                            "input_tokens": 2950,
+                            "context_window_exceeded": false
                         }
                     ],
                     "version_blocked": false,
@@ -6175,7 +6394,9 @@
                             "operator_id": 2,
                             "context_window": 4096,
                             "max_output_tokens": 0,
-                            "effective_max_output": 8192
+                            "effective_max_output": 8192,
+                            "input_tokens": 100,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6279,7 +6500,9 @@
                             "operator_id": 2,
                             "context_window": 4096,
                             "max_output_tokens": 4000,
-                            "effective_max_output": 4000
+                            "effective_max_output": 4000,
+                            "input_tokens": 200,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6383,7 +6606,9 @@
                             "operator_id": 2,
                             "context_window": 40000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 10000
+                            "effective_max_output": 10000,
+                            "input_tokens": 31000,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6679,7 +6904,9 @@
                             "operator_id": 2,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 1000
+                            "effective_max_output": 1000,
+                            "input_tokens": 8000,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6778,7 +7005,9 @@
                             "operator_id": 2,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 1000
+                            "effective_max_output": 1000,
+                            "input_tokens": 9000,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6873,13 +7102,17 @@
                             "operator_id": 1,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 1000
+                            "effective_max_output": 1000,
+                            "input_tokens": 9001,
+                            "context_window_exceeded": true
                         },
                         {
                             "operator_id": 2,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 1000
+                            "effective_max_output": 1000,
+                            "input_tokens": 9001,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,
@@ -6974,13 +7207,17 @@
                             "operator_id": 1,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 4000
+                            "effective_max_output": 4000,
+                            "input_tokens": 1,
+                            "context_window_exceeded": true
                         },
                         {
                             "operator_id": 2,
                             "context_window": 4000,
                             "max_output_tokens": 0,
-                            "effective_max_output": 4000
+                            "effective_max_output": 4000,
+                            "input_tokens": 1,
+                            "context_window_exceeded": true
                         }
                     ],
                     "version_blocked": false,

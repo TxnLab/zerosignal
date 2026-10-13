@@ -223,6 +223,42 @@ func buildTargetCases() []targetCase {
 			}(),
 		},
 		{
+			// A miss carries the filter's own reading. The 9.1 node is charged
+			// v1's 2950 and fails the window; the 9.2 node is charged v2's 300,
+			// passes the window and fails its cap.
+			Name: "sizing_miss_records_the_charged_input",
+			Operators: func() []selection.Operator {
+				old, new := baseOp(1, "A"), baseOp(2, "B")
+				old.ProtoVersion, new.ProtoVersion = "9.1", "9.2"
+				cap := map[string]selection.ModelCapacity{"m1": {ContextWindow: 3000, MaxOutputTokens: 50}}
+				old.ModelCapacities, new.ModelCapacities = cap, cap
+				return []selection.Operator{old, new}
+			}(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.InputTokensV2, c.MaxOutputTokens = 2950, 300, 100
+				return c
+			}(),
+		},
+		{
+			// A node deferring fit to its upstream passes the window although
+			// 2950 + 100 exceeds it, so its miss is the cap alone; the 9.2 node
+			// fails the window on the same numbers.
+			Name: "sizing_miss_records_a_deferred_window_pass",
+			Operators: func() []selection.Operator {
+				tight, defers := baseOp(1, "A"), baseOp(2, "B")
+				tight.ProtoVersion, defers.ProtoVersion = "9.2", wire.UpstreamFitVerdictMinVersion
+				cap := map[string]selection.ModelCapacity{"m1": {ContextWindow: 3000, MaxOutputTokens: 50}}
+				tight.ModelCapacities, defers.ModelCapacities = cap, cap
+				return []selection.Operator{tight, defers}
+			}(),
+			Constraints: func() selection.Constraints {
+				c := chatConstraints()
+				c.InputTokens, c.MaxOutputTokens = 2950, 100
+				return c
+			}(),
+		},
+		{
 			Name: "version_blocked",
 			Operators: func() []selection.Operator {
 				ops := []selection.Operator{baseOp(1, "A"), baseOp(2, "B")}

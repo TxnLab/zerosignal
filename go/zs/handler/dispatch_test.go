@@ -2528,9 +2528,11 @@ func TestDispatch_Sizing_NoFit_400ContextLengthExceeded(t *testing.T) {
 		t.Errorf("body missing context_length_exceeded: %s", body)
 	}
 	// The diagnostic should call out THIS operator and report the
-	// context-window gap. Default test tokenizer returns input=8
-	// max_out=128, so the request needs 136 against a window of 4.
-	wantOpLine := fmt.Sprintf("op %d: context_window=4 (request needs 136)", op.operator.ID)
+	// context-window gap the filter charged. The test estimator's input=8 is
+	// the v1 count; the fake is a node on the tight bound, charged the body's
+	// v2 bound (49), so with max_out=128 the request needs 177 against a
+	// window of 4.
+	wantOpLine := fmt.Sprintf("op %d: context_window=4 (request needs 177 = input 49 + max_output 128)", op.operator.ID)
 	if !strings.Contains(body, wantOpLine) {
 		t.Errorf("body missing per-operator diagnostic %q: %s", wantOpLine, body)
 	}
@@ -2551,7 +2553,8 @@ func TestDispatch_Sizing_NoFit_PerOperatorReasons(t *testing.T) {
 	opts := setup(t, cfg, opA, opB)
 
 	ops := cfg.ResolvedOperators
-	// A: input+max_output=136 > ContextWindow=4 → context-window miss.
+	// A: input+max_output=177 (the v2 bound, 49, plus 128) > ContextWindow=4
+	// → context-window miss.
 	ops[0].ModelCapacities = map[string]zs.ModelCapacity{"gpt-test": {ContextWindow: 4}}
 	// B: ContextWindow=0 (unbounded) but MaxOutputTokens=64 < 128 →
 	// max_output_tokens miss. Distinct branch in describeMiss.
@@ -2570,7 +2573,7 @@ func TestDispatch_Sizing_NoFit_PerOperatorReasons(t *testing.T) {
 		t.Fatalf("status = %d body=%s; want 400", w.Result().StatusCode, w.Body.String())
 	}
 	body := w.Body.String()
-	wantA := fmt.Sprintf("op %d: context_window=4 (request needs 136)", opA.operator.ID)
+	wantA := fmt.Sprintf("op %d: context_window=4 (request needs 177 = input 49 + max_output 128)", opA.operator.ID)
 	wantB := fmt.Sprintf("op %d: max_output_tokens=64 (over by 64)", opB.operator.ID)
 	if !strings.Contains(body, wantA) {
 		t.Errorf("body missing opA diagnostic %q: %s", wantA, body)

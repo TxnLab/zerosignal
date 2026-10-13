@@ -31,6 +31,15 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a no-fit message names the limit the filter failed (unreleased)
+
+The per-operator lines of a `context_length_exceeded` message recomputed the miss from the
+request's v1 input count. The filter charges a 9.2 node the v2 count instead, and passes a 9.11
+node's window when the upstream can take the request, so a node that failed only its
+`max_output_tokens` cap could be reported as over its context window, with a need it was never
+charged. `selection.SizingMiss` now carries the filter's own reading, `input_tokens` and
+`context_window_exceeded`, and both SDKs' messages use it. Routing is unchanged.
+
 ### 2026-10-13 — `CatalogEngine` and `EphemeralVerifyCache` are gone (unreleased)
 
 The TS SDK no longer exports `CatalogEngine` (with `CatalogEngineOptions`, `ProbeObservation`,

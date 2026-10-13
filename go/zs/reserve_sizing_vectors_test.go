@@ -160,10 +160,12 @@ type sizingVecRejection struct {
 }
 
 type sizingVecMiss struct {
-	OperatorID         uint64 `json:"operator_id"`
-	ContextWindow      uint64 `json:"context_window"`
-	MaxOutputTokens    uint64 `json:"max_output_tokens"`
-	EffectiveMaxOutput uint64 `json:"effective_max_output"`
+	OperatorID            uint64 `json:"operator_id"`
+	ContextWindow         uint64 `json:"context_window"`
+	MaxOutputTokens       uint64 `json:"max_output_tokens"`
+	EffectiveMaxOutput    uint64 `json:"effective_max_output"`
+	InputTokens           uint64 `json:"input_tokens"`
+	ContextWindowExceeded bool   `json:"context_window_exceeded"`
 }
 
 type sizingVecMessage struct {
@@ -610,10 +612,15 @@ func sizingMessageCases() []sizingVecMessage {
 	flat := sizingVecRequest{Model: "m", InputTokens: 1200, MaxOutputTokens: 4000}
 	derive := sizingVecRequest{Model: "m", InputTokens: 1200, MaxOutputTokens: 32768, DeriveMaxOutput: true, MaxOutputCeiling: 32768}
 	misses := []sizingVecMiss{
-		{OperatorID: 1, ContextWindow: 4096, MaxOutputTokens: 0, EffectiveMaxOutput: 4000},
-		{OperatorID: 2, ContextWindow: 0, MaxOutputTokens: 2048, EffectiveMaxOutput: 4000},
-		{OperatorID: 3, ContextWindow: 100_000, MaxOutputTokens: 8000, EffectiveMaxOutput: 4000},
-		{OperatorID: 4, ContextWindow: 5200, MaxOutputTokens: 3000, EffectiveMaxOutput: 4000},
+		{OperatorID: 1, ContextWindow: 4096, MaxOutputTokens: 0, EffectiveMaxOutput: 4000, InputTokens: 1200, ContextWindowExceeded: true},
+		{OperatorID: 2, ContextWindow: 0, MaxOutputTokens: 2048, EffectiveMaxOutput: 4000, InputTokens: 1200},
+		{OperatorID: 3, ContextWindow: 100_000, MaxOutputTokens: 8000, EffectiveMaxOutput: 4000, InputTokens: 1200},
+		{OperatorID: 4, ContextWindow: 5200, MaxOutputTokens: 3000, EffectiveMaxOutput: 4000, InputTokens: 1200},
+		// A 9.2 node charged the v2 count, not the request's v1 1200.
+		{OperatorID: 8, ContextWindow: 4096, MaxOutputTokens: 3000, EffectiveMaxOutput: 4000, InputTokens: 300, ContextWindowExceeded: true},
+		// A node deferring fit upstream passed the window though 1200 + 4000
+		// exceeds it, so the cap is what failed.
+		{OperatorID: 9, ContextWindow: 5000, MaxOutputTokens: 3000, EffectiveMaxOutput: 4000, InputTokens: 1200},
 	}
 	rejections := []sizingVecRejection{
 		{OperatorID: 5, Code: "context_length_exceeded", Message: "input 1200 + max_output 4000 exceeds 4096"},

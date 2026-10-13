@@ -546,7 +546,7 @@ describe('an empty pick', () => {
         const failed = await fail([withCap(op(1), { contextWindow: 4 }), withCap(op(2), { maxOutputTokens: 64 })])
         expect(failed.code).toBe('context_length_exceeded')
         expect(failed.message).toMatch(/^no operator serves gpt-test with input_tokens=\d+ max_output_tokens=128\n/)
-        expect(failed.message).toMatch(/op 1: context_window=4 \(request needs \d+\)/)
+        expect(failed.message).toMatch(/op 1: context_window=4 \(request needs \d+ = input \d+ \+ max_output 128\)/)
         expect(failed.message).toContain('op 2: max_output_tokens=64 (over by 64)')
     })
 

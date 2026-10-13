@@ -42,7 +42,7 @@ export function reserveSizeFailureMessage(
     }
     if (preFilter.length > 0) {
         out += '\n  operators advertising this model:'
-        for (const m of preFilter) out += `\n  - ${describeMiss(m, sizing)}`
+        for (const m of preFilter) out += `\n  - ${describeMiss(m)}`
     }
     return out
 }
@@ -53,15 +53,13 @@ function describeRejection(r: ReserveSizeRejection): string {
     return `op ${r.operatorId}: refused for size (no detail)`
 }
 
-// describeMiss blames the limit the filter checked first, from the max_output
-// it actually charged the operator. The need uses the v1 input count even
-// where the filter charged v2, as Go's does.
-function describeMiss(m: SizingMiss, sizing: SizingRequest): string {
-    if (m.context_window > 0) {
-        const need = sizing.inputTokens + m.effective_max_output
-        if (need > m.context_window) {
-            return `op ${m.operator_id}: context_window=${m.context_window} (request needs ${need})`
-        }
+// describeMiss blames the limit the filter checked first, from the filter's own
+// reading: the input count and max_output it charged the operator, and its
+// verdict on the window (a node deferring fit upstream passes some requests
+// whose input plus max_output exceeds the window).
+function describeMiss(m: SizingMiss): string {
+    if (m.context_window_exceeded) {
+        return `op ${m.operator_id}: context_window=${m.context_window} (request needs ${m.input_tokens + m.effective_max_output} = input ${m.input_tokens} + max_output ${m.effective_max_output})`
     }
     if (m.max_output_tokens > 0 && m.effective_max_output > m.max_output_tokens) {
         return `op ${m.operator_id}: max_output_tokens=${m.max_output_tokens} (over by ${m.effective_max_output - m.max_output_tokens})`
