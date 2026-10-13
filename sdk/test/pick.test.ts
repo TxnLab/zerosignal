@@ -555,6 +555,30 @@ describe('pickCandidates', () => {
             expect(ids(res.operators)).toEqual(['1/1'])
         })
 
+        it('says when a strict pin lost its attestation, though the pool has an attested node', async () => {
+            const list = [op(1, { tee: attested }), op(7)]
+            let res = await pickCandidates(withPin({ affinityPolicy: 'strict' }, list), request({ body, requireTee: true }))
+            expect(res.teeBlocked).toBe(true)
+            expect(res.teeBlockedReason).toBe(
+                'this tool-call continuation is pinned (strict affinity) to operator 7 node 1, which no longer has current TEE attestation; retry once it refreshes its evidence, or set the affinity policy to prefer so an attested node can continue it',
+            )
+            res = await pickCandidates(withPin({ affinityPolicy: 'prefer' }, list), request({ body, requireTee: true }))
+            expect(res.teeBlockedReason).toBe('')
+            expect(ids(res.operators)).toEqual(['1/1'])
+        })
+
+        // The pool's message stands when the pool has no attested node: under
+        // prefer, and under strict when the pin is attested but dropped earlier.
+        it('leaves a pin out of a pool-wide TEE block', async () => {
+            let res = await pickCandidates(withPin({ affinityPolicy: 'prefer' }, [op(1), op(7)]), request({ body, requireTee: true }))
+            expect(res.teeBlocked).toBe(true)
+            expect(res.teeBlockedReason).toBe('')
+            const oldWire = [op(1), op(7, { tee: attested, protoVersion: '1.0' })]
+            res = await pickCandidates(withPin({ affinityPolicy: 'strict' }, oldWire), request({ body, requireTee: true }))
+            expect(res.teeBlocked).toBe(true)
+            expect(res.teeBlockedReason).toBe('')
+        })
+
         it('leaves a funded strict pin out of an underfunded pool’s reason', async () => {
             const pinnedNode = op(7)
             const list = [op(1, { signerSpendableMicroAlgos: 0 })]

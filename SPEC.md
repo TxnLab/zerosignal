@@ -2324,6 +2324,11 @@ app pick identically.
 - **Target** — `SelectTargets` applies the model-eligibility, sizing, version,
   TEE, staging, signer-funding, built-in-tool and affinity policy. The shared policy is
   **price-ordered**.
+  - The tool-call affinity pin re-checks the TEE requirement, the caller's
+    `only`/`ignore`/`order`, fit and signer funding on the pinned node, since
+    each can change between turns. It does not re-check the wire version: the
+    TS SDK's `selectTargetsForOperator` seeds the payer's own operator pick
+    through the same step so it is still tried after the version filter.
 
   On top of it each caller applies an app-side **responsiveness banding**. It
   reads per-process and on-chain signals, so, like the relay weighting below, it

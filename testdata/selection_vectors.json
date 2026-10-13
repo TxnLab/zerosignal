@@ -2195,6 +2195,476 @@
             }
         },
         {
+            "name": "affinity_prefer_unattested_yields",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 3,
+                    "node_id": 0,
+                    "owner_addr": "C",
+                    "base_url": "https://op3.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 100,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": true,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "prefer",
+                "allow_fallbacks": true
+            },
+            "preferred": {
+                "id": 3,
+                "node_id": 0,
+                "owner_addr": "C",
+                "base_url": "https://op3.example",
+                "proto_version": "9.11",
+                "reachable": true,
+                "tee_attested": false,
+                "models": [
+                    "m1"
+                ],
+                "model_capacities": {},
+                "builtin_tools": []
+            },
+            "expected": {
+                "operator_ids": [
+                    1,
+                    2
+                ],
+                "node_ids": [
+                    0,
+                    0
+                ],
+                "diagnostics": {
+                    "registry_count": 3,
+                    "version_blocked": false,
+                    "tee_blocked": false,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "affinity_strict_unattested_blocked",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 3,
+                    "node_id": 0,
+                    "owner_addr": "C",
+                    "base_url": "https://op3.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 100,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": true,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "strict",
+                "allow_fallbacks": true
+            },
+            "preferred": {
+                "id": 3,
+                "node_id": 0,
+                "owner_addr": "C",
+                "base_url": "https://op3.example",
+                "proto_version": "9.11",
+                "reachable": true,
+                "tee_attested": false,
+                "models": [
+                    "m1"
+                ],
+                "model_capacities": {},
+                "builtin_tools": []
+            },
+            "expected": {
+                "operator_ids": [],
+                "node_ids": [],
+                "diagnostics": {
+                    "registry_count": 3,
+                    "version_blocked": false,
+                    "tee_blocked": true,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "affinity_strict_unattested_before_ref_conflict",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 3,
+                    "node_id": 0,
+                    "owner_addr": "C",
+                    "base_url": "https://op3.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 100,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": true,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "strict",
+                "only": [
+                    {
+                        "operator_id": 1,
+                        "node_id": 0,
+                        "match_all_nodes": true
+                    }
+                ],
+                "allow_fallbacks": true
+            },
+            "preferred": {
+                "id": 3,
+                "node_id": 0,
+                "owner_addr": "C",
+                "base_url": "https://op3.example",
+                "proto_version": "9.11",
+                "reachable": true,
+                "tee_attested": false,
+                "models": [
+                    "m1"
+                ],
+                "model_capacities": {},
+                "builtin_tools": []
+            },
+            "expected": {
+                "operator_ids": [],
+                "node_ids": [],
+                "diagnostics": {
+                    "registry_count": 3,
+                    "version_blocked": false,
+                    "tee_blocked": true,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "affinity_strict_attested_kept",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 3,
+                    "node_id": 0,
+                    "owner_addr": "C",
+                    "base_url": "https://op3.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": true,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 100,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": true,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "strict",
+                "allow_fallbacks": true
+            },
+            "preferred": {
+                "id": 2,
+                "node_id": 0,
+                "owner_addr": "B",
+                "base_url": "https://op2.example",
+                "proto_version": "9.11",
+                "reachable": true,
+                "tee_attested": true,
+                "models": [
+                    "m1"
+                ],
+                "model_capacities": {},
+                "builtin_tools": []
+            },
+            "expected": {
+                "operator_ids": [
+                    2
+                ],
+                "node_ids": [
+                    0
+                ],
+                "diagnostics": {
+                    "registry_count": 3,
+                    "version_blocked": false,
+                    "tee_blocked": false,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
+            "name": "affinity_prefer_incompatible_version_still_leads",
+            "operators": [
+                {
+                    "id": 1,
+                    "node_id": 0,
+                    "owner_addr": "A",
+                    "base_url": "https://op1.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 2,
+                    "node_id": 0,
+                    "owner_addr": "B",
+                    "base_url": "https://op2.example",
+                    "proto_version": "9.11",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                },
+                {
+                    "id": 3,
+                    "node_id": 0,
+                    "owner_addr": "C",
+                    "base_url": "https://op3.example",
+                    "proto_version": "1.0",
+                    "reachable": true,
+                    "tee_attested": false,
+                    "models": [
+                        "m1"
+                    ],
+                    "model_capacities": {},
+                    "builtin_tools": []
+                }
+            ],
+            "constraints": {
+                "model": "m1",
+                "input_tokens": 100,
+                "max_output_tokens": 100,
+                "endpoint": "/v1/chat/completions",
+                "require_tee": false,
+                "requested_tools": null,
+                "image_tool_gen_budget": 0,
+                "image_tool_edit_budget": 0,
+                "affinity_policy": "prefer",
+                "allow_fallbacks": true
+            },
+            "preferred": {
+                "id": 3,
+                "node_id": 0,
+                "owner_addr": "C",
+                "base_url": "https://op3.example",
+                "proto_version": "1.0",
+                "reachable": true,
+                "tee_attested": false,
+                "models": [
+                    "m1"
+                ],
+                "model_capacities": {},
+                "builtin_tools": []
+            },
+            "expected": {
+                "operator_ids": [
+                    3,
+                    1,
+                    2
+                ],
+                "node_ids": [
+                    0,
+                    0,
+                    0
+                ],
+                "diagnostics": {
+                    "registry_count": 3,
+                    "version_blocked": false,
+                    "tee_blocked": false,
+                    "staging_blocked": false,
+                    "signer_underfunded_blocked": false,
+                    "image_endpoint_unsupported": false,
+                    "affinity_blocked": false,
+                    "provider_pin_blocked": false,
+                    "price_blocked": false,
+                    "tool_unsupported": false
+                }
+            }
+        },
+        {
             "name": "registry_empty",
             "operators": [
                 {

@@ -967,7 +967,10 @@ function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest
         )
     }
     if (pick.teeBlocked) {
-        return newError('no_tee_capacity', 'no operator with current TEE attestation can serve this request')
+        return newError(
+            'no_tee_capacity',
+            pick.teeBlockedReason || 'no operator with current TEE attestation can serve this request',
+        )
     }
     if (pick.stagingBlocked) {
         return newError(

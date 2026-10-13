@@ -560,18 +560,28 @@ func SelectTargets(ops []Operator, c Constraints, preferred *Operator) TargetRes
 	}
 
 	// 11. Affinity reorder. preferred is the caller-resolved affinity target
-	//     (nil ⇒ none). Note: like the proxy, the tool-affinity path does NOT
-	//     re-check wire-version / TEE on the preferred operator — only serves,
-	//     fits, and signer funding — so a preferred operator resolved from the
-	//     full registry is honored on those axes alone (plus the caller's own
-	//     Only/Ignore/Order below). Funding is re-checked because a pinned node
-	//     can drain mid-loop, and every paid request sent to a signer that can't
-	//     cover its fees fails.
+	//     (nil ⇒ none), resolved from the full registry. It is re-checked on
+	//     serves, TEE, the caller's Only/Ignore/Order, fit, and signer funding —
+	//     not wire version: the TS SDK's selectTargetsForOperator seeds the
+	//     payer's own pick here so it is still tried after the version filter
+	//     dropped it (sdk/src/routing/seed.ts).
 	if c.AffinityPolicy == AffinityNone || preferred == nil {
 		res.Operators = fitList
 		return res
 	}
 	if !preferred.ServesModel(c.Model) {
+		res.Operators = fitList
+		return res
+	}
+	// A confidential request must never reach an unattested node, and a pinned
+	// node's attestation can lapse between turns of one tool loop. Strict blocks
+	// with TEEBlocked, as the previous_response_id pin does; prefer yields to
+	// fitList, which step 6 already cleared of the node.
+	if c.RequireTEE && !preferred.TEEAttested {
+		if c.AffinityPolicy == AffinityStrict {
+			res.Diagnostics.TEEBlocked = true
+			return res
+		}
 		res.Operators = fitList
 		return res
 	}

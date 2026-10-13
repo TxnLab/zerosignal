@@ -568,6 +568,26 @@ describe('an empty pick', () => {
         expect(em.runs[0]!.op.id).toBe(2)
     })
 
+    it('names a strict pin that lost its attestation, rather than blaming the pool', async () => {
+        const attested = {
+            mode: 'dstack-tdx',
+            attestedAt: 0,
+            verifierId: 'dstack-tdx',
+            verified: true,
+            failureTag: '',
+            osImageChecked: true,
+            composeReleaseChecked: true,
+        }
+        const h = harness([op(1), op(2, { tee: attested })], { pick: { affinityPolicy: 'strict' } })
+        h.deps.pick.toolAffinity.record({ op: 1, node: 0 }, ['call-strict-1'])
+        const em = await h.run(`{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call-strict-1","content":"x"}]}`, {
+            requireTee: true,
+        })
+        expect(em.failed!.code).toBe('no_tee_capacity')
+        expect(em.failed!.message).toContain('pinned (strict affinity) to operator 1 node 0')
+        expect(h.rc.calls).toEqual([])
+    })
+
     it('names a strict pin that cannot fit, rather than blaming the pool', async () => {
         const h = harness([withCap(op(1), { contextWindow: 4 }), op(2)], { pick: { affinityPolicy: 'strict' } })
         h.deps.pick.toolAffinity.record({ op: 1, node: 0 }, ['call-strict-1'])
