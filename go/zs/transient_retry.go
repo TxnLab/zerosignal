@@ -77,9 +77,12 @@ func (s *Client) sweepDelay(sweep int) time.Duration {
 // the caller must carry both forward — sealing the inference to a pre-rotation
 // hop would send it through a relay we just abandoned.
 type reserveAttempt struct {
-	Ticket  *ReservedTicket
-	Op      Operator
-	Hop     *RelayHop
+	Ticket *ReservedTicket
+	Op     Operator
+	Hop    *RelayHop
+	// Req is the request the final attempt sent, re-sized after a re-probe;
+	// the ticket is checked against it.
+	Req     ticket.ReserveRequest
 	Elapsed time.Duration // successful round-trip duration, for the latency store
 	Err     error
 }
@@ -215,7 +218,7 @@ func (s *Client) reserveWithTransientRetry(
 	deadline time.Time,
 	resize func(Operator, *ticket.ReserveRequest),
 ) reserveAttempt {
-	return retryReserve(ctx, op, hop, usePrivacy, deadline, retryReserveDeps{
+	a := retryReserve(ctx, op, hop, usePrivacy, deadline, retryReserveDeps{
 		attempt: func(op Operator, hop *RelayHop) (*ReservedTicket, error) {
 			return s.reserveClient.Reserve(ctx, op, req, hop)
 		},
@@ -250,6 +253,8 @@ func (s *Client) reserveWithTransientRetry(
 		sleep:              sleepCtx,
 		log:                s.log,
 	})
+	a.Req = req
+	return a
 }
 
 // retryReserveDeps is what retryReserve reaches outside itself, as functions

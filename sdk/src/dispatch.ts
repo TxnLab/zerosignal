@@ -554,8 +554,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
             }
             // A re-probe can refresh op, and the bound version and max_output
             // are per-operator, so the retry re-sizes against the refreshed
-            // one. The image routes carry no token sizing to redo. The price
-            // check below reads the request as first built, as Go's does.
+            // one. The image routes carry no token sizing to redo.
             const firstOp = op
             const firstReq = reserveReq
             const attemptRequest = (o: Operator): ReserveCallRequest => {
@@ -566,13 +565,19 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     : r
             }
             em.note({ type: 'relay.hop', relay: relayOf(hop), target: refOf(op), reason: 'chosen' })
+            // What the last attempt sent, as Go's reserveAttempt.Req: the
+            // ticket answers this request, not one rebuilt afterwards.
+            let lastSent = firstReq
             const attempt = await reserveWithTransientRetry<Operator, Reserved>({
                 target: op,
                 ref: refOf,
                 hop,
                 usePrivacy,
                 deadlineMs: retryDeadline,
-                attempt: (o, h) => deps.reserveClient.reserve(o, attemptRequest(o), h, signal),
+                attempt: (o, h) => {
+                    lastSent = attemptRequest(o)
+                    return deps.reserveClient.reserve(o, lastSent, h, signal)
+                },
                 nextHop: (o, excluded) =>
                     relayHopForPool(
                         deps.pick,
@@ -627,14 +632,17 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                 }
                 // Refuse a mis-priced ticket before escrowing against it.
                 // Another operator may be honest, so it is skipped like a
-                // size rejection. Fails open with no reference.
+                // size rejection. Fails open with no reference. Checked
+                // against the request this ticket answers: a re-probe
+                // re-sizes it.
+                const sent = lastSent
                 const v = await verifyReservePrice({
                     ticket: rt.ticket,
                     pricing: operatorPricingOf(op, model),
                     feeBps: async () => deps.feeRate(),
-                    reserveInputCount: firstReq.input_count,
-                    imageToolBudget: firstReq.image_tool_budget ?? 0,
-                    imageEditToolBudget: firstReq.image_edit_tool_budget ?? 0,
+                    reserveInputCount: sent.input_count,
+                    imageToolBudget: sent.image_tool_budget ?? 0,
+                    imageEditToolBudget: sent.image_edit_tool_budget ?? 0,
                 })
                 if (v !== null) {
                     priceRejected = true
