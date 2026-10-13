@@ -99,32 +99,41 @@ func ParseToolBudgets(body []byte) ImageToolBudgets {
 	return b
 }
 
-// ExtractInputToolCallIDs scans a chat-completions request body for role:tool
-// messages and returns their tool_call_id values in order. These are the keys
-// the affinity cache is keyed on for continuation routing.
+// ExtractInputToolCallIDs returns the tool-call ids a request body answers, in
+// order: a chat request's role:tool tool_call_id values, then the call_id of
+// every Responses `input[]` item carrying one. These are the keys the affinity
+// cache is keyed on for continuation routing.
+//
+// Responses keys on any item with a call_id rather than on function_call_output
+// alone, because a client runs several call types (function_call,
+// custom_tool_call, local_shell_call, computer_call, …) and Codex mixes them.
+// The pin matters more here than on chat: a stateless (store:false) client
+// replays the reasoning items' encrypted_content, which the upstream refuses
+// from any account but the one that produced it.
 func ExtractInputToolCallIDs(body []byte) []string {
+	var out []string
 	var peek struct {
 		Messages []struct {
 			Role       string `json:"role"`
 			ToolCallID string `json:"tool_call_id"`
 		} `json:"messages"`
 	}
-	if err := json.Unmarshal(body, &peek); err != nil {
-		return nil
-	}
-	var out []string
-	for _, m := range peek.Messages {
-		if m.Role == "tool" && m.ToolCallID != "" {
-			out = append(out, m.ToolCallID)
+	if json.Unmarshal(body, &peek) == nil {
+		for _, m := range peek.Messages {
+			if m.Role == "tool" && m.ToolCallID != "" {
+				out = append(out, m.ToolCallID)
+			}
 		}
 	}
-	return out
+	return append(out, itemCallIDs(body, "input")...)
 }
 
-// ExtractResponseToolCallIDs scans a chat-completions response body for
-// tool_calls[].id values across every choice. These are recorded into the
+// ExtractResponseToolCallIDs returns the tool-call ids a response body issues:
+// a chat response's tool_calls[].id across every choice, then the call_id of
+// every Responses `output[]` item carrying one. These are recorded into the
 // affinity cache after a successful response decrypt.
 func ExtractResponseToolCallIDs(body []byte) []string {
+	var out []string
 	var peek struct {
 		Choices []struct {
 			Message struct {
@@ -134,24 +143,57 @@ func ExtractResponseToolCallIDs(body []byte) []string {
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.Unmarshal(body, &peek); err != nil {
+	if json.Unmarshal(body, &peek) == nil {
+		for _, ch := range peek.Choices {
+			for _, tc := range ch.Message.ToolCalls {
+				if tc.ID != "" {
+					out = append(out, tc.ID)
+				}
+			}
+		}
+	}
+	return append(out, itemCallIDs(body, "output")...)
+}
+
+// itemCallIDs reads the non-empty call_id of each item in the body's
+// top-level Responses item list `key`. A string `input`, an absent list, or an
+// item or call_id of the wrong type yields none.
+//
+// Decoded apart from the chat fields, and by exact key at both levels (maps,
+// not tagged structs, which encoding/json matches case-insensitively), so it
+// reads what the ts twin reads: a malformed `messages` beside the list can't
+// hide it, and an "Input" or "CALL_ID" isn't one.
+func itemCallIDs(body []byte, key string) []string {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return nil
+	}
+	var items []map[string]json.RawMessage
+	if json.Unmarshal(top[key], &items) != nil {
 		return nil
 	}
 	var out []string
-	for _, ch := range peek.Choices {
-		for _, tc := range ch.Message.ToolCalls {
-			if tc.ID != "" {
-				out = append(out, tc.ID)
-			}
+	for _, it := range items {
+		raw, ok := it["call_id"]
+		if !ok {
+			continue
+		}
+		var id *string
+		if json.Unmarshal(raw, &id) != nil {
+			return nil
+		}
+		if id != nil && *id != "" {
+			out = append(out, *id)
 		}
 	}
 	return out
 }
 
 // ExtractStreamToolCallIDs is ExtractResponseToolCallIDs for one decrypted
-// chat-completions stream chunk: the tool_calls[].id values in its choices'
-// deltas. A tool call's id rides only its first chunk; later chunks carry
-// argument fragments without one.
+// stream frame: the tool_calls[].id values in a chat chunk's choice deltas, or
+// the call_id of a Responses event's `item` (response.output_item.added and
+// .done carry it). A chat tool call's id rides only its first chunk; later
+// chunks carry argument fragments without one.
 func ExtractStreamToolCallIDs(frameData []byte) []string {
 	var peek struct {
 		Choices []struct {
@@ -161,6 +203,9 @@ func ExtractStreamToolCallIDs(frameData []byte) []string {
 				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
+		Item struct {
+			CallID string `json:"call_id"`
+		} `json:"item"`
 	}
 	if err := json.Unmarshal(frameData, &peek); err != nil {
 		return nil
@@ -172,6 +217,9 @@ func ExtractStreamToolCallIDs(frameData []byte) []string {
 				out = append(out, tc.ID)
 			}
 		}
+	}
+	if peek.Item.CallID != "" {
+		out = append(out, peek.Item.CallID)
 	}
 	return out
 }

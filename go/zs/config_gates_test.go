@@ -32,6 +32,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -739,6 +740,28 @@ func TestPickCandidates_ZeroAffinityPinsLikePrefer(t *testing.T) {
 	}
 	if got := first(""); got != pinned.ID {
 		t.Errorf("zero Affinity: %d leads, want the pinned %d", got, pinned.ID)
+	}
+}
+
+// A stateless Responses tool turn answers its call by call_id in input[]; it
+// must return to the node that issued the call, whose upstream account alone
+// can read the replayed reasoning's encrypted_content.
+func TestPickCandidates_ResponsesToolOutputPinsToTheIssuingNode(t *testing.T) {
+	const model = "gpt-4o-mini"
+	pinned, peer := signerOp(9, model, nil), signerOp(8, model, nil)
+	body := []byte(`{"model":"gpt-4o-mini","store":false,"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"e"},{"type":"function_call","call_id":"call_1","name":"f","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":"x"}]}`)
+
+	srv := minimalTEEServer(t, []Operator{peer, pinned})
+	srv.cfg.Affinity.Policy = AffinityStrict
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
+	pick, err := srv.pickCandidates(context.Background(), endpointResponses, model, body,
+		SizingRequest{Model: model, InputTokens: 100, MaxOutputTokens: 100}, false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+	if err != nil {
+		t.Fatalf("pickCandidates: %v", err)
+	}
+	if got := opIDSet(pick.Operators); len(pick.Operators) != 1 || pick.Operators[0].ID != pinned.ID {
+		t.Errorf("got %v, want only the issuing node %d", got, pinned.ID)
 	}
 }
 

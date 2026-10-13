@@ -9,8 +9,8 @@ import type { Clock } from './ports.js'
 import type { NodeRef } from './types.js'
 
 /**
- * AffinityStore maps an id a node issued (a tool_call_id, or a Responses API
- * response_id) to that node, so a continuation returns to it: its KV cache and
+ * AffinityStore maps an id a node issued (a tool_call_id, a Responses call_id,
+ * or a Responses API response_id) to that node, so a continuation returns to it: its KV cache and
  * the Responses session live in that node's upstream account, not merely its
  * operator's. A host shares one across Clients through Stores.
  */

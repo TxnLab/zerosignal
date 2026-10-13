@@ -43,10 +43,10 @@ func ValidAffinityPolicy(v AffinityPolicy) bool {
 	return false
 }
 
-// IDAffinity is a bounded TTL+LRU map from a string id (typically
-// tool_call_id from a prior response, or response_id from the Responses
-// API) to the operator's id (the stable on-chain id, not the payment
-// address). The dispatcher uses it to pin continuation requests to the
+// IDAffinity is a bounded TTL+LRU map from a string id (typically a
+// tool_call_id or Responses call_id from a prior response, or a response_id
+// from the Responses API) to the operator's id (the stable on-chain id, not
+// the payment address). The dispatcher uses it to pin continuation requests to the
 // same operator so KV-cache reuse and Responses API session state
 // (which lives in the operator's upstream account) stay coherent.
 //
@@ -181,14 +181,15 @@ func ExtractRequestedBuiltinTools(body []byte) []string {
 	return selection.ExtractRequestedBuiltinTools(body)
 }
 
-// ExtractInputToolCallIDs scans a chat-completions request for role:tool
-// messages' tool_call_id values, in order — the affinity cache keys.
+// ExtractInputToolCallIDs returns the tool-call ids a request answers, in
+// order: chat tool_call_id values, then Responses input[] call_id values — the
+// affinity cache keys.
 func ExtractInputToolCallIDs(body []byte) []string {
 	return selection.ExtractInputToolCallIDs(body)
 }
 
-// ExtractResponseToolCallIDs scans a chat-completions response for
-// tool_calls[].id across every choice.
+// ExtractResponseToolCallIDs returns the tool-call ids a response issues: chat
+// tool_calls[].id across every choice, then Responses output[] call_id values.
 func ExtractResponseToolCallIDs(body []byte) []string {
 	return selection.ExtractResponseToolCallIDs(body)
 }
