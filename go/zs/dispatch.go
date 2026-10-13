@@ -695,8 +695,8 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				Stream:         wantsStream,
 				PayerAddr:      s.wallet.PayerAddr(),
 				// Tell the node which bound sized InputCount so it re-measures the
-				// decrypted body with the same function. Omitted (0 ⇒ v1) for a
-				// pre-9.2 target, which wouldn't understand the field anyway.
+				// decrypted body with the same function. A pre-9.2 target is sent
+				// v1, which it reads as its default.
 				InputBoundVersion: boundVersion,
 			}
 			if isImage {
