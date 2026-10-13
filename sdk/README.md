@@ -198,7 +198,7 @@ A host can also implement `RegistryProvider` itself: it lists the operators for 
 resolves one node by its ref, lists every operator for the relay pool, re-probes a node whose
 ephemeral key went stale, and records which models were asked for. `subscribe` on a
 `DiscoveryRegistry` hands each cycle's snapshot to an app that renders it, the saved fleet
-first. `CatalogEngine` folds probe results but is not a registry.
+first.
 
 ### Algod
 
@@ -409,9 +409,8 @@ It also holds what a payer does with its nodes' discovery probes, each matching 
 registry under shared vectors: `selectProbeSet` bounds which nodes a cycle probes, steered by
 the recently requested models in `ModelDemand` and then by the nodes nothing is known about yet
 (no `lastRefreshAt`, no `reachableAsOf`); `checkEphemeralAdvertisement` verifies a
-node's signed ephemeral seal key and says why one is unusable (`EphemeralVerifyCache` reuses
-the verdict for an app that rebuilds its rows often, and `recordEphemeralStaleness` charges a
-relay that served a stale key).
+node's signed ephemeral seal key and says why one is unusable (`recordEphemeralStaleness`
+charges a relay that served a stale key).
 
 An app that renders a `DiscoveryRegistry` snapshot reads each node's row verdict with
 `reachabilityOf(op, now, maxCarryAge)`, the rule the registry advertises on (`advertisable`,
@@ -424,14 +423,8 @@ the registry publishes nothing. Pass the `discovery.maxCarryAge` the registry wa
 or less is the default, as the registry reads it. Dispatch does not consult the verdict: a node
 probed down keeps its carried models and stays a candidate.
 
-`CatalogEngine` is the other row verdict, for an app that runs the probes itself rather than
-reading a registry: it folds each node's probe results as the Go registry does. A node keeps its last
-answer for `maxCarryAge` after it, through a failed probe, an unreachable relay, or a cycle that
-skipped it. A probe that reached the node and failed reads `failing` but keeps the models. One
-that learned nothing (every relay hop failed) changes nothing. Two readings are more cautious
-than Go's, which starts each cycle with every node unprobed: a node's own failure stays `failing`,
-and a privacy-mode probe with no relay reads `no-relay`, until the node is next probed. The app runs the probes and hands
-each result over; `restoredProtoVersion` floors a version read back from storage to its major.
+`restoredProtoVersion` floors a version read back from storage to its major, as the saved
+catalog does.
 
 ## TEE evidence
 
