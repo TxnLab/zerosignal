@@ -893,6 +893,16 @@ func (w *Wallet) PrepareDeposit(ctx context.Context) error {
 	return w.ensureDepositForServe(ctx)
 }
 
+// RecheckDeposit clears depositReady, so the next PrepareDeposit reads the
+// payer's escrow-app opt-in again and deposits if it's gone. Open's revert
+// path does the same, but a node that refuses the reserve for a missing
+// opt-in ends the request before any open.
+func (w *Wallet) RecheckDeposit() {
+	w.depositMu.Lock()
+	w.depositReady = false
+	w.depositMu.Unlock()
+}
+
 // freeDepositSlots reports how many additional ticket boxes the prepaid pool
 // can currently back: (AlgoBalance − OpenTickets × ticketMbr) / ticketMbr. An
 // open needs only ONE free slot to commit, so ensureDepositForServe uses this

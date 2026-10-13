@@ -210,6 +210,17 @@ export interface WalletOpener {
      */
     prepareDeposit?(signal?: AbortSignal): Promise<void>
     /**
+     * Called when a node refuses a reserve with payer_not_opted_in. The node
+     * saw no escrow-app opt-in for the payer: its MBR deposit was closed
+     * outside this wallet (another process, or another tab of the same payer),
+     * its first deposit hasn't confirmed yet, or the node's cache is stale.
+     * Only the first is lasting, and a wallet that has already checked the
+     * deposit skips the opt-in on later requests, so every one would be
+     * refused the same way. Rechecking is safe in the other cases: it costs
+     * one opt-in read. Optional. Go's DepositRechecker.
+     */
+    recheckDeposit?(): void
+    /**
      * The live protocol fee in basis points. Optional: without it responses
      * carry no fee breakdown.
      */

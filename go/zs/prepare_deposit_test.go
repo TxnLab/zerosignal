@@ -36,6 +36,41 @@ func (p *preparerWallet) PrepareDeposit(ctx context.Context) error {
 	return p.err
 }
 
+// recheckerWallet counts RecheckDeposit calls on a test wallet.
+type recheckerWallet struct {
+	WalletOpener
+	rechecks int
+}
+
+func (r *recheckerWallet) ProtocolFeeBps(ctx context.Context) (uint64, error) {
+	if f, ok := r.WalletOpener.(feeRateCapable); ok {
+		return f.ProtocolFeeBps(ctx)
+	}
+	return 0, errors.New("no fee rate")
+}
+
+func (r *recheckerWallet) RecheckDeposit() { r.rechecks++ }
+
+// A node refusing the payer as unopted means the MBR deposit the wallet
+// checked may be gone, so dispatch has the wallet check it again; any other
+// payer refusal leaves it alone.
+func TestDispatch_NotOptedInRefusalRechecksTheDeposit(t *testing.T) {
+	for code, want := range map[string]int{"payer_not_opted_in": 1, "free_quota_exhausted": 0} {
+		t.Run(code, func(t *testing.T) {
+			c, rc := admitClient(t, []Operator{retryOp(1, "OWNER_A")}, &admitGuard{limit: ^uint64(0)})
+			rc.script = []error{&PayerRefusalError{Code: code, Message: "refused"}}
+			rw := &recheckerWallet{WalletOpener: c.wallet}
+			c.wallet = rw
+			if ze := turnErr(t, c, string(admitBody)); ze.Code != code {
+				t.Fatalf("code %q, want %s", ze.Code, code)
+			}
+			if rw.rechecks != want {
+				t.Errorf("RecheckDeposit calls = %d, want %d", rw.rechecks, want)
+			}
+		})
+	}
+}
+
 // A request the spend cap refuses deposits nothing: the cap is checked first.
 func TestDispatch_AdmitRefusalPreparesNoDeposit(t *testing.T) {
 	c, rc := admitClient(t, []Operator{pricedOp(1, 1, 2)}, &admitGuard{limit: 0})

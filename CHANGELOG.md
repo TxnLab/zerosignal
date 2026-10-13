@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a node's `payer_not_opted_in` refusal makes the wallet check the MBR deposit again (unreleased)
+
+Once the wallet has seen the payer opted into the escrow app with its MBR deposit covering the
+working set, it skips those reads on later requests. A deposit closed outside the wallet —
+`zs-proxy close-deposit` while the daemon runs, or "Close pool" in another browser tab — went
+unnoticed, so reserves were refused `payer_not_opted_in` until the process restarted or a request
+reached a node whose cache still admitted the payer (its open then reverted, which already
+re-deposited). Both SDKs now have the wallet check again when a node refuses with that code (Go:
+the optional `DepositRechecker` interface, which `*Wallet` implements; TS: the optional
+`WalletOpener.recheckDeposit`), and the next request opts in and deposits again. The refused
+request itself still fails, and a node that refused within the last few seconds may refuse once
+more from its cache.
+
 ### 2026-10-13 — a re-probed node's ticket is checked against the request it answers (unreleased)
 
 When a reserve hit a stale ephemeral key, both SDKs re-probe the node and re-size the reserve

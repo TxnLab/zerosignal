@@ -358,6 +358,17 @@ describe('Wallet.open', () => {
         expect(chain.deposits).toEqual([{ amount: FULL, optIn: true }])
     })
 
+    // TestPrepareDeposit_DepositsAgainAfterRecheck
+    it('makes the first deposit again after a recheck finds the deposit closed elsewhere', async () => {
+        await wallet.open(ticket, op, openGroup('valid'))
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.optedIn = false
+        chain.spendable = 10n * FULL
+        wallet.recheckDeposit()
+        await wallet.prepareDeposit()
+        expect(chain.deposits).toEqual([{ amount: FULL, optIn: true }])
+    })
+
     // TestPrepareDeposit_UnaffordableWithNoPool
     it('refuses before a reserve when no pool can be funded', async () => {
         chain.deposit = { algoBalance: 0n, openTickets: 0n }

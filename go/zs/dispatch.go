@@ -964,6 +964,11 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 				// as a payer refusal.
 				e := &Error{Kind: KindFunds, Code: payerRefusal.Code, Message: payerRefusal.Message, RetryAfter: payerRefusal.RetryAfter}
 				em.fail(e)
+				// After the failure is sent: RecheckDeposit waits out any
+				// funding pass in flight, which the caller shouldn't.
+				if r, ok := s.wallet.(DepositRechecker); ok && payerRefusal.Code == "payer_not_opted_in" {
+					r.RecheckDeposit()
+				}
 				return
 			case outcomeNoEphemeral:
 				// An all-skip outcome becomes 503 no_ephemeral_capacity. Debug, not

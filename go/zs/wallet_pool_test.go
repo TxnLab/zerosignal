@@ -202,6 +202,27 @@ func TestPrepareDeposit_DepositsAgainAfterClose(t *testing.T) {
 	}
 }
 
+// An MBR deposit closed outside this wallet (another process, another tab)
+// leaves depositReady set until a node refuses the payer unopted; after
+// RecheckDeposit the next request opts in again.
+func TestPrepareDeposit_DepositsAgainAfterRecheck(t *testing.T) {
+	ctx := context.Background()
+	pool := &fakePool{ticketMbr: testTicketMbr, minFee: 1_000, spendable: 100_000_000}
+	w := newPoolWallet(pool)
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("PrepareDeposit: %v", err)
+	}
+	pool.optedIn = false
+	pool.dep = escrow.PayerDeposit{}
+	w.RecheckDeposit()
+	if err := w.PrepareDeposit(ctx); err != nil {
+		t.Fatalf("PrepareDeposit after recheck: %v", err)
+	}
+	if pool.depositCalls != 2 || !pool.lastOptIn {
+		t.Errorf("deposits = %d, optIn = %v; want a second opt-in deposit", pool.depositCalls, pool.lastOptIn)
+	}
+}
+
 // An opted-in pool short of its working set is left to Open: a node checks
 // only the opt-in at reserve, and such a pool never latches, so a top-up here
 // would repeat the whole funding pass on every request.

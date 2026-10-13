@@ -396,6 +396,19 @@ export class Wallet implements WalletOpener {
         return this.#ensureDepositForServe(signal)
     }
 
+    /**
+     * Clears #depositReady, so the next prepareDeposit reads the payer's
+     * escrow-app opt-in again and deposits if it's gone. A failed open does
+     * the same, but a node that refuses the reserve for a missing opt-in ends
+     * the request before any open. Go's RecheckDeposit, except that Go waits
+     * for a funding pass in flight and this doesn't: a pass that read the
+     * deposit before it closed can still set #depositReady, and the next
+     * refusal clears it again.
+     */
+    recheckDeposit(): void {
+        this.#depositReady = false
+    }
+
     async #freeSlots(): Promise<bigint> {
         const ticketMbr = await this.#chain.ticketMbr()
         if (ticketMbr <= 0n) throw new Error('wallet: free-deposit-slots: ticket MBR not loaded')
