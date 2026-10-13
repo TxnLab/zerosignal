@@ -492,6 +492,10 @@ Each open ticket's box is paid for out of the payer's prepaid ALGO pool in escro
 carries no ALGO. A node may refuse a reserve from a payer who isn't opted into the pool
 (`payer_not_opted_in`), so the SDK's `Wallet` makes the first deposit before the payer's first
 reserve; a wallet you supply does the same if it implements `WalletOpener.prepareDeposit`.
+When a node refuses with that code anyway (the deposit was closed elsewhere, or the first
+deposit hasn't confirmed), the SDK calls `WalletOpener.recheckDeposit`, so a wallet that skips
+the opt-in read once it has seen the deposit should implement it and read the opt-in again on
+its next `prepareDeposit`.
 `ensureMbrDeposit(chain, payer, slots)` funds the pool toward a working set of
 `slots` concurrent tickets (`Config.concurrentSlots` by default), opting in on the first
 deposit. The working set is an ideal rather than a requirement: a wallet that can't reach it

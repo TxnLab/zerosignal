@@ -102,7 +102,7 @@ export type RunSealed = (em: Emitter, run: SealedRun, signal?: AbortSignal) => P
 export interface DispatchDeps {
     pick: PickDeps
     reserveClient: ReserveClient
-    wallet: Pick<WalletOpener, 'payerAddr' | 'prepareDeposit'>
+    wallet: Pick<WalletOpener, 'payerAddr' | 'prepareDeposit' | 'recheckDeposit'>
     estimatePolicy: EstimatePolicy
     privacy: Privacy
     allowPrivacyOverride: boolean
@@ -761,6 +761,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     em.fail(
                         new ZsError({ kind: 'funds', code: pr.code, message: pr.nodeMessage, ...retryAfterOf(pr.retryAfterMs) }),
                     )
+                    if (pr.code === 'payer_not_opted_in') deps.wallet.recheckDeposit?.()
                     return
                 }
                 case 'no_ephemeral':

@@ -1467,6 +1467,23 @@ describe('the sweep', () => {
         }
     })
 
+    // TestDispatch_NotOptedInRefusalRechecksTheDeposit
+    it('has the wallet recheck its deposit when a node refuses the payer as unopted, and only then', async () => {
+        for (const [code, want] of [
+            ['payer_not_opted_in', 1],
+            ['free_quota_exhausted', 0],
+        ] as const) {
+            let rechecks = 0
+            const h = harness([op(1)], {
+                answer: async () => Promise.reject(new PayerRefusalError(code, 'refused', 0)),
+                deps: { wallet: { payerAddr: () => 'PAYER', recheckDeposit: () => void rechecks++ } },
+            })
+            const em = await h.run(chat())
+            expect(em.failed).toMatchObject({ code })
+            expect(rechecks).toBe(want)
+        }
+    })
+
     it('stops when the caller leaves, unpaid and canceled', async () => {
         const ac = new AbortController()
         const h = harness([op(1), op(2)], {
