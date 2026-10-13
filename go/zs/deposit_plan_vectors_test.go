@@ -99,6 +99,16 @@ func TestDepositPlanVectors(t *testing.T) {
 		// wallet can't cover: the need is the term, not a slot.
 		in{3, mbr, quota, 3 * mbr, 0, true, 5_000, fee},
 		in{10, mbr, quota, 3*mbr + 10_000, 0, true, 5_000, fee},
+		// A part slot in the pool counts toward the next: 3 slots and 100_000
+		// over, with 15_000 spendable past the fee, buys a 4th; 1 short doesn't.
+		in{10, mbr, 0, 3*mbr + 100_000, 0, true, 2*fee + 15_000, fee},
+		in{10, mbr, 0, 3*mbr + 100_000, 0, true, 2*fee + 14_999, fee},
+		// The same with a quota term: the slot first, the term only if it fits.
+		in{10, mbr, quota, 3*mbr + 100_000, 0, true, 2*fee + 15_000 + quota, fee},
+		in{10, mbr, quota, 3*mbr + 100_000, 0, true, 2*fee + 15_000 + quota - 1, fee},
+		// A pool and wallet past uint64 together saturate rather than wrap.
+		// The target saturates too, so the plan reaches the sum.
+		in{math.MaxUint64, mbr, 0, math.MaxUint64 - 50_000, 0, true, 100_000_000, fee},
 		// A larger minimum fee.
 		in{10, mbr, 0, mbr, 0, true, 2*10_000 + mbr, 10_000},
 		in{10, mbr, 0, mbr, 0, true, 2*10_000 + mbr - 1, 10_000},

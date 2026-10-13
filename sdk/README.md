@@ -495,10 +495,11 @@ reserve; a wallet you supply does the same if it implements `WalletOpener.prepar
 `ensureMbrDeposit(chain, payer, slots)` funds the pool toward a working set of
 `slots` concurrent tickets (`Config.concurrentSlots` by default), opting in on the first
 deposit. The working set is an ideal rather than a requirement: a wallet that can't reach it
-funds as many whole slots as it affords and reports `belowTarget`, and one that can't afford a
-single slot throws `MbrDepositUnaffordableError` before anything is signed. `backedSlots` on
-the error tells a pool that can still serve from one that can't, and `need` is what the next
-deposit costs: the free-quota box term when that is what a serving pool lacks, else a slot. `planMbrDeposit` is the
+funds as many slots as it affords, counting a part slot already in the pool, and reports
+`belowTarget`, and one that can't afford a single slot throws `MbrDepositUnaffordableError`
+before anything is signed. `backedSlots` on the error tells a pool that can still serve from
+one that can't, and `need` is what the next deposit costs: the free-quota box term when that
+is what a serving pool lacks, else what the pool's part slot lacks of a whole one. `planMbrDeposit` is the
 sizing on its own, Go's `planDeposit`, and `readMbrPool` / `mbrPoolState` report what is
 deposited, reserved by live tickets, and withdrawable.
 

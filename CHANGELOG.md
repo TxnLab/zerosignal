@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — the slot pool counts a part slot (unreleased)
+
+Funding the prepaid ticket-MBR pool now counts a part slot already in the pool toward the next
+one, in both SDKs. Previously the pool and the wallet were each floored to whole slots, so a pool
+holding three slots and most of a fourth, beside a wallet that could pay the rest, read as unable
+to afford a fourth and asked for a whole one. `need` (Go: the `ErrDepositUnaffordable` message;
+TS: `MbrDepositUnaffordableError.need`) is now what the part slot lacks rather than a whole slot.
+
 ### 2026-10-13 — a whole reply is bounded, and a caller's leaving reaches a stream before its headers (unreleased)
 
 Both SDKs now read a whole (non-streamed) reply's body under the stream idle bound's
