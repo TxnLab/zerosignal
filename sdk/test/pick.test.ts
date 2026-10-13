@@ -293,7 +293,9 @@ describe('pickCandidates', () => {
         res = await pickCandidates(deps([op(1)]), request({ endpoint: '/v1/images/generations' }))
         expect(res.imageEndpointUnsupported).toBe(true)
         res = await pickCandidates(deps([op(1, { protoVersion: JUDGES_FIT }, { contextWindow: 150 })]), request())
-        expect(res.sizingMisses).toEqual([{ operator_id: 1, context_window: 150, max_output_tokens: 0, effective_max_output: 100 }])
+        expect(res.sizingMisses).toEqual([
+            { operator_id: 1, context_window: 150, max_output_tokens: 0, effective_max_output: 100, input_tokens: 100, context_window_exceeded: true },
+        ])
         expect(res.operators).toEqual([])
     })
 
@@ -304,7 +306,9 @@ describe('pickCandidates', () => {
         const s = sizing({ inputTokens: 4000, maxOutputTokens: 200_000, deriveMaxOutput: true, maxOutputCeiling: 500 })
         const res = await pickCandidates(deps(ops), request({ sizing: s }))
         expect(ids(res.operators)).toEqual(['1/1'])
-        expect(res.sizingMisses).toEqual([{ operator_id: 2, context_window: 4000, max_output_tokens: 0, effective_max_output: 500 }])
+        expect(res.sizingMisses).toEqual([
+            { operator_id: 2, context_window: 4000, max_output_tokens: 0, effective_max_output: 500, input_tokens: 4000, context_window_exceeded: true },
+        ])
     })
 
     it('sizes a current-wire operator by the v2 input count', async () => {

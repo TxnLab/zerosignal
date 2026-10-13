@@ -13,6 +13,7 @@ import {
     effectiveInputTokens,
     effectiveMaxOutput,
     fits,
+    fitsContextWindowFor,
     operatorRefMatches,
     servesModel,
     signerUnderfunded,
@@ -121,6 +122,15 @@ export interface SizingMiss {
     // called with, so a caller rendering a "why didn't this fit" message reports
     // the true gap instead of the flat display ceiling the caller never sent.
     effective_max_output: number
+    // the input count the fit check charged this operator: the v2 bound for a
+    // node on the tight bound, else v1. The two differ most on images, which v1
+    // prices at a flat 2048x2048.
+    input_tokens: number
+    // whether the window check failed, as fitsContextWindowFor judged it. A node
+    // that defers fit to its upstream passes some requests whose input plus
+    // max_output exceeds the window, so a message can't recompute this from the
+    // other fields.
+    context_window_exceeded: boolean
 }
 
 export interface Diagnostics {
@@ -212,16 +222,20 @@ export function selectTargets(ops: Operator[], c: Constraints, preferred: Operat
     const sizingMisses: SizingMiss[] = []
     for (const op of pool) {
         const eff = opMaxOutput(op, c)
-        if (fits(op, c.model, opInputTokens(op, c), eff)) {
+        const input = opInputTokens(op, c)
+        if (fits(op, c.model, input, eff)) {
             fitList.push(op)
             continue
         }
         const mc = op.model_capacities?.[c.model]
+        const window = mc?.context_window ?? 0
         sizingMisses.push({
             operator_id: op.id,
-            context_window: mc?.context_window ?? 0,
+            context_window: window,
             max_output_tokens: mc?.max_output_tokens ?? 0,
             effective_max_output: eff,
+            input_tokens: input,
+            context_window_exceeded: !fitsContextWindowFor(op.proto_version, input, eff, window),
         })
     }
     if (sizingMisses.length > 0) diagnostics.sizing_misses = sizingMisses

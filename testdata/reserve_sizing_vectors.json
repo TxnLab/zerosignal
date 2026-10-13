@@ -2852,29 +2852,53 @@
           "operator_id": 1,
           "context_window": 4096,
           "max_output_tokens": 0,
-          "effective_max_output": 4000
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": true
         },
         {
           "operator_id": 2,
           "context_window": 0,
           "max_output_tokens": 2048,
-          "effective_max_output": 4000
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": false
         },
         {
           "operator_id": 3,
           "context_window": 100000,
           "max_output_tokens": 8000,
-          "effective_max_output": 4000
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": false
         },
         {
           "operator_id": 4,
           "context_window": 5200,
           "max_output_tokens": 3000,
-          "effective_max_output": 4000
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": false
+        },
+        {
+          "operator_id": 8,
+          "context_window": 4096,
+          "max_output_tokens": 3000,
+          "effective_max_output": 4000,
+          "input_tokens": 300,
+          "context_window_exceeded": true
+        },
+        {
+          "operator_id": 9,
+          "context_window": 5000,
+          "max_output_tokens": 3000,
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": false
         }
       ],
-      "no_fit": "no operator serves m with input_tokens=1200 max_output_tokens=4000\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200)\n  - op 2: max_output_tokens=2048 (over by 1952)\n  - op 3: declared capacity does not fit (context_window=100000, max_output_tokens=8000)\n  - op 4: max_output_tokens=3000 (over by 1000)",
-      "size_failure": "no operator serves m with input_tokens=1200 max_output_tokens=4000\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200)\n  - op 2: max_output_tokens=2048 (over by 1952)\n  - op 3: declared capacity does not fit (context_window=100000, max_output_tokens=8000)\n  - op 4: max_output_tokens=3000 (over by 1000)"
+      "no_fit": "no operator serves m with input_tokens=1200 max_output_tokens=4000\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200 = input 1200 + max_output 4000)\n  - op 2: max_output_tokens=2048 (over by 1952)\n  - op 3: declared capacity does not fit (context_window=100000, max_output_tokens=8000)\n  - op 4: max_output_tokens=3000 (over by 1000)\n  - op 8: context_window=4096 (request needs 4300 = input 300 + max_output 4000)\n  - op 9: max_output_tokens=3000 (over by 1000)",
+      "size_failure": "no operator serves m with input_tokens=1200 max_output_tokens=4000\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200 = input 1200 + max_output 4000)\n  - op 2: max_output_tokens=2048 (over by 1952)\n  - op 3: declared capacity does not fit (context_window=100000, max_output_tokens=8000)\n  - op 4: max_output_tokens=3000 (over by 1000)\n  - op 8: context_window=4096 (request needs 4300 = input 300 + max_output 4000)\n  - op 9: max_output_tokens=3000 (over by 1000)"
     },
     {
       "name": "reserve-time rejections",
@@ -2931,11 +2955,13 @@
           "operator_id": 1,
           "context_window": 4096,
           "max_output_tokens": 0,
-          "effective_max_output": 4000
+          "effective_max_output": 4000,
+          "input_tokens": 1200,
+          "context_window_exceeded": true
         }
       ],
-      "no_fit": "no operator serves m with input_tokens=1200 max_output_tokens=derived-per-operator\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200)",
-      "size_failure": "no operator serves m with input_tokens=1200 max_output_tokens=derived-per-operator\n  operators rejected the request at reserve time:\n  - op 5: input 1200 + max_output 4000 exceeds 4096 (context_length_exceeded)\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200)"
+      "no_fit": "no operator serves m with input_tokens=1200 max_output_tokens=derived-per-operator\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200 = input 1200 + max_output 4000)",
+      "size_failure": "no operator serves m with input_tokens=1200 max_output_tokens=derived-per-operator\n  operators rejected the request at reserve time:\n  - op 5: input 1200 + max_output 4000 exceeds 4096 (context_length_exceeded)\n  operators advertising this model:\n  - op 1: context_window=4096 (request needs 5200 = input 1200 + max_output 4000)"
     }
   ],
   "admit": [

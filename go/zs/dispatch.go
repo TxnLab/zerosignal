@@ -1269,7 +1269,7 @@ func formatReserveSizeFailureMessage(model string, sizing SizingRequest, rejecti
 		b.WriteString("\n  operators advertising this model:")
 		for _, m := range preFilter {
 			b.WriteString("\n  - ")
-			b.WriteString(describeMiss(m, sizing))
+			b.WriteString(describeMiss(m))
 		}
 	}
 	return b.String()
@@ -1406,10 +1406,10 @@ type pickResult struct {
 }
 
 // sizingMiss is the per-operator capacity envelope captured when Fits
-// rejects a candidate. Both fields are pulled directly from
-// op.ModelCapacities[req.Model]; a zero value means "the operator did
-// not declare that limit" (Fits treats 0 as unbounded), so describeMiss
-// shouldn't blame a 0 limit for the rejection.
+// rejects a candidate. ContextWindow and MaxOutputTokens are the operator's
+// declared ModelCapacity; a zero value means "the operator did not declare
+// that limit" (Fits treats 0 as unbounded), so describeMiss shouldn't blame
+// a 0 limit for the rejection. The rest is the filter's own reading.
 type sizingMiss struct {
 	OperatorID      uint64
 	ContextWindow   uint64
@@ -1421,6 +1421,11 @@ type sizingMiss struct {
 	// gap from THIS, not sizing.MaxOutputTokens (which in derive mode holds the
 	// flat display ceiling the caller never sent).
 	EffectiveMaxOutput uint64
+	// InputTokens and ContextWindowExceeded are the filter's own reading
+	// (selection.SizingMiss): the input count it charged this operator, and
+	// whether the window check is what failed.
+	InputTokens           uint64
+	ContextWindowExceeded bool
 }
 
 // formatNoFitMessage builds the error body for the "registry has
@@ -1456,7 +1461,7 @@ func formatNoFitMessage(model string, sizing SizingRequest, misses []sizingMiss)
 	b.WriteString("\n  operators advertising this model:")
 	for _, m := range misses {
 		b.WriteString("\n  - ")
-		b.WriteString(describeMiss(m, sizing))
+		b.WriteString(describeMiss(m))
 	}
 	return b.String()
 }
@@ -1469,19 +1474,17 @@ func formatNoFitMessage(model string, sizing SizingRequest, misses []sizingMiss)
 // message is defensive: if Fits ever grows a new check, we still emit
 // a line per operator instead of going silent.
 //
-// The max_output term is m.EffectiveMaxOutput — the value the filter
-// actually charged this operator — NOT req.MaxOutputTokens. They differ in
-// derive mode (caller omitted max_output): req.MaxOutputTokens then holds
-// the flat display ceiling while each operator was fit-checked against its
-// own per-operator derivation, so blaming the flat ceiling would overstate
-// the gap (and cite a max_output the caller never sent).
-func describeMiss(m sizingMiss, req SizingRequest) string {
-	if m.ContextWindow > 0 {
-		need := req.InputTokens + m.EffectiveMaxOutput
-		if need > m.ContextWindow {
-			return fmt.Sprintf("op %d: context_window=%d (request needs %d)",
-				m.OperatorID, m.ContextWindow, need)
-		}
+// Every number is the one the filter charged this operator, never the
+// request's: the input count differs by bound version (a 9.2 node is charged
+// v2, which reads an image's real size), and the max_output in derive mode
+// (the caller omitted it, so SizingRequest.MaxOutputTokens holds a flat
+// display ceiling the caller never sent). Which limit failed is the filter's
+// verdict too, since a node that defers fit to its upstream passes some
+// requests whose input plus max_output exceeds its window.
+func describeMiss(m sizingMiss) string {
+	if m.ContextWindowExceeded {
+		return fmt.Sprintf("op %d: context_window=%d (request needs %d = input %d + max_output %d)",
+			m.OperatorID, m.ContextWindow, m.InputTokens+m.EffectiveMaxOutput, m.InputTokens, m.EffectiveMaxOutput)
 	}
 	if m.MaxOutputTokens > 0 && m.EffectiveMaxOutput > m.MaxOutputTokens {
 		return fmt.Sprintf("op %d: max_output_tokens=%d (over by %d)",
@@ -1860,10 +1863,12 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 	res.ToolUnsupported = tr.Diagnostics.ToolUnsupported
 	for _, m := range tr.Diagnostics.SizingMisses {
 		res.SizingMisses = append(res.SizingMisses, sizingMiss{
-			OperatorID:         m.OperatorID,
-			ContextWindow:      m.ContextWindow,
-			MaxOutputTokens:    m.MaxOutputTokens,
-			EffectiveMaxOutput: m.EffectiveMaxOutput,
+			OperatorID:            m.OperatorID,
+			ContextWindow:         m.ContextWindow,
+			MaxOutputTokens:       m.MaxOutputTokens,
+			EffectiveMaxOutput:    m.EffectiveMaxOutput,
+			InputTokens:           m.InputTokens,
+			ContextWindowExceeded: m.ContextWindowExceeded,
 		})
 	}
 

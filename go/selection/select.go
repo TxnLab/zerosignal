@@ -185,6 +185,15 @@ type SizingMiss struct {
 	// EffectiveMaxOutput vs ContextWindow) instead of the flat display ceiling,
 	// which in derive mode the caller never sent.
 	EffectiveMaxOutput uint64 `json:"effective_max_output"`
+	// InputTokens is the input count the fit check charged this operator: the
+	// v2 bound for a node on the tight bound, else v1. The two differ most on
+	// images, which v1 prices at a flat 2048x2048.
+	InputTokens uint64 `json:"input_tokens"`
+	// ContextWindowExceeded is whether the window check failed, as
+	// FitsContextWindowFor judged it. A node that defers fit to its upstream
+	// passes some requests whose input plus max_output exceeds the window, so
+	// a message can't recompute this from the other fields.
+	ContextWindowExceeded bool `json:"context_window_exceeded"`
 }
 
 // Diagnostics explains an empty candidate list. Exactly one of the boolean
@@ -306,16 +315,19 @@ func SelectTargets(ops []Operator, c Constraints, preferred *Operator) TargetRes
 	fitList := make([]Operator, 0, len(registry))
 	for _, op := range registry {
 		eff := effectiveMaxOutput(op, c)
-		if Fits(op, c.Model, effectiveInputTokens(op, c), eff) {
+		in := effectiveInputTokens(op, c)
+		if Fits(op, c.Model, in, eff) {
 			fitList = append(fitList, op)
 			continue
 		}
 		mc := op.ModelCapacities[c.Model]
 		res.Diagnostics.SizingMisses = append(res.Diagnostics.SizingMisses, SizingMiss{
-			OperatorID:         op.ID,
-			ContextWindow:      mc.ContextWindow,
-			MaxOutputTokens:    mc.MaxOutputTokens,
-			EffectiveMaxOutput: eff,
+			OperatorID:            op.ID,
+			ContextWindow:         mc.ContextWindow,
+			MaxOutputTokens:       mc.MaxOutputTokens,
+			EffectiveMaxOutput:    eff,
+			InputTokens:           in,
+			ContextWindowExceeded: !FitsContextWindowFor(op.ProtoVersion, in, eff, mc.ContextWindow),
 		})
 	}
 	if len(fitList) == 0 {
