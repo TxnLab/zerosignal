@@ -27,8 +27,7 @@ function op(id: number): Operator {
     return testOperator({ id, nodeId: 0, ownerAddr: `OWNER${id}`, models: [MODEL], protoVersion: PROTO_VERSION })
 }
 
-function setup(policy: PickDeps['affinityPolicy']) {
-    const ops = [op(1), op(7)]
+function setup(policy: PickDeps['affinityPolicy'], ops = [op(1), op(7)]) {
     const nodeExclusions = new NodeExclusionStore()
     nodeExclusions.excludeNode({ op: 7, node: 0 })
     const debug: [string, LogAttrs | undefined][] = []
@@ -77,6 +76,21 @@ describe('an excluded node and the continuation pins', () => {
                 'previous_response_id "rid" is pinned to operator 7 node 0, which this payer excluded for handing it a fraudulent settle group; start a new conversation',
             )
         }
+    })
+
+    // An excluded node behind the newest pin ends the walk; the older pin behind
+    // it, to a live node, is not consulted.
+    it('stops at an excluded newest pin rather than taking an older one', async () => {
+        const { deps } = setup('prefer', [op(1), op(2), op(7)])
+        deps.toolAffinity.record({ op: 2, node: 0 }, ['call_old'])
+        const res = await pickCandidates(
+            deps,
+            request(
+                '/v1/chat/completions',
+                `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call_old"},{"role":"tool","tool_call_id":"call_1"}]}`,
+            ),
+        )
+        expect(res.operators.map((o) => o.id)).toEqual([1, 2])
     })
 
     it('reads a tool-call pin to it as no preference, under strict too', async () => {

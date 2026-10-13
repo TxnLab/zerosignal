@@ -218,6 +218,33 @@ func TestPickCandidates_ExcludedNodeOffContinuationPins(t *testing.T) {
 	}
 }
 
+// An excluded node behind the NEWEST pin ends the walk: the older pin behind
+// it, to a live node, is not consulted, as for a node gone from the registry.
+func TestPickCandidates_ExcludedNewestPinIsNoPreference(t *testing.T) {
+	srv := minimalRoutingServer(t, []Operator{
+		routingOp(1, routingModel, 0, 0),
+		routingOp(2, routingModel, 0, 0),
+		routingOp(7, routingModel, 0, 0),
+	})
+	source := &ChainOperatorSource{}
+	source.ExcludeNode(NodeRef{Op: 7})
+	srv.nodeExcluder = source
+	srv.cfg.Affinity.Policy = AffinityPrefer
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(2, 0, []string{"call_old"})
+	srv.toolAffinity.Record(7, 0, []string{"call_new"})
+
+	body := []byte(`{"model":"` + routingModel + `","messages":[{"role":"tool","tool_call_id":"call_old"},{"role":"tool","tool_call_id":"call_new"}]}`)
+	pick, err := srv.pickCandidates(context.Background(), endpointChatCompletions, routingModel, body,
+		SizingRequest{Model: routingModel, InputTokens: 100, MaxOutputTokens: 100}, false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+	if err != nil {
+		t.Fatalf("pickCandidates: %v", err)
+	}
+	if ids := opIDs(pick); len(ids) != 2 || ids[0] != 1 {
+		t.Fatalf("got %v, want the unpinned order with 1 first, not the older pin 2", ids)
+	}
+}
+
 // The same exclusion drops the node from the relay pool: a node that tried to
 // take the payer's account is not trusted to forward traffic either. This is a
 // true DROP, distinct from RelayDownranked's soft demote to the fallback tier.

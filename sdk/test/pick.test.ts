@@ -497,6 +497,16 @@ describe('pickCandidates', () => {
             expect(ids(res.operators)).toEqual(['7/1'])
         })
 
+        // A resent history carries every earlier call id; a conversation that
+        // moved off its first node follows the node that served the latest turn.
+        it('lets the newest live call id decide', async () => {
+            const d = withPin()
+            d.toolAffinity.record({ op: 2, node: 1 }, ['call_2'])
+            const history = `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call_1"},{"role":"tool","tool_call_id":"call_2"},{"role":"tool","tool_call_id":"miss"}]}`
+            const res = await pickCandidates(d, request({ body: history }))
+            expect(ids(res.operators)[0]).toBe('2/1')
+        })
+
         it('is off under policy none', async () => {
             const res = await pickCandidates(withPin({ affinityPolicy: 'none' }), request({ body }))
             expect(ids(res.operators)).toEqual(['1/1', '2/1', '7/1'])
@@ -529,11 +539,14 @@ describe('pickCandidates', () => {
             expect(ids(res.operators)).toEqual(['7/1', '1/1', '2/1'])
         })
 
-        it('takes the first live pin, and a pin whose node is gone is no preference', async () => {
+        it('takes the newest live pin, and a pin whose node is gone is no preference', async () => {
             const d = withPin()
             d.toolAffinity.record({ op: 2, node: 1 }, ['call_1'])
             d.toolAffinity.record({ op: 99, node: 1 }, ['miss'])
-            const res = await pickCandidates(d, request({ body }))
+            // The gone node's id is the newest, so it decides; the older call_1
+            // pin to op 2 must not be reached past it.
+            const newestGone = `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call_1"},{"role":"tool","tool_call_id":"miss"}]}`
+            const res = await pickCandidates(d, request({ body: newestGone }))
             expect(ids(res.operators)).toEqual(['1/1', '2/1', '7/1'])
             expect(d.logged).toContainEqual({
                 level: 'debug',

@@ -743,6 +743,51 @@ func TestPickCandidates_ZeroAffinityPinsLikePrefer(t *testing.T) {
 	}
 }
 
+// A resent history carries every earlier call id. The newest live one decides,
+// so a conversation that moved off its first node (a pin that yielded) follows
+// the node that served the latest turn rather than snapping back.
+func TestPickCandidates_NewestToolCallIDDecides(t *testing.T) {
+	const model = "gpt-4o-mini"
+	first, latest := signerOp(9, model, nil), signerOp(8, model, nil)
+	srv := minimalTEEServer(t, []Operator{signerOp(7, model, nil), latest, first})
+	srv.cfg.Affinity.Policy = AffinityPrefer
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(first.ID, first.NodeID, []string{"call_1"})
+	srv.toolAffinity.Record(latest.ID, latest.NodeID, []string{"call_2"})
+
+	body := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"},{"role":"tool","tool_call_id":"call_2","content":"y"},{"role":"tool","tool_call_id":"call_gone","content":"z"}]}`)
+	got := pickChat(t, srv, model, body)
+	if len(got.Operators) == 0 || got.Operators[0].ID != latest.ID {
+		t.Errorf("got %v, want the latest turn's node %d first", opIDsOf(got.Operators), latest.ID)
+	}
+}
+
+// A newest live pin whose node is gone from the registry is no preference: the
+// walk stops there rather than reaching the older pin behind it.
+func TestPickCandidates_NewestPinToAGoneNodeIsNoPreference(t *testing.T) {
+	const model = "gpt-4o-mini"
+	older := signerOp(8, model, nil)
+	srv := minimalTEEServer(t, []Operator{signerOp(7, model, nil), older})
+	srv.cfg.Affinity.Policy = AffinityPrefer
+	srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+	srv.toolAffinity.Record(older.ID, older.NodeID, []string{"call_1"})
+	srv.toolAffinity.Record(99, 1, []string{"call_gone"})
+
+	body := []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"},{"role":"tool","tool_call_id":"call_gone","content":"y"}]}`)
+	got := pickChat(t, srv, model, body)
+	if ids := opIDsOf(got.Operators); len(ids) != 2 || ids[0] != 7 {
+		t.Errorf("got %v, want the unpinned order with 7 first, not the older pin %d", ids, older.ID)
+	}
+}
+
+func opIDsOf(ops []Operator) []uint64 {
+	ids := make([]uint64, len(ops))
+	for i, op := range ops {
+		ids[i] = op.ID
+	}
+	return ids
+}
+
 // A stateless Responses tool turn answers its call by call_id in input[]; it
 // must return to the node that issued the call, whose upstream account alone
 // can read the replayed reasoning's encrypted_content.

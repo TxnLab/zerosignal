@@ -31,6 +31,16 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — the newest tool-call id decides the pin (unreleased)
+
+A client resends its whole history, so a request carries every earlier tool-call id, and both
+SDKs pinned to the node behind the OLDEST one with a live pin. A conversation that moved off its
+first node (a `prefer` pin that yielded) therefore snapped back to it while that pin lived,
+losing the KV cache and, on Responses, sending the round's reasoning to an account other than the
+one that encrypted it. Both SDKs now walk the ids newest first. (A conversation already served by
+two accounts still replays earlier rounds' reasoning from both; this does not change that.) A newest id whose node is gone or excluded is still no preference; an
+older id is not consulted past it.
+
 ### 2026-10-13 — Go reads the `provider` routing key exactly (unreleased)
 
 Go's `ExtractRoutingPreferences` matched the top-level key case-insensitively, so a body carrying

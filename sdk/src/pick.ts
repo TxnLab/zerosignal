@@ -322,13 +322,16 @@ export async function pickCandidates(deps: PickDeps, req: PickRequest, signal?: 
         }
     }
 
-    // The first tool-call id with a live pin decides; a pin whose node is gone
-    // or excluded is no preference at all. selectTargets would put an excluded
-    // node back past the filter above, and this pin is a cache location, not a
-    // session, so even strict falls through to normal selection.
+    // The newest tool-call id with a live pin decides: a client resends its
+    // whole history, so the oldest names the node that served the
+    // conversation's start, which a pin that yielded since has left. A pin
+    // whose node is gone or excluded is no preference at all. selectTargets
+    // would put an excluded node back past the filter above, and this pin is a
+    // cache location, not a session, so even strict falls through to normal
+    // selection. Mirror of the Go loop in pickCandidates.
     let preferredOp: Operator | undefined
     if (deps.affinityPolicy !== 'none') {
-        for (const id of extractInputToolCallIDs(text)) {
+        for (const id of extractInputToolCallIDs(text).reverse()) {
             const ref = deps.toolAffinity.lookup(id)
             if (ref === undefined) continue
             if (deps.nodeExclusions?.nodeExcluded(ref)) {
