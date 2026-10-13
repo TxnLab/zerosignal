@@ -70,6 +70,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 - `zs/relay_latency.go` ↔ `routing/latency.ts`: the float EWMAs aren't vectored.
 - `zs/malicious_nodes.go` ↔ `routing/exclusion.ts`.
 - `zs/refund_watchdog.go` ↔ `sdk/src/refund-watchdog.ts`: only the `classify` it calls is pinned.
+- `zs/idle.go` ↔ `sdk/src/idle.ts`, the stream idle bound and `readReply`, the whole-reply read: only the default budgets and the 256 MiB reply cap are pinned (`sdk_vocabulary_vectors.json`); which frames open and close a tool round, the phase each silence is measured against, and the whole-reply bound are tested per language.
 - `zs/doctor.go` `Diagnose` / `gatherDoctorReadings` ↔ `sdk/src/doctor.ts` `diagnose` / `gatherDoctorReadings`: how the reads become `DoctorReadings`, tested per language against a fake chain. Both simulate as the application account, so they answer for a payer with no ALGO.
 - `zs/assemble.go` (`buildNetworkParts`, `newChainSource`, `registryConfig`) and the store defaults in `New` ↔ `sdk/src/assemble.ts` and `Client.create`: the wiring from `Config` to discovery. Each `Discovery` setting dropped there is a silent no-op, so `sdk/test/client-registry.test.ts` checks the ones it can observe.
 

@@ -18,6 +18,7 @@ import { type Clock, type Logger, discardLogger } from './ports.js'
 import { withJournalTimeout } from './receipt-check.js'
 import { DEFAULT_LAPSE_FALLBACK_MS, type ReconcileAction, type TicketRecord, decideTicket } from './reconcile.js'
 import { idle } from './sleep.js'
+import { guardRecords } from './spend-guard.js'
 import { decodeTicketId } from './wallet.js'
 import { walletParts } from './wallet-parts.js'
 
@@ -161,9 +162,14 @@ export class Reconciler {
      */
     async close(beforeRelease?: () => Promise<void> | void): Promise<void> {
         this.#stop.abort()
-        await this.#done
-        await beforeRelease?.()
-        this.release?.()
+        // A claim never given back bars every later Client from sweeping this
+        // journal, so it goes whatever the steps before it threw.
+        try {
+            await this.#done
+            await beforeRelease?.()
+        } finally {
+            this.release?.()
+        }
     }
 
     #stopped(): boolean {
@@ -182,7 +188,14 @@ export class Reconciler {
         for (const rec of recs) {
             if (this.#stopped()) return
             if (this.#watching(rec.ticketId) || this.#exhausted(rec.ticketId)) continue
-            await this.#reconcile(rec)
+            // A row that throws, a box it can't decide say, must not end the
+            // sweep loop for the rows after it. It counts as a failed
+            // attempt, so a row that always throws is given up on.
+            try {
+                await this.#reconcile(rec)
+            } catch (err) {
+                this.#failed(rec, 'reconcile', err)
+            }
         }
     }
 
@@ -234,13 +247,13 @@ export class Reconciler {
         // receipt means the request path already counted its charge, so a lapse
         // only drops what reservation is left rather than counting it twice.
         if (action === 'refundInactive' || (action === 'settleLapsed' && rec.settle !== undefined)) {
-            spend.release(rec.ticketId)
+            guardRecords(this.#log, 'release', rec.ticketId, () => spend.release(rec.ticketId))
         } else if (action === 'settleLapsed') {
-            spend.settle(rec.ticketId, Number(box!.pendingAmount))
+            guardRecords(this.#log, 'settle', rec.ticketId, () => spend.settle(rec.ticketId, Number(box!.pendingAmount)))
         }
     }
 
-    #failed(rec: TicketRecord, action: ReconcileAction, err: unknown): void {
+    #failed(rec: TicketRecord, action: ReconcileAction | 'reconcile', err: unknown): void {
         const n = (this.#failures.get(rec.ticketId) ?? 0) + 1
         this.#failures.set(rec.ticketId, n)
         if (n >= RECONCILE_MAX_FAILURES) {
@@ -271,7 +284,8 @@ export class Reconciler {
             // two writes, and settling it again would count the charge twice.
             // With no receipt nothing here says what the ticket cost, so its
             // reservation ages out.
-            this.#spend?.release(rec.ticketId)
+            const spend = this.#spend
+            if (spend) guardRecords(this.#log, 'release', rec.ticketId, () => spend.release(rec.ticketId))
         }
         try {
             await this.#bounded(() => this.#journal.delete(rec.ticketId))

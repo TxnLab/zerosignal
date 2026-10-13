@@ -159,6 +159,7 @@ func (s *Client) forwardRawStream(
 	frameFnFactory frameTransformFactory,
 	nonStreamFallback nonStreamResponder,
 	genComplete *atomic.Bool,
+	idle *idleWatchdog,
 ) {
 	// Detach the upstream read from the client request. If the client
 	// disconnects AFTER the node has finished generating (genComplete is set by
@@ -179,19 +180,23 @@ func (s *Client) forwardRawStream(
 	}
 	upstreamReq.Header.Set("Accept", "text/event-stream")
 
+	// Until the node answers, a caller who leaves cancels the request: nothing
+	// has been generated that a drain could pay for, and the wait for headers
+	// can run to minutes. Once it answers, a buffered reply is the whole
+	// generation, so its body is read for the receipt (bounded by readReply),
+	// and a stream is the watcher's below.
+	stopEarlyLeave := context.AfterFunc(ctx, cancelUpstream)
 	upstreamResp, err := s.httpClient.Do(upstreamReq)
+	stopEarlyLeave()
 	if err != nil {
 		// Relayed mode: a transport error reaching the relay is a relay-hop
 		// failure — attribute it (no-op for a direct route), don't flip the target.
 		//
-		// upstreamCtx, not ctx: it is the context this request actually rode, and
-		// CallerAborted must describe THAT one. It is WithoutCancel and the
-		// disconnect watcher below only starts once Do has returned, so a payer
-		// hang-up cannot reach it and the abort arm is false here by
-		// construction. Passing the payer's ctx instead would exonerate a relay
-		// whose transport genuinely failed while the payer happened to be gone.
+		// upstreamCtx: it is the context this request actually rode, and
+		// CallerAborted must describe that one. A payer's leaving reaches it
+		// only through the cancel above.
 		s.attributeRelayHop(upstreamCtx, hop, transient.TransportFailureStatus, nil, nil)
-		s.log.Error("upstream request failed", slog.String("endpoint", endpoint), relayAttr(hop), slog.Any("err", err))
+		s.logForwardFailure(upstreamCtx, slog.LevelError, "upstream request failed", endpoint, hop, err)
 		em.fail(newError("upstream_unreachable", err.Error()))
 		return
 	}
@@ -199,9 +204,10 @@ func (s *Client) forwardRawStream(
 
 	ct := upstreamResp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "text/event-stream") {
-		respBody, err := io.ReadAll(upstreamResp.Body)
+		respBody, err := readReply(upstreamResp.Body, s.cfg.StreamIdle, s.replyCap(), cancelUpstream)
 		if err != nil {
-			em.fail(newError("read_upstream", err.Error()))
+			s.logForwardFailure(upstreamCtx, slog.LevelWarn, "upstream reply read failed", endpoint, hop, err)
+			em.fail(readUpstreamError(err))
 			return
 		}
 		// Non-stream response on the streaming path: classify it as a relay
@@ -282,11 +288,40 @@ func (s *Client) forwardRawStream(
 		}
 	}()
 
+	// idle bounds the node's silences, the tail drain included: a silence past
+	// its budget cancels the upstream, and the turn ends stream_interrupted
+	// with the *StreamIdleTimeoutError as its cause.
+	idle.start(func(err *StreamIdleTimeoutError) {
+		s.log.Warn("upstream stream idle; cancelling upstream",
+			slog.String("endpoint", endpoint), relayAttr(hop),
+			slog.String("phase", err.Phase), slog.Int64("timeout_ms", err.Timeout.Milliseconds()))
+		cancelUpstream()
+	})
+	// Deferred too, so a caller's loop body that panics through the pump
+	// leaves no timer behind.
+	defer idle.stop()
+	var upstreamBody io.Reader = upstreamResp.Body
+	timedFn, emit := frameFn, em.frame
+	if idle != nil {
+		upstreamBody = idleReader{r: upstreamBody, w: idle}
+		// The hook settles a receipt inline, and the emitter runs the
+		// caller's loop body inline; neither reads the node meanwhile.
+		timedFn = func(f Frame) (outFrame, error) {
+			return bracket(idle, func() (outFrame, error) { return frameFn(f) })
+		}
+		emit = func(o outFrame) (int, error) {
+			return bracket(idle, func() (int, error) { return em.frame(o) })
+		}
+	}
+
 	// The emitter swallows frames once the caller is gone, so a dead-socket
 	// write error can't abort a tail drain before it reaches the receipt frame.
-	// The pump itself stops on upstreamCtx (clean EOF, or cancelUpstream from
-	// the watcher).
-	pumpErr := pumpSSE(upstreamCtx, em.frame, upstreamResp.Body, frameFn, &tally)
+	// The pump itself stops on upstreamCtx (clean EOF, cancelUpstream from the
+	// watcher, or the idle bound).
+	pumpErr := pumpSSE(upstreamCtx, emit, upstreamBody, timedFn, &tally)
+	// Every way the pump ends stops the watchdog first, so a timeout here is
+	// what ended it.
+	idleErr := idle.stop()
 	close(pumpDone)
 	// The pump has stopped, so the tally is settled and safe to read.
 	//
@@ -312,7 +347,11 @@ func (s *Client) forwardRawStream(
 		// Only surface a stream error to the client if it's still connected; a
 		// drain that ended because the client left has nothing to write to.
 		if ctx.Err() == nil {
-			em.interrupt()
+			var cause error
+			if idleErr != nil {
+				cause = idleErr
+			}
+			em.interrupt(cause)
 		}
 	}
 }

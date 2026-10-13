@@ -5,10 +5,82 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { IdleWatchdog } from '../src/idle.js'
+import { IdleWatchdog, readReply } from '../src/idle.js'
 import { DEFAULT_STREAM_IDLE, StreamIdleTimeoutError } from '../src/index.js'
 
 const enc = new TextEncoder()
+
+// replyOf is a body that sends parts, waiting gapMs before each after the
+// first, then closes unless open; cancelled records the read's cancel.
+function replyOf(parts: string[], gapMs = 0, open = false) {
+    const cancelled: unknown[] = []
+    const body = new ReadableStream<Uint8Array>({
+        async start(c) {
+            for (const [i, p] of parts.entries()) {
+                if (i > 0) await new Promise((r) => setTimeout(r, gapMs))
+                c.enqueue(enc.encode(p))
+            }
+            if (!open) c.close()
+        },
+        cancel(reason) {
+            cancelled.push(reason)
+        },
+    })
+    return { resp: new Response(body), cancelled }
+}
+
+describe('readReply', () => {
+    const bound = { preStream: 60_000, midStream: 30, toolActive: 60_000 }
+
+    // Before the first byte too: the node writes a buffered body with its
+    // headers, so the pre-stream budget doesn't apply.
+    it.each([
+        ['before the first byte', [], 'pre-stream'],
+        ['between bytes', ['ab'], 'mid-stream'],
+    ] as const)('cuts a silence %s at the mid-stream budget', async (_, parts, phase) => {
+        const { resp, cancelled } = replyOf([...parts], 0, true)
+        const err = await readReply(resp, bound).catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(StreamIdleTimeoutError)
+        expect(err).toMatchObject({ phase, timeoutMs: 30 })
+        expect(cancelled).toEqual([err])
+    })
+
+    // A transport may reject the pending read when the body is cancelled,
+    // rather than end it; the cut is still the cause.
+    it('reports the cut though the cancelled read rejects', async () => {
+        let pending: ((err: unknown) => void) | undefined
+        const reader = {
+            read: () => new Promise((_, reject) => (pending = reject)),
+            cancel: async () => pending?.(new DOMException('aborted', 'AbortError')),
+        }
+        const resp = { body: { getReader: () => reader } } as unknown as Response
+        const err = await readReply(resp, bound).catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(StreamIdleTimeoutError)
+    })
+
+    it('reads a body still flowing', async () => {
+        const { resp } = replyOf(Array(10).fill('x'), 10)
+        expect(new TextDecoder().decode(await readReply(resp, { ...bound, midStream: 100 }))).toBe('xxxxxxxxxx')
+    })
+
+    it('waits out the silence with no bound', async () => {
+        const { resp } = replyOf(['a', 'b'], 60)
+        expect(new TextDecoder().decode(await readReply(resp, null))).toBe('ab')
+    })
+
+    it('refuses a body over the limit', async () => {
+        expect(new TextDecoder().decode(await readReply(replyOf(['123', '45']).resp, null, 5))).toBe('12345')
+        const { resp, cancelled } = replyOf(['123', '456'], 0, true)
+        const err = await readReply(resp, null, 5).catch((e: unknown) => e)
+        expect(err).not.toBeInstanceOf(StreamIdleTimeoutError)
+        expect((err as Error).message).toBe("the node's reply is over 5 bytes")
+        expect(cancelled).toEqual([err])
+    })
+
+    it('reads no body as empty', async () => {
+        expect(await readReply(new Response(null), bound)).toEqual(new Uint8Array(0))
+    })
+})
 
 const BUDGETS = { preStream: 1000, midStream: 100, toolActive: 500 }
 

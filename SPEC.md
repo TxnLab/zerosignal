@@ -2248,7 +2248,19 @@ On receipt the relay:
 
    2a. **Refuses a private dial target (SSRF guard).** The relay's forwarding
    HTTP client rejects any *resolved* IP in a loopback / RFC1918 / link-local /
-   CGNAT / ULA range (v4 and v6). A malicious operator that registers a private
+   CGNAT / ULA range (v4 and v6), and an IPv6 address that reaches one through a
+   well-known embedding: NAT64 `64:ff9b::/96`, SIIT `::ffff:0:0:0/96` and 6to4
+   `2002::/16` are judged by the IPv4 address they carry, and the
+   IPv4-compatible `::/96`, local-use NAT64 `64:ff9b:1::/48` and Teredo
+   `2001::/32` are refused whole. On a DNS64 network a name with a private A
+   record resolves into `64:ff9b::/96`, so without this the guard passes it.
+   Two limits follow from judging the address alone. A NAT64 under a
+   network-specific prefix (RFC 6052 §2.2, carved from the network's own space)
+   is not recognisable, so a private A record synthesised under one still
+   passes. And a host whose DNS64 uses the local-use prefix cannot reach an
+   IPv4-only target through the guard, because that prefix's length, and so
+   where the IPv4 address sits, is the network's choice. A
+   malicious operator that registers a private
    `base_url`, or a hostname resolving into private space, therefore cannot turn
    a relay into a prober against its own LAN: the dial fails before any bytes
    are sent, surfacing as `relay_upstream_unreachable`. Because the check
@@ -3342,7 +3354,7 @@ puts it in the same differential path rather than a new one.
 | Sealed request with unknown/expired/consumed `ticket_id` | 402 `invalid_request_error`, `ticket_invalid` | Ticket expired before payment arrived, or replay detected — obtain a fresh ticket. |
 | Sealed request whose inner-header `reply_to_public_key` is not the ticket's reserve-time `proxy_recipient` | 402 `invalid_request_error`, `reply_to_mismatch` | Caller must reuse the reserve-time ephemeral identity as the envelope's reply-to (§ 4). Checked before `Consume`, so the ticket survives — re-send with the correct identity. |
 | Sealed request whose body `model` differs from the ticket's reserved model | 400 `invalid_request_error`, `model_mismatch` | Sealed, with a zero-cost receipt, so the escrow settles at zero. Reserve for the model you intend to call — the ticket's model, not the body's, determines the rates and limits. |
-| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. |
+| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. The error is plaintext and passes back through any relay, so its message MUST name only the failure class: never the `algorand_tx_id`, the `ticket_id` or an address, any of which lets the relay find the `open()` on-chain and tie the caller's IP to the payer (§ 3f). |
 | Second `escrow.settle` call from the same side as the pending claim, with args that differ from it | On-chain revert `same side cannot re-claim with different args` | Caller-logic bug: only the counterparty of the pending claim can answer it with different args. A same-side re-claim with byte-for-byte matching args is a no-op (§ 3a "Settlement windows"). See "Settle outcomes" below. |
 | Second `escrow.settle` call from the counterparty, with args that differ from the pending claim | No revert; the ticket transitions to `STATUS_FROZEN` | The counterparty disagreed with the first side's claim. It proceeds to off-chain arbitration, and the first claim stays on-chain as the disputed reference. |
 | `escrow.settle` broadcast after `ticket.expires_at + ticket.settlement_grace_seconds` (both unix seconds) | On-chain revert `settle after refund deadline` | Neither party acked in time. The operator force-finalizes a pending operator claim via `escrow.settleLapsed`; the payer recovers funds via `escrow.refundInactive` when no operator claim is pending. |

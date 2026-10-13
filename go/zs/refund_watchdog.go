@@ -385,6 +385,13 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 
 	go func() {
 		defer rw.running.Done()
+		// The refunded hook is the host's; its panic must not end the process.
+		defer func() {
+			if p := recover(); p != nil {
+				rw.log.Error("refund watchdog: ticket driver panicked",
+					slog.String("ticket_id", ticketID), slog.Any("panic", p))
+			}
+		}()
 		// Entry stays in the map through the retry loop so Resolve can still
 		// cancel mid-retry; cleaned up on exit. Resolve is the only closer of
 		// the channel (delete+close under the lock), so there's no double-close.

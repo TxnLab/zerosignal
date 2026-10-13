@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The read-side silence bound on a streamed answer. The Go SDK has none: its
-// callers bound a turn with their context's deadline. A fetch in a browser
-// has no read timeout at all, and the SDK's Node fetch sets none, so a stream
+// The read-side silence bound on a streamed answer. A fetch in a browser has
+// no read timeout at all, and the SDK's Node fetch sets none, so a stream
 // whose node or relay stops sending, without closing, would hold the turn and
 // its escrow until the caller gave up. The bound is on bytes, not frames: a
 // node's keepalive comment proves the hop is alive.
 //
 // Ported from the chat app's envelope-fetch watchdog, with its three budgets.
+// Go's twin is go/zs/idle.go, tested per language.
 
 /** Which budget a silence was measured against. */
 export type StreamIdlePhase = 'pre-stream' | 'mid-stream' | 'tool-active'
@@ -151,6 +151,69 @@ export class IdleWatchdog {
             this.#onIdle?.(new StreamIdleTimeoutError(ms, phase))
         }, ms)
     }
+}
+
+/**
+ * The largest buffered reply the SDK reads, Go's maxReplyBytes. The node puts
+ * generated media in the body, base64, and caps none of it, so without this a
+ * node or relay that never ends a body holds the turn, its escrow and the
+ * payer's memory.
+ */
+export const MAX_REPLY_BYTES = 256 * 1024 * 1024
+
+/**
+ * readReply reads a buffered reply's body whole, refusing one over limit, Go's
+ * readReply. The node writes a buffered reply's body with its headers, so
+ * every silence in it is measured against midStream; null is no bound, and
+ * undefined is the default budgets. A silence past that cancels the body and
+ * rejects with the StreamIdleTimeoutError.
+ */
+export async function readReply(resp: Response, idle: StreamIdle | null | undefined, limit = MAX_REPLY_BYTES): Promise<Uint8Array> {
+    if (resp.body === null) return new Uint8Array(0)
+    const reader = resp.body.getReader()
+    let cut: unknown
+    const end = (err: Error) => {
+        cut ??= err
+        reader.cancel(err).catch(() => {})
+    }
+    let watchdog: IdleWatchdog | undefined
+    if (idle !== null) {
+        const mid = (idle ?? DEFAULT_STREAM_IDLE).midStream
+        watchdog = new IdleWatchdog({ preStream: mid, midStream: mid, toolActive: mid })
+        watchdog.start(end)
+    }
+    const parts: Uint8Array[] = []
+    let size = 0
+    try {
+        for (;;) {
+            let r: ReadableStreamReadResult<Uint8Array>
+            try {
+                r = await reader.read()
+            } catch (err) {
+                throw cut ?? err
+            }
+            if (cut !== undefined) throw cut
+            if (r.done) break
+            watchdog?.chunk()
+            size += r.value.byteLength
+            if (size > limit) {
+                const tooLarge = new Error(`the node's reply is over ${limit} bytes`)
+                end(tooLarge)
+                throw tooLarge
+            }
+            parts.push(r.value)
+        }
+    } finally {
+        watchdog?.stop()
+    }
+    if (parts.length === 1) return parts[0]!
+    const out = new Uint8Array(size)
+    let at = 0
+    for (const p of parts) {
+        out.set(p, at)
+        at += p.byteLength
+    }
+    return out
 }
 
 const NEEDLE = new TextEncoder().encode('zs_tool_call')

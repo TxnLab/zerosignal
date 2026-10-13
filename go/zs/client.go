@@ -32,6 +32,8 @@ type Client struct {
 	cfg        Config
 	log        *slog.Logger
 	httpClient *http.Client
+	// replyLimit is a test's cap on a buffered reply; zero is maxReplyBytes.
+	replyLimit int64
 
 	// Providers. The registry feeds operator selection, the reserve
 	// client handles the pre-payment admission call, and the affinity cache
@@ -311,7 +313,10 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.SpendGuard != nil {
 		// A ticket whose request failed after its escrow opened keeps its
 		// reservation in dispatch; its refund is what frees it.
-		c.refunds.refunded = cfg.SpendGuard.Release
+		guard, log := cfg.SpendGuard, c.log
+		c.refunds.refunded = func(ticketID string) {
+			recordSpend(log, "release", ticketID, func() { guard.Release(ticketID) })
+		}
 	}
 	if sdkWallet != nil {
 		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.SpendGuard, cfg.Logger)

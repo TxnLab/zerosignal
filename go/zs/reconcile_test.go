@@ -16,10 +16,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/algorand/go-algorand-sdk/v2/types"
 )
 
 var reconcileNow = time.Unix(1_800_000_000, 0)
@@ -340,6 +343,172 @@ func TestReconciler_StartSweepsAtOnceAndCloseStops(t *testing.T) {
 	case <-r.done:
 	default:
 		t.Error("close returned with the loop still running")
+	}
+}
+
+// firstReleasePanics is a host spend guard with a bug: its first Release panics.
+type firstReleasePanics struct{ calls atomic.Int32 }
+
+func (*firstReleasePanics) Admit(uint64) error           { return nil }
+func (*firstReleasePanics) Reserve(string, uint64) error { return nil }
+func (*firstReleasePanics) Settle(string, uint64)        {}
+func (g *firstReleasePanics) Release(string) {
+	if g.calls.Add(1) == 1 {
+		panic("guard bug")
+	}
+}
+
+// panicGuard is a host spend guard whose Settle and Release always panic.
+type panicGuard struct{}
+
+func (panicGuard) Admit(uint64) error           { return nil }
+func (panicGuard) Reserve(string, uint64) error { return nil }
+func (panicGuard) Settle(string, uint64)        { panic("guard bug") }
+func (panicGuard) Release(string)               { panic("guard bug") }
+
+// A closed ticket's row goes even when the guard panics on its release; kept,
+// it would be re-read and re-released every sweep.
+func TestReconciler_ForgetsPastAPanickingGuard(t *testing.T) {
+	j := newMemJournal()
+	put(t, j, pendingRec(time.Hour))
+	r := testReconciler(j, &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": nil}})
+	r.spend = panicGuard{}
+	r.sweep()
+	if got := ids(t, j); len(got) != 0 {
+		t.Errorf("journal %v, want the closed ticket forgotten", got)
+	}
+}
+
+// A guard that panics on the outcome of a submit the chain accepted costs a
+// log line, not a failed attempt: the submit succeeded, and counting it would
+// give up on a ticket that was fine.
+func TestReconciler_PanickingGuardAfterASubmitIsNoFailure(t *testing.T) {
+	claimed := box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute)
+	for _, tc := range []struct {
+		name string
+		rec  TicketRecord
+		box  *escrow.TicketRecord
+	}{
+		{"refund, released", openRec(), box(escrow.StatusOpen, 0, -time.Minute)},
+		{"lapse, settled", openRec(), claimed},
+		{"lapse after a receipt, released", pendingRec(time.Hour), claimed},
+	} {
+		j := newMemJournal()
+		put(t, j, tc.rec)
+		r := testReconciler(j, &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}})
+		r.spend = panicGuard{}
+		r.sweep()
+		if n := r.failures["T"]; n != 0 {
+			t.Errorf("%s: %d failed attempt(s) counted for a submit that went through", tc.name, n)
+		}
+	}
+}
+
+// failingOpenWallet's Open always fails, as a payer short of funds does.
+type failingOpenWallet struct{}
+
+func (failingOpenWallet) Open(context.Context, *ticket.Ticket, Operator, []types.SignedTxn) (*OpenHandle, error) {
+	return nil, errors.New("insufficient funds")
+}
+func (failingOpenWallet) PayerAddr() string { return "PAYER" }
+
+// A guard that panics while a failed open is backed out still leaves the
+// request failed with the open's error, not a panic.
+func TestRunSealed_FailsTheOpenPastAPanickingGuard(t *testing.T) {
+	c := settleClient()
+	c.wallet = failingOpenWallet{}
+	c.spend = panicGuard{}
+	em := &recEmitter{}
+	rt := &ReservedTicket{Ticket: &ticket.Ticket{TicketID: "T"}}
+	c.runSealed(context.Background(), em, endpointChatCompletions, "m", []byte(`{}`), Operator{ID: 1}, rt, false, nil)
+	if em.failed == nil || em.failed.Code != "wallet_open" {
+		t.Errorf("failed with %v, want the open's wallet_open", em.failed)
+	}
+}
+
+// panicChain is chain code that panics reading one ticket's box.
+type panicChain struct {
+	*fakeChain
+	on string
+}
+
+func (c panicChain) readBox(ctx context.Context, id string) (*escrow.TicketRecord, error) {
+	if id == c.on {
+		panic("chain bug")
+	}
+	return c.fakeChain.readBox(ctx, id)
+}
+
+// A row that panics costs that row a failed attempt, not the sweep or the
+// process: the next row is still reconciled, and a row that always panics is
+// given up on like any other failure.
+func TestReconciler_PanickingRowCountsAsAFailure(t *testing.T) {
+	j := newMemJournal()
+	a, b := openRec(), openRec()
+	a.TicketID, b.TicketID = "A", "B"
+	put(t, j, a, b)
+	chain := panicChain{fakeChain: &fakeChain{boxes: map[string]*escrow.TicketRecord{"B": box(escrow.StatusOpen, 0, -time.Minute)}}, on: "A"}
+	r := testReconciler(j, chain)
+	r.sweep()
+	if got := chain.seen(); !slices.Equal(got, []string{"refund B"}) {
+		t.Errorf("calls %v, want B refunded past A's panic", got)
+	}
+	for range reconcileMaxFailures {
+		r.sweep()
+	}
+	if !r.exhausted("A") {
+		t.Error("a row that always panics is never given up on")
+	}
+}
+
+// A journal whose List panics costs the sweep, not the process.
+func TestReconciler_PanickingListIsContained(t *testing.T) {
+	r := testReconciler(panicList{newMemJournal()}, &fakeChain{})
+	r.sweep()
+}
+
+type panicList struct{ *memJournal }
+
+func (panicList) List(context.Context, string, uint64) ([]TicketRecord, error) {
+	panic("journal bug")
+}
+
+// A host hook that panics on one ticket costs that ticket, not the sweep or
+// the process: the next row is still reconciled.
+func TestReconciler_HostPanicCostsOnlyItsRow(t *testing.T) {
+	j := newMemJournal()
+	a, b := openRec(), openRec()
+	a.TicketID, b.TicketID = "A", "B"
+	put(t, j, a, b)
+	chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{
+		"A": box(escrow.StatusOpen, 0, -time.Minute),
+		"B": box(escrow.StatusOpen, 0, -time.Minute),
+	}}
+	r := testReconciler(j, chain)
+	guard := &firstReleasePanics{}
+	r.spend = guard
+	r.sweep()
+	if got := chain.seen(); len(got) != 2 {
+		t.Errorf("calls %v, want both tickets refunded", got)
+	}
+	if n := guard.calls.Load(); n != 2 {
+		t.Errorf("guard released %d tickets, want 2", n)
+	}
+}
+
+// The journal claim is given back even when the hand-off before it panics:
+// kept, it bars every later Client from sweeping that journal.
+func TestReconciler_CloseReleasesWhenTheHandOffPanics(t *testing.T) {
+	r := testReconciler(newMemJournal(), &fakeChain{})
+	released := false
+	r.release = func() { released = true }
+	r.start()
+	func() {
+		defer func() { _ = recover() }()
+		r.close(func() { panic("hand-off bug") })
+	}()
+	if !released {
+		t.Error("close kept the journal claim after the hand-off panicked")
 	}
 }
 

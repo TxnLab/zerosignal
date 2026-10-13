@@ -31,6 +31,57 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-13 — a whole reply is bounded, and a caller's leaving reaches a stream before its headers (unreleased)
+
+Both SDKs now read a whole (non-streamed) reply's body under the stream idle bound's
+between-bytes budget, 60 s by default, and refuse one over 256 MiB. Either ends the turn
+`read_upstream`, with the `StreamIdleTimeoutError` or the size error as its cause. This covers
+the buffered forward and a buffered reply to a streamed request. Previously a node or relay
+that stopped sending mid-body, or never ended it, held the turn and its escrow until the caller
+gave up. `StreamIdle{Off: true}` (TS `streamIdle: false`) turns off the time bound but not the
+size cap.
+
+A caller who cancels a streamed request before the node's headers arrive now ends it at once.
+Previously the request ran on until the headers came, or the 5-minute header backstop. The
+relay is no longer charged for that request, and the failure is logged at debug rather than
+error.
+
+### 2026-10-13 — the Go SDK cuts a silent stream (unreleased)
+
+A streamed answer whose node or relay stops sending without closing now ends
+`stream_interrupted`, its `Err` a `*StreamIdleTimeoutError`, as in TS: by default after 300 s
+with no first byte, 60 s between bytes after that, or 300 s while the node runs an image tool.
+Previously the Go SDK waited as long as the caller's context allowed, and the turn's escrow
+with it. `Config.StreamIdle` sets each bound, and `StreamIdle{Off: true}` turns it off.
+
+### 2026-10-13 — host hooks can't bypass the spend cap or stop the SDK (unreleased)
+
+A `SpendGuard` method that returns a Promise no longer slips past the cap: the TS methods now
+return `SpendGuardResult`, so an async one is a compile error, and an async `admit` or `reserve`
+ends the request (`spend_cap_exceeded`, naming the async guard) whatever it resolves to.
+Previously it was ignored, so its refusal never reached the request, and its rejection could end
+a Node process. A `settle` or `release` that throws (Go: panics) is logged rather than failing
+the request, the reconciler sweep or the refund watchdog. The reconciler now carries on past a
+row that throws or panics, counting it as a failed attempt, and gives back its journal claim
+even when its shutdown step fails; the TS `Client.close` stops the registry and the sweep
+whatever the other throws. A source whose `reprobeEphemeral` rejects reads as a node the SDK
+can't seal to, as Go's does.
+
+**TS hosts:** a synchronous guard whose method returns `void` or a primitive needs no change.
+One that returns an object no longer compiles, e.g. `reserve: (id, p) => this.held.set(id, p)`,
+which returns the `Map`; give the arrow a block body.
+
+### 2026-10-12 — the private-target guard judges translated IPv6 (unreleased)
+
+Go's `httpx.IsPrivateIP` (the `BlockPrivateTargets` dial guard, used by the node's relay, web
+read and favicon fetches and by the Go SDK's operator clients) and the TS SDK's `isPrivateAddress` /
+`isBlockedOperatorUrl` now refuse an IPv6 address that reaches a private IPv4 address. NAT64
+`64:ff9b::/96`, SIIT `::ffff:0:0:0/96` and 6to4 `2002::/16` are judged by the IPv4 address they
+carry; `::/96`, local-use NAT64 `64:ff9b:1::/48` and Teredo `2001::/32` are refused whole. On a
+DNS64 network a name with a private A record resolved into `64:ff9b::/96` and passed the guard.
+A NAT64 under a network-specific prefix is still not recognisable, and a host whose DNS64 uses
+the local-use prefix can't reach IPv4-only targets through the guard (SPEC §3f, step 2a).
+
 ### 2026-10-12 — payer obligations, the pool opt-in and the doctor (0.5.0)
 
 Both SDKs unless noted:

@@ -182,6 +182,13 @@ type Config struct {
 	// before payment (transient.OverallDeadline). The client app shares the
 	// default, so the two ride out an outage for the same time.
 	RetryBudget time.Duration
+	// StreamIdle is how long a streamed answer may go without a byte before
+	// the turn ends stream_interrupted, caused by a *StreamIdleTimeoutError;
+	// zero fields take DefaultStreamIdle, and Off sets no bound. The forward
+	// client has no read timeout, so without one a node or relay that stops
+	// sending without closing holds the turn until the caller's context ends.
+	// A whole reply's body is held to MidStream, and ends read_upstream.
+	StreamIdle StreamIdle
 	// SweepDelay is the wait before the given retry sweep over the candidate
 	// list (transient.SweepDelay). Set, it also replaces the wait before a
 	// busy re-sweep, the node's Retry-After included.
@@ -319,6 +326,7 @@ func (c Config) withDefaults() Config {
 	c.MaxOutputCeiling = orDefault(c.MaxOutputCeiling, selection.DefaultMaxOutputCeiling)
 	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, DefaultDepositSlots)
 	c.ReserveTimeout = orDefault(c.ReserveTimeout, DefaultReserveTimeout)
+	c.StreamIdle = c.StreamIdle.withDefaults()
 
 	d := &c.Discovery
 	d.RefreshInterval = orDefault(d.RefreshInterval, DefaultRefreshInterval)

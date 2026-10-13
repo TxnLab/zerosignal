@@ -95,7 +95,7 @@ func TestStreamEmitter_FailAfterCommitIsPaid(t *testing.T) {
 	}
 	em.reserved(&ReservedTicket{Ticket: &ticket.Ticket{TicketID: "tid", MaxPrice: 7}}, Operator{ID: 3, NodeID: 4})
 	em.committed("tid", "txid", 1000)
-	em.interrupt()
+	em.interrupt(nil)
 
 	ze, ok := gotErr.(*Error)
 	if !ok {
@@ -106,6 +106,25 @@ func TestStreamEmitter_FailAfterCommitIsPaid(t *testing.T) {
 	}
 	if ze.Code != "stream_interrupted" || ze.Kind != KindInterrupted {
 		t.Errorf("error = %s/%s, want interrupted/stream_interrupted", ze.Kind, ze.Code)
+	}
+}
+
+// A node that reports a failure and then goes silent is cut by the idle
+// bound, but the turn ends in the node's failure, not in the cut.
+func TestStreamEmitter_TheNodesFailureBeatsTheCause(t *testing.T) {
+	var gotErr error
+	em := &streamEmitter{
+		yield:  func(_ Event, err error) bool { gotErr = err; return true },
+		cancel: func() {},
+		dec:    newDecoder(endpointChatCompletions),
+	}
+	em.frame(outFrame{frame: errorFrame})
+	em.interrupt(&StreamIdleTimeoutError{Phase: IdleMidStream, Timeout: time.Second})
+
+	var ze *Error
+	var idleErr *StreamIdleTimeoutError
+	if !errors.As(gotErr, &ze) || ze.Code != "upstream_error" || errors.As(gotErr, &idleErr) {
+		t.Errorf("ended in %v, want the node's upstream_error", gotErr)
 	}
 }
 
@@ -149,7 +168,7 @@ func endedEmitter(t *testing.T, frames ...Frame) ([]Event, error) {
 	}
 	em.finish()
 	em.finish()
-	em.interrupt()
+	em.interrupt(nil)
 	if gotErr != nil && em.err != gotErr {
 		t.Errorf("Err() = %v, the loop got %v", em.err, gotErr)
 	}
@@ -237,7 +256,7 @@ func TestStreamEmitter_InterruptPrefersTheNodesFailure(t *testing.T) {
 		dec:    newDecoder(endpointChatCompletions),
 	}
 	em.frame(outFrame{frame: errorFrame})
-	em.interrupt()
+	em.interrupt(nil)
 	if ze, ok := gotErr.(*Error); !ok || ze.Code != "upstream_error" {
 		t.Errorf("ended in %v, want the node's upstream error", gotErr)
 	}
@@ -505,7 +524,7 @@ func TestForwardRawStream_DisconnectAfterGenerationStillReachesTail(t *testing.T
 		}, nil
 	}
 	s.forwardRawStream(clientCtx, &recEmitter{}, upstream.URL, "", []byte("{}"), "application/json", nil, nil,
-		factory, func(emitter, *http.Response, []byte) error { return nil }, &genComplete)
+		factory, func(emitter, *http.Response, []byte) error { return nil }, &genComplete, nil)
 
 	if !sawTail.Load() {
 		t.Error("the stream ended before the tail frame after the client left")

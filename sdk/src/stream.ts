@@ -32,14 +32,22 @@ import {
 
 import { newError } from './codes.js'
 import { goDecodeUTF8 } from './gotext.js'
-import type { IdleWatchdog, StreamIdleTimeoutError } from './idle.js'
+import { type IdleWatchdog, type StreamIdleTimeoutError, readReply } from './idle.js'
 import { type Operator, refOf } from './operator.js'
 import type { Clock, LogAttrs } from './ports.js'
 import { type ReceiptCheckDeps, type SettleSlot, checkTurnReceipt } from './receipt-check.js'
 import { type ResponderDeps, type UsageReport, openCommittedKey, openSealedResponseMeta, settleGroupOf } from './responder.js'
 import { DRAIN_TAIL_TIMEOUT_MS } from './response.js'
 import { type RelayHop, relayRef } from './routing/relay.js'
-import { type BufferedResponder, type Outbound, type SealedCall, type SealedDeps, attributeRelayHop } from './sealed.js'
+import {
+    type BufferedResponder,
+    type Outbound,
+    type SealedCall,
+    type SealedDeps,
+    attributeRelayHop,
+    logForwardFailure,
+    readUpstreamError,
+} from './sealed.js'
 import type { Emitter } from './turn.js'
 import type { Endpoint } from './types.js'
 
@@ -332,7 +340,7 @@ export async function pumpSSE(
 }
 
 /** What forwardStream reads off the Client. */
-export type StreamForwardDeps = Pick<SealedDeps, 'fetch' | 'relayReputation' | 'logger'> & {
+export type StreamForwardDeps = Pick<SealedDeps, 'fetch' | 'relayReputation' | 'logger' | 'streamIdle' | 'maxReplyBytes'> & {
     clock?: Clock | undefined
     /** Overrides DRAIN_TAIL_TIMEOUT_MS. */
     drainTailTimeoutMs?: number | undefined
@@ -375,6 +383,12 @@ export async function forwardStream(
     const clock = deps.clock ?? Date.now
     const { endpoint, hop, signal } = call
     const upstream = new AbortController()
+    // Until the node answers, a caller who leaves cancels the request: nothing
+    // has been generated that a drain could pay for, and the wait for headers
+    // can run to minutes. Once it answers, a buffered reply is the whole
+    // generation, so its body is read for the receipt (bounded by readReply),
+    // and a stream is the watcher's below.
+    const onEarlyLeave = () => upstream.abort()
     let frameFn: FrameTransform | undefined
     try {
         try {
@@ -383,6 +397,8 @@ export async function forwardStream(
             em.fail(newError('build_request', errText(err)))
             return
         }
+        if (signal?.aborted) onEarlyLeave()
+        else signal?.addEventListener('abort', onEarlyLeave, { once: true })
         let resp: Response
         try {
             resp = await deps.fetch(out.url, {
@@ -393,20 +409,23 @@ export async function forwardStream(
             })
         } catch (err) {
             // The request rode the detached signal, which a caller leaving
-            // can't reach before the response, so this is the hop's failure.
+            // reaches only through onEarlyLeave.
             attributeRelayHop(deps.relayReputation, hop, upstream.signal, TRANSPORT_FAILURE_STATUS, null, null)
-            log.error('upstream request failed', { endpoint, ...relayAttrs(hop), err: errText(err) })
+            logForwardFailure(log, 'error', upstream.signal, 'upstream request failed', endpoint, hop, err)
             em.fail(newError('upstream_unreachable', errText(err)))
             return
+        } finally {
+            signal?.removeEventListener('abort', onEarlyLeave)
         }
 
         const ct = resp.headers.get('Content-Type') ?? ''
         if (!ct.startsWith('text/event-stream')) {
             let body: Uint8Array
             try {
-                body = new Uint8Array(await resp.arrayBuffer())
+                body = await readReply(resp, deps.streamIdle, deps.maxReplyBytes)
             } catch (err) {
-                em.fail(newError('read_upstream', errText(err)))
+                logForwardFailure(log, 'warn', upstream.signal, 'upstream reply read failed', endpoint, hop, err)
+                em.fail(readUpstreamError(err))
                 return
             }
             attributeRelayHop(deps.relayReputation, hop, upstream.signal, resp.status, resp.headers, body)

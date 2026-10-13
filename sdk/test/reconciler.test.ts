@@ -472,6 +472,131 @@ describe('Reconciler', () => {
         await new Promise((res) => setTimeout(res, 50))
         expect(order.slice(-2)).toEqual(['beforeRelease', 'release'])
     })
+
+    // Kept, the claim bars every later Client from sweeping this journal.
+    it('releases the claim even when beforeRelease throws', async () => {
+        const { r } = testReconciler(memoryJournal(), new FakeChain())
+        let released = false
+        r.release = () => {
+            released = true
+        }
+        r.start()
+        await expect(
+            r.close(() => {
+                throw new Error('hand-off bug')
+            }),
+        ).rejects.toThrow('hand-off bug')
+        expect(released).toBe(true)
+    })
+
+    // The spend guard is host code: one that throws costs a log line, and the
+    // sweep goes on to the next ticket.
+    it('logs a spend guard that throws and goes on to the next ticket', async () => {
+        const j = memoryJournal()
+        await put(j, openRec({ ticketId: 'A' }), openRec({ ticketId: 'B' }))
+        const chain = new FakeChain()
+        for (const id of ['A', 'B']) chain.boxes.set(id, box(STATUS_OPEN, 0, -MIN))
+        const released: string[] = []
+        const guard: SpendGuard = {
+            admit() {},
+            reserve() {},
+            settle() {},
+            release(id) {
+                released.push(id)
+                if (released.length === 1) throw new Error('guard bug')
+            },
+        }
+        const { r, log } = testReconciler(j, chain, [], guard)
+        await r.sweep()
+        expect(chain.calls).toEqual(['refund A', 'refund B'])
+        expect(released).toEqual(['A', 'B'])
+        expect(log.logged).toContainEqual({ level: 'warn', msg: 'spend guard release failed', attrs: { ticket_id: 'A', err: 'guard bug' } })
+    })
+
+    // A row the sweep can't decide, here a box with no fields, doesn't end the
+    // loop for the rows after it, and counts as a failed attempt: a row that
+    // always throws is given up on with the remedy.
+    it('goes on to the next ticket when one row throws, and gives up on it in time', async () => {
+        const j = memoryJournal()
+        await put(j, openRec({ ticketId: 'A' }), openRec({ ticketId: 'B' }))
+        const chain = new FakeChain()
+        chain.boxes.set('A', {} as TicketBox)
+        chain.boxes.set('B', box(STATUS_OPEN, 0, -MIN))
+        const { r, log } = testReconciler(j, chain)
+        r.remedy = 'recover it by hand'
+        await r.sweep()
+        expect(chain.calls).toEqual(['refund B'])
+        for (let i = 1; i < RECONCILE_MAX_FAILURES; i++) await r.sweep()
+        expect(log.logged).toContainEqual(
+            expect.objectContaining({
+                level: 'warn',
+                msg: 'ticket reconciler: reconcile keeps failing; leaving the ticket for the next start',
+                attrs: expect.objectContaining({ ticket_id: 'A', remedy: 'recover it by hand' }),
+            }),
+        )
+    })
+
+    // The lapse went through, so a guard that throws on its charge costs a log
+    // line, not a failed attempt, and the sweep goes on.
+    it('logs a spend guard whose lapse settle throws, counting no failure', async () => {
+        const j = memoryJournal()
+        await put(j, openRec({ ticketId: 'A' }), openRec({ ticketId: 'B' }))
+        const chain = new FakeChain()
+        chain.boxes.set('A', box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, -11 * MIN))
+        chain.boxes.set('B', box(STATUS_OPEN, 0, -MIN))
+        const guard: SpendGuard = {
+            admit() {},
+            reserve() {},
+            settle() {
+                throw new Error('guard bug')
+            },
+            release() {},
+        }
+        const { r, log } = testReconciler(j, chain, [], guard)
+        r.remedy = 'recover it by hand'
+        for (let i = 0; i < RECONCILE_MAX_FAILURES; i++) await r.sweep()
+        expect(chain.calls.slice(0, 2)).toEqual(['lapse A', 'refund B'])
+        expect(log.logged).toContainEqual({ level: 'warn', msg: 'spend guard settle failed', attrs: { ticket_id: 'A', err: 'guard bug' } })
+        expect(log.logged.some((l) => l.msg.includes('keeps failing'))).toBe(false)
+    })
+
+    // A closed ticket's row goes even when the guard throws on its release;
+    // kept, it would be re-read and re-released every sweep.
+    it('forgets a closed ticket when the guard throws on its release', async () => {
+        const j = memoryJournal()
+        await put(j, pendingRec(HOUR, { ticketId: 'A' }))
+        const guard: SpendGuard = {
+            admit() {},
+            reserve() {},
+            settle() {},
+            release() {
+                throw new Error('guard bug')
+            },
+        }
+        const { r, log } = testReconciler(j, new FakeChain(), [], guard)
+        await r.sweep()
+        expect(await ids(j)).toEqual([])
+        expect(log.logged).toContainEqual({ level: 'warn', msg: 'spend guard release failed', attrs: { ticket_id: 'A', err: 'guard bug' } })
+    })
+
+    // A guard returning a rejecting Promise is caught too: unobserved, the
+    // rejection would end a Node process.
+    it('logs a spend guard whose release rejects', async () => {
+        const j = memoryJournal()
+        await put(j, openRec({ ticketId: 'A' }))
+        const chain = new FakeChain()
+        chain.boxes.set('A', box(STATUS_OPEN, 0, -MIN))
+        const guard = {
+            admit() {},
+            reserve() {},
+            settle() {},
+            release: () => Promise.reject(new Error('guard bug')),
+        } as unknown as SpendGuard
+        const { r, log } = testReconciler(j, chain, [], guard)
+        await r.sweep()
+        await new Promise((res) => setTimeout(res, 0))
+        expect(log.logged).toContainEqual({ level: 'warn', msg: 'spend guard release failed', attrs: { ticket_id: 'A', err: 'guard bug' } })
+    })
 })
 
 describe('walletChain', () => {

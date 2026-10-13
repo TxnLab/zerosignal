@@ -430,16 +430,13 @@ describe('forwardStream', () => {
         expect(t.fetches).toEqual([])
     })
 
-    // The request rides its own signal, so a caller who already left can't
-    // excuse a relay whose dial failed.
-    it('charges an unreachable relay even when the caller has left', async () => {
+    it('charges an unreachable relay', async () => {
         const rep = new RelayReputationStore({ clock: Date.now, targetReachable: () => true })
         const outcome = vi.spyOn(rep, 'recordRelayOutcome')
         const t = setup(() => {
             throw new TypeError('fetch failed')
         })
         const caller = new AbortController()
-        caller.abort()
         const hop = hopOf()
         await forwardStream({ ...t.deps, relayReputation: rep }, t.em as never, out, call(caller.signal, hop), async () => identity, noFallback, {
             value: false,
@@ -451,6 +448,111 @@ describe('forwardStream', () => {
             msg: 'upstream request failed',
             attrs: { endpoint: '/v1/chat/completions', relay_operator_id: 5, relay_node_id: 0, err: 'fetch failed' },
         })
+    })
+
+    // The request rides its own signal, but until the node's headers arrive a
+    // caller who leaves still cancels it, and the relay isn't charged for a
+    // socket the SDK tore down itself.
+    it('cancels the request when the caller leaves before the headers, charging no relay', async () => {
+        const rep = new RelayReputationStore({ clock: Date.now, targetReachable: () => true })
+        const outcome = vi.spyOn(rep, 'recordRelayOutcome')
+        const t = setup(
+            (init) =>
+                new Promise((_, reject) =>
+                    init.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }),
+                ),
+        )
+        const caller = new AbortController()
+        const run = forwardStream({ ...t.deps, relayReputation: rep }, t.em as never, out, call(caller.signal, hopOf()), async () => identity, noFallback, {
+            value: false,
+        })
+        caller.abort()
+        await run
+        expect(outcome).not.toHaveBeenCalled()
+        expect(t.em.failed).toMatchObject({ code: 'upstream_unreachable' })
+        expect(t.logger.logged.filter((l) => l.msg === 'upstream request failed').map((l) => l.level)).toEqual(['debug'])
+    })
+
+    it('sends nothing on its way for a caller already gone', async () => {
+        const rep = new RelayReputationStore({ clock: Date.now, targetReachable: () => true })
+        const outcome = vi.spyOn(rep, 'recordRelayOutcome')
+        let abortedAtFetch: boolean | undefined
+        const t = setup((init) => {
+            abortedAtFetch = init.signal!.aborted
+            throw new DOMException('aborted', 'AbortError')
+        })
+        const caller = new AbortController()
+        caller.abort()
+        await forwardStream({ ...t.deps, relayReputation: rep }, t.em as never, out, call(caller.signal, hopOf()), async () => identity, noFallback, {
+            value: false,
+        })
+        expect(abortedAtFetch).toBe(true)
+        expect(outcome).not.toHaveBeenCalled()
+        expect(t.em.failed).toMatchObject({ code: 'upstream_unreachable' })
+    })
+
+    // A buffered reply's headers come once the generation is done, so a
+    // caller who leaves mid-body doesn't end the read: the body carries the
+    // receipt the settle is checked against.
+    it('reads a buffered reply whole though the caller leaves mid-body', async () => {
+        const caller = new AbortController()
+        const t = setup(
+            (init) =>
+                new Response(
+                    new ReadableStream({
+                        start(c) {
+                            c.enqueue(enc.encode('{"partial":'))
+                            init.signal!.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')), { once: true })
+                            caller.signal.addEventListener('abort', () => {
+                                setTimeout(() => {
+                                    c.enqueue(enc.encode('true}'))
+                                    c.close()
+                                }, 20)
+                            })
+                        },
+                    }),
+                    { headers: { 'Content-Type': 'application/json' } },
+                ),
+        )
+        let got: string | undefined
+        const run = forwardStream({ ...t.deps, streamIdle: null }, t.em as never, out, call(caller.signal), async () => identity, async (_e, _r, b) => {
+            got = new TextDecoder().decode(b)
+        }, { value: false })
+        await vi.waitFor(() => expect(t.fetches).toHaveLength(1))
+        caller.abort()
+        await run
+        expect([t.em.failed, got]).toEqual([undefined, '{"partial":true}'])
+    })
+
+    it('reads a buffered reply under the idle bound and the size cap', async () => {
+        const silent = setup(
+            () =>
+                new Response(
+                    new ReadableStream({
+                        start(c) {
+                            c.enqueue(enc.encode('{"partial":'))
+                        },
+                    }),
+                    { headers: { 'Content-Type': 'application/json' } },
+                ),
+        )
+        const bound = { preStream: 60_000, midStream: 30, toolActive: 60_000 }
+        await forwardStream({ ...silent.deps, streamIdle: bound }, silent.em as never, out, call(), async () => identity, noFallback, { value: false })
+        expect(silent.em.failed).toMatchObject({ code: 'read_upstream' })
+        expect((silent.em.failed as { cause?: unknown }).cause).toMatchObject({ name: 'StreamIdleTimeoutError', timeoutMs: 30 })
+
+        for (const [body, whole] of [
+            ['{"a":12}', true],
+            ['{"a":123}', false],
+        ] as const) {
+            const t = setup(() => new Response(body, { headers: { 'Content-Type': 'application/json' } }))
+            let got: string | undefined
+            await forwardStream({ ...t.deps, maxReplyBytes: 8 }, t.em as never, out, call(), async () => identity, async (_e, _r, b) => {
+                got = new TextDecoder().decode(b)
+            }, { value: false })
+            if (whole) expect([t.em.failed, got]).toEqual([undefined, body])
+            else expect([t.em.failed?.code, got]).toEqual(['read_upstream', undefined])
+        }
     })
 
     // The residue Go's relayEvidence names: its backstop fires on a context

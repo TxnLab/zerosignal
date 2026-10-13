@@ -17,9 +17,10 @@ import { ENCRYPTED_CONTENT_TYPE, RELAY_HOP_HEADER, setsRelayHopHeader } from '@t
 import { newError } from './codes.js'
 import type { Remedies, SpendGuard } from './config.js'
 import type { SealedRun } from './dispatch.js'
-import { findError } from './errors.js'
+import { type ZsError, findError } from './errors.js'
 import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
 import { openAIError } from './http.js'
+import { type StreamIdle, readReply } from './idle.js'
 import { MbrDepositUnaffordableError } from './mbr.js'
 import type { Operator } from './operator.js'
 import type { OpenHandle, Reserved, WalletOpener } from './parts.js'
@@ -28,6 +29,7 @@ import { recordRelayHopAction, relayHopAction } from './routing/attribution.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import type { RelayReputationStore } from './routing/reputation.js'
 import { sealRequest } from './seal.js'
+import { guardRecords } from './spend-guard.js'
 import type { Emitter } from './turn.js'
 import type { Endpoint } from './types.js'
 import { BelowTargetError } from './wallet.js'
@@ -73,6 +75,10 @@ export interface SealedDeps {
     fetch: Fetch
     relayReputation?: RelayReputationStore | undefined
     logger: Logger
+    /** Bounds a buffered reply's silences, as readReply reads it; null is no bound. */
+    streamIdle?: StreamIdle | null | undefined
+    /** Overrides MAX_REPLY_BYTES. */
+    maxReplyBytes?: number | undefined
     /**
      * Runs once escrow has opened, before anything is sent: Go arms the refund
      * watchdog and journals the open ticket here. The turn waits for it, so the
@@ -123,7 +129,8 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
         handle = await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
     } catch (err) {
         // The open didn't commit, so a failed attempt doesn't keep the cap.
-        deps.spendGuard?.release(ticket.ticket_id)
+        const guard = deps.spendGuard
+        if (guard) guardRecords(log, 'release', ticket.ticket_id, () => guard.release(ticket.ticket_id))
         log.error('wallet open failed', {
             endpoint,
             ...opAttrs(op),
@@ -288,7 +295,7 @@ export function operatorHeaders(contentType: string, extra: Record<string, strin
  * forwardRawNonStream. Every outcome is attributed to the relay it rode.
  */
 export async function forwardBuffered(
-    deps: Pick<SealedDeps, 'fetch' | 'relayReputation' | 'logger'>,
+    deps: Pick<SealedDeps, 'fetch' | 'relayReputation' | 'logger' | 'streamIdle' | 'maxReplyBytes'>,
     em: Emitter,
     out: Outbound,
     call: Pick<SealedCall, 'endpoint' | 'hop' | 'signal'>,
@@ -317,16 +324,17 @@ export async function forwardBuffered(
         // ruled out our own abort: this waits out the whole generation, so a
         // payer hanging up mid-answer lands here too.
         attributeRelayHop(deps.relayReputation, hop, signal, TRANSPORT_FAILURE_STATUS, null, null)
-        log.error('operator request failed', { endpoint, ...relayAttrs(hop), err: errText(err) })
+        logForwardFailure(log, 'error', signal, 'operator request failed', endpoint, hop, err)
         em.fail(newError('upstream_unreachable', errText(err)))
         return
     }
 
     let body: Uint8Array
     try {
-        body = new Uint8Array(await resp.arrayBuffer())
+        body = await readReply(resp, deps.streamIdle, deps.maxReplyBytes)
     } catch (err) {
-        em.fail(newError('read_upstream', errText(err)))
+        logForwardFailure(log, 'warn', signal, 'operator reply read failed', endpoint, hop, err)
+        em.fail(readUpstreamError(err))
         return
     }
 
@@ -339,6 +347,28 @@ export async function forwardBuffered(
         log.error('response handling failed', { endpoint, err: errText(err) })
         em.fail(newError('response_handler', 'operator response could not be processed'))
     }
+}
+
+/**
+ * logForwardFailure logs a forward that failed at level, Go's
+ * logForwardFailure. One the caller ended by leaving is expected, so it is
+ * logged at debug.
+ */
+export function logForwardFailure(
+    log: Logger,
+    level: 'warn' | 'error',
+    signal: AbortSignal | undefined,
+    msg: string,
+    endpoint: Endpoint,
+    hop: RelayHop | null,
+    err: unknown,
+): void {
+    log[signal?.aborted ? 'debug' : level](msg, { endpoint, ...relayAttrs(hop), err: errText(err) })
+}
+
+/** readUpstreamError is the turn's error for a buffered reply that couldn't be read, with why as its cause. */
+export function readUpstreamError(err: unknown): ZsError {
+    return newError('read_upstream', errText(err), { cause: err })
 }
 
 /**

@@ -636,7 +636,17 @@ export class DiscoveryRegistry implements RegistryProvider {
      */
     async reprobeEphemeral(op: Operator, signal?: AbortSignal): Promise<Operator | null> {
         const reprobe = this.#source.reprobeEphemeral
-        const refreshed = reprobe === undefined ? op : await reprobe.call(this.#source, this.#snap?.view.operators ?? [], op, signal)
+        let refreshed = op
+        if (reprobe !== undefined) {
+            // Go's reprober answers false on any failure; a source is free to
+            // reject, and the caller reads null as "can't seal to it".
+            try {
+                refreshed = await reprobe.call(this.#source, this.#snap?.view.operators ?? [], op, signal)
+            } catch (err) {
+                this.#log.debug('ephemeral re-probe failed', { ...nodeAttrs(op), err: err instanceof Error ? err.message : String(err) })
+                return null
+            }
+        }
         try {
             sealRecipientOf(refreshed, this.#clock())
             return refreshed

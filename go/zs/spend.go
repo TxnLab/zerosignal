@@ -5,7 +5,23 @@
 
 package zs
 
-import "errors"
+import (
+	"errors"
+	"log/slog"
+)
+
+// recordSpend runs a SpendGuard Settle or Release. The outcome is already
+// decided by then, and what follows, the receipt journal and the settle a
+// restart re-fires, must still run, so a host guard that panics is logged
+// and the caller carries on. The TS twin is guardRecords.
+func recordSpend(log *slog.Logger, method, ticketID string, call func()) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Warn("spend guard "+method+" failed", slog.String("ticket_id", ticketID), slog.Any("panic", p))
+		}
+	}()
+	call()
+}
 
 // SpendGuard is the caller's spending policy, consulted at two checkpoints.
 // All amounts are microUSDC. Implementations must be safe for concurrent use.

@@ -364,6 +364,45 @@ describe('Client.create building the registry', () => {
         expect(stop).toHaveBeenCalledTimes(1)
     })
 
+    // Left unclosed, the sweep keeps its journal claim and bars the next Client.
+    it('closes the sweep even when stopping the registry throws, and reports it', async () => {
+        const { c, p, registry } = await clientOver(serve)
+        const stop = vi.spyOn(registry, 'stop').mockImplementationOnce(() => {
+            throw new Error('stop bug')
+        })
+        let swept = false
+        ;(p as { reconciler?: unknown }).reconciler = {
+            handOff: false,
+            close: async () => {
+                swept = true
+            },
+        }
+        await expect(c.close()).rejects.toThrow('stop bug')
+        expect(swept).toBe(true)
+        clients.splice(clients.indexOf(c), 1)
+        stop.mockRestore()
+        await registry.stop()
+    })
+
+    it('reports both failures when stopping the registry and closing the sweep both throw', async () => {
+        const { c, p, registry } = await clientOver(serve)
+        const stop = vi.spyOn(registry, 'stop').mockImplementationOnce(() => {
+            throw new Error('stop bug')
+        })
+        ;(p as { reconciler?: unknown }).reconciler = {
+            handOff: false,
+            close: async () => {
+                throw new Error('sweep bug')
+            },
+        }
+        const err = await c.close().catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(AggregateError)
+        expect((err as AggregateError).errors.map((e: Error) => e.message)).toEqual(['stop bug', 'sweep bug'])
+        clients.splice(clients.indexOf(c), 1)
+        stop.mockRestore()
+        await registry.stop()
+    })
+
     it("stops the boot, and waits for it to stop, when create's signal aborts", async () => {
         const stopped = spyStops()
         const algod = fakeAlgod(FLEET, { gate: hang })

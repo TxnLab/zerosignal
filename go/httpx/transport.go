@@ -228,10 +228,45 @@ var ErrPrivateTarget = errors.New("httpx: refusing to dial private/loopback/link
 // is checked explicitly in IsPrivateIP.
 var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
 
+// IPv6 ranges that reach an IPv4 address. A translator (NAT64, SIIT) or a 6to4
+// relay delivers a dial to one of these to the IPv4 address it carries, so on
+// a DNS64 network a name whose A record is private resolves to an IPv6 address
+// in nat64 that none of the IPv6 checks catch. Each is judged by the IPv4
+// address inside it, which keeps every public IPv4-only site reachable from an
+// IPv6-only host.
+var (
+	nat64     = mustCIDR("64:ff9b::/96")    // RFC 6052 well-known prefix, IPv4 in the last 32 bits
+	siit      = mustCIDR("::ffff:0:0:0/96") // RFC 2765 IPv4-translated, IPv4 in the last 32 bits
+	sixToFour = mustCIDR("2002::/16")       // RFC 3056, IPv4 in bits 16-47
+)
+
+// IPv6 ranges refused whole. The IPv4-compatible ::/96 is deprecated and never
+// a destination. The local-use NAT64 prefix leaves its length to the network,
+// so where the IPv4 address sits is unknowable from the address alone; trying
+// every length doesn't help, since a /96 deployment's zero bytes decode as
+// 0.0.0.0 at the shorter ones. Teredo addresses are client tunnel endpoints,
+// not servers. A NAT64 under a network-specific prefix is out of reach: it
+// looks like any global address.
+var refusedV6 = []*net.IPNet{
+	mustCIDR("::/96"),          // RFC 4291 IPv4-compatible, with :: and ::1
+	mustCIDR("64:ff9b:1::/48"), // RFC 8215 local-use NAT64
+	mustCIDR("2001::/32"),      // RFC 4380 Teredo
+}
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
+
 // IsPrivateIP reports whether ip is in a range a client must not be tricked
 // into dialing on an attacker-controlled BaseURL: loopback, RFC1918 / IPv6 ULA
 // (net.IP.IsPrivate), link-local (unicast + multicast), unspecified, multicast,
-// or RFC 6598 CGNAT (100.64.0.0/10). Family-agnostic — the net.IP.Is* methods
+// or RFC 6598 CGNAT (100.64.0.0/10); or an IPv6 address that carries such an
+// IPv4 address (NAT64, SIIT, 6to4) or can't be judged (IPv4-compatible,
+// local-use NAT64, Teredo). Family-agnostic — the net.IP.Is* methods
 // classify v4 and v6 alike. A nil ip reports true (fail closed). This is the
 // SSRF predicate; it is intentionally separate from the IPv4-only,
 // golden-vectored selection.isPublicIPv4 used for relay /16 diversity.
@@ -243,7 +278,24 @@ func IsPrivateIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
 		return true
 	}
-	return cgnat.Contains(ip)
+	if cgnat.Contains(ip) {
+		return true
+	}
+	if ip.To4() != nil {
+		return false
+	}
+	for _, n := range refusedV6 {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	switch {
+	case nat64.Contains(ip), siit.Contains(ip):
+		return IsPrivateIP(ip[12:16])
+	case sixToFour.Contains(ip):
+		return IsPrivateIP(ip[2:6])
+	}
+	return false
 }
 
 // blockPrivateControl is a net.Dialer.Control hook that fails the dial when the

@@ -85,24 +85,35 @@ export interface Remedies {
  * Amounts are microUSDC. See proto/go/zs SpendGuard for the full contract:
  * settle and release can arrive more than once for a ticket, so a guard
  * keyed by ticket id counts only the first.
+ *
+ * Every method answers synchronously: an async one doesn't compile against
+ * SpendGuardResult, and an async admit or reserve is refused at run time
+ * whatever it resolves to. A settle or release that throws is logged.
  */
 export interface SpendGuard {
     /**
      * Before any reserve, with the lowest max_price any candidate is expected
      * to sign. Advisory: throwing refuses the request with kind spend_cap.
      */
-    admit(estimate: number): void
+    admit(estimate: number): SpendGuardResult
     /**
      * After a node signs a ticket and before escrow opens, with its maxPrice.
      * Throwing moves on to the next candidate; returning records the exposure.
      * Throwing a DuplicateTicketError, or an error whose cause chain holds
      * one, instead ends the request with kind operator_fault.
      */
-    reserve(ticketId: string, maxPrice: number): void
-    settle(ticketId: string, charged: number): void
+    reserve(ticketId: string, maxPrice: number): SpendGuardResult
+    settle(ticketId: string, charged: number): SpendGuardResult
     /** Drops a reservation that never became a charge. */
-    release(ticketId: string): void
+    release(ticketId: string): SpendGuardResult
 }
+
+/**
+ * SpendGuardResult is anything but a Promise or another object. The SDK
+ * ignores the value; the type exists so an async method is a compile error,
+ * where a void return would accept one.
+ */
+export type SpendGuardResult = void | undefined | null | boolean | number | string | bigint | symbol
 
 /**
  * DuplicateTicketError is a SpendGuard reserve refusal for a ticket id that
@@ -172,9 +183,10 @@ export interface Config {
      * stream_interrupted, caused by a StreamIdleTimeoutError; false for no
      * bound. A browser's fetch has no read timeout and the SDK's Node fetch
      * sets none, so without one a node or relay that stops sending without
-     * closing holds the turn until the caller gives up. The Go SDK has no
-     * such bound: its callers set their context's deadline. A budget past
-     * setTimeout's limit, about 24.8 days, is held to it.
+     * closing holds the turn until the caller gives up. A whole reply's body
+     * is held to midStream, and ends read_upstream. Go's is
+     * Config.StreamIdle. A budget past setTimeout's limit, about 24.8 days,
+     * is held to it.
      */
     streamIdle?: Partial<StreamIdle> | false
     /**

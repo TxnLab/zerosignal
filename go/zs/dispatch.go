@@ -2484,7 +2484,7 @@ func (s *Client) runSealed(
 		// The open didn't commit — back the reservation out so a failed attempt
 		// doesn't permanently consume the cap.
 		if s.spend != nil {
-			s.spend.Release(ticket.TicketID)
+			recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 		}
 		s.log.Error("wallet open failed",
 			slog.String("endpoint", endpoint),
@@ -2588,8 +2588,9 @@ func (s *Client) runSealed(
 		// (node already done → pay the operator for delivered content) or
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
-		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete)
-		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete)
+		idle := newIdleWatchdog(s.cfg.StreamIdle)
+		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, idle)
+		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete, idle)
 		return
 	}
 	s.forwardRawNonStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, nonStreamRespond)
@@ -3925,7 +3926,7 @@ func (s *Client) checkReceipt(
 		// It stays ahead of journalReceipt: the reconciler reads a journaled
 		// receipt as a charge already counted.
 		if s.spend != nil {
-			s.spend.Settle(ticket.TicketID, receipt.AmountCharged)
+			recordSpend(s.log, "settle", ticket.TicketID, func() { s.spend.Settle(ticket.TicketID, receipt.AmountCharged) })
 		}
 		if handle == nil {
 			return nil, check
@@ -4023,7 +4024,7 @@ func (s *Client) checkReceipt(
 	// refunds/lapses on-chain). Drop the ticket's reserved ceiling without
 	// recording any spend.
 	if s.spend != nil {
-		s.spend.Release(ticket.TicketID)
+		recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 	}
 	if handle == nil || re.Violation != ReceiptViolationBodyHash {
 		return nil, check
@@ -4154,6 +4155,7 @@ func (s *Client) buildFrameFactory(
 	openFees uint64,
 	hop *RelayHop,
 	genComplete *atomic.Bool,
+	idle *idleWatchdog,
 ) frameTransformFactory {
 	return func(upstreamResp *http.Response) (frameTransform, error) {
 		wrappedKey := upstreamResp.Header.Get(wire.ResponseKeyHeader)
@@ -4288,6 +4290,8 @@ func (s *Client) buildFrameFactory(
 				if genComplete != nil && verdict.Terminal && !genComplete.Load() {
 					genComplete.Store(true)
 				}
+				// An image tool's round is silent while it runs.
+				idle.frame(plaintext)
 				// So the next turn of a tool-calling conversation routes back
 				// here, as a buffered reply's tool calls do. Each id rides its
 				// call's first chunk only, so ids are recorded as they arrive.

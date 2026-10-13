@@ -284,6 +284,7 @@
     "maxCacheAgeMs": 900000,
     "maxCarryAgeMs": 5400000,
     "maxOutputCeiling": 32768,
+    "maxReplyBytes": 268435456,
     "probeBudget": 96,
     "refreshIntervalMs": 300000,
     "refreshTimeoutMs": 30000,
@@ -291,6 +292,9 @@
     "responseHeaderBackstopMs": 300000,
     "retryBudgetMs": 60000,
     "settlePendingGraceMs": 120000,
+    "streamIdleMidStreamMs": 60000,
+    "streamIdlePreStreamMs": 300000,
+    "streamIdleToolActiveMs": 300000,
     "targetTopK": 8
   }
 }

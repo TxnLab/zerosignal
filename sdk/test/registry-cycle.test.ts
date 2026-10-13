@@ -1091,5 +1091,20 @@ describe('DiscoveryRegistry', () => {
             now = expiry * 1000
             expect(await live.reprobeEphemeral(row(1))).toBeNull()
         })
+
+        // Go's reprober answers false on any failure; a source that rejects
+        // reads the same, rather than escaping into dispatch untyped.
+        it('reads a reprobe that rejects as a node it cannot seal to', async () => {
+            const failing: OperatorSource = {
+                fetchChain: async () => [row(1)],
+                enrichSubset: async () => {},
+                reprobeEphemeral: async () => {
+                    throw new Error('probe failed')
+                },
+            }
+            const r = registry({ source: failing })
+            await r.ready
+            expect(await r.reprobeEphemeral(row(1))).toBeNull()
+        })
     })
 })

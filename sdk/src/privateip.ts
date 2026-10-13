@@ -11,7 +11,8 @@
 // resolves into private space, and a rebind, which the literal check can't.
 //
 // The ranges are Go's, not the literal check's: Go allows 0.0.0.1, 240/4 and
-// the broadcast address, and judges an IPv4-mapped address by its IPv4 half.
+// the broadcast address, and judges an IPv4-mapped address by its IPv4 half,
+// as it judges a NAT64, SIIT or 6to4 address by the IPv4 address it carries.
 // Pinned by testdata/private_target_vectors.json, which Go generates.
 
 /**
@@ -125,36 +126,54 @@ function to4(ip: Uint8Array): Uint8Array | null {
 }
 
 // Go's IsPrivateIP: loopback, RFC 1918 and ULA, link-local unicast and
-// multicast, unspecified, multicast, and CGNAT 100.64/10.
+// multicast, unspecified, multicast, and CGNAT 100.64/10; and an IPv6 address
+// that carries such an IPv4 address, or can't be judged.
 function isPrivateIP(ip: Uint8Array): boolean {
     const v4 = to4(ip)
-    if (v4) {
-        const [a, b, c, d] = [v4[0]!, v4[1]!, v4[2]!, v4[3]!]
-        return (
-            a === 127 ||
-            a === 10 ||
-            (a === 172 && (b & 0xf0) === 16) ||
-            (a === 192 && b === 168) ||
-            (a === 169 && b === 254) ||
-            (a === 224 && b === 0 && c === 0) ||
-            (a === 0 && b === 0 && c === 0 && d === 0) ||
-            (a & 0xf0) === 0xe0 ||
-            (a === 100 && (b & 0xc0) === 64)
-        )
-    }
+    if (v4) return isPrivateIPv4(v4)
     const zeroTo = (n: number) => ip.subarray(0, n).every((x) => x === 0)
-    return (
-        (zeroTo(15) && (ip[15] === 1 || ip[15] === 0)) || // loopback ::1, unspecified ::
+    if (
+        zeroTo(12) || // IPv4-compatible ::/96, with loopback ::1 and unspecified ::
         (ip[0]! & 0xfe) === 0xfc || // ULA fc00::/7
         (ip[0] === 0xfe && (ip[1]! & 0xc0) === 0x80) || // link-local fe80::/10
-        ip[0] === 0xff // multicast ff00::/8, link-local multicast with it
+        ip[0] === 0xff || // multicast ff00::/8, link-local multicast with it
+        startsWith(ip, [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01]) || // local-use NAT64 64:ff9b:1::/48
+        startsWith(ip, [0x20, 0x01, 0x00, 0x00]) // Teredo 2001::/32
+    ) {
+        return true
+    }
+    // A translator or a 6to4 relay delivers these to the IPv4 address inside.
+    if (startsWith(ip, [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0])) return isPrivateIPv4(ip.subarray(12)) // NAT64 64:ff9b::/96
+    if (startsWith(ip, [0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0])) return isPrivateIPv4(ip.subarray(12)) // SIIT ::ffff:0:0:0/96
+    if (startsWith(ip, [0x20, 0x02])) return isPrivateIPv4(ip.subarray(2, 6)) // 6to4 2002::/16
+    return false
+}
+
+function isPrivateIPv4(v4: Uint8Array): boolean {
+    const [a, b, c, d] = [v4[0]!, v4[1]!, v4[2]!, v4[3]!]
+    return (
+        a === 127 ||
+        a === 10 ||
+        (a === 172 && (b & 0xf0) === 16) ||
+        (a === 192 && b === 168) ||
+        (a === 169 && b === 254) ||
+        (a === 224 && b === 0 && c === 0) ||
+        (a === 0 && b === 0 && c === 0 && d === 0) ||
+        (a & 0xf0) === 0xe0 ||
+        (a === 100 && (b & 0xc0) === 64)
     )
+}
+
+function startsWith(ip: Uint8Array, prefix: readonly number[]): boolean {
+    return prefix.every((x, k) => ip[k] === x)
 }
 
 /**
  * isPrivateAddress reports whether a dial to address must be refused: it is in
- * a private, loopback, link-local, unspecified, multicast or CGNAT range, or it
- * is not an IP address at all (a name nobody resolved fails closed).
+ * a private, loopback, link-local, unspecified, multicast or CGNAT range, it is
+ * IPv6 that reaches one (NAT64, SIIT, 6to4) or can't be judged (::/96,
+ * local-use NAT64, Teredo), or it is not an IP address at all (a name nobody
+ * resolved fails closed).
  */
 export function isPrivateAddress(address: string): boolean {
     const ip = parseIP(address)

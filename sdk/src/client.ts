@@ -31,6 +31,7 @@ import {
 } from './parts.js'
 import type { PickDeps } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
+import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
 import { type JournalDeps, Reconciler, journalOpen, journalReceipt, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
@@ -196,7 +197,7 @@ export class Client {
             remedy: cfg.remedies.recoverTicket,
             // A ticket whose request failed after its escrow opened keeps its
             // reservation in dispatch; its refund is what frees it.
-            refunded: guard ? (ticketId) => guard.release(ticketId) : undefined,
+            refunded: guard ? (ticketId) => guardRecords(cfg.logger, 'release', ticketId, () => guard.release(ticketId)) : undefined,
         })
         const life = new AbortController()
         const settles = new Settles({ logger: cfg.logger, journal, life: life.signal })
@@ -302,13 +303,17 @@ export class Client {
     close(): Promise<void> {
         this.#closing ??= (async () => {
             this.#p.life.abort()
-            const stopping = this.#p.stopRegistry?.()
+            // Both run whatever the other throws: a registry left running keeps
+            // probing, and an unreleased journal claim bars the next Client.
             const r = this.#p.reconciler
-            if (r !== undefined) {
-                const refunds = this.#p.refunds
-                await r.close(r.handOff ? () => refunds.handOff() : undefined)
-            }
-            await stopping
+            const refunds = this.#p.refunds
+            const results = await Promise.allSettled([
+                (async () => this.#p.stopRegistry?.())(),
+                (async () => r?.close(r.handOff ? () => refunds.handOff() : undefined))(),
+            ])
+            const failed = results.flatMap((res) => (res.status === 'rejected' ? [res.reason as unknown] : []))
+            if (failed.length === 1) throw failed[0]
+            if (failed.length > 1) throw new AggregateError(failed, 'closing the registry and the ticket sweep both failed')
         })()
         return this.#closing
     }
@@ -400,6 +405,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         fetch: cfg.inferenceFetch,
         relayReputation: st.relayReputation,
         logger,
+        streamIdle: cfg.streamIdle,
         // With USDC locked on chain, the watchdog recovers it if no settlement
         // resolves the ticket, and the journal keeps it past a restart.
         opened: async (h, ticket) => {
