@@ -335,8 +335,12 @@ func newFakeNode(t *testing.T, cfg *nodeConfig) *fakeNode {
 	t.Cleanup(srv.Close)
 
 	node.Server = srv
+	id := nextFakeOperatorID()
 	node.operator = zs.Operator{
-		ID:          nextFakeOperatorID(),
+		ID: id,
+		// Unlike the operator id and never 0, so a pin that loses or swaps
+		// the node half lands on no node.
+		NodeID:      id + 1000,
 		OwnerAddr:   ownerAddr,
 		SigningAddr: signingAddr,
 		// Mandatory forward secrecy: the proxy seals only to the operator's
@@ -412,6 +416,7 @@ func (n *fakeNode) issueTicket(t *testing.T, w http.ResponseWriter, pub ed25519.
 	tkt := ticket.Ticket{
 		TicketID:       tid,
 		OperatorID:     n.operator.ID,
+		NodeID:         n.operator.NodeID,
 		InputCount:     req.InputCount,
 		MaxOutputCount: req.MaxOutputCount,
 		InputRate:      inRate,
