@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-13 — a no-fit message names the limit the filter failed (unreleased)
+### 2026-10-13 — a no-fit message names the limit the filter failed (0.5.1)
 
 The per-operator lines of a `context_length_exceeded` message recomputed the miss from the
 request's v1 input count. The filter charges a 9.2 node the v2 count instead, and passes a 9.11
@@ -40,7 +40,7 @@ node's window when the upstream can take the request, so a node that failed only
 charged. `selection.SizingMiss` now carries the filter's own reading, `input_tokens` and
 `context_window_exceeded`, and both SDKs' messages use it. Routing is unchanged.
 
-### 2026-10-13 — `CatalogEngine` and `EphemeralVerifyCache` are gone (unreleased)
+### 2026-10-13 — `CatalogEngine` and `EphemeralVerifyCache` are gone (0.5.1)
 
 The TS SDK no longer exports `CatalogEngine` (with `CatalogEngineOptions`, `ProbeObservation`,
 `CatalogNodeRef` and `CatalogNodeView`) or `EphemeralVerifyCache` (with its options type).
@@ -48,7 +48,7 @@ The TS SDK no longer exports `CatalogEngine` (with `CatalogEngineOptions`, `Prob
 second. `restoredProtoVersion`, `checkEphemeralAdvertisement` and `recordEphemeralStaleness`
 stay exported from `@txnlab/zerosignal/catalog`.
 
-### 2026-10-13 — the newest tool-call id decides the pin (unreleased)
+### 2026-10-13 — the newest tool-call id decides the pin (0.5.1)
 
 A client resends its whole history, so a request carries every earlier tool-call id, and both
 SDKs pinned to the node behind the OLDEST one with a live pin. A conversation that moved off its
@@ -58,13 +58,13 @@ one that encrypted it. Both SDKs now walk the ids newest first. (A conversation 
 two accounts still replays earlier rounds' reasoning from both; this does not change that.) A newest id whose node is gone or excluded is still no preference; an
 older id is not consulted past it.
 
-### 2026-10-13 — Go reads the `provider` routing key exactly (unreleased)
+### 2026-10-13 — Go reads the `provider` routing key exactly (0.5.1)
 
 Go's `ExtractRoutingPreferences` matched the top-level key case-insensitively, so a body carrying
 `"Provider"` set routing preferences in Go but not in TS, and Go's `DropRoutingPreferences`
 (exact key) left it in the sealed body. Go now reads `provider` exactly, as TS and the drop do.
 
-### 2026-10-13 — a Responses tool turn returns to the node that issued the call (unreleased)
+### 2026-10-13 — a Responses tool turn returns to the node that issued the call (0.5.1)
 
 The tool-call pin read only chat shapes (`messages[].tool_call_id`, `tool_calls[].id`), so a
 `/v1/responses` tool turn was routed from scratch and could land on another node. For a stateless
@@ -74,7 +74,7 @@ client (`store: false`, such as Codex) that turn replays the earlier reasoning i
 `output[]` item and streamed `item`, and pin a request by the `call_id` of its `input[]` items,
 under the same `affinity_policy` as chat.
 
-### 2026-10-13 — the tool-call pin passes the TEE gate (unreleased)
+### 2026-10-13 — the tool-call pin passes the TEE gate (0.5.1)
 
 A tool-calling turn is pinned to the node that issued its `tool_call_id`, and `SelectTargets`
 put that node first without checking, for a request requiring TEE, its attestation. So a
@@ -85,7 +85,7 @@ pin already did. The wire version stays unchecked there on purpose, since
 `selectTargetsForOperator` relies on it to still try the payer's own pick. Pinned by new
 `selection_vectors.json` cases.
 
-### 2026-10-13 — a node's `payer_not_opted_in` refusal makes the wallet check the MBR deposit again (unreleased)
+### 2026-10-13 — a node's `payer_not_opted_in` refusal makes the wallet check the MBR deposit again (0.5.1)
 
 Once the wallet has seen the payer opted into the escrow app with its MBR deposit covering the
 working set, it skips those reads on later requests. A deposit closed outside the wallet —
@@ -98,7 +98,7 @@ the optional `DepositRechecker` interface, which `*Wallet` implements; TS: the o
 request itself still fails, and a node that refused within the last few seconds may refuse once
 more from its cache.
 
-### 2026-10-13 — a re-probed node's ticket is checked against the request it answers (unreleased)
+### 2026-10-13 — a re-probed node's ticket is checked against the request it answers (0.5.1)
 
 When a reserve hit a stale ephemeral key, both SDKs re-probe the node and re-size the reserve
 against what it now advertises, but the price check still read the request as first built. A
@@ -106,7 +106,7 @@ node that came back with a different bound version or tool limit signed an hones
 re-sized request and was refused `ticket_price_rejected`. The check now reads the request the
 ticket answers.
 
-### 2026-10-13 — the slot pool counts a part slot (unreleased)
+### 2026-10-13 — the slot pool counts a part slot (0.5.1)
 
 Funding the prepaid ticket-MBR pool now counts a part slot already in the pool toward the next
 one, in both SDKs. Previously the pool and the wallet were each floored to whole slots, so a pool
@@ -114,7 +114,7 @@ holding three slots and most of a fourth, beside a wallet that could pay the res
 to afford a fourth and asked for a whole one. `need` (Go: the `ErrDepositUnaffordable` message;
 TS: `MbrDepositUnaffordableError.need`) is now what the part slot lacks rather than a whole slot.
 
-### 2026-10-13 — a whole reply is bounded, and a caller's leaving reaches a stream before its headers (unreleased)
+### 2026-10-13 — a whole reply is bounded, and a caller's leaving reaches a stream before its headers (0.5.1)
 
 Both SDKs now read a whole (non-streamed) reply's body under the stream idle bound's
 between-bytes budget, 60 s by default, and refuse one over 256 MiB. Either ends the turn
@@ -129,7 +129,7 @@ Previously the request ran on until the headers came, or the 5-minute header bac
 relay is no longer charged for that request, and the failure is logged at debug rather than
 error.
 
-### 2026-10-13 — the Go SDK cuts a silent stream (unreleased)
+### 2026-10-13 — the Go SDK cuts a silent stream (0.5.1)
 
 A streamed answer whose node or relay stops sending without closing now ends
 `stream_interrupted`, its `Err` a `*StreamIdleTimeoutError`, as in TS: by default after 300 s
@@ -137,7 +137,7 @@ with no first byte, 60 s between bytes after that, or 300 s while the node runs 
 Previously the Go SDK waited as long as the caller's context allowed, and the turn's escrow
 with it. `Config.StreamIdle` sets each bound, and `StreamIdle{Off: true}` turns it off.
 
-### 2026-10-13 — host hooks can't bypass the spend cap or stop the SDK (unreleased)
+### 2026-10-13 — host hooks can't bypass the spend cap or stop the SDK (0.5.1)
 
 A `SpendGuard` method that returns a Promise no longer slips past the cap: the TS methods now
 return `SpendGuardResult`, so an async one is a compile error, and an async `admit` or `reserve`
@@ -154,7 +154,7 @@ can't seal to, as Go's does.
 One that returns an object no longer compiles, e.g. `reserve: (id, p) => this.held.set(id, p)`,
 which returns the `Map`; give the arrow a block body.
 
-### 2026-10-12 — the private-target guard judges translated IPv6 (unreleased)
+### 2026-10-12 — the private-target guard judges translated IPv6 (0.5.1)
 
 Go's `httpx.IsPrivateIP` (the `BlockPrivateTargets` dial guard, used by the node's relay, web
 read and favicon fetches and by the Go SDK's operator clients) and the TS SDK's `isPrivateAddress` /
