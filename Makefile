@@ -20,12 +20,13 @@ GO   ?= go
 PNPM ?= pnpm
 
 .PHONY: test test-go test-ts test-sdk test-examples build-ts build-sdk check-lockstep verify-vectors update-vectors update-sealed-vectors \
-	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck
+	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck \
+	release-pr release-tag release-status check-release-script
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
 # vector-staleness is caught here too.
-test: check-vector-generators check-no-hayai check-lockstep check-escrow-client test-go test-ts test-sdk test-examples
+test: check-vector-generators check-no-hayai check-lockstep check-release-script check-escrow-client test-go test-ts test-sdk test-examples
 
 test-go:
 	cd go && $(GO) test ./... -count 1
@@ -44,6 +45,23 @@ test-sdk: build-ts
 check-lockstep:
 	./scripts/check-lockstep.test.sh
 	./scripts/check-lockstep.sh
+
+# The lockstep release (README "Releasing"): `make release-pr VERSION=X.Y.Z`, merge
+# the PR, `make release-tag`. REMOTE overrides the git remote (default origin).
+release-pr:
+	@test -n "$(VERSION)" || { echo "usage: make release-pr VERSION=X.Y.Z" >&2; exit 2; }
+	./scripts/release.sh prepare $(VERSION)
+
+release-tag:
+	./scripts/release.sh tag
+
+release-status:
+	./scripts/release.sh status $(VERSION)
+
+# A real release meets release.sh's guards once, with tags that can't be moved, so
+# they are tested here against a scratch remote.
+check-release-script:
+	./scripts/release.test.sh
 
 # sdk/ resolves @txnlab/zs-proto to ts/dist, so it needs a current build.
 build-ts: node_modules

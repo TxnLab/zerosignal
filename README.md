@@ -183,13 +183,29 @@ cd ts && pnpm build
 ## Releasing
 
 Go, `@txnlab/zs-proto` and the `@txnlab/zerosignal` SDK release in lockstep: one version
-number, all three tags on the same commit.
+number, all three tags on the same commit. Three commands do it:
 
-1. Set `version` to `X.Y.Z` in both `ts/package.json` and `sdk/package.json` and commit
-   (`make check-lockstep` refuses a mismatch).
-2. Tag that commit `go/vX.Y.Z`, `ts/vX.Y.Z` and `sdk/vX.Y.Z`, then push exactly those three:
-   `git push origin go/vX.Y.Z ts/vX.Y.Z sdk/vX.Y.Z`. GitHub starts no workflow for a push of
-   more than three tags, so don't use `--tags`.
+```bash
+make release-pr VERSION=X.Y.Z   # version commit on release/vX.Y.Z, pushed, PR opened
+# squash-merge the PR
+make release-tag                # tags the version commit, after a y/N confirmation
+make release-status             # tags, release.yml runs, npm, Go module
+```
+
+What they do, step by step:
+
+1. `release-pr` refuses a version not above both `main`'s and the latest `go/v*` tag. It
+   branches `release/vX.Y.Z` off `main`, sets `version` to `X.Y.Z` in both `ts/package.json` and
+   `sdk/package.json`, relabels each `###` CHANGELOG heading ending `(unreleased)` to `(X.Y.Z)`,
+   runs `scripts/check-lockstep.sh`, commits `ts, sdk: X.Y.Z`, pushes the branch and opens the
+   PR. It leaves your checkout on that branch.
+2. `release-tag` reads the version from `main`'s package.json files, so the tags can only name
+   what they say, and tags the commit that set it, not `main`'s tip: a PR merged after the
+   release PR stays out of the release. It tags that commit `go/vX.Y.Z`, `ts/vX.Y.Z` and
+   `sdk/vX.Y.Z` and pushes exactly those three, atomically. GitHub starts no workflow for a push
+   of more than three tags, so never `git push --tags`. Re-running it is safe: it pushes only
+   the tags missing from the remote and refuses, pushing nothing, when one already points at
+   another commit. `scripts/release.test.sh` (in `make test`) pins these guards.
 3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`,
    with the private-repo setup below).
    Each of the `ts/v*` and `sdk/v*` tags runs [`release.yml`](./.github/workflows/release.yml),
@@ -230,8 +246,10 @@ to `go/attest/releases.go`, and regenerates `ts/src/attest/trust-lists.ts` from 
 node tag cut before the workflow gained that step), regenerate by hand with
 `cd go && go test ./attest -run TestTrustListTwinVectors -update-trust-lists`.
 
-Merging it reaches no payer. Once it merges, cut a release here, then bump the pins in zs-proxy
-and the web app; each trusts the new node release from its own next release or deploy.
+Merging it reaches no payer. Once it merges, cut a release here (`make release-pr`), then bump
+the pins in zs-proxy and the web app; each trusts the new node release from its own next release
+or deploy. zs-node itself needs no pin bump for it: a node reads only the OS-image list, and its
+own image can't be in the release it was built against.
 
 ## License
 
