@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -2481,6 +2482,86 @@ func bandByResponsiveness(ops []Operator, preferred *Operator, lat RelayLatency,
 	return out, ordered
 }
 
+// recheckDepositOnRefusedOpen wraps the responder for a request whose open the
+// node submits. A prepaid-pool shortfall used to surface as the payer's own
+// submit failing, and Open topped the pool up and retried. Now the revert
+// happens at the node, which answers only payment_verification_failed and
+// burns the ticket, so the wallet rechecks its deposit before the next open
+// rather than trusting a cached "ready" every later open would fail on too.
+// Rechecking after some other refusal costs one read. The recheck runs after
+// the refusal is passed on: RecheckDeposit waits on a funding pass in flight,
+// which must not delay the caller's error.
+func (s *Client) recheckDepositOnRefusedOpen(next nonStreamResponder) nonStreamResponder {
+	return func(em emitter, resp *http.Response, body []byte) error {
+		err := next(em, resp, body)
+		if resp.StatusCode == http.StatusPaymentRequired && resp.Header.Get(wire.ResponseKeyHeader) == "" &&
+			openAIErrorCode(body) == "payment_verification_failed" {
+			if r, ok := s.wallet.(DepositRechecker); ok {
+				r.RecheckDeposit()
+			}
+		}
+		return err
+	}
+}
+
+// settleAckPoster returns the OpenHandle's deliverAck for a node that takes
+// the payer's settle half (wire.TakesSettleAck), or nil to keep broadcasting
+// it. The ack is sealed to the recipient the request was sealed to, and goes
+// the way the request went: through a relay when the request was relayed, or
+// the ack would tie the payer's IP to the node the relay hid it from.
+//
+// Only relays that forward the path can carry it. With none, the poster
+// reports errNoSettleAckRoute and the ack is broadcast as before 9.12. Any
+// other failure is final: the node's settlement driver claims the ticket on
+// its own, and broadcasting after a send that may have arrived would only race
+// it.
+func (s *Client) settleAckPoster(op Operator, recipient age.Recipient, relayed bool) func(context.Context, wire.SettleAck) error {
+	if !wire.TakesSettleAck(op.ProtoVersion) || recipient == nil {
+		return nil
+	}
+	return func(ctx context.Context, ack wire.SettleAck) error {
+		body, err := wire.SealSettleAck(ack, recipient)
+		if err != nil {
+			return err
+		}
+		baseURL, endpoint := op.BaseURL, wire.SettleAckPath
+		var headers http.Header
+		if relayed {
+			var capable []selection.Operator
+			for _, r := range s.relayPool(ctx) {
+				if wire.TakesSettleAck(r.ProtoVersion) {
+					capable = append(capable, r)
+				}
+			}
+			hop, err := s.relayHopForPool(capable, op, true)
+			if err != nil || hop == nil {
+				return errNoSettleAckRoute
+			}
+			rr := protorelay.BuildRequest(hop.BaseURL, hop.TargetID, hop.TargetNodeID, wire.SettleAckPath, http.MethodPost)
+			baseURL, endpoint = rr.URL, ""
+			headers = http.Header{}
+			headers.Set(wire.RelayTargetHeader, rr.Target)
+			headers.Set(wire.RelayTargetNodeHeader, rr.TargetNode)
+			headers.Set(wire.RelayPathHeader, rr.Path)
+			headers.Set(wire.RelayMethodHeader, rr.Method)
+		}
+		req, err := s.buildOperatorRequest(ctx, baseURL, http.MethodPost, endpoint, body, wire.SealedSettleAckContentType, headers)
+		if err != nil {
+			return err
+		}
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("zs: settle ack: %w", err)
+		}
+		defer resp.Body.Close()
+		reply, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		if resp.StatusCode != http.StatusAccepted {
+			return fmt.Errorf("zs: settle ack: node answered %d %s", resp.StatusCode, openAIErrorCode(reply))
+		}
+		return nil
+	}
+}
+
 // runSealed seals the request under the recipient pinned at reserve time
 // (rt.SealRecipient — the operator's signed ephemeral recipient; mandatory
 // forward secrecy, no anchor), dispatches it to op.BaseURL with the reserved
@@ -2505,13 +2586,19 @@ func (s *Client) runSealed(
 
 	// The caller has already reserved the ticket's ceiling with the spend guard.
 
-	// Compose + submit the Payment + escrow.open atomic group via the
-	// wallet. The app-call txid (group member 1) is threaded into the
-	// envelope's algorand_tx_id — the real per-txn id algod's
-	// PendingTransactionInformation can look up directly. The group id
-	// is retained on the handle for audit/dispute logging but is NOT
-	// the lookup key.
-	openHandle, err := s.wallet.Open(ctx, ticket, op, rt.PreSignedOpenGroup)
+	// Complete the Payment + escrow.open atomic group via the wallet, and
+	// submit it unless the node will (wire.SubmitsOpen). The app-call txid
+	// (group member 1) is threaded into the envelope's algorand_tx_id either
+	// way: the node finds a payer-submitted open by it, and checks that a
+	// handed-off group carries it. The group id is retained on the handle for
+	// audit/dispute logging but is NOT the lookup key.
+	var openHandle *OpenHandle
+	var err error
+	if no, ok := s.wallet.(NodeOpener); ok && wire.SubmitsOpen(op.ProtoVersion) {
+		openHandle, err = no.OpenForNode(ctx, ticket, op, rt.PreSignedOpenGroup)
+	} else {
+		openHandle, err = s.wallet.Open(ctx, ticket, op, rt.PreSignedOpenGroup)
+	}
 	if err != nil {
 		// The open didn't commit — back the reservation out so a failed attempt
 		// doesn't permanently consume the cap.
@@ -2529,7 +2616,8 @@ func (s *Client) runSealed(
 	}
 	// Open committed: the reservation stays on the tally (settlement reconciles
 	// the actual charge lower on-chain; the cap intentionally counts the ceiling).
-	// Arm the refund watchdog now that USDC is locked on-chain: if no
+	// Arm the refund watchdog now that USDC is locked on-chain — or, for a
+	// handed-off group, may be locked whenever the node submits it: if no
 	// settlement resolves this ticket (the node burns it on a
 	// payment-verification failure, the response never arrives, the operator
 	// dies before settling), refundInactive recovers the escrow after
@@ -2538,6 +2626,7 @@ func (s *Client) runSealed(
 	// existence-probe no-op at fire time.
 	s.refunds.Track(openHandle, ticket.ExpiresAt)
 	s.journalOpen(openHandle, ticket)
+	openHandle.deliverAck = s.settleAckPoster(op, rt.SealRecipient, hop != nil)
 	txID := openHandle.AppCallTxID
 	em.committed(ticket.TicketID, txID, openHandle.OpenFeesMicroalgos)
 	s.log.Debug("wallet open submitted",
@@ -2573,7 +2662,12 @@ func (s *Client) runSealed(
 	// successful Reserve; a nil pin would surface as a clean WrapRequestWithIdentity
 	// error below rather than sealing to nothing.
 	sealRecipient := rt.SealRecipient
-	envelopeJSON, err := wire.WrapRequestWithIdentity(body, txID, ticket.TicketID, admissionTag, ephemeral, sealRecipient)
+	envelopeJSON, err := wire.WrapRequestBound(body, wire.RequestBinding{
+		TxID:         txID,
+		TicketID:     ticket.TicketID,
+		AdmissionTag: admissionTag,
+		OpenGroup:    openHandle.OpenGroup,
+	}, ephemeral, sealRecipient)
 	timer.RecordEncrypt(time.Since(t0))
 	if err != nil {
 		s.log.Error("wrap request failed",
@@ -2592,6 +2686,9 @@ func (s *Client) runSealed(
 	var sh settlementHandle = openHandle
 	openFees := openHandle.OpenFeesMicroalgos
 	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
+	if openHandle.OpenGroup != "" {
+		nonStreamRespond = s.recheckDepositOnRefusedOpen(nonStreamRespond)
+	}
 
 	// Transport-privacy routing. With no hop, send directly to the target
 	// (fwdBaseURL = op.BaseURL, fwdEndpoint = endpoint, no extra headers) —

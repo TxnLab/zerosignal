@@ -679,6 +679,21 @@ describe('Client.stream’s wiring', () => {
         await h.c.close()
     })
 
+    // The Client hands a turn the relay pool its own requests ride. Without
+    // it a relayed turn's settle ack has no route and the payer broadcasts
+    // the group from its own IP, as before 9.12.
+    it('sends a relayed turn’s settle ack through a relay', async () => {
+        const h = await harness({ relay: true })
+        await h.c.stream({ endpoint: CHAT, body: h.body }).text()
+        const deliverAck = (h.handle as unknown as OpenHandle).deliverAck
+        expect(deliverAck).toBeTypeOf('function')
+        h.urls.length = 0
+        // The fake answers the ack like an inference reply; only the route is in question.
+        await deliverAck!({ ticket_id: TICKET_ID, settle_group: 'G' }).catch(() => {})
+        expect(h.urls).toEqual(['https://r8.example.com/v1/zs/relay'])
+        await h.c.close()
+    })
+
     // Config.clock drives affinity; journal rows carry the wall clock, as Go's do.
     it('dates journal rows by the wall clock', async () => {
         const before = Date.now()

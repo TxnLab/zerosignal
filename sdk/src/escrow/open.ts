@@ -8,13 +8,24 @@
 // transfer unsigned. The payer checks every field of that group against the
 // ticket it verified before signing anything, then signs only the transfer.
 // Mirrors proto/go/escrow (DecodeOpenGroup, VerifyOpenGroup,
-// SubmitPresignedOpenGroup); the checks run in Go's order and refuse with Go's
-// field names, pinned by testdata/escrow_group_vectors.json.
+// CompletePresignedOpenGroup, EncodeOpenGroup); the checks run in Go's order
+// and refuse with Go's field names, and the completed group encodes to Go's
+// bytes, both pinned by testdata/escrow_group_vectors.json.
 
 import algosdk, { ABIMethod, Address, OnApplicationComplete } from 'algosdk'
 
 import { type Signer, SignerAddressError } from '../ports.js'
-import { type GroupMember, base32NoPad, bytesEqual, canonicalTxid, decodeSignedGroup, groupCommitsToMembers, hex, isZero } from './group.js'
+import {
+    type GroupMember,
+    base32NoPad,
+    bytesEqual,
+    canonicalTxid,
+    decodeSignedGroup,
+    encodeSignedPair,
+    groupCommitsToMembers,
+    hex,
+    isZero,
+} from './group.js'
 
 /** The open() signature in the deployed ARC-56; the vectors pin its selector. */
 export const OPEN_METHOD_SIGNATURE = 'open(axfer,byte[],uint64,uint64,address,uint64,uint64,uint64)void'
@@ -198,10 +209,16 @@ export function verifyOpenGroup(group: GroupMember[], spec: OpenGroupSpec): void
     checkUint64(arg(7), spec.settlementGraceSeconds, 'settlementGraceSeconds')
 }
 
-/** CompletedOpenGroup is the payer-signed group, ready for algod. */
+/** CompletedOpenGroup is the payer-signed group, ready for algod or for the node. */
 export interface CompletedOpenGroup {
     /** The two signed txns concatenated in group order, for sendRawTransaction. */
     signedGroup: Uint8Array
+    /**
+     * The same group as Go's EncodeOpenGroup writes it, base64(msgpack of the
+     * two signed txns), which a node that submits the open (submitsOpen)
+     * decodes with DecodeOpenGroup.
+     */
+    encoded: string
     /** Per-member txids; txids[1], the app call, is the envelope's algorand_tx_id. */
     txids: string[]
     /** The group id in base32, as Go logs it. */
@@ -213,7 +230,8 @@ export interface CompletedOpenGroup {
 /**
  * completeOpenGroup decodes the node's pre-signed open group, checks it
  * against spec, and has the payer sign its transfer. Nothing is signed unless
- * the whole group passes: the node composed the transfer the payer signs.
+ * the whole group passes: the node composed the transfer the payer signs. It
+ * submits nothing; the caller sends signedGroup or hands encoded to the node.
  */
 export async function completeOpenGroup(presignedOpenTxn: string, spec: OpenGroupSpec, signer: Signer): Promise<CompletedOpenGroup> {
     if (signer.address !== spec.payerAddr) throw new SignerAddressError(signer.address, spec.payerAddr)
@@ -234,6 +252,7 @@ export async function completeOpenGroup(presignedOpenTxn: string, spec: OpenGrou
     out.set(nodeSigned, payerSigned.length)
     return {
         signedGroup: out,
+        encoded: encodeSignedPair(out),
         txids: txns.map((t) => t.txID()),
         groupId: base32NoPad(txns[0]!.group!),
         payerFeeMicroalgos: txns[0]!.fee,

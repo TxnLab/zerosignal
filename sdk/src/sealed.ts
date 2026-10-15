@@ -10,9 +10,21 @@
 // responder's. Nothing here fails over: once escrow opens the turn is this
 // node's.
 
+import type { Operator as SelectionOperator } from '@txnlab/zs-proto/selection'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 import { type RelayEvidence, TRANSPORT_FAILURE_STATUS } from '@txnlab/zs-proto/transient'
-import { ENCRYPTED_CONTENT_TYPE, RELAY_HOP_HEADER, setsRelayHopHeader } from '@txnlab/zs-proto/wire'
+import {
+    ENCRYPTED_CONTENT_TYPE,
+    RELAY_HOP_HEADER,
+    RESPONSE_KEY_HEADER,
+    SEALED_SETTLE_ACK_CONTENT_TYPE,
+    SETTLE_ACK_PATH,
+    type SettleAck,
+    sealSettleAck,
+    setsRelayHopHeader,
+    submitsOpen,
+    takesSettleAck,
+} from '@txnlab/zs-proto/wire'
 
 import { newError } from './codes.js'
 import type { Remedies, SpendGuard } from './config.js'
@@ -32,7 +44,7 @@ import { sealRequest } from './seal.js'
 import { guardRecords } from './spend-guard.js'
 import type { Emitter } from './turn.js'
 import type { Endpoint } from './types.js'
-import { BelowTargetError } from './wallet.js'
+import { BelowTargetError, NoSettleAckRouteError } from './wallet.js'
 
 /** How long a payer whose ticket slots are all in flight is told to wait: Go's 2s. */
 export const MBR_POOL_EXHAUSTED_RETRY_AFTER_MS = 2000
@@ -86,6 +98,12 @@ export interface SealedDeps {
      * its own write. A throw is logged and the turn goes on.
      */
     opened?(handle: OpenHandle, ticket: Ticket): Promise<void> | void
+    /**
+     * The relay candidates and the picker a relayed request's hop came from,
+     * which the settle ack's own hop is chosen from. Without it a relayed
+     * request's ack has no route and is broadcast as before 9.12.
+     */
+    relays?: SettleAckRelays | undefined
     /** Builds the responder for a buffered answer. */
     buffered(call: SealedCall): BufferedResponder
     /**
@@ -124,9 +142,16 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
     em.reserved(rt, op)
 
     // The caller has already reserved the ticket's ceiling with the spend guard.
+    // The wallet completes the open group and submits it unless the node will
+    // (submitsOpen). The app-call txid goes into the envelope either way: the
+    // node finds a payer-submitted open by it, and checks that a handed-off
+    // group carries it.
     let handle: OpenHandle
     try {
-        handle = await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
+        handle =
+            deps.wallet.openForNode && submitsOpen(op.protoVersion)
+                ? await deps.wallet.openForNode(ticket, op, rt.presignedOpenTxn, signal)
+                : await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
     } catch (err) {
         // The open didn't commit, so a failed attempt doesn't keep the cap.
         const guard = deps.spendGuard
@@ -143,12 +168,15 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
     }
     // The ceiling stays on the spend tally: settlement charges less on chain,
     // and the cap counts the ceiling on purpose. The hook can't stop the turn:
-    // escrow is open, so the caller must still hear that it paid.
+    // escrow is open, or for a handed-off group may open whenever the node
+    // submits it, so the caller must still hear that it paid.
     try {
         await deps.opened?.(handle, ticket)
     } catch (err) {
         log.warn('open hook failed', { ticket_id: ticket.ticket_id, err: errText(err) })
     }
+    const deliverAck = settleAckPoster(deps, op, rt.sealRecipient, hop !== null)
+    if (deliverAck) handle.deliverAck = deliverAck
     const txId = handle.appCallTxId
     em.committed(ticket.ticket_id, txId, handle.openFeesMicroalgos)
     log.debug('wallet open submitted', {
@@ -173,6 +201,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
             responseKey: rt.responseKey,
             nodeRecipient: rt.sealRecipient,
             ephemeral: rt.identity,
+            ...(handle.openGroup ? { openGroup: handle.openGroup } : {}),
         })
     } catch (err) {
         log.error('wrap request failed', { endpoint, ...opAttrs(op), ...relayAttrs(hop), err: errText(err) })
@@ -181,7 +210,8 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
     }
 
     const call: SealedCall = { endpoint, model, op, reserved: rt, handle, txId, hop, signal }
-    const respond = deps.buffered(call)
+    const buffered = deps.buffered(call)
+    const respond = handle.openGroup ? recheckDepositOnRefusedOpen(deps.wallet, buffered) : buffered
     // Relayed, the envelope goes to the relay's route with the inner request
     // in its headers; it stays sealed to the target, which the relay can't open.
     const fwd = applyRelay(hop, op.baseUrl + endpoint, 'POST', operatorHeaders(ENCRYPTED_CONTENT_TYPE), endpoint)
@@ -191,6 +221,88 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
         return
     }
     await forwardBuffered(deps, em, out, call, respond)
+}
+
+/** Where a settle ack's relay hop comes from: the pool and picker the request's own did. */
+export interface SettleAckRelays {
+    pool(signal?: AbortSignal): Promise<SelectionOperator[]>
+    hopFor(pool: SelectionOperator[], target: Operator): RelayHop | null
+}
+
+// What the node's settle-ack reply is read for: its error code. Go's 4 KiB.
+const SETTLE_ACK_REPLY_LIMIT = 4 << 10
+
+/**
+ * settleAckPoster returns the handle's deliverAck for a node that takes the
+ * payer's settle half (takesSettleAck), or undefined to keep broadcasting it,
+ * Go's settleAckPoster. The ack is sealed to the recipient the request was
+ * sealed to, and goes the way the request went: through a relay when the
+ * request was relayed, or the ack would tie the payer's IP to the node the
+ * relay hid it from.
+ *
+ * Only relays that forward the path can carry it. With none, the poster
+ * rejects with NoSettleAckRouteError and the ack is broadcast as before 9.12.
+ * Any other failure is final: the node's settlement driver claims the ticket
+ * on its own, and broadcasting after a send that may have arrived would only
+ * race it.
+ */
+export function settleAckPoster(
+    deps: Pick<SealedDeps, 'fetch' | 'relays'>,
+    op: Operator,
+    recipient: string,
+    relayed: boolean,
+): ((ack: SettleAck, signal?: AbortSignal) => Promise<void>) | undefined {
+    if (!takesSettleAck(op.protoVersion) || !recipient) return undefined
+    return async (ack, signal) => {
+        const body = await sealSettleAck(ack, recipient)
+        let hop: RelayHop | null = null
+        if (relayed) {
+            const relays = deps.relays
+            if (!relays) throw new NoSettleAckRouteError()
+            const capable = (await relays.pool(signal)).filter((r) => takesSettleAck(r.proto_version))
+            hop = relays.hopFor(capable, op)
+            if (hop === null) throw new NoSettleAckRouteError()
+        }
+        const fwd = applyRelay(hop, op.baseUrl + SETTLE_ACK_PATH, 'POST', operatorHeaders(SEALED_SETTLE_ACK_CONTENT_TYPE), SETTLE_ACK_PATH)
+        let resp: Response
+        try {
+            resp = await deps.fetch(fwd.url, { method: 'POST', headers: fwd.headers, body, ...(signal ? { signal } : {}) })
+        } catch (err) {
+            throw new Error(`zs: settle ack: ${errText(err)}`, { cause: err })
+        }
+        let reply = new Uint8Array()
+        try {
+            reply = await readReply(resp, null, SETTLE_ACK_REPLY_LIMIT)
+        } catch {
+            // Read only for the error code; an unreadable reply has none.
+        }
+        if (resp.status !== 202) {
+            throw new Error(`zs: settle ack: node answered ${resp.status} ${openAIError(new TextDecoder().decode(reply)).code}`)
+        }
+    }
+}
+
+/**
+ * recheckDepositOnRefusedOpen wraps the responder for a request whose open
+ * the node submits, Go's recheckDepositOnRefusedOpen. A prepaid-pool shortfall
+ * used to surface as the payer's own submit failing, and open topped the pool
+ * up and retried. Now the revert happens at the node, which answers only
+ * payment_verification_failed and burns the ticket, so the wallet rechecks its
+ * deposit before the next open rather than trusting a cached "ready" every
+ * later open would fail on too. Rechecking after some other refusal costs one
+ * read.
+ */
+export function recheckDepositOnRefusedOpen(wallet: Pick<WalletOpener, 'recheckDeposit'>, next: BufferedResponder): BufferedResponder {
+    return (em, resp, body) => {
+        if (
+            resp.status === 402 &&
+            !resp.headers.get(RESPONSE_KEY_HEADER) &&
+            openAIError(new TextDecoder().decode(body)).code === 'payment_verification_failed'
+        ) {
+            wallet.recheckDeposit?.()
+        }
+        return next(em, resp, body)
+    }
 }
 
 /** openFailure is the error a failed open ends the turn with, most specific first. */

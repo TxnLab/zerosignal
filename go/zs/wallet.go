@@ -22,6 +22,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/algo"
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/wire"
 )
 
 // Wallet drives the escrow payment path from the proxy side.
@@ -123,6 +124,9 @@ type poolEscrow interface {
 	// signs gtxn[0] = usdcPayment; gtxn[1] = open() AppCall is
 	// operator-signed), then completes + broadcasts it.
 	SubmitPresignedOpenGroup(ctx context.Context, group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error)
+	// CompletePresignedOpenGroup runs the same verification and signature but
+	// broadcasts nothing, for a node that submits the group itself.
+	CompletePresignedOpenGroup(group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error)
 }
 
 // poolEscrowAdapter is the production poolEscrow, wrapping *escrow.Client.
@@ -172,11 +176,19 @@ func (a poolEscrowAdapter) SubmitPresignedOpenGroup(ctx context.Context, group [
 	// Wallet.Open: the escrow client is its single source of truth
 	// (RefreshConfig-loaded), and it keeps the pool seam's callers free of
 	// *escrow.Client field access so the fake stays a pure recorder.
+	return a.c.SubmitPresignedOpenGroup(ctx, group, payerSigner, a.stampChain(spec))
+}
+
+func (a poolEscrowAdapter) CompletePresignedOpenGroup(group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error) {
+	return a.c.CompletePresignedOpenGroup(group, payerSigner, a.stampChain(spec))
+}
+
+func (a poolEscrowAdapter) stampChain(spec escrow.OpenGroupSpec) escrow.OpenGroupSpec {
 	spec.AppID = a.c.AppID
 	spec.AppAddress = a.c.AppAddr
 	spec.UsdcAssetID = a.c.UsdcAssetID
 	spec.TicketMbr = a.c.TicketMbr
-	return a.c.SubmitPresignedOpenGroup(ctx, group, payerSigner, spec)
+	return spec
 }
 
 // WalletConfig groups the dependencies buildWallet assembles. Keeping
@@ -291,9 +303,23 @@ type OpenHandle struct {
 	// SignedGroup is the raw msgpack bytes of the submitted group —
 	// retained for dispute evidence per SPEC.md §3b.
 	SignedGroup [][]byte
+	// OpenGroup is the completed group in escrow.EncodeOpenGroup's form, set
+	// only by OpenForNode: nothing has been broadcast, and the sealed request
+	// carries it for the node to submit.
+	OpenGroup string
+
+	// deliverAck hands the completed settle group to the node instead of
+	// broadcasting it (wire.TakesSettleAck); nil keeps the broadcast. Set by
+	// dispatch, which owns the transport.
+	deliverAck func(ctx context.Context, ack wire.SettleAck) error
 
 	wallet *Wallet
 }
+
+// errNoSettleAckRoute is a deliverAck failure that sent nothing: no relay can
+// carry the ack yet (every relay predates wire.SettleAckMinVersion). The ack
+// then goes out as it did before 9.12, which costs exactly the old privacy.
+var errNoSettleAckRoute = errors.New("zs: no relay serves the settle ack")
 
 // Open composes, signs, submits the atomic group (Payment +
 // escrow.open). Returns the OpenHandle that flows through the
@@ -306,6 +332,23 @@ type OpenHandle struct {
 // window it'll thread a per-ticket value through here; that's a
 // step-8 knob.
 func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error) {
+	return w.open(ctx, tk, op, presignedOpenGroup, true)
+}
+
+// OpenForNode is Open for a node that submits the group itself
+// (wire.SubmitsOpen): it verifies and signs the group but broadcasts nothing,
+// so the payer's IP never reaches an algod alongside its address. The handle's
+// OpenGroup carries the completed group for the sealed request.
+//
+// The open may still land after this returns, whenever the node submits it, so
+// the caller arms the refund watchdog and journals the ticket exactly as after
+// Open. The contract refuses an open past the ticket's expires_at, which bounds
+// how long a node can hold it.
+func (w *Wallet) OpenForNode(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error) {
+	return w.open(ctx, tk, op, presignedOpenGroup, false)
+}
+
+func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn, submit bool) (*OpenHandle, error) {
 	if tk == nil {
 		return nil, errors.New("wallet: open: ticket is nil")
 	}
@@ -362,6 +405,21 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 	}
 
 	signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
+	if !submit {
+		// No retry here: nothing reached the chain, so a pool revert can only
+		// surface at the node, which refuses with payment_verification_failed and
+		// the dispatcher answers with RecheckDeposit.
+		result, err := w.pool.CompletePresignedOpenGroup(presignedOpenGroup, signer, openSpec)
+		if err != nil {
+			return nil, fmt.Errorf("wallet: complete presigned open group: %w", err)
+		}
+		if len(result.TxIDs) != 2 {
+			return nil, fmt.Errorf("wallet: escrow complete returned %d txids, want 2", len(result.TxIDs))
+		}
+		h := w.handleFor(tk, op, result)
+		h.OpenGroup = result.Encoded
+		return h, nil
+	}
 	result, err := w.pool.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
 	if err != nil {
 		// An open() that reverts on a prepaid-pool guard ('payer has no MBR
@@ -415,7 +473,10 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 	if len(result.TxIDs) != 2 {
 		return nil, fmt.Errorf("wallet: escrow submit returned %d txids, want 2", len(result.TxIDs))
 	}
+	return w.handleFor(tk, op, result), nil
+}
 
+func (w *Wallet) handleFor(tk *ticket.Ticket, op Operator, result escrow.OpenResult) *OpenHandle {
 	return &OpenHandle{
 		AppCallTxID:        result.TxIDs[1],
 		GroupID:            result.GroupID,
@@ -425,7 +486,7 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 		OpenFeesMicroalgos: result.PayerFeeMicroalgos,
 		SignedGroup:        result.SignedGroup,
 		wallet:             w,
-	}, nil
+	}
 }
 
 // AckSettle is the payer's matching co-sign on an operator-initiated
@@ -462,7 +523,30 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 	return ackSettle(len(presignedSettleGroup) > 0, ackSettleDeps{
 		spec: func() (escrow.SettleGroupSpec, error) { return h.settleGroupSpec(receipt) },
 		submitGroup: func(spec escrow.SettleGroupSpec) (escrow.CallResult, error) {
-			return h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+			if h.deliverAck == nil {
+				return h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+			}
+			res, encoded, err := h.wallet.escrow.CompletePresignedSettleGroup(presignedSettleGroup, signer, spec)
+			if err != nil {
+				return escrow.CallResult{}, err
+			}
+			err = h.deliverAck(ctx, wire.SettleAck{TicketID: h.TicketID, SettleGroup: encoded})
+			if errors.Is(err, errNoSettleAckRoute) {
+				// Broadcast the group already completed above rather than
+				// verifying and signing it a second time (as the TS twin does).
+				completed, derr := escrow.DecodeSettleGroup(encoded)
+				if derr != nil {
+					return escrow.CallResult{}, derr
+				}
+				if err := escrow.SubmitSettleGroup(ctx, h.wallet.escrow.Algod, completed); err != nil {
+					return escrow.CallResult{}, err
+				}
+				return res, nil
+			}
+			if err != nil {
+				return escrow.CallResult{}, err
+			}
+			return res, nil
 		},
 		standalone: func() (escrow.CallResult, error) { return h.settleStandalone(ctx, settleArgsOf(receipt)) },
 		log:        h.wallet.logger().With("operator_id", h.Operator.ID, "node_id", h.Operator.NodeID),
@@ -853,8 +937,10 @@ func (w *Wallet) ensureDepositForServe(ctx context.Context) error {
 	// but DON'T cache depositReady: the pool is below target, so the next
 	// request retries the top-up as ALGO is added / in-flight tickets settle.
 	// If we misjudge headroom under a concurrent-open race, open() reverts on
-	// its own pool guard → the honest 429 mbr_pool_exhausted, never a 402. Any
-	// other failure (chain read error, unrelated) stays fatal.
+	// its own pool guard: the honest 429 mbr_pool_exhausted when the payer
+	// submits the open, or the node's 402 payment_verification_failed (with a
+	// deposit recheck) when the node does. Any other failure (chain read
+	// error, unrelated) stays fatal.
 	//
 	// ErrDepositBelowTarget takes the same branch, and that is the whole reason
 	// it isn't a nil error: a partial deposit (some slots, or the quota term

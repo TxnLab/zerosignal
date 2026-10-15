@@ -38,6 +38,7 @@ interface Vectors {
             settlement_grace_seconds: number
         }
         cases: { name: string; group_b64: string; expected: string | null }[]
+        completed: { payer_seed: number; encoded: string }
     }
 }
 
@@ -136,6 +137,27 @@ describe('completeOpenGroup', () => {
         const signer = payerSigner(s.node_signing_addr)
         await expect(completeOpenGroup(validB64, spec, signer)).rejects.toBeInstanceOf(SignerAddressError)
         expect(signer.calls).toEqual([])
+    })
+
+    // The node decodes a handed-off group with Go's DecodeOpenGroup, so the
+    // payer must write Go's EncodeOpenGroup bytes. The vector is Go's
+    // CompletePresignedOpenGroup under the same payer key.
+    it("encodes the completed group as Go's EncodeOpenGroup, byte for byte", async () => {
+        const c = vectors.open.completed
+        const seed = new Uint8Array(32).fill(c.payer_seed)
+        const sk = new Uint8Array(64)
+        sk.set(seed)
+        sk.set(algosdk.decodeAddress(s.payer_addr).publicKey, 32)
+        const real: Signer = {
+            address: s.payer_addr,
+            signBytes: () => Promise.reject(new Error('unused')),
+            signTransactions: async (txns, idx) => idx.map((i) => algosdk.signTransaction(txns[i]!, sk).blob),
+        }
+        const out = await completeOpenGroup(validB64, spec, real)
+        expect(out.encoded).toBe(c.encoded)
+        // The same members a payer submit sends, under the array header.
+        expect(hex(algosdk.base64ToBytes(out.encoded))).toBe(`92${hex(out.signedGroup)}`)
+        expect(decodeOpenGroup(out.encoded).map((m) => m.stxn.txn.txID())).toEqual(out.txids)
     })
 
     it('refuses a group that is not two txns', () => {

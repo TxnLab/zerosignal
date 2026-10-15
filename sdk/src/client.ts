@@ -29,7 +29,7 @@ import {
     isMemoryJournal,
     memoryJournal,
 } from './parts.js'
-import type { PickDeps } from './pick.js'
+import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
@@ -411,6 +411,10 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         opened: async (h, ticket) => {
             p.refunds.track(h, ticket.expires_at)
             await journalOpen(journal, h, ticket)
+        },
+        relays: {
+            pool: (signal) => relayPool(p.pick, signal),
+            hopFor: (pool, target) => relayHopForPool(p.pick, pool, target),
         },
         buffered: (call) => bufferedResponder(responder, call, slot),
         streamed: (em, out, call, buffered) => {

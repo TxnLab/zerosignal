@@ -61,6 +61,9 @@ const (
 	// modeNonStreamPreEnvelopeError: node writes a plaintext OpenAI-shaped
 	// 4xx with no response key — the pre-envelope error passthrough path.
 	modeNonStreamPreEnvelopeError
+	// modeNonStreamPaymentRefused: the plaintext 402 a node answers when the
+	// open it submitted for the payer was rejected.
+	modeNonStreamPaymentRefused
 	modeStreamEncrypted
 	modeStreamPlaintext // operator returns 200 SSE without sealing (protocol violation)
 	modeStreamMixedEvents
@@ -177,6 +180,9 @@ type fakeNode struct {
 	// every sealed request so tests can assert which payment-path
 	// produced it (stub random vs wallet group id).
 	lastSealedAlgorandTxID string
+	// lastSealedOpenGroup records the envelope's open_group, which only a
+	// payer handing the open to a 9.12+ node sets.
+	lastSealedOpenGroup string
 }
 
 // rawKeyBytesSigner satisfies ticket.BytesSigner with a single raw
@@ -518,6 +524,7 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 
 	n.mu.Lock()
 	n.lastSealedAlgorandTxID = txID
+	n.lastSealedOpenGroup = dec.OpenGroup
 	n.mu.Unlock()
 
 	k, ok := n.keyFor(ticketID)
@@ -597,6 +604,10 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusPaymentRequired)
 		_, _ = w.Write([]byte(`{"error":{"message":"ticket expired","type":"invalid_request_error","code":"ticket_invalid"}}`))
+	case modeNonStreamPaymentRefused:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"error":{"message":"payment verification failed: open group rejected by algod (mbr_pool)","type":"invalid_request_error","code":"payment_verification_failed"}}`))
 	case modeStreamEncrypted:
 		if cfg.replyStatus != 0 {
 			w = statusOverride{w, cfg.replyStatus}
@@ -2795,6 +2806,101 @@ func TestDispatch_WalletPath_ThreadsAppCallTxIDIntoEnvelope(t *testing.T) {
 	}
 	if fw.lastOp.OwnerAddr == "" {
 		t.Error("wallet did not receive operator in Open call")
+	}
+}
+
+// fakeNodeOpener is a fakeWallet that can also hand the open to the node.
+type fakeNodeOpener struct {
+	fakeWallet
+	openForNodeCalls int
+}
+
+func (f *fakeNodeOpener) OpenForNode(ctx context.Context, tk *ticket.Ticket, op zs.Operator, g []types.SignedTxn) (*zs.OpenHandle, error) {
+	f.openForNodeCalls++
+	h, err := f.Open(ctx, tk, op, g)
+	if err != nil {
+		return nil, err
+	}
+	f.openCalls-- // counted as a hand-off, not a payer submit
+	h.OpenGroup = "COMPLETEDGROUP"
+	return h, nil
+}
+
+// The open goes to the node only when the node advertises it takes one:
+// handing a group to an older node would lose the turn, since it ignores the
+// field and waits for an open nobody submitted.
+func TestDispatch_WalletPath_HandsOpenToNodeByVersion(t *testing.T) {
+	cases := []struct {
+		version      string
+		wantHandOff  bool
+		wantEnvelope string
+	}{
+		{version: wire.NodeSubmitsOpenMinVersion, wantHandOff: true, wantEnvelope: "COMPLETEDGROUP"},
+		{version: "9.11", wantHandOff: false, wantEnvelope: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.version, func(t *testing.T) {
+			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamEncrypted, replyPlaintext: []byte(`{"ok":true}`)})
+			node.operator.ProtoVersion = tc.version
+			cfg := testConfig()
+			opts := setup(t, cfg, node)
+			fw := &fakeNodeOpener{fakeWallet: fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}}
+			opts.Wallet = fw
+			s := testServer(cfg, opts)
+
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+			if w.Result().StatusCode != http.StatusOK {
+				t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
+			}
+			if got := fw.openForNodeCalls == 1 && fw.openCalls == 0; got != tc.wantHandOff {
+				t.Errorf("OpenForNode calls = %d, Open calls = %d; hand-off want %v", fw.openForNodeCalls, fw.openCalls, tc.wantHandOff)
+			}
+			if node.lastSealedOpenGroup != tc.wantEnvelope {
+				t.Errorf("envelope open_group = %q, want %q", node.lastSealedOpenGroup, tc.wantEnvelope)
+			}
+			if node.lastSealedAlgorandTxID != fw.appCallTxID {
+				t.Errorf("envelope algorand_tx_id = %q, want the app call's", node.lastSealedAlgorandTxID)
+			}
+		})
+	}
+}
+
+// rechecking is a fakeNodeOpener that counts RecheckDeposit.
+type rechecking struct {
+	fakeNodeOpener
+	rechecks int
+}
+
+func (r *rechecking) RecheckDeposit() { r.rechecks++ }
+
+// A pool shortfall used to fail the payer's own submit, and Open topped the
+// pool up there. With the node submitting, the only sign is the node's 402, so
+// the wallet must recheck its deposit then — and only on a handed-off open,
+// since a payer-submitted one already proved the pool.
+func TestDispatch_WalletPath_RefusedHandOffRechecksDeposit(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		want    int
+	}{{wire.NodeSubmitsOpenMinVersion, 1}, {"9.11", 0}} {
+		t.Run(tc.version, func(t *testing.T) {
+			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamPaymentRefused})
+			node.operator.ProtoVersion = tc.version
+			cfg := testConfig()
+			opts := setup(t, cfg, node)
+			rw := &rechecking{fakeNodeOpener: fakeNodeOpener{fakeWallet: fakeWallet{appCallTxID: "APPCALLTXID00000000000000000000000000000000000000000"}}}
+			opts.Wallet = rw
+			s := testServer(cfg, opts)
+
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
+			if w.Result().StatusCode != http.StatusPaymentRequired {
+				t.Fatalf("status = %d body=%s, want 402", w.Result().StatusCode, w.Body.String())
+			}
+			if rw.rechecks != tc.want {
+				t.Errorf("RecheckDeposit calls = %d, want %d", rw.rechecks, tc.want)
+			}
+		})
 	}
 }
 

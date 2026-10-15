@@ -40,6 +40,7 @@ interface Vectors {
             operator_signing_addr: string
         }
         cases: { name: string; group_b64: string; expected: string | null }[]
+        completed: { payer_seed: number; encoded: string }
     }
 }
 
@@ -138,6 +139,25 @@ describe('completeSettleGroup', () => {
         const signer = payerSigner(s.operator_signing_addr)
         await expect(completeSettleGroup(validB64, spec, signer)).rejects.toBeInstanceOf(SignerAddressError)
         expect(signer.calls).toEqual([])
+    })
+
+    // A node that takes the settle ack decodes the group with Go's
+    // DecodeSettleGroup, so the payer must write Go's EncodeSettleGroup bytes.
+    // The vector is Go's CompletePresignedSettleGroup under the same payer key.
+    it("encodes the completed group as Go's EncodeSettleGroup, byte for byte", async () => {
+        const c = vectors.settle.completed
+        const sk = new Uint8Array(64)
+        sk.set(new Uint8Array(32).fill(c.payer_seed))
+        sk.set(algosdk.decodeAddress(s.payer_addr).publicKey, 32)
+        const real: Signer = {
+            address: s.payer_addr,
+            signBytes: () => Promise.reject(new Error('unused')),
+            signTransactions: async (txns, idx) => idx.map((i) => algosdk.signTransaction(txns[i]!, sk).blob),
+        }
+        const out = await completeSettleGroup(validB64, spec, real)
+        expect(out.encoded).toBe(c.encoded)
+        expect(hex(algosdk.base64ToBytes(out.encoded))).toBe(`92${hex(out.signedGroup)}`)
+        expect(decodeSettleGroup(out.encoded)[1]!.stxn.txn.txID()).toBe(out.txid)
     })
 
     it('refuses an empty payload or a group that is not two txns, as a plain error', () => {
