@@ -55,11 +55,12 @@ type fakePool struct {
 	// the last entry repeats.
 	submitResults []submitOutcome
 
-	depositCalls int
-	submitCalls  int
-	depositedAmt uint64               // last shortfall passed to ComposeDepositMbr
-	lastOptIn    bool                 // last optIn passed to ComposeDepositMbr
-	lastSpec     escrow.OpenGroupSpec // last spec passed to SubmitPresignedOpenGroup
+	depositCalls  int
+	submitCalls   int
+	completeCalls int
+	depositedAmt  uint64               // last shortfall passed to ComposeDepositMbr
+	lastOptIn     bool                 // last optIn passed to ComposeDepositMbr
+	lastSpec      escrow.OpenGroupSpec // last spec passed to SubmitPresignedOpenGroup
 }
 
 type submitOutcome struct {
@@ -118,6 +119,16 @@ func (f *fakePool) SubmitPresignedOpenGroup(_ context.Context, _ []types.SignedT
 		idx = len(f.submitResults) - 1
 	}
 	o := f.submitResults[idx]
+	return o.res, o.err
+}
+
+func (f *fakePool) CompletePresignedOpenGroup(_ []types.SignedTxn, _ transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error) {
+	f.completeCalls++
+	f.lastSpec = spec
+	if len(f.submitResults) == 0 {
+		return escrow.OpenResult{}, errors.New("fakePool: no complete outcome scripted")
+	}
+	o := f.submitResults[0]
 	return o.res, o.err
 }
 
@@ -754,6 +765,58 @@ func TestOpen_DepositRevert_RetryFiresWhenTopUpDeposits(t *testing.T) {
 	}
 }
 
+// OpenForNode must broadcast nothing: the point is that the payer's IP never
+// reaches an algod with the group. The handle carries the group for the node.
+func TestOpenForNode_CompletesWithoutSubmitting(t *testing.T) {
+	pool := &fakePool{
+		ticketMbr: testTicketMbr,
+		submitResults: []submitOutcome{
+			{res: escrow.OpenResult{TxIDs: []string{"USDC", "APPCALL"}, GroupID: "GID", Encoded: "ENCODED"}},
+		},
+	}
+	w := newPoolWallet(pool)
+	w.depositReady = true
+
+	h, err := w.OpenForNode(context.Background(), validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	if err != nil {
+		t.Fatalf("OpenForNode: %v", err)
+	}
+	if pool.submitCalls != 0 || pool.completeCalls != 1 {
+		t.Fatalf("submit calls = %d, complete calls = %d; want 0 and 1", pool.submitCalls, pool.completeCalls)
+	}
+	if h.OpenGroup != "ENCODED" || h.AppCallTxID != "APPCALL" {
+		t.Errorf("handle OpenGroup = %q, AppCallTxID = %q; want ENCODED, APPCALL", h.OpenGroup, h.AppCallTxID)
+	}
+	if pool.lastSpec.MaxPrice != validTicket().MaxPrice {
+		t.Errorf("spec MaxPrice = %d, want the ticket's", pool.lastSpec.MaxPrice)
+	}
+}
+
+// Open, the path for an older node, still submits and leaves OpenGroup empty,
+// which is what keeps the sealed request free of an open_group that node would
+// ignore.
+func TestOpen_SubmitsAndCarriesNoGroup(t *testing.T) {
+	pool := &fakePool{
+		ticketMbr: testTicketMbr,
+		submitResults: []submitOutcome{
+			{res: escrow.OpenResult{TxIDs: []string{"USDC", "APPCALL"}, GroupID: "GID", Encoded: "ENCODED"}},
+		},
+	}
+	w := newPoolWallet(pool)
+	w.depositReady = true
+
+	h, err := w.Open(context.Background(), validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if pool.submitCalls != 1 || pool.completeCalls != 0 {
+		t.Fatalf("submit calls = %d, complete calls = %d; want 1 and 0", pool.submitCalls, pool.completeCalls)
+	}
+	if h.OpenGroup != "" {
+		t.Errorf("Open set OpenGroup = %q", h.OpenGroup)
+	}
+}
+
 func TestOpen_DepositRevert_NoTopUpSurfacesOriginal(t *testing.T) {
 	ctx := context.Background()
 	// Pool already covers the working set, so the revert re-ensure no-ops
@@ -937,6 +1000,56 @@ func TestPoolEscrowAdapter_RevertStaysTyped(t *testing.T) {
 	// every proxy test green. This assertion is the only thing binding the two.
 	if revert.Method != "open" {
 		t.Errorf("Method = %q, want %q — the dispatch classifier gates on it", revert.Method, "open")
+	}
+}
+
+// The hand-off twin of the submit path above: the adapter must stamp the
+// chain half of the spec (app id, app address, USDC asset, ticket MBR) before
+// the group is verified. Every other OpenForNode test runs on fakePool, so an
+// unstamped spec would verify against app 0 and refuse every real hand-off
+// with the suite green.
+func TestPoolEscrowAdapter_CompleteStampsTheChain(t *testing.T) {
+	payer := crypto.GenerateAccount()
+	operator := crypto.GenerateAccount()
+	client, err := escrow.NewClient(1234, algodRejectingSubmit(t, 1))
+	if err != nil {
+		t.Fatalf("escrow.NewClient: %v", err)
+	}
+	client.TicketMbr = testTicketMbr
+	client.UsdcAssetID = 31566704
+
+	ticketIDRaw := make([]byte, 16)
+	copy(ticketIDRaw, "ticket-id-16byte")
+	group, err := client.ComposeOpenGroup(context.Background(), escrow.OpenArgs{
+		TicketIDRaw:            ticketIDRaw,
+		OperatorID:             7,
+		NodeID:                 11,
+		PayerAddr:              payer.Address.String(),
+		MaxPrice:               1_000_000,
+		ExpiresAt:              2_000_000_000,
+		SettlementGraceSeconds: 0,
+	}, transaction.BasicAccountTransactionSigner{Account: operator}, operator.Address.String())
+	if err != nil {
+		t.Fatalf("ComposeOpenGroup: %v", err)
+	}
+
+	res, err := poolEscrowAdapter{c: client}.CompletePresignedOpenGroup(group,
+		transaction.BasicAccountTransactionSigner{Account: payer},
+		escrow.OpenGroupSpec{
+			TicketIDRaw:     ticketIDRaw,
+			OperatorID:      7,
+			NodeID:          11,
+			MaxPrice:        1_000_000,
+			NodeSigningAddr: operator.Address,
+			PayerAddr:       payer.Address,
+			ExpiresAt:       2_000_000_000,
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompletePresignedOpenGroup: %v — the chain half of the spec was not stamped", err)
+	}
+	if res.Encoded == "" {
+		t.Error("completed group not encoded for the node")
 	}
 }
 

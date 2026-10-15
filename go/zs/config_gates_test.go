@@ -28,12 +28,14 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
 	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
+	"github.com/algorand/go-algorand-sdk/v2/transaction"
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/wire"
 )
 
 // suppliedParts is a Config whose network parts are all supplied, so New
@@ -369,6 +371,85 @@ func TestOpenHandle_StandaloneAckSubmitsTheReceipt(t *testing.T) {
 	}
 	if fee == 0 || fee != uint64(calls[0].Fee) {
 		t.Errorf("fee %d, want the submitted settle's own %d", fee, calls[0].Fee)
+	}
+}
+
+// settleGroupFor composes the node's atomic settle group for receipt r on h's
+// ticket, signed by a fresh node key that h's operator then names.
+func settleGroupFor(t *testing.T, h *OpenHandle, r *ticket.UsageReceipt) []types.SignedTxn {
+	t.Helper()
+	node := crypto.GenerateAccount()
+	h.Operator.SigningAddr = node.Address.String()
+	raw, err := decodeTicketID(h.TicketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := h.wallet.escrow.ComposeSettleGroup(context.Background(), h.payerSettleArgs(raw, settleArgsOf(r)),
+		transaction.BasicAccountTransactionSigner{Account: node}, node.Address.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return group
+}
+
+// A node that takes the ack gets the completed group and nothing is
+// broadcast from the payer: that broadcast is the IP-to-address link the
+// hand-off removes.
+func TestOpenHandle_AckHandedToNode(t *testing.T) {
+	h, submitted := walletHandle(t)
+	r := &ticket.UsageReceipt{AmountCharged: 11}
+	group := settleGroupFor(t, h, r)
+	var got wire.SettleAck
+	h.deliverAck = func(_ context.Context, ack wire.SettleAck) error { got = ack; return nil }
+
+	txid, _, rejected, err := h.AckSettle(context.Background(), r, group)
+	if err != nil || rejected {
+		t.Fatalf("err %v, rejected %v", err, rejected)
+	}
+	if n := len(escrowCalls(t, submitted(), "settle")); n != 0 {
+		t.Errorf("payer broadcast %d settle calls, want 0", n)
+	}
+	if got.TicketID != h.TicketID {
+		t.Errorf("ack ticket = %q, want %q", got.TicketID, h.TicketID)
+	}
+	handed, err := escrow.DecodeSettleGroup(got.SettleGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// walletHandle's signer encodes without signing, so the payer half's
+	// identity is checked by txid rather than by signature.
+	if crypto.GetTxID(handed[0].Txn) != crypto.GetTxID(group[0].Txn) || crypto.GetTxID(handed[1].Txn) != txid {
+		t.Error("handed group is not the node's gtxn[0] plus the payer half AckSettle reported")
+	}
+}
+
+func TestOpenHandle_AckDeliveryFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		deliverErr    error
+		wantErr       bool
+		wantBroadcast int
+	}{
+		// No relay forwards the path yet: the ack goes out as before 9.12.
+		{name: "no route", deliverErr: errNoSettleAckRoute, wantBroadcast: 2},
+		// Anything else may have reached the node, whose driver settles on its
+		// own; broadcasting now would only race it.
+		{name: "send failed", deliverErr: errors.New("node answered 409"), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, submitted := walletHandle(t)
+			r := &ticket.UsageReceipt{AmountCharged: 11}
+			group := settleGroupFor(t, h, r)
+			h.deliverAck = func(context.Context, wire.SettleAck) error { return tc.deliverErr }
+
+			_, _, _, err := h.AckSettle(context.Background(), r, group)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if n := len(escrowCalls(t, submitted(), "settle")); n != tc.wantBroadcast {
+				t.Errorf("payer broadcast %d settle calls, want %d", n, tc.wantBroadcast)
+			}
+		})
 	}
 }
 

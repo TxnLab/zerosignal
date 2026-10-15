@@ -10,6 +10,7 @@
 
 import type { OperatorDetailsModel } from '@txnlab/zs-proto/inject'
 import type { BytesSigner, Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
+import type { SettleAck } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult } from './ack.js'
 import type { AffinityStore } from './affinity.js'
@@ -171,6 +172,21 @@ export interface OpenHandle {
     /** The submitted group's signed transactions, concatenated in group order: dispute evidence. */
     signedGroup: Uint8Array
     /**
+     * The completed group in Go's EncodeOpenGroup form, set only by
+     * openForNode: nothing was broadcast, and the sealed request carries it
+     * for the node to submit. Absent when the payer submitted the open.
+     */
+    openGroup?: string
+    /**
+     * Hands the completed settle group to the node instead of broadcasting it
+     * (takesSettleAck); absent keeps the broadcast. The sealed run sets it,
+     * since it owns the transport the request took. It rejects with
+     * NoSettleAckRouteError when it sent nothing, which ackSettle answers by
+     * broadcasting; any other rejection may have reached the node, so nothing
+     * is broadcast after it. A host's own handle may ignore it and broadcast.
+     */
+    deliverAck?: (ack: SettleAck, signal?: AbortSignal) => Promise<void>
+    /**
      * Settles on the receipt: through the node's presigned settle group when
      * settleGroup carries one (base64), else standalone at the payer's fee.
      * settleGroup is null (or '') when the node sent none or it doesn't decode
@@ -200,6 +216,14 @@ export interface WalletOpener {
      * this group.
      */
     open(ticket: Ticket, op: Operator, presignedOpenGroup: string, signal?: AbortSignal): Promise<OpenHandle>
+    /**
+     * open for a target that submits the open itself (submitsOpen): the same
+     * checks and signature, but nothing is broadcast, and the handle's
+     * openGroup carries the group for the sealed request. Optional: a wallet
+     * without it keeps submitting, which every node still accepts. Go's
+     * NodeOpener.
+     */
+    openForNode?(ticket: Ticket, op: Operator, presignedOpenGroup: string, signal?: AbortSignal): Promise<OpenHandle>
     /** The address reserve requests name as the payer. */
     payerAddr(): string
     /**

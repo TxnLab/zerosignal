@@ -15,16 +15,24 @@ import type { Ticket } from '@txnlab/zs-proto/ticket'
 import { TRANSPORT_FAILURE_STATUS } from '@txnlab/zs-proto/transient'
 import {
     ENCRYPTED_CONTENT_TYPE,
+    NODE_SUBMITS_OPEN_MIN_VERSION,
     PROTO_VERSION,
     RELAY_HOP_HEADER,
     RELAY_METHOD_HEADER,
     RELAY_PATH_HEADER,
     RELAY_TARGET_HEADER,
     RELAY_TARGET_NODE_HEADER,
+    RESPONSE_KEY_HEADER,
+    SEALED_SETTLE_ACK_CONTENT_TYPE,
+    SETTLE_ACK_MIN_VERSION,
+    SETTLE_ACK_PATH,
+    type SettleAck,
     computeAdmissionTag,
     decryptRequest,
     generateEphemeralIdentity,
+    openSettleAck,
 } from '@txnlab/zs-proto/wire'
+import type { Operator as SelectionOperator } from '@txnlab/zs-proto/selection'
 
 import type { Remedies, SpendGuard } from '../src/config.js'
 import { withHeaderBackstop } from '../src/header-backstop.js'
@@ -52,8 +60,9 @@ import {
     operatorHeaders,
     relayEvidence,
     runSealed,
+    settleAckPoster,
 } from '../src/sealed.js'
-import { BelowTargetError, OpenTopUpError } from '../src/wallet.js'
+import { BelowTargetError, NoSettleAckRouteError, OpenTopUpError } from '../src/wallet.js'
 import { testOperator } from './fixtures.js'
 
 const POOL_ASSERTS = [
@@ -573,12 +582,30 @@ describe('runSealed', () => {
         } as unknown as Ticket
     }
 
-    async function setup(o: { openErr?: unknown; hop?: RelayHop | null; stream?: boolean; body?: string | Uint8Array; responseKey?: Uint8Array } = {}) {
+    async function setup(
+        o: {
+            openErr?: unknown
+            hop?: RelayHop | null
+            stream?: boolean
+            body?: string | Uint8Array
+            responseKey?: Uint8Array
+            protoVersion?: string
+            /** Give the wallet openForNode (a NodeOpener). */
+            nodeOpener?: boolean
+            reply?: () => Response
+        } = {},
+    ) {
         const pinned = await generateEphemeralIdentity()
         const current = await generateEphemeralIdentity()
         const identity = await generateEphemeralIdentity()
         const responseKey = o.responseKey ?? new Uint8Array(32).fill(3)
-        const op = testOperator({ id: 9, nodeId: 1, baseUrl: 'https://n9.example.com', ephemeralRecipient: current.recipient } as Partial<Operator>)
+        const op = testOperator({
+            id: 9,
+            nodeId: 1,
+            baseUrl: 'https://n9.example.com',
+            ephemeralRecipient: current.recipient,
+            ...(o.protoVersion !== undefined ? { protoVersion: o.protoVersion } : {}),
+        } as Partial<Operator>)
         const reserved = {
             ticket: ticketOf(),
             responseKey,
@@ -594,6 +621,8 @@ describe('runSealed', () => {
             openFeesMicroalgos: 2000,
         } as unknown as OpenHandle
         const opens: unknown[][] = []
+        const handOffs: unknown[][] = []
+        const rechecks = { count: 0 }
         const wallet: WalletOpener = {
             payerAddr: () => 'PAYERADDR',
             async open(...args) {
@@ -601,6 +630,17 @@ describe('runSealed', () => {
                 if (o.openErr !== undefined) throw o.openErr
                 return handle
             },
+            recheckDeposit: () => {
+                rechecks.count++
+            },
+        }
+        if (o.nodeOpener) {
+            wallet.openForNode = async (...args) => {
+                handOffs.push(args)
+                if (o.openErr !== undefined) throw o.openErr
+                handle.openGroup = 'COMPLETEDGROUP'
+                return handle
+            }
         }
         const released: string[] = []
         const spendGuard: SpendGuard = { admit() {}, reserve() {}, settle() {}, release: (id) => released.push(id) }
@@ -617,7 +657,7 @@ describe('runSealed', () => {
             network: 'testnet',
             fetch: async (url, init) => {
                 sent.push({ url: String(url), init: init! })
-                return new Response('{"done":true}')
+                return o.reply ? o.reply() : new Response('{"done":true}')
             },
             logger: { debug() {}, info() {}, warn() {}, error() {} },
             opened: (h, t) => {
@@ -643,8 +683,129 @@ describe('runSealed', () => {
             stream: o.stream ?? false,
             hop: o.hop ?? null,
         }
-        return { deps, em, run, pinned, current, identity, handle, opens, released, sent, opened, calls, streamed, responses }
+        return { deps, em, run, pinned, current, identity, handle, opens, handOffs, rechecks, released, sent, opened, calls, streamed, responses }
     }
+
+    // Go's settleAckPoster is set on the handle by runSealed; only a node
+    // that serves the route gets one.
+    it.each([
+        [SETTLE_ACK_MIN_VERSION, true],
+        ['9.11', false],
+        ['', false],
+    ] as const)('gives a %s node a settle-ack poster: %s', async (version, want) => {
+        const s = await setup({ protoVersion: version })
+        await runSealed(s.deps, s.em, s.run)
+        expect(typeof s.handle.deliverAck === 'function').toBe(want)
+    })
+
+    // The poster runSealed wires must follow the request's own route: a
+    // relayed request's ack sent direct would show the target the payer's IP
+    // beside a group naming the payer, and a direct request needs no relay.
+    it.each([
+        ['relayed', true, 'https://relay.example.com/v1/zs/relay'],
+        ['direct', false, `https://n9.example.com${SETTLE_ACK_PATH}`],
+    ] as const)('sends a %s request’s settle ack the same way', async (_name, relayed, wantUrl) => {
+        const s = await setup({ protoVersion: SETTLE_ACK_MIN_VERSION, hop: relayed ? hopOf() : null })
+        s.deps.relays = {
+            pool: async () => [
+                { operator_id: 5, node_id: 0, proto_version: SETTLE_ACK_MIN_VERSION, reachable: true } as unknown as SelectionOperator,
+            ],
+            hopFor: () => hopOf(),
+        }
+        await runSealed(s.deps, s.em, s.run)
+        s.sent.length = 0
+        // The fake answers 200, which the poster refuses; only the route is in question.
+        await s.handle.deliverAck!({ ticket_id: 'TKT1', settle_group: 'G' }).catch(() => {})
+        expect(s.sent.map((r) => r.url)).toEqual([wantUrl])
+    })
+
+    describe('handing the open to the node', () => {
+        // TestDispatch_WalletPath_HandsOpenToNodeByVersion: a group handed to
+        // an older node loses the turn, since it ignores the field and waits
+        // for an open nobody submitted.
+        it.each([
+            [NODE_SUBMITS_OPEN_MIN_VERSION, true, true],
+            [PROTO_VERSION, true, true],
+            ['9.11', true, false],
+            ['', true, false],
+            // A wallet without openForNode keeps submitting, whatever the node.
+            [NODE_SUBMITS_OPEN_MIN_VERSION, false, false],
+        ] as const)('node %s, openForNode %s: hands off %s', async (version, nodeOpener, handOff) => {
+            const s = await setup({ protoVersion: version, nodeOpener })
+            const ac = new AbortController()
+            await runSealed(s.deps, s.em, s.run, ac.signal)
+            const args = [s.run.reserved.ticket, s.run.op, 'OPENGROUP', ac.signal]
+            expect(s.handOffs).toEqual(handOff ? [args] : [])
+            expect(s.opens).toEqual(handOff ? [] : [args])
+
+            const dec = await decryptRequest(s.sent[0]!.init.body as Uint8Array, s.pinned.secret)
+            expect(dec.openGroup).toBe(handOff ? 'COMPLETEDGROUP' : '')
+            // The app call's txid either way, and the tag binds it as before.
+            expect(dec.algorandTxID).toBe('APPCALLTXID')
+            expect(dec.admissionTag).toEqual(computeAdmissionTag(new Uint8Array(32).fill(3), 'TKT1', 'APPCALLTXID', dec.body))
+            // Journal and watchdog are armed exactly as after a payer submit.
+            expect(s.opened).toEqual([[s.handle, s.run.reserved.ticket]])
+            expect(s.em.order).toEqual(['reserved TKT1 9', 'opened', 'committed'])
+        })
+
+        it('backs the reservation out when the hand-off fails', async () => {
+            const s = await setup({ protoVersion: NODE_SUBMITS_OPEN_MIN_VERSION, nodeOpener: true, openErr: new Error('algod unreachable') })
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.handOffs).toHaveLength(1)
+            expect(s.released).toEqual(['TKT1'])
+            expect(s.opened).toEqual([])
+            expect(s.sent).toEqual([])
+        })
+
+        const refused = () =>
+            new Response(
+                '{"error":{"message":"payment verification failed: open group rejected by algod","type":"invalid_request_error","code":"payment_verification_failed"}}',
+                { status: 402, headers: { 'Content-Type': 'application/json' } },
+            )
+
+        // TestDispatch_WalletPath_RefusedHandOffRechecksDeposit: with the node
+        // submitting, its 402 is the only sign of a pool shortfall, and a
+        // payer-submitted open already proved the pool.
+        it.each([
+            ['a handed-off open', NODE_SUBMITS_OPEN_MIN_VERSION, 1],
+            ['a payer-submitted open', '9.11', 0],
+        ] as const)('rechecks the deposit when the node refuses %s', async (_name, version, want) => {
+            const s = await setup({ protoVersion: version, nodeOpener: true, reply: refused })
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.rechecks.count).toBe(want)
+            // The refusal still reaches the responder as it came.
+            expect(s.responses).toHaveLength(1)
+            expect(s.responses[0]![0]).toBe(402)
+        })
+
+        it('rechecks on nothing but a plaintext 402 payment_verification_failed', async () => {
+            const body = (code: string) => `{"error":{"message":"x","code":"${code}"}}`
+            for (const reply of [
+                () => new Response(body('ticket_invalid'), { status: 402 }),
+                () => new Response(body('payment_verification_failed'), { status: 400 }),
+                // A sealed answer is the node's own reply, not a pre-envelope refusal.
+                () => new Response(body('payment_verification_failed'), { status: 402, headers: { [RESPONSE_KEY_HEADER]: 'K' } }),
+                () => new Response('not json', { status: 402 }),
+                () => new Response('{"done":true}'),
+            ]) {
+                const s = await setup({ protoVersion: NODE_SUBMITS_OPEN_MIN_VERSION, nodeOpener: true, reply })
+                await runSealed(s.deps, s.em, s.run)
+                expect(s.rechecks.count).toBe(0)
+                expect(s.responses).toHaveLength(1)
+            }
+        })
+
+        // The streamed forward's plain-body fallback is the same responder, as
+        // Go hands forwardRawStream the wrapped nonStreamRespond.
+        it('rechecks through the streamed forward’s buffered fallback too', async () => {
+            const s = await setup({ protoVersion: NODE_SUBMITS_OPEN_MIN_VERSION, nodeOpener: true, stream: true })
+            await runSealed(s.deps, s.em, s.run)
+            const [, , buffered] = s.streamed[0]!
+            const r = refused()
+            await buffered(s.em, r, new Uint8Array(await r.arrayBuffer()))
+            expect(s.rechecks.count).toBe(1)
+        })
+    })
 
     it('opens escrow, seals to the pinned recipient with the app-call txid, and sends it direct', async () => {
         const s = await setup()
@@ -842,5 +1003,123 @@ describe('runSealed', () => {
             await runSealed(s.deps, s.em, s.run)
             expect(s.em.failed!.code).toBe('wallet_open')
         })
+    })
+})
+
+// TestSettleAckPoster
+describe('settleAckPoster', () => {
+    const ack: SettleAck = { ticket_id: 'TKT', settle_group: 'GROUP' }
+
+    // A node's settle-ack route: it opens what arrives with its identity and
+    // answers status.
+    async function ackNode(status: number) {
+        const id = await generateEphemeralIdentity()
+        const got: { url: string; headers: Record<string, string>; ack: SettleAck }[] = []
+        const fetch: Fetch = async (url, init) => {
+            const headers = init!.headers as Record<string, string>
+            got.push({ url: String(url), headers, ack: await openSettleAck(init!.body as Uint8Array, id.secret) })
+            return new Response(status === 202 ? null : '{"error":{"message":"x","code":"ticket_settled"}}', { status })
+        }
+        return { id, got, fetch }
+    }
+
+    const target = (protoVersion: string) =>
+        testOperator({ id: 1, nodeId: 1, baseUrl: 'https://target.example.com', protoVersion } as Partial<Operator>)
+    const relayOf = (id: number, proto_version: string) =>
+        ({ operator_id: id, node_id: 1, proto_version, reachable: true }) as unknown as SelectionOperator
+
+    it('builds no poster for an older node, so the payer broadcasts', async () => {
+        const n = await ackNode(202)
+        expect(settleAckPoster({ fetch: n.fetch }, target('9.11'), n.id.recipient, false)).toBeUndefined()
+        expect(settleAckPoster({ fetch: n.fetch }, target(''), n.id.recipient, false)).toBeUndefined()
+        expect(settleAckPoster({ fetch: n.fetch }, target(SETTLE_ACK_MIN_VERSION), '', false)).toBeUndefined()
+    })
+
+    it('posts the sealed ack straight to the node on a direct request', async () => {
+        const n = await ackNode(202)
+        const post = settleAckPoster({ fetch: n.fetch }, target(SETTLE_ACK_MIN_VERSION), n.id.recipient, false)!
+        await post(ack)
+        expect(n.got).toEqual([
+            {
+                url: `https://target.example.com${SETTLE_ACK_PATH}`,
+                headers: { 'Content-Type': SEALED_SETTLE_ACK_CONTENT_TYPE, Accept: 'application/json' },
+                ack,
+            },
+        ])
+    })
+
+    it('treats a refusal as final, not a reason to broadcast', async () => {
+        const n = await ackNode(409)
+        const post = settleAckPoster({ fetch: n.fetch }, target(SETTLE_ACK_MIN_VERSION), n.id.recipient, false)!
+        const err = await post(ack).catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(Error)
+        expect(err).not.toBeInstanceOf(NoSettleAckRouteError)
+        expect(String(err)).toMatch(/node answered 409 ticket_settled/)
+        // 200 is not 202: the node did not take the ack.
+        const ok = await ackNode(200)
+        const post200 = settleAckPoster({ fetch: ok.fetch }, target(SETTLE_ACK_MIN_VERSION), ok.id.recipient, false)!
+        await expect(post200(ack)).rejects.not.toBeInstanceOf(NoSettleAckRouteError)
+    })
+
+    it('reports a transport failure as final too', async () => {
+        const fetch: Fetch = () => Promise.reject(new Error('connection reset'))
+        const id = await generateEphemeralIdentity()
+        const err = await settleAckPoster({ fetch }, target(SETTLE_ACK_MIN_VERSION), id.recipient, false)!(ack).catch((e: unknown) => e)
+        expect(String(err)).toMatch(/settle ack: connection reset/)
+        expect(err).not.toBeInstanceOf(NoSettleAckRouteError)
+    })
+
+    it('sends nothing on a relayed request when no relay serves the route', async () => {
+        const n = await ackNode(202)
+        const pools: SelectionOperator[][] = []
+        const relays = {
+            pool: async () => [relayOf(2, '9.11'), relayOf(3, '')],
+            hopFor: (pool: SelectionOperator[]) => {
+                pools.push(pool)
+                return pool.length > 0 ? hopOf() : null
+            },
+        }
+        const post = settleAckPoster({ fetch: n.fetch, relays }, target(SETTLE_ACK_MIN_VERSION), n.id.recipient, true)!
+        await expect(post(ack)).rejects.toBeInstanceOf(NoSettleAckRouteError)
+        // Only capable relays are offered to the picker.
+        expect(pools).toEqual([[]])
+        expect(n.got).toEqual([])
+
+        // Without a relay source at all, the same: never a direct send.
+        const bare = settleAckPoster({ fetch: n.fetch }, target(SETTLE_ACK_MIN_VERSION), n.id.recipient, true)!
+        await expect(bare(ack)).rejects.toBeInstanceOf(NoSettleAckRouteError)
+        expect(n.got).toEqual([])
+    })
+
+    it('rides a capable relay on a relayed request, still sealed to the target', async () => {
+        const n = await ackNode(202)
+        const capable = relayOf(4, SETTLE_ACK_MIN_VERSION)
+        const pools: SelectionOperator[][] = []
+        const hop = hopOf({ baseUrl: 'https://relay.example.com', targetId: 1, targetNodeId: 1, relayId: 4 })
+        const relays = {
+            pool: async () => [relayOf(2, '9.11'), capable],
+            hopFor: (pool: SelectionOperator[], t: Operator) => {
+                pools.push(pool)
+                expect(t.id).toBe(1)
+                return hop
+            },
+        }
+        const post = settleAckPoster({ fetch: n.fetch, relays }, target(SETTLE_ACK_MIN_VERSION), n.id.recipient, true)!
+        await post(ack)
+        expect(pools).toEqual([[capable]])
+        expect(n.got).toEqual([
+            {
+                url: 'https://relay.example.com/v1/zs/relay',
+                headers: {
+                    'Content-Type': SEALED_SETTLE_ACK_CONTENT_TYPE,
+                    Accept: 'application/json',
+                    [RELAY_TARGET_HEADER]: '1',
+                    [RELAY_TARGET_NODE_HEADER]: '1',
+                    [RELAY_PATH_HEADER]: SETTLE_ACK_PATH,
+                    [RELAY_METHOD_HEADER]: 'POST',
+                },
+                ack,
+            },
+        ])
     })
 })

@@ -7,13 +7,24 @@
 // a two-txn group, signs its own settle() call, and leaves the payer's ack
 // unsigned. The payer checks both halves against the receipt it verified,
 // then signs only the ack. Mirrors proto/go/escrow (DecodeSettleGroup,
-// VerifySettleGroup, SubmitPresignedSettleGroup); the checks run in Go's order
-// and refuse with Go's field names, pinned by testdata/escrow_group_vectors.json.
+// VerifySettleGroup, CompletePresignedSettleGroup, EncodeSettleGroup); the
+// checks run in Go's order and refuse with Go's field names, and the completed
+// group encodes to Go's bytes, both pinned by testdata/escrow_group_vectors.json.
 
 import algosdk, { ABIMethod, Address, OnApplicationComplete } from 'algosdk'
 
 import { type Signer, SignerAddressError } from '../ports.js'
-import { type GroupMember, base32NoPad, bytesEqual, canonicalTxid, decodeSignedGroup, groupCommitsToMembers, hex, isZero } from './group.js'
+import {
+    type GroupMember,
+    base32NoPad,
+    bytesEqual,
+    canonicalTxid,
+    decodeSignedGroup,
+    encodeSignedPair,
+    groupCommitsToMembers,
+    hex,
+    isZero,
+} from './group.js'
 
 /** The settle() signature in the deployed ARC-56; the vectors pin its selector. */
 export const SETTLE_METHOD_SIGNATURE = 'settle(byte[],uint64,byte[],uint64,uint64,uint64,uint64,uint64,uint64,uint64,bool)void'
@@ -167,10 +178,16 @@ function verifyMember(m: GroupMember, spec: SettleGroupSpec, role: string, sende
     }
 }
 
-/** CompletedSettleGroup is the payer-signed settle group, ready for algod. */
+/** CompletedSettleGroup is the payer-signed settle group, ready for algod or for the node. */
 export interface CompletedSettleGroup {
     /** The two signed txns concatenated in group order, for sendRawTransaction. */
     signedGroup: Uint8Array
+    /**
+     * The same group as Go's EncodeSettleGroup writes it, base64(msgpack of the
+     * two signed txns): the settle ack's settle_group for a node that submits
+     * it (takesSettleAck).
+     */
+    encoded: string
     /** The payer ack's txid (gtxn[1]), as Go's CallResult.TxID reports it. */
     txid: string
     /** The group id in base32, as Go logs it. */
@@ -186,6 +203,7 @@ export interface CompletedSettleGroup {
  * against spec, and has the payer sign the ack. Nothing is signed unless the
  * whole group passes. A SettleGroupRejectedError means the node contradicted
  * its own receipt; any other error (decode, signer) is not evidence of that.
+ * It submits nothing; the caller sends signedGroup or hands encoded to the node.
  */
 export async function completeSettleGroup(settleGroupB64: string, spec: SettleGroupSpec, signer: Signer): Promise<CompletedSettleGroup> {
     if (signer.address !== spec.payerAddr) throw new SignerAddressError(signer.address, spec.payerAddr)
@@ -206,6 +224,7 @@ export async function completeSettleGroup(settleGroupB64: string, spec: SettleGr
     out.set(payerSigned, nodeSigned.length)
     return {
         signedGroup: out,
+        encoded: encodeSignedPair(out),
         txid: txns[1]!.txID(),
         groupId: base32NoPad(txns[0]!.group!),
         feeMicroalgos: txns[0]!.fee + txns[1]!.fee,

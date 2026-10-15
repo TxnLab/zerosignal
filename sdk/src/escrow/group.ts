@@ -80,6 +80,19 @@ export function decodeSignedGroup(b64: string): GroupMember[] {
     })
 }
 
+/**
+ * encodeSignedPair is a two-member group's concatenated signed txns in Go's
+ * EncodeOpenGroup / EncodeSettleGroup form, base64(msgpack([]SignedTxn)). A
+ * msgpack array of two is one header byte (fixarray 0x92) before its members,
+ * so the node is handed exactly the bytes a payer submit sends.
+ */
+export function encodeSignedPair(signedGroup: Uint8Array): string {
+    const wire = new Uint8Array(1 + signedGroup.length)
+    wire[0] = 0x92
+    wire.set(signedGroup, 1)
+    return algosdk.bytesToBase64(wire)
+}
+
 export const isZero = (b: Uint8Array) => b.every((x) => x === 0)
 
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {

@@ -35,6 +35,11 @@ export interface SealRequestArgs {
     nodeRecipient: string
     /** The reserve's ephemeral identity, reused as reply-to so it opens the response too. */
     ephemeral: EphemeralIdentity
+    /**
+     * The payer-completed open group for a node that submits it (submitsOpen).
+     * Omitted when the payer submitted the open.
+     */
+    openGroup?: string
 }
 
 /**
@@ -55,6 +60,7 @@ export async function sealRequest(a: SealRequestArgs): Promise<Uint8Array> {
         admissionTag,
         nodeRecipient: a.nodeRecipient,
         ephemeral: a.ephemeral,
+        ...(a.openGroup ? { openGroup: a.openGroup } : {}),
     })
     return envelope
 }

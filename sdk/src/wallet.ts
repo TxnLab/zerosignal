@@ -201,7 +201,26 @@ export class Wallet implements WalletOpener {
      * checked against the ticket and the operator's chain-resolved signing key
      * before the payer signs anything.
      */
-    async open(ticket: Ticket, op: Operator, presignedOpenGroup: string, signal?: AbortSignal): Promise<OpenHandle> {
+    open(ticket: Ticket, op: Operator, presignedOpenGroup: string, signal?: AbortSignal): Promise<OpenHandle> {
+        return this.#open(ticket, op, presignedOpenGroup, true, signal)
+    }
+
+    /**
+     * open for a node that submits the group itself (submitsOpen): it checks
+     * and signs the group but broadcasts nothing, so the payer's IP never
+     * reaches an algod alongside its address. The handle's openGroup carries
+     * the completed group for the sealed request.
+     *
+     * The open may still land after this returns, whenever the node submits
+     * it, so the caller arms the refund watchdog and journals the ticket
+     * exactly as after open. The contract refuses an open past the ticket's
+     * expires_at, which bounds how long a node can hold it.
+     */
+    openForNode(ticket: Ticket, op: Operator, presignedOpenGroup: string, signal?: AbortSignal): Promise<OpenHandle> {
+        return this.#open(ticket, op, presignedOpenGroup, false, signal)
+    }
+
+    async #open(ticket: Ticket, op: Operator, presignedOpenGroup: string, submit: boolean, signal?: AbortSignal): Promise<OpenHandle> {
         if (op.id === 0) throw new Error('wallet: open: operator id is unset')
         if (!op.ownerAddr || !op.signingAddr) throw new Error('wallet: open: operator addresses incomplete')
         if (!presignedOpenGroup) {
@@ -247,36 +266,53 @@ export class Wallet implements WalletOpener {
             throw new Error(`wallet: ensure MBR deposit: ${message(err)}`, { cause: err })
         }
         signal?.throwIfAborted()
+        const handleOf = (group: CompletedOpenGroup) =>
+            this.#handle(
+                {
+                    appCallTxId: group.txids[1]!,
+                    groupId: group.groupId,
+                    ticketId: ticket.ticket_id,
+                    operator: op,
+                    maxPrice: ticket.max_price,
+                    openFeesMicroalgos: Number(group.payerFeeMicroalgos),
+                    signedGroup: group.signedGroup,
+                },
+                cfg.settlementGraceDefault,
+            )
+        if (!submit) {
+            // No retry here: nothing reached the chain, so a pool revert can
+            // only surface at the node, which refuses with
+            // payment_verification_failed, and the sealed run answers that
+            // with recheckDeposit.
+            let group: CompletedOpenGroup
+            try {
+                group = await completeOpenGroup(presignedOpenGroup, spec, this.#signer)
+            } catch (err) {
+                throw new Error(`wallet: complete presigned open group: ${message(err)}`, { cause: err })
+            }
+            const h = handleOf(group)
+            h.openGroup = group.encoded
+            return h
+        }
         // Go's SubmitPresignedOpenGroup: check, sign, send. Nothing is signed
         // unless the group passes, and any failure, a refused group included,
         // takes the pool re-check below as it does in Go.
-        const submit = async (): Promise<CompletedOpenGroup> => {
+        const send = async (): Promise<CompletedOpenGroup> => {
             const g = await completeOpenGroup(presignedOpenGroup, spec, this.#signer)
             await this.#chain.sendGroup(g.signedGroup, 'open', signal)
             return g
         }
         let group: CompletedOpenGroup
         try {
-            group = await submit()
+            group = await send()
         } catch (sendErr) {
-            const r = await this.#retryOpen(submit, sendErr, signal)
+            const r = await this.#retryOpen(send, sendErr, signal)
             if (r.group === undefined) {
                 throw new Error(`wallet: submit presigned open group: ${message(r.err)}`, { cause: r.err })
             }
             group = r.group
         }
-        return this.#handle(
-            {
-                appCallTxId: group.txids[1]!,
-                groupId: group.groupId,
-                ticketId: ticket.ticket_id,
-                operator: op,
-                maxPrice: ticket.max_price,
-                openFeesMicroalgos: Number(group.payerFeeMicroalgos),
-                signedGroup: group.signedGroup,
-            },
-            cfg.settlementGraceDefault,
-        )
+        return handleOf(group)
     }
 
     /**
@@ -465,9 +501,24 @@ export class Wallet implements WalletOpener {
                         })
                     },
                     submitGroup: async (spec) => {
+                        // Checked and signed either way, so a refused group
+                        // still takes ackSettle's standalone path.
                         const g = await completeSettleGroup(group, spec, signer)
+                        const done = { txid: g.txid, payerFeeMicroalgos: g.payerFeeMicroalgos }
+                        const deliver = h.deliverAck
+                        if (deliver) {
+                            try {
+                                await deliver({ ticket_id: fields.ticketId, settle_group: g.encoded }, signal)
+                                return done
+                            } catch (err) {
+                                // Anything but "no route" may have reached the
+                                // node, whose driver settles on its own; a
+                                // broadcast now would only race it.
+                                if (!(err instanceof NoSettleAckRouteError)) throw err
+                            }
+                        }
                         await chain.sendGroup(g.signedGroup, 'settle', signal)
-                        return { txid: g.txid, payerFeeMicroalgos: g.payerFeeMicroalgos }
+                        return done
                     },
                     standalone: () =>
                         chain.settleStandalone(
@@ -530,6 +581,20 @@ export class BelowTargetError extends Error {
 
     constructor(readonly deposited: bigint) {
         super(`wallet: prepaid MBR pool funded below the configured working set (deposited ${deposited} µALGO)`)
+    }
+}
+
+/**
+ * NoSettleAckRouteError: a deliverAck failure that sent nothing, because no
+ * relay can carry the ack yet (every relay predates SETTLE_ACK_MIN_VERSION).
+ * The ack then goes out as it did before 9.12, at exactly the old privacy
+ * cost. Go's errNoSettleAckRoute.
+ */
+export class NoSettleAckRouteError extends Error {
+    override readonly name = 'NoSettleAckRouteError'
+
+    constructor() {
+        super('zs: no relay serves the settle ack')
     }
 }
 

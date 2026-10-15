@@ -445,3 +445,12 @@ type DepositPreparer interface {
 type DepositRechecker interface {
 	RecheckDeposit()
 }
+
+// NodeOpener is an optional WalletOpener method dispatch uses for a target
+// that submits the open itself (wire.SubmitsOpen). OpenForNode verifies and
+// signs the group like Open but broadcasts nothing, and returns it on
+// OpenHandle.OpenGroup for the sealed request. A wallet without it keeps
+// submitting, which every node still accepts. *Wallet implements it.
+type NodeOpener interface {
+	OpenForNode(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error)
+}

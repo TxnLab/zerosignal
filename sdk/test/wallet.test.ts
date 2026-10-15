@@ -33,6 +33,7 @@ vi.mock('../src/escrow/settle.js', async (importOriginal) => {
 const {
     BelowTargetError,
     MbrDepositUnaffordableError,
+    NoSettleAckRouteError,
     OpenGroupRejectedError,
     OpenTopUpError,
     findError,
@@ -205,6 +206,71 @@ const causes = (err: unknown): unknown[] => {
     return out
 }
 
+describe('Wallet.openForNode', () => {
+    const openSpec = () => ({
+        appId: BigInt(s.app_id),
+        appAddress: s.app_address,
+        ticketIdRaw: decodeTicketId(s.ticket_id_b64),
+        operatorId: BigInt(s.operator_id),
+        nodeId: BigInt(s.node_id),
+        maxPrice: BigInt(s.max_price),
+        usdcAssetId: BigInt(s.usdc_asset_id),
+        nodeSigningAddr: s.node_signing_addr,
+        payerAddr: s.payer_addr,
+        expiresAt: BigInt(s.expires_at),
+        settlementGraceSeconds: 0n,
+    })
+
+    // TestOpenForNode_CompletesWithoutSubmitting: the point is that the
+    // payer's IP never reaches an algod with the group.
+    it('signs the group but broadcasts nothing, handing it back for the node', async () => {
+        const want = await completeOpenGroup(openGroup('valid'), openSpec(), payerSigner())
+        const h = await wallet.openForNode(ticket, op, openGroup('valid'))
+        expect(chain.sent).toEqual([])
+        expect(chain.sendMethods).toEqual([])
+        expect(signer.calls).toEqual([[0]])
+        expect(h).toMatchObject({
+            appCallTxId: want.txids[1],
+            groupId: want.groupId,
+            ticketId: s.ticket_id_b64,
+            operator: op,
+            maxPrice: s.max_price,
+            openFeesMicroalgos: 0,
+            signedGroup: want.signedGroup,
+            openGroup: want.encoded,
+        })
+        // The refund watchdog can track it like any open: the node may land it.
+        expect(refundSources.get(h)?.graceSeconds).toBe(chain.grace)
+    })
+
+    // Nothing reached the chain, so there is no revert for a top-up to cure:
+    // a refused group fails once, with no pool re-check.
+    it('refuses a bad group without signing, re-checking the pool or retrying', async () => {
+        await wallet.openForNode(ticket, op, openGroup('valid'))
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.spendable = 10n * FULL
+        signer.calls.length = 0
+        const reads = chain.reads
+        const err = await wallet.openForNode(ticket, { ...op, signingAddr: OWNER }, openGroup('valid')).catch((e: unknown) => e)
+        expect(findError(err, OpenGroupRejectedError)).toBeDefined()
+        expect(String(err)).toMatch(/^Error: wallet: complete presigned open group: escrow: /)
+        expect(signer.calls).toEqual([])
+        expect(chain.reads).toBe(reads)
+        expect(chain.deposits).toEqual([])
+        expect(chain.sent).toEqual([])
+    })
+
+    // Still funds the pool first: the node's submit draws a slot from it.
+    it('funds an empty pool before completing the group', async () => {
+        chain.deposit = { algoBalance: 0n, openTickets: 0n }
+        chain.optedIn = false
+        chain.spendable = 10n * FULL
+        await wallet.openForNode(ticket, op, openGroup('valid'))
+        expect(chain.deposits).toEqual([{ amount: FULL, optIn: true }])
+        expect(chain.sent).toEqual([])
+    })
+})
+
 describe('Wallet.open', () => {
     it('submits the payer-signed group and hands back its ids', async () => {
         const want = await completeOpenGroup(openGroup('valid'), {
@@ -233,6 +299,14 @@ describe('Wallet.open', () => {
             signedGroup: want.signedGroup,
         })
         expect(chain.deposits).toEqual([])
+    })
+
+    // TestOpen_SubmitsAndCarriesNoGroup: an older node would ignore an
+    // open_group, so the submit path must not set one.
+    it('carries no open group for the sealed request', async () => {
+        const h = await wallet.open(ticket, op, openGroup('valid'))
+        expect(chain.sent).toHaveLength(1)
+        expect(h.openGroup).toBeUndefined()
     })
 
     // The group is checked against the operator's chain key, not its own
@@ -749,7 +823,7 @@ describe('OpenHandle', () => {
         await wallet.open(ticket, op, openGroup('valid'), signal)
         for (const name of ['config', 'sendGroup']) expect(chain.signals[name], `open ${name}`).toBe(signal)
 
-        completeSettle = async () => ({ signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', feeMicroalgos: 0n, payerFeeMicroalgos: 0n })
+        completeSettle = async () => ({ signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', encoded: 'ENCODED', feeMicroalgos: 0n, payerFeeMicroalgos: 0n })
         const atomic = await open()
         chain.signals = {}
         await atomic.ackSettle(receipt, 'GROUP', signal)
@@ -774,7 +848,7 @@ describe('OpenHandle', () => {
         let seen: SettleGroupSpec | undefined
         completeSettle = async (_b64, spec) => {
             seen = spec
-            return { signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', feeMicroalgos: 7000n, payerFeeMicroalgos: 0n }
+            return { signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', encoded: 'ENCODED', feeMicroalgos: 7000n, payerFeeMicroalgos: 0n }
         }
         const r = await (await open()).ackSettle(receipt, 'GROUP')
         expect(r).toEqual({ txid: 'ATOMIC', feeMicroalgos: 0, groupRejected: false })
@@ -808,13 +882,78 @@ describe('OpenHandle', () => {
     })
 
     it('surfaces a failed submit of a passing group without settling standalone at the payer\'s expense', async () => {
-        completeSettle = async () => ({ signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', feeMicroalgos: 0n, payerFeeMicroalgos: 0n })
+        completeSettle = async () => ({ signedGroup: new Uint8Array([9]), txid: 'ATOMIC', groupId: 'G', encoded: 'ENCODED', feeMicroalgos: 0n, payerFeeMicroalgos: 0n })
         const h = await open()
         chain.sendOutcomes = [new Error('pool eval')]
         const r = await h.ackSettle(receipt, 'GROUP')
         expect(r).toMatchObject({ groupRejected: false, txid: '' })
         expect(String(r.err)).toMatch(/pool eval/)
         expect(chain.calls.settleStandalone).toBeUndefined()
+    })
+
+    describe('handing the ack to the node', () => {
+        const atomic = () => {
+            completeSettle = async () => ({
+                signedGroup: new Uint8Array([9]),
+                txid: 'ATOMIC',
+                groupId: 'G',
+                encoded: 'ENCODED',
+                feeMicroalgos: 0n,
+                payerFeeMicroalgos: 0n,
+            })
+        }
+
+        // TestOpenHandle_AckHandedToNode: the payer's broadcast is the
+        // IP-to-address link the hand-off removes.
+        it('gives the node the completed group and broadcasts nothing', async () => {
+            atomic()
+            const h = await open()
+            const acks: unknown[][] = []
+            h.deliverAck = async (...args) => {
+                acks.push(args)
+            }
+            const signal = new AbortController().signal
+            const r = await h.ackSettle(receipt, 'GROUP', signal)
+            expect(r).toEqual({ txid: 'ATOMIC', feeMicroalgos: 0, groupRejected: false })
+            expect(acks).toEqual([[{ ticket_id: s.ticket_id_b64, settle_group: 'ENCODED' }, signal]])
+            expect(chain.sendMethods).toEqual(['open'])
+            expect(chain.calls.settleStandalone).toBeUndefined()
+        })
+
+        // TestOpenHandle_AckDeliveryFailures
+        it('broadcasts as before 9.12 when no relay can carry the ack', async () => {
+            atomic()
+            const h = await open()
+            h.deliverAck = () => Promise.reject(new NoSettleAckRouteError())
+            const r = await h.ackSettle(receipt, 'GROUP')
+            expect(r).toEqual({ txid: 'ATOMIC', feeMicroalgos: 0, groupRejected: false })
+            expect(chain.sendMethods).toEqual(['open', 'settle'])
+            expect(chain.sent.at(-1)).toEqual(new Uint8Array([9]))
+        })
+
+        it('returns any other delivery failure and broadcasts nothing, since the node may settle it', async () => {
+            atomic()
+            const h = await open()
+            h.deliverAck = () => Promise.reject(new Error('zs: settle ack: node answered 409 '))
+            const r = await h.ackSettle(receipt, 'GROUP')
+            expect(r).toMatchObject({ txid: '', groupRejected: false })
+            expect(String(r.err)).toMatch(/node answered 409/)
+            expect(chain.sendMethods).toEqual(['open'])
+            expect(chain.calls.settleStandalone).toBeUndefined()
+        })
+
+        // The checks run before any hand-off, so a node contradicting its own
+        // receipt is still reported, and gets no payer signature to submit.
+        it('hands over nothing for a group the checks refuse, and acks standalone', async () => {
+            const h = await open()
+            let delivered = 0
+            h.deliverAck = async () => {
+                delivered++
+            }
+            const r = await h.ackSettle(receipt, settleGroup('valid'))
+            expect(r).toMatchObject({ groupRejected: true, txid: 'STANDALONE' })
+            expect(delivered).toBe(0)
+        })
     })
 
     it("goes standalone without blaming the node when the payer's spec can't be built", async () => {
