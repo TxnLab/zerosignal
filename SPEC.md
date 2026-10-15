@@ -246,7 +246,13 @@ HTTP 200, `Content-Type: application/json`:
 
 `wrapped_response_key` uses the same age primitive as the response-time `X-Zs-Response-Key` header (§ 5.2). Delivering it early gives the caller `K_response` in time to compute the sealed request's `admission_tag`.
 
-`presigned_open_txn` is the node's signed `escrow.open()` AppCall: gtxn[1] of the open group. Its group hash already commits to the caller's funding transaction, gtxn[0], a `usdcPayment` from `payer_addr` with fee 0. gtxn[1] carries `fee = 2 × minTxnFee`, which pays for the whole group. The caller builds and signs gtxn[0] and submits the two-transaction group atomically. Algorand consensus then authenticates the node signing key's intent on gtxn[1], and the contract reads its ABI args directly.
+`presigned_open_txn` is the node's signed `escrow.open()` AppCall: gtxn[1] of the open group. Its group hash already commits to the caller's funding transaction, gtxn[0], a `usdcPayment` from `payer_addr` with fee 0. gtxn[1] carries `fee = 2 × minTxnFee`, which pays for the whole group. The caller builds and signs gtxn[0]. Algorand consensus then authenticates the node signing key's intent on gtxn[1], and the contract reads its ABI args directly.
+
+**Who submits the group.** Against a node advertising `proto_version` ≥ 9.12 (`wire.SubmitsOpen`), the caller does not submit the completed group. It hands the group to the node inside the sealed request as `open_group` (§ 4), and the node submits it at admission (§ 9). Against an older node the caller submits the group atomically itself, as before 9.12. Handing the group over has two effects:
+- The payer submits no transaction naming itself on a turn's open. Its algod provider can still link the payer's IP to the ticket through the payer's later reads of it ("Residual payer contact with algod" under "Settle ack").
+- The node learns whether the open was accepted from `SendRawTransaction`'s own answer, instead of polling the pool for a group the payer sent elsewhere.
+
+A node holding the payer's signed gtxn[0] can only submit that one group, and only before `expires_at`: `open()` refuses an expired ticket, so a node cannot hold the payment back and spend it later.
 
 So the operator, not the payer, pays the open-time ALGO fee ("Settlement asset model"). The per-ticket box MBR comes from the payer's prepaid pool, not from a per-turn payment. `escrow.open()` takes no `ticketSigDigest` / `ticketSig` args: admission is authenticated by consensus on gtxn[1], so `ticket.sig` is carried only for off-chain audit and dispute tooling.
 
@@ -596,7 +602,7 @@ Both sides hash the inner header's wire-form strings, with no decoding. The NUL 
 - `ticket.Ticket` (`ticket/ticket.go`): canonical struct, `CanonicalBytes()`, `Sign`, `Verify`, plus `CommitResponseKey(K)` helper.
 - `ticket.ReserveRequest` / `ticket.ReserveResponse` (`ticket/reserve.go`) — including `PayerAddr` and `PreSignedOpenTxn`.
 - `wire.NewResponseSealerWithKey` (`wire/seal.go`): sealer variant that takes a caller-supplied K — used by the node to honor the pre-commitment.
-- `escrow.ComposeOpenGroup` / `escrow.SubmitPresignedOpenGroup` / `escrow.EncodeOpenGroup` / `escrow.DecodeOpenGroup` (`proto/go/escrow/client.go`): operator-side composition of gtxn[1] (signs AppCall with `fee = 2 × minTxnFee`); proxy-side completion of gtxn[0] (usdcPayment) and atomic submission. Plus `escrow.ComposeDepositMbr` / `ComposeWithdrawMbr` / `ComposeCloseDeposit` / `ReadPayerDeposit` for the per-payer prepaid-pool lifecycle.
+- `escrow.ComposeOpenGroup` / `escrow.CompletePresignedOpenGroup` / `escrow.SubmitPresignedOpenGroup` / `escrow.SubmitOpenGroup` / `escrow.EncodeOpenGroup` / `escrow.DecodeOpenGroup` (`proto/go/escrow/client.go`): operator-side composition of gtxn[1] (signs AppCall with `fee = 2 × minTxnFee`); proxy-side completion of gtxn[0] (usdcPayment), then either the hand-off to the node, which submits it (`SubmitOpenGroup`), or the payer's own atomic submission. Plus `escrow.ComposeDepositMbr` / `ComposeWithdrawMbr` / `ComposeCloseDeposit` / `ReadPayerDeposit` for the per-payer prepaid-pool lifecycle.
 - Node-side: `node/internal/server/reserve.go` (handler) composes + signs gtxn[1] post-Reserve, encodes it into `PreSignedOpenTxn`.
 
 ### Settlement receipt
@@ -893,12 +899,62 @@ Payers MUST NOT assert an exact gtxn[0] fee when verifying a pre-signed settle g
 
 The node composes gtxn[1] and the payer only signs it, so before signing the payer MUST also verify that neither member sets `rekey_to` and that both are NoOp calls. A rekey on the payer's ack hands the node the payer's account. A ClearState ack skips the approval program and wipes the payer's prepaid-pool accounting. `settle()`'s TEAL rejects a rekey on either side as a backstop, but only when gtxn[1] really is a `settle()` call on an app whose installed approval program carries that assert; a node can put the rekey on any other txn type, which is why the payer must pin gtxn[1]'s type, app id and selector. Nothing on chain can reject a ClearState ack, so that check is the payer's alone.
 
-The proxy signs gtxn[1] without modifying any group-hash-participating field and broadcasts the group atomically. On admission:
+The proxy signs gtxn[1] without modifying any group-hash-participating field, then hands the completed group to the node to submit ("Settle ack" below), or broadcasts it atomically itself for a pre-9.12 node. On admission:
 
 1. gtxn[0] runs first → status flips OPEN → PENDING_SETTLE with operator-side claim.
 2. gtxn[1] runs → matching args + opposite side → finalize and delete the box.
 
 A mismatched gtxn[1] is structurally unreachable when both txns originated from the same receipt; a status that is not OPEN at gtxn[0] time falls into the cases described in "Race ordering" below.
+
+#### Settle ack
+
+Since 9.12 the payer does not broadcast the completed settle group. It sends the group to the node, and the node submits it. gtxn[1]'s sender is the payer, so a payer broadcast showed the payer's algod provider the payer's IP next to its address on every paid turn. The payer may use this route only with a node advertising `proto_version` ≥ 9.12 (`wire.TakesSettleAck`). Against an older node it broadcasts the group itself, as before.
+
+**Request.** `POST /v1/zs/settle-ack` with `Content-Type: application/vnd.zs-settle-ack+json`. The body has the reserve request's sealed-envelope shape, `{"ciphertext": "<base64 age output>"}`, sealed to the node's signed ephemeral recipient (the same one the inference request was sealed to). The plaintext is:
+
+```json
+{"ticket_id": "<the ticket's id>", "settle_group": "<base64 msgpack of [gtxn0, gtxn1]>"}
+```
+
+`settle_group` is in the same form as `X-Zs-Settle-Group`, with gtxn[1] now signed by the payer. The ack is sealed because the group names the payer, and the ack usually travels through a relay. A relayed ack goes through a relay advertising ≥ 9.12, since an older relay's allow-list refuses the path (§ 3f "What goes through the relay"). When privacy mode finds no such relay, the payer broadcasts the group itself rather than sending the ack directly from its own IP.
+
+**What the node checks.** The ack carries no admission tag and needs none:
+- gtxn[1]'s txid must equal the ack txid the node stamped on the ticket's settlement-ledger row when it composed the group. That txid covers the group id, which commits to the node's own gtxn[0], so the one comparison pins both members.
+- algod checks the payer's signature, and `settle()` checks the values.
+
+A matching group is exactly the settle the payer wants on chain, whoever submits it. A replayed ack resubmits a group algod already holds or has already applied.
+
+**When the node submits.** The ack is not late just because the settlement driver has already posted its standalone claim. A same-side re-claim with matching args is a no-op ("Same-side idempotency"). So against that pending claim the group's gtxn[0] passes, and the payer's gtxn[1] finalizes the ticket sooner than `settleLapsed` would. The node refuses the ack only once the ticket is past that point: finalized, failed, or with `settleLapsed` already submitted, which happens only after the deadline at which `settle()` itself reverts. The node does not change the driver's schedule on a successful submit. The driver's next pass finds the ticket finalized, as it does when a payer broadcasts the group.
+
+**Responses.** All are plaintext and may pass a relay, so none names the ticket.
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 202 | — | Submitted, or a failed submit of a group algod already holds. |
+| 400 | `read_body` | Unreadable body, or over 64 KiB. |
+| 400 | `bad_settle_ack` | Not openable, or `settle_group` is malformed. |
+| 400 | `settle_ack_mismatch` | Not the group this node composed for the ticket. |
+| 404 | `settle_ack_unknown_ticket` | No ledger row for the ticket. |
+| 409 | `settle_ack_too_late` | The ticket is already finalized, failed, or lapsing. |
+| 409 | `settle_ack_rejected` | algod or the contract refused the group, and algod does not hold it. |
+| 415 | `bad_content_type` | Wrong `Content-Type`. |
+| 503 | `settle_ack_unavailable`, `node_ephemeral_unavailable` | Transient node-side failure: the ledger or algod unreachable, or no ephemeral key. |
+
+**After a failed ack, the payer does not broadcast the group.** Two failures are final: a refusal, because the node's answer about its own group stands, and a transport failure, because the ack may have arrived. Either way the ticket settles on the driver's path (its standalone claim, then `settleLapsed` at the operator's claimed amount after the deadline), as it does when a payer never acks. The one exception is a pre-flight one: when there is no route for the ack at all (no ≥ 9.12 relay), the payer broadcasts the group itself.
+
+**Residual payer contact with algod.** On the happy path a payer's turns now submit nothing to algod, but the payer still reads from algod, and some of those reads name a ticket. A ticket box or a settle txid resolves to the payer address on chain, so its algod provider can still tie the payer's IP to the payer through them. These reads are **per ticket**, not rare:
+- the txid poll that confirms a settle landed, a few seconds after each acked turn;
+- the reconciler's sweep, which reads the box of every ticket still in the journal, roughly once a minute;
+- the refund watchdog's box read at a ticket's deadline, when the ticket did not settle.
+
+The rest name the payer directly but are not per turn:
+- wallet reads: balances, the prepaid-pool simulate, opt-in checks;
+- the rare exit transactions: `refundInactive`, `protest`, deposits and withdrawals;
+- the fallback broadcasts above, against pre-9.12 nodes or with no ≥ 9.12 relay.
+
+So the hand-off removes the payer's transaction submissions from a turn, not every per-turn link at the payer's algod provider. Removing those needs the ticket reads routed away from the payer's IP as well.
+
+Reference: `wire.SealSettleAck` / `OpenSettleAck`; the payer side is `OpenHandle.AckSettle` (`escrow.CompletePresignedSettleGroup`, then `settleAckPoster`); the node side is `handleSettleAck`.
 
 #### `asOperator` ABI arg
 
@@ -2184,13 +2240,15 @@ Request headers (defined in `proto/go/wire`, mirrored in `proto/ts`):
 
 The request body and `Content-Type` are the inner request's, verbatim: a sealed
 inference envelope `application/vnd.zs+json`, a sealed reserve envelope
-`application/vnd.zs-reserve+json`, or empty for discovery GETs. The relay
-forwards the opaque bytes either way and can read neither the inference body
-nor the reserve's `payer_addr`.
+`application/vnd.zs-reserve+json`, a sealed settle ack
+`application/vnd.zs-settle-ack+json` (since 9.12), or empty for discovery
+GETs. The relay forwards the opaque bytes either way and can read neither the
+inference body, nor the reserve's `payer_addr`, nor the settle group.
 
-The same holds on the **return** path. A relay forwards a request's reserve leg
-*and* its inference leg (both paths are on the allow-list below), so a leak in
-any one of the four bodies would re-expose the payer. All four are sealed:
+The same holds on the **return** path. A relay forwards a request's reserve leg,
+its inference leg and its settle ack (all three paths are on the allow-list
+below), so a leak in any one of those bodies would re-expose the payer. Each is
+sealed or names nothing:
 
 | Leg | Direction | Sealed to |
 |---|---|---|
@@ -2198,6 +2256,8 @@ any one of the four bodies would re-expose the payer. All four are sealed:
 | reserve | response | caller's `proxy_recipient` |
 | inference | request | target's ephemeral (body and identifiers alike) |
 | inference | response | `K_response` (body, frames, receipt, settle group, metadata) |
+| settle ack | request | target's ephemeral |
+| settle ack | response | not sealed: a bare status and a code that names no ticket (§ 3a "Settle ack") |
 
 The response headers a relay copies through are `X-Zs-Response-Key` (age-wrapped
 to the caller's ephemeral, so opaque without its private half) and the sealed
@@ -2233,7 +2293,7 @@ On receipt the relay:
 1. Validates `X-Zs-Relay-Path` against a **closed allow-list**:
    `/v1/chat/completions`, `/v1/responses`, `/v1/images/generations`,
    `/v1/images/edits`, `/v1/models`, `/v1/models/{id}`, `/v1/zs/reserve`,
-   `/v1/zs/details`, `/v1/zs/attestation`.
+   `/v1/zs/settle-ack` (since 9.12), `/v1/zs/details`, `/v1/zs/attestation`.
    - `/v1/zs/relay` itself is **not** allowed: relaying is single-hop, never
      chained.
    - A **query string** is split off before matching and forwarded to the
@@ -2292,11 +2352,14 @@ to resolve targets against and is unreachable in production anyway.
 
 With privacy mode on (the default; `privacy: false` / `PROXY_ZS_PRIVACY=false`
 opts out), **all** of a client's operator-bound HTTP traffic is relayed: the
-inference POST, `/v1/zs/reserve`, and the discovery GETs (`/v1/models`,
+inference POST, `/v1/zs/reserve`, the settle ack (`/v1/zs/settle-ack`, since
+9.12; § 3a "Settle ack"), and the discovery GETs (`/v1/models`,
 `/v1/models/{id}`, `/v1/zs/details`, `/v1/zs/attestation`). Direct discovery
 probes would re-expose the client's IP on a background cadence, so they ride a
 relay too. On-chain operator *enumeration* (algod box reads) is not an operator
-HTTP call and is not relayed.
+HTTP call and is not relayed. Neither are the payer's remaining algod calls
+(§ 3a "Settle ack", "Residual payer contact with algod"); since 9.12 the open
+and the settle ack are submitted by the node, not by the payer.
 
 The envelope, ticket, receipt, admission tag and AAD layout are **unchanged**:
 the request is sealed to the target's age key and admission-tag-bound to the
@@ -2390,9 +2453,11 @@ app pick identically.
     algod outage cannot empty the catalog. A failed read keeps the last known
     value: a node read as broke stays excluded until a read shows it refunded.
   - **Every signer is read, uniformly.** Never only the chosen target's, and
-    never at request time. The submitted `open()` group already names the node
-    to the algod provider, but a targeted read would add a signal ahead of it —
-    including for requests that never reach `open()` — so the read stays
+    never at request time. A targeted read would tell the payer's algod
+    provider which node the payer chose, including for requests that never
+    reach `open()`, and ahead of anything else that does (since 9.12 the payer
+    no longer submits the `open()` group; its later reads of the ticket box
+    still name the node, § 3a "Settle ack"). The read therefore stays
     demand-independent and adds no channel.
   - The floor doubles as the staleness budget. At ~7,000 µALGO of pooled fees
     per paid request, 5 ALGO covers ~700 requests between reads.
@@ -2760,11 +2825,12 @@ The envelope carries **nothing but ciphertext**. Everything the node needs rides
 | `reply_to_public_key` | inner header | string | The proxy's ephemeral X25519 public key in age's `age1...` bech32 format. The node uses it as the age recipient when wrapping the response symmetric key. The node checks it against the ticket's `proxy_recipient` (note below). |
 | `algorand_tx_id` | inner header | string | Txid of the request's escrow.open **app call** (gtxn[1] of the group; note below). The node **MUST** bind it into the AEAD AAD of every sealed response payload per § 6. It is **not** echoed in the response envelope. |
 | `ticket_id` | inner header | string | References a `Ticket` previously obtained from the node's reserve endpoint (§ 3a). AAD-bound alongside `algorand_tx_id` on every sealed response payload per § 6. Admission is always ticket-gated (the node rejects unadmitted POSTs), so every request carries one. |
+| `open_group` | inner header | string (optional, since 9.12) | The completed open group for the node to submit: base64 of a msgpack array of the two signed transactions, the payer-signed gtxn[0] then the node's own gtxn[1], in the same form as `presigned_open_txn` (§ 3a "Who submits the group"). gtxn[1]'s txid MUST equal `algorand_tx_id`. Absent means the caller submitted the group itself. Rides inside the seal because the group names the payer. |
 | `admission_tag` | inner header | string (optional) | base64 of `HMAC-SHA256(K_response, "zs-admission-v1\0" \|\| ticket_id \|\| \0 \|\| algorand_tx_id \|\| \0 \|\| sha256(body))`. Proves the sender holds `K_response`, delivered to the proxy at reserve time via `wrapped_response_key`. Required when `ticket_id` is present and the node enforces admission tagging; missing or mismatched → `402 admission_tag_invalid` (note below). |
 
 **`reply_to_public_key`.** The proxy reuses the identity it declared at reserve time as `proxy_recipient`, so one private key unwraps both `wrapped_response_key` (reserve) and `X-Zs-Response-Key` (response). **The node enforces this**: a value other than the ticket's `proxy_recipient` is rejected with `402 reply_to_mismatch`, before `Consume`.
 
-**`algorand_tx_id`.** The group is two transactions: the payer's usdcPayment (gtxn[0]) and the node-signed AppCall (gtxn[1]). The node pre-signs gtxn[1] and delivers it at reserve time as `presigned_open_txn` (§ 3a); the proxy signs gtxn[0] against it and submits the group atomically. The proxy puts gtxn[1]'s app-call txid in this field, and the node looks it up directly via algod's `PendingTransactionInformation`. The group id is NOT a valid lookup key, so the app-call txid is used; the proxy keeps the group id for audit only.
+**`algorand_tx_id`.** The group is two transactions: the payer's usdcPayment (gtxn[0]) and the node-signed AppCall (gtxn[1]). The node pre-signs gtxn[1] and delivers it at reserve time as `presigned_open_txn` (§ 3a); the proxy signs gtxn[0] against it and either hands the group over as `open_group` or submits it itself. The proxy puts gtxn[1]'s app-call txid in this field. With `open_group` the node checks the handed-over gtxn[1] against it; without, the node looks the txid up directly via algod's `PendingTransactionInformation`. The group id is NOT a valid lookup key, so the app-call txid is used; the proxy keeps the group id for audit only.
 
 **`admission_tag`.** The node verifies it before `Consume`, so a forged tag does not burn the ticket (§ 3a "Sealed request envelope").
 
@@ -2817,7 +2883,7 @@ Every prompt-carrying response is a sealed envelope. The proxy detects the strea
   - **Sealed under `K_response`** with `HeaderAAD(algorand_tx_id, ticket_id, "receipt")` (§ 6), because the receipt carries `ticket_id`, which resolves to `TicketRecord.payer` on chain.
   - Inside the seal the value is `base64(json)`. The canonical binary encoding exists only as signature input, never on the wire.
 - `X-Zs-Settle-Group: <base64(nonce || AEAD(base64(msgpack([op_first_half(SignedTxn), payer_ack(SignedTxn-with-empty-sig)]))))>`
-  - Present whenever the response carries a receipt and the node has algod connectivity. The proxy signs gtxn[1] in place and broadcasts atomically.
+  - Present whenever the response carries a receipt and the node has algod connectivity. The proxy signs gtxn[1] in place and hands the group back to the node (§ 3a "Settle ack"), or broadcasts it atomically itself for a pre-9.12 node.
   - **Sealed under `K_response`** with `HeaderAAD(algorand_tx_id, ticket_id, "settle-group")`, because the encoded group names the payer address outright: gtxn[1]'s sender, and both txns' `ForeignAccounts`. That these transactions later go on chain is no defense: a relay forwarding the response also holds the client's IP, and the chain does not.
   - Soft failure: if composition fails (e.g. algod unreachable, no operator signer), the header is omitted and the proxy falls through to its standalone-ack path. The receipt header is still delivered.
 
@@ -2841,7 +2907,7 @@ Proxy behavior:
 2. Parse the envelope.
 3. `chacha20poly1305.New(response_key).Open(nil, nonce, ciphertext, BodyAAD(tx_id, ticket_id))` → plaintext OpenAI response body. A response sealed under a different request's `tx_id` fails here (§ 10).
 4. Emit to the client with `Content-Type: application/json`, and without `X-Zs-Response-Key`, `X-Zs-Receipt` or `X-Zs-Settle-Group`.
-5. Open `X-Zs-Receipt` and `X-Zs-Settle-Group` (when present) under their `HeaderAAD` names, then decode. Validate that the receipt matches the inference body, then either broadcast the atomic settle group or fall through to a standalone ack-settle (§ 3a "Settlement windows"). A value that fails to open is treated as absent: the proxy degrades exactly as it does for a node that sent nothing.
+5. Open `X-Zs-Receipt` and `X-Zs-Settle-Group` (when present) under their `HeaderAAD` names, then decode. Validate that the receipt matches the inference body, then either ack the atomic settle group (§ 3a "Settle ack"; a broadcast for a pre-9.12 node) or fall through to a standalone ack-settle (§ 3a "Settlement windows"). A value that fails to open is treated as absent: the proxy degrades exactly as it does for a node that sent nothing.
 
 ### 5.3 Streaming encrypted response
 
@@ -2893,7 +2959,7 @@ data: <base64(nonce || ChaCha20-Poly1305(JSON UsageReceipt))>   [AAD = FrameAAD(
 
 | Event | Sealing / counter | When emitted | Required ordering | Consumer |
 |---|---|---|---|---|
-| `zs-settle-group` | Sealed under `K_response` with `HeaderAAD(tx_id, ticket_id, "settle-group")`; no `frame_index` consumed. | Once, after the final encrypted content frame and immediately before `zs-receipt`. Soft failure: the node MAY omit it on algod outage. | Before `zs-receipt`, before `[DONE]`. | Proxy AEAD-opens it under the header AAD and caches the decoded group; when the receipt arrives it signs gtxn[1] and broadcasts atomically. |
+| `zs-settle-group` | Sealed under `K_response` with `HeaderAAD(tx_id, ticket_id, "settle-group")`; no `frame_index` consumed. | Once, after the final encrypted content frame and immediately before `zs-receipt`. Soft failure: the node MAY omit it on algod outage. | Before `zs-receipt`, before `[DONE]`. | Proxy AEAD-opens it under the header AAD and caches the decoded group; when the receipt arrives it signs gtxn[1] and acks the group (§ 3a "Settle ack"), or broadcasts it atomically for a pre-9.12 node. |
 | `zs-receipt` | Sealed under `K_response`; consumes the next `frame_index`. | Once, after `zs-settle-group` (when emitted) and immediately before `[DONE]`. Always present on a successful streamed inference admitted via a ticket. | After `zs-settle-group` (when emitted), before `[DONE]`. | Proxy AEAD-opens at the current counter, parses the JSON receipt, and runs the § 3a verification + settle/protest. The raw receipt is never forwarded to the client. |
 
 The node MUST NOT emit either event before all encrypted content frames are flushed. Proxies parse the stream sequentially and treat these events as the signal that the inference body is complete. The proxy treats either event arriving mid-content as a protocol violation.
@@ -3099,11 +3165,11 @@ Numbered walkthrough from client submission to client response. Code names for e
 
 1. The client sends `POST /v1/chat/completions` with a normal OpenAI JSON body and `Content-Type: application/json`.
 2. The proxy reads the plaintext body. `"stream"` is `false` (or absent), so it takes the non-streaming path.
-3. The proxy already holds the reserved ticket from a prior `/v1/zs/reserve` round-trip (§ 3a), including the node-signed `presigned_open_txn` (gtxn[1]) and the unwrapped `K_response`. To produce `tx_id` it completes the open group: it signs gtxn[0] (usdcPayment, fee=0, sender=payer_addr) against the group hash already pinned into gtxn[1], submits the 2-tx group atomically, and uses gtxn[1]'s app-call txid as `tx_id`.
+3. The proxy already holds the reserved ticket from a prior `/v1/zs/reserve` round-trip (§ 3a), including the node-signed `presigned_open_txn` (gtxn[1]) and the unwrapped `K_response`. To produce `tx_id` it completes the open group: it signs gtxn[0] (usdcPayment, fee=0, sender=payer_addr) against the group hash already pinned into gtxn[1] and uses gtxn[1]'s app-call txid as `tx_id`. Against a ≥ 9.12 node it keeps the completed group for the inner header's `open_group`; against an older node it submits the 2-tx group atomically itself.
 4. The proxy resolves the node's age recipient.
 5. The proxy seals the request:
    - It generates an ephemeral X25519 identity, or reuses the one already held from reserve.
-   - It frames the inner request: `"zsrq" || 1 || uint32_be(len(headerJSON)) || headerJSON || body`, where `headerJSON` carries `reply_to_public_key`, `algorand_tx_id`, `ticket_id`, `admission_tag` (§ 4).
+   - It frames the inner request: `"zsrq" || 1 || uint32_be(len(headerJSON)) || headerJSON || body`, where `headerJSON` carries `reply_to_public_key`, `algorand_tx_id`, `ticket_id`, `admission_tag` and, when handing the open over, `open_group` (§ 4).
    - It age-encrypts the inner frame to the recipient → binary ciphertext bytes.
    - It builds the envelope `{ciphertext: base64(ct)}`, with nothing else.
    - It returns the envelope JSON and the ephemeral identity. The ephemeral identity lives only in the handler's stack/heap.
@@ -3113,10 +3179,10 @@ Numbered walkthrough from client submission to client response. Code names for e
    - It decrypts `ciphertext` with its in-memory ephemeral identity set: the current key, falling back to the previous key inside the decrypt-overlap window (§ 3c, § 8). There is no long-lived identity.
    - It decodes the inner-request frame → `body` plus the header's `reply_to_public_key`, `algorand_tx_id`, `ticket_id`, `admission_tag`. A frame without the `zsrq` magic is rejected here.
    - It parses `reply_to_public_key` as an age X25519 recipient.
-   - It verifies admission: ticket lookup, admission-tag verify, `Consume`, and the open app-call check (§ 9).
+   - It verifies admission: ticket lookup, admission-tag verify, `Consume`, and the open app-call check, then submits a handed-over `open_group` (§ 9).
    - It processes the OpenAI request against the real model.
    - It builds a node-signed `UsageReceipt` (§ 3a).
-   - It composes the atomic settle group: it pre-signs gtxn[0] (`asOperator=true`, fee=6×minTxnFee) against the unsigned gtxn[1] payer-ack template (sender = `t.payer`, fee=0, identical args). It computes `group[0].txid` and stamps it on the settlement-ledger row at `MarkServed`. Soft failure on algod outage: the settle group is omitted from the response, and the operator's settlement driver becomes the sole finalize path.
+   - It composes the atomic settle group: it pre-signs gtxn[0] (`asOperator=true`, fee=6×minTxnFee) against the unsigned gtxn[1] payer-ack template (sender = `t.payer`, fee=0, identical args). It computes both members' txids and stamps them on the settlement-ledger row at `MarkServed`, before the receipt goes out, since the settle ack is checked against gtxn[1]'s. Soft failure on algod outage: the settle group is omitted from the response, and the operator's settlement driver becomes the sole finalize path.
    - It reuses the `K_response` committed at reserve (the pre-committed K, not a fresh key).
    - It age-encrypts the raw 32 bytes to the `reply_to_public_key` recipient → wrapped_key bytes.
    - It seals the plaintext response body with ChaCha20-Poly1305 under `response_key`, with a random 12-byte nonce and AAD = `BodyAAD(tx_id, ticket_id)` (§ 6) → `ct_with_tag`.
@@ -3127,7 +3193,7 @@ Numbered walkthrough from client submission to client response. Code names for e
    - It rebuilds `BodyAAD(tx_id, ticket_id)` and AEAD-opens the body → plaintext OpenAI response. A response sealed under a different request's `tx_id` fails the open.
    - It opens `X-Zs-Receipt` and `X-Zs-Settle-Group` (when present) under their `HeaderAAD` names, decodes them, verifies the receipt's commit-K and body-hash, and records the spend.
    - It sets `Content-Type: application/json`, strips all `X-Zs-*` headers, copies the other upstream headers, and writes the plaintext to the client.
-   - Only then, in the background, it submits the settle: if the receipt checked out, it signs gtxn[1] of the settle group and broadcasts the atomic group. Without a settle group it falls through to the operator's settlement driver (no proxy-side settle action). The client never waits on this algod round-trip.
+   - Only then, in the background, it acks the settle: if the receipt checked out, it signs gtxn[1] of the settle group and sends the completed group to the node's `/v1/zs/settle-ack` (§ 3a "Settle ack"), or broadcasts it itself for a pre-9.12 node. Without a settle group it falls through to the operator's settlement driver (no proxy-side settle action). The client never waits on this round-trip.
 10. The client receives what looks like a normal OpenAI response.
 11. The handler returns. The ephemeral identity and `response_key` go out of scope.
 
@@ -3135,14 +3201,15 @@ Numbered walkthrough from client submission to client response. Code names for e
 - The response detection of step 9 runs in the frame factory instead. The response key is unwrapped once, when the upstream headers arrive, and the proxy initializes `frame_index = 0`.
 - Each subsequent SSE frame either passes through (no `event: zs`; `frame_index` unchanged) or is AEAD-opened with `response_key` and AAD = `FrameAAD(tx_id, ticket_id, frame_index)`, after which `frame_index` is incremented.
 - After the final encrypted content frame the node emits `event: zs-settle-group` (when present; sealed under `HeaderAAD`, no counter change), then the **sealed** `event: zs-receipt` frame at the next `frame_index` (§ 5.3 "Out-of-band settlement event types").
-- The proxy caches the group, AEAD-opens and verifies the receipt, and submits the atomic settle group inline when the receipt frame arrives, then forwards the trailing `[DONE]` to the client.
+- The proxy caches the group, AEAD-opens and verifies the receipt, and acks the atomic settle group inline when the receipt frame arrives (the same route as step 9), then forwards the trailing `[DONE]` to the client.
 
 **Reference** (Go names, by step):
 - 2: `streamableRequest`. 4: `s.recipientProvider.Recipient(ctx)` → `age.Recipient`.
-- 5: `wire.WrapRequest(body, tx_id, ticket_id, admission_tag, recipient)`, or `WrapRequestWithIdentity(...)` when reusing the reserve-time identity; `age.GenerateX25519Identity()`; `age.Encrypt(w, recipient)`; `RequestEnvelope`.
+- 3: `Wallet.OpenForNode` (hand-over) or `Wallet.Open` (payer submits), chosen by `wire.SubmitsOpen`.
+- 5: `wire.WrapRequest(body, tx_id, ticket_id, admission_tag, recipient)`, or `WrapRequestBound(...)` when reusing the reserve-time identity and carrying `open_group`; `age.GenerateX25519Identity()`; `age.Encrypt(w, recipient)`; `RequestEnvelope`.
 - 6–7: `forwardRawNonStream`; the base URL is `op.BaseURL`; `buildOperatorRequest` drops `Authorization`.
 - 8: `age.ParseX25519Recipient`; `VerifyOpenAppCall`; `ticket.UsageReceipt`; the settle txid via `crypto.GetTxID`; the committed key is `rc.admitted.Key`.
-- 9: `wire.UnwrapResponseKey(hdr, ephemeral)`; `wire.DecryptBody(respBody, response_key, tx_id, ticket_id)`; `wire.OpenSealedHeader`; `Wallet.AckSettle` signs and broadcasts, run after the write by `submitAfterResponse`.
+- 9: `wire.UnwrapResponseKey(hdr, ephemeral)`; `wire.DecryptBody(respBody, response_key, tx_id, ticket_id)`; `wire.OpenSealedHeader`; `Wallet.AckSettle` signs and hands the group to the node (`settleAckPoster`) or broadcasts it, run after the write by `submitAfterResponse`.
 
 ## 8. Security properties
 
@@ -3179,12 +3246,19 @@ What the scheme does **not** guarantee:
 
 The 2-tx atomic open group is **co-composed**:
 - The serving node's signing key signs gtxn[1] (the `escrow.open()` AppCall) at reserve time and delivers it to the proxy as `presigned_open_txn`.
-- The proxy signs gtxn[0] (`usdcPayment` AssetTransfer, sender = `payer_addr`) at request time and broadcasts the assembled group.
+- The proxy signs gtxn[0] (`usdcPayment` AssetTransfer, sender = `payer_addr`) at request time. Against a ≥ 9.12 node it hands the assembled group to the node as `open_group` (§ 4); against an older node it broadcasts the group itself.
 - There is no feePayment leg; the box MBR is drawn from the payer's prepaid pool at `open()`.
 
-The proxy places gtxn[1]'s app-call txid in the envelope's `algorand_tx_id` field, and the node resolves it with a targeted per-txid lookup (`algod.PendingTransactionInformation(txid)`). Group id is **not** used as the lookup key because algod has no "find pending txn by group id" primitive; the proxy keeps it for audit/dispute logging only.
+The proxy places gtxn[1]'s app-call txid in the envelope's `algorand_tx_id` field. How the node finds the app call depends on who submits:
+- **Handed over (`open_group` present).** The node decodes the group and requires gtxn[1]'s txid to equal `algorand_tx_id`. It runs the app-call check below on that gtxn[1], and only then submits the group to its own algod. A node therefore never broadcasts an open it would refuse. algod evaluates the contract's TEAL before it accepts a group into its pool, so a clean submit is the same evidence the pool lookup waits for, and the node admits on it without polling. The node interprets the submit result as follows:
+  - **Contract or pool rejection** (an approval-program revert, a prepaid-pool shortfall, insufficient USDC). The node refuses with `402 payment_verification_failed`, naming only the failure category: algod's text names the payer and its balances. The ticket is burned, as for any payment failure. A payer that sees this refusal after handing the group over re-checks its prepaid-pool deposit before its next open.
+  - **Any other `400`.** algod also answers `400` to a group already in its pool, which an algod client produces when it retries a submit whose first answer was lost, as does a payer that also broadcast the group. The node therefore looks the txid up once and admits if the pool holds it cleanly.
+  - **Neither a `400` nor a clean answer** (a timeout, a `5xx`). The group may have been accepted before the failure, so the node falls back to the pool lookup below with its whole window.
+- **Payer-submitted (no `open_group`).** The node resolves the txid with a targeted per-txid lookup (`algod.PendingTransactionInformation(txid)`), polling until the app call lands in the pool or its window closes. Group id is **not** used as the lookup key because algod has no "find pending txn by group id" primitive; the proxy keeps it for audit/dispute logging only.
 
-On admission success the node verifies the pending app call, checking that:
+Pool acceptance is not confirmation on either path. A conflicting spend can still displace the group before a block, so the open-confirmation watchdog (§ 10 "`open_unconfirmed`") runs either way.
+
+On admission success the node verifies the app call, checking that:
 
 - `Txn.sender == node_signing` (the serving node's hot key, consensus-verified; § 3a "Operator authentication");
 - the ABI args `(ticketId, operatorId, nodeId, payerAddr, maxPrice)` match the ticket the proxy is admitting against. `expiresAt` and `settlementGraceSeconds` are **not** re-checked: the node composed and signed this very txn at reserve time, so those args are node-authored and consensus covers them on-chain. There is no `commitK` ABI arg at all; the commitment lives only in the signed ticket (§ 3a "Why the response key is committed, not chosen");
@@ -3203,13 +3277,13 @@ Refund recovery depends on the window pin: it is what makes the payer's computed
 
 The payment sibling is **not** re-verified on the node. Algod only admits an `open()` to the mempool after evaluating the contract's TEAL, which already gates gtxn[0] (AssetTransfer, asset_receiver == app address, xfer_asset == `usdcAssetId`, asset_amount == `max_price`, fee == 0, no rekey_to / asset_close_to / asset_sender) and the prepaid-pool draw (`open()` asserts the payer is opted in with sufficient `algoBalance`, then `openTickets++`). The per-ticket box MBR is not a payment leg; it is reserved against the payer's pool.
 
-**Settle-side txids.** At compose time the node also computes the on-chain txid of gtxn[0] of the atomic settle group (the operator's first half). The txid is the hash of the canonical, sig-stripped txn body, so the signature does not affect it and the txn lands under this txid whoever broadcasts it. The node stamps it on the settlement ledger row at `MarkServed`, so the row carries the on-chain reference even when the proxy, not the operator's settlement driver, submitted finalize. Computing the txid correctly requires the algod genesis ID and genesis hash on the txn; both are static per network and cached on the node's escrow client.
+**Settle-side txids.** At compose time the node also computes the on-chain txid of gtxn[0] of the atomic settle group (the operator's first half). The txid is the hash of the canonical, sig-stripped txn body, so the signature does not affect it and the txn lands under this txid whoever broadcasts it. The node stamps it, and gtxn[1]'s txid beside it, on the settlement ledger row at `MarkServed`, so the row carries the on-chain reference even when the proxy, not the operator's settlement driver, submitted finalize. Computing the txid correctly requires the algod genesis ID and genesis hash on the txn; both are static per network and cached on the node's escrow client.
 
 **Init precondition.** The escrow app account MUST have been opted into the configured `usdcAssetId` via the contract's `init()` method before any `open()` group is admitted. This is one-shot per deploy and handled by the bootstrap CLI; node and proxy callers do not need to retry against it. The payer wallet MUST also be opted into the same USDC asset before issuing requests, since algod rejects asset-transfer txns from non-opted-in senders at admission time.
 
 The field is cryptographically bound into AEAD AAD per § 6. It is not echoed on the response: a response sealed under a different request's `algorand_tx_id` fails to AEAD-open at the proxy, which is the same rejection an echo check gave, with one fewer identifier on the wire.
 
-Reference: the node's app-call check is `proto/go/escrow.VerifyOpenAppCall`; the payer's pre-sign check is `proto/go/escrow.VerifyOpenGroup` (`SubmitPresignedOpenGroup` takes the spec and refuses first); settle txids use `crypto.GetTxID(SignedTxn)`.
+Reference: the node's app-call check is `proto/go/escrow.VerifyOpenAppCall`, and it submits a handed-over group with `escrow.SubmitOpenGroup`; the payer's pre-sign check is `proto/go/escrow.VerifyOpenGroup` (`CompletePresignedOpenGroup` and `SubmitPresignedOpenGroup` take the spec and refuse first); settle txids use `crypto.GetTxID(SignedTxn)`.
 
 **Invariant:** the value is a 52-character base32 string (no padding). Implementations MUST treat it as opaque at the wire level.
 
@@ -3359,7 +3433,7 @@ puts it in the same differential path rather than a new one.
 | Sealed request with unknown/expired/consumed `ticket_id` | 402 `invalid_request_error`, `ticket_invalid` | Ticket expired before payment arrived, or replay detected — obtain a fresh ticket. |
 | Sealed request whose inner-header `reply_to_public_key` is not the ticket's reserve-time `proxy_recipient` | 402 `invalid_request_error`, `reply_to_mismatch` | Caller must reuse the reserve-time ephemeral identity as the envelope's reply-to (§ 4). Checked before `Consume`, so the ticket survives — re-send with the correct identity. |
 | Sealed request whose body `model` differs from the ticket's reserved model | 400 `invalid_request_error`, `model_mismatch` | Sealed, with a zero-cost receipt, so the escrow settles at zero. Reserve for the model you intend to call — the ticket's model, not the body's, determines the rates and limits. |
-| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), or ABI args ≠ ticket) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. The error is plaintext and passes back through any relay, so its message MUST name only the failure class: never the `algorand_tx_id`, the `ticket_id` or an address, any of which lets the relay find the `open()` on-chain and tie the caller's IP to the payer (§ 3f). |
+| Sealed request whose on-chain payment verification failed at admission (algod lookup error, txn not found in the pool within the node's poll window, txn already rejected by the pool (`pool-error` set), ABI args ≠ ticket, or, since 9.12, a handed-over `open_group` that does not match `algorand_tx_id` or that algod rejected on submit) | 402 `invalid_request_error`, `payment_verification_failed` | The ticket was consumed before verification ran and is **burned** (§ 3a "Payment-verification failure burns the ticket"). **Re-reserve**; never resubmit the same `ticket_id`, which now fails as `ticket_invalid`. If the `open()` group did confirm on-chain, the payer recovers the escrowed `max_price` via `refundInactive` after `expires_at + grace`; the reference proxy's refund watchdog automates this. The error is plaintext and passes back through any relay, so its message MUST name only the failure class: never the `algorand_tx_id`, the `ticket_id` or an address, any of which lets the relay find the `open()` on-chain and tie the caller's IP to the payer (§ 3f). |
 | Second `escrow.settle` call from the same side as the pending claim, with args that differ from it | On-chain revert `same side cannot re-claim with different args` | Caller-logic bug: only the counterparty of the pending claim can answer it with different args. A same-side re-claim with byte-for-byte matching args is a no-op (§ 3a "Settlement windows"). See "Settle outcomes" below. |
 | Second `escrow.settle` call from the counterparty, with args that differ from the pending claim | No revert; the ticket transitions to `STATUS_FROZEN` | The counterparty disagreed with the first side's claim. It proceeds to off-chain arbitration, and the first claim stays on-chain as the disputed reference. |
 | `escrow.settle` broadcast after `ticket.expires_at + ticket.settlement_grace_seconds` (both unix seconds) | On-chain revert `settle after refund deadline` | Neither party acked in time. The operator force-finalizes a pending operator claim via `escrow.settleLapsed`; the payer recovers funds via `escrow.refundInactive` when no operator claim is pending. |
@@ -3437,9 +3511,9 @@ block production drops the group. It is detected in one of two ways:
 
 ## 11. Versioning
 
-Version negotiation occurs at discovery, as defined in § 3c “Protocol version negotiation”; the current `proto_version` is `"9.11"`. The envelope has no inline version field. Peers with the same major remain compatible, while capabilities introduced by a minor version are used only when their specific version gate passes. An absent or unparseable version never implies capability support.
+Version negotiation occurs at discovery, as defined in § 3c “Protocol version negotiation”; the current `proto_version` is `"9.12"`. The envelope has no inline version field. Peers with the same major remain compatible, while capabilities introduced by a minor version are used only when their specific version gate passes. An absent or unparseable version never implies capability support.
 
-Minor versions are additive and need not introduce a gate. For example, 9.3 added long-context pricing fields, 9.4 added built-in-tool `action` fields (§ 5.3.1), 9.5 added the `dstack-tdx` attestation mode with its `event_log` / `posture` evidence fields (§ 3e), 9.6 added the `app_compose` preimage beside them, 9.7 added the optional `collateral` set beside that, 9.8 added the optional `upstream_attestation` block, and 9.11 changed when a node refuses an over-budget prompt at the context ceiling (§ 3a; gate `wire.DefersFitToUpstream`), all of which older peers can ignore. 9.9 and 9.10 are the exceptions: 9.8 and 9.9 verifiers refuse each other's dstack-tdx nodes, as do 9.9 and 9.10 (§ 3e, verifier step 6). Within a compatible major, implementations are otherwise expected to track the same revision of this spec.
+Minor versions are additive and need not introduce a gate. For example, 9.3 added long-context pricing fields, 9.4 added built-in-tool `action` fields (§ 5.3.1), 9.5 added the `dstack-tdx` attestation mode with its `event_log` / `posture` evidence fields (§ 3e), 9.6 added the `app_compose` preimage beside them, 9.7 added the optional `collateral` set beside that, 9.8 added the optional `upstream_attestation` block, and 9.11 changed when a node refuses an over-budget prompt at the context ceiling (§ 3a; gate `wire.DefersFitToUpstream`), all of which older peers can ignore. 9.12 moved the open and settle submissions to the node (`open_group`, § 4; `/v1/zs/settle-ack`, § 3a); a payer uses either only against a node advertising 9.12 (`wire.SubmitsOpen`, `wire.TakesSettleAck`) and otherwise submits both itself. 9.9 and 9.10 are the exceptions: 9.8 and 9.9 verifiers refuse each other's dstack-tdx nodes, as do 9.9 and 9.10 (§ 3e, verifier step 6). Within a compatible major, implementations are otherwise expected to track the same revision of this spec.
 
 **Before stability.** The wire shape is not frozen. Incompatible changes may be made in place while the protocol remains in active development.
 

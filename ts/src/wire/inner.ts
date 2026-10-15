@@ -36,6 +36,9 @@ export interface InnerRequestHeader {
     algorand_tx_id: string
     ticket_id?: string
     admission_tag?: string
+    // The payer-completed open() group for a node that submits it itself
+    // (submitsOpen). Mirrors Go's innerRequestHeader.OpenGroup.
+    open_group?: string
 }
 
 export function encodeInnerRequest(header: InnerRequestHeader, body: Uint8Array): Uint8Array {

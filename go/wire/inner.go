@@ -49,6 +49,10 @@ type innerRequestHeader struct {
 	AlgorandTxID     string `json:"algorand_tx_id"`
 	TicketID         string `json:"ticket_id,omitempty"`
 	AdmissionTag     string `json:"admission_tag,omitempty"`
+	// OpenGroup is the payer-completed open() group (escrow.EncodeOpenGroup)
+	// for a node that submits it itself (SubmitsOpen). Sealed for the same
+	// reason as the rest: the group names the payer.
+	OpenGroup string `json:"open_group,omitempty"`
 }
 
 // encodeInnerRequest builds the frame. body is appended verbatim.

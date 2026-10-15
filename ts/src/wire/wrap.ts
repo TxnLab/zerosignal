@@ -46,6 +46,10 @@ export interface WrapRequestArgs {
     // before computing the admission tag). Omit to have wrapRequest
     // generate one internally.
     ephemeral?: EphemeralIdentity
+    // The payer-completed open() group (base64 msgpack, the form Go's
+    // escrow.EncodeOpenGroup writes), set only for a node that submits the
+    // open itself (submitsOpen). Omit when the payer submitted it.
+    openGroup?: string
 }
 
 export interface WrapRequestResult {
@@ -71,6 +75,9 @@ export async function wrapRequest(args: WrapRequestArgs): Promise<WrapRequestRes
     }
     if (args.admissionTag && args.admissionTag.length > 0) {
         header.admission_tag = base64.encode(args.admissionTag)
+    }
+    if (args.openGroup) {
+        header.open_group = args.openGroup
     }
 
     const e = new age.Encrypter()

@@ -68,6 +68,7 @@ func TestIsAllowedInnerPath(t *testing.T) {
 		"/v1/models",
 		"/v1/models/gpt-4.1-mini",
 		"/v1/zs/reserve",
+		"/v1/zs/settle-ack", // without it a relayed ack fails, and a failed ack is never broadcast
 		"/v1/zs/details",
 		"/v1/zs/attestation",
 		// Per-model deep details probe (SPEC §3c): a query string scopes the

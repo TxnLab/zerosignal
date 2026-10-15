@@ -15,7 +15,7 @@
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-export const PROTO_VERSION = '9.11' as const
+export const PROTO_VERSION = '9.12' as const
 
 // LEGACY_PROTO_VERSION is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -188,6 +188,27 @@ export const UPSTREAM_FIT_VERDICT_MIN_VERSION = '9.11' as const
  */
 export function defersFitToUpstream(protoVersion: string | undefined | null): boolean {
     return protoVersionAtLeast(protoVersion, UPSTREAM_FIT_VERDICT_MIN_VERSION)
+}
+
+/**
+ * The first PROTO_VERSION at which a node accepts the payer-completed open
+ * group inside the sealed request (`open_group`) and submits it to its own
+ * algod, instead of finding an open the payer submitted.
+ */
+export const NODE_SUBMITS_OPEN_MIN_VERSION = '9.12' as const
+
+/**
+ * Whether a target advertising `protoVersion` takes the open group in the
+ * sealed request rather than expecting the payer to submit it. Mirrors Go's
+ * `wire.SubmitsOpen`.
+ *
+ * Handing an older node the group and not submitting it loses the turn: that
+ * node ignores the field and times out waiting for an open nobody sent.
+ * Submitting it ourselves to a new node costs only the privacy this gate buys.
+ * So it fails closed via protoVersionAtLeast, and the payer submits.
+ */
+export function submitsOpen(protoVersion: string | undefined | null): boolean {
+    return protoVersionAtLeast(protoVersion, NODE_SUBMITS_OPEN_MIN_VERSION)
 }
 
 /**

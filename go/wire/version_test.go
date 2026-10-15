@@ -189,6 +189,28 @@ func TestDefersFitToUpstream(t *testing.T) {
 	}
 }
 
+// The 9.12 hand-off gates, in literals: a test against the constants would
+// follow them anywhere, and moving either past 9.12 would keep this build's
+// own nodes on the payer-submits path.
+func TestNodeSubmitGates(t *testing.T) {
+	for _, gate := range []struct {
+		name string
+		f    func(string) bool
+	}{{"SubmitsOpen", SubmitsOpen}, {"TakesSettleAck", TakesSettleAck}} {
+		for _, tc := range []struct {
+			version string
+			want    bool
+		}{{"9.12", true}, {"9.13", true}, {"10.0", true}, {"9.11", false}, {"9.2", false}, {"", false}, {"garbage", false}} {
+			if got := gate.f(tc.version); got != tc.want {
+				t.Errorf("%s(%q) = %v, want %v", gate.name, tc.version, got, tc.want)
+			}
+		}
+		if !gate.f(ProtoVersion) {
+			t.Errorf("%s(ProtoVersion=%q) = false: this build's own nodes would not take the hand-off", gate.name, ProtoVersion)
+		}
+	}
+}
+
 // TestAppComposeGateCoversThisBuild pins the gate to the constant it
 // gates on. A hand-typed min-version that drifted BELOW ProtoVersion
 // would be inert (everything current passes) and one ABOVE it would

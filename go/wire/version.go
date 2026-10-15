@@ -27,7 +27,7 @@ import (
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-const ProtoVersion = "9.11"
+const ProtoVersion = "9.12"
 
 // LegacyProtoVersion is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -240,6 +240,25 @@ const UpstreamFitVerdictMinVersion = "9.11"
 // the old behaviour.
 func DefersFitToUpstream(protoVersion string) bool {
 	return ProtoVersionAtLeast(protoVersion, UpstreamFitVerdictMinVersion)
+}
+
+// NodeSubmitsOpenMinVersion is the first ProtoVersion at which a node accepts
+// the payer-completed open group inside the sealed request (open_group) and
+// submits it to its own algod, instead of finding an open the payer submitted.
+const NodeSubmitsOpenMinVersion = "9.12"
+
+// SubmitsOpen reports whether a target advertising protoVersion takes the
+// open group in the sealed request rather than expecting the payer to submit
+// it.
+//
+// The asymmetry decides the fail-closed direction. Handing an older node the
+// group and not submitting it loses the turn: that node ignores the field and
+// times out waiting for an open nobody sent. Submitting it ourselves to a new
+// node costs only the privacy this gate exists to buy. So an empty,
+// unparseable or bootstrap-seeded version returns false, and the payer
+// submits.
+func SubmitsOpen(protoVersion string) bool {
+	return ProtoVersionAtLeast(protoVersion, NodeSubmitsOpenMinVersion)
 }
 
 // AppComposeMinVersion is the first ProtoVersion at which a dstack-tdx

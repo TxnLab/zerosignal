@@ -32,6 +32,9 @@ export interface DecryptedRequest {
     // when omitted. Verifying the tag against HMAC(K_response, ...) is
     // the node's job — this type just decodes the wire bytes.
     admissionTag?: Uint8Array
+    // The inner header's open_group, opaque at this layer; '' when the payer
+    // submitted the open itself.
+    openGroup: string
 }
 
 // decryptRequest parses a RequestEnvelope, age-decrypts the ciphertext
@@ -81,6 +84,7 @@ export async function decryptRequest(
         algorandTxID: header.algorand_tx_id,
         ticketID: header.ticket_id ?? '',
         admissionTag,
+        openGroup: header.open_group ?? '',
     }
 }
 
