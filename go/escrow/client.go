@@ -919,6 +919,10 @@ type OpenResult struct {
 	// proxy can report only payer-paid fees to its callers (the TUI)
 	// without leaking operator-paid fees as if the payer paid them.
 	PayerFeeMicroalgos uint64
+	// Encoded is SignedGroup in EncodeOpenGroup's wire form. It is what a payer
+	// hands a node that submits the open itself (wire.SubmitsOpen), and what
+	// that node decodes with DecodeOpenGroup and passes to SubmitOpenGroup.
+	Encoded string
 }
 
 // The HAY fee discount is retired. open() snapshots discountBps as 0 and makes
@@ -1301,11 +1305,76 @@ func DecodeOpenGroup(b64 string) ([]types.SignedTxn, error) {
 	return group, nil
 }
 
-// SubmitPresignedOpenGroup is the proxy-side completer/submitter.
-// Takes the 2-tx group from the reserve response (gtxn[0] = usdcPayment
-// has empty Sig, gtxn[1] = open() AppCall is operator-signed), verifies
-// it against spec, signs gtxn[0] with the payer's signer, and
-// broadcasts to algod.
+// SubmitPresignedOpenGroup is the proxy-side completer/submitter for a node
+// older than wire.NodeSubmitsOpenMinVersion: CompletePresignedOpenGroup, then
+// a broadcast from the payer's own algod connection.
+func (c *Client) SubmitPresignedOpenGroup(
+	ctx context.Context,
+	group []types.SignedTxn,
+	payerSigner transaction.TransactionSigner,
+	spec OpenGroupSpec,
+) (OpenResult, error) {
+	res, err := c.CompletePresignedOpenGroup(group, payerSigner, spec)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	combined := make([]byte, 0, len(res.SignedGroup[0])+len(res.SignedGroup[1]))
+	combined = append(combined, res.SignedGroup[0]...)
+	combined = append(combined, res.SignedGroup[1]...)
+	if _, err := c.Algod.SendRawTransactionGroup(ctx, combined); err != nil {
+		// Same treatment the single-txn calls get: algod hands back only
+		// "assert failed pc=NNN", so without the ARC-56 source-map lookup the
+		// proxy has no way to tell an MBR-pool revert (retryable, points at
+		// zs.concurrent_slots) from any other open() failure.
+		return OpenResult{}, enrichSubmitError("open", err)
+	}
+	return res, nil
+}
+
+// SubmitOpenGroup is the node-side broadcast of a payer-completed open group
+// (DecodeOpenGroup of OpenResult.Encoded). The node submitting is what keeps
+// the payer's IP away from every algod on the happy path: the group names the
+// payer, so whoever sends it links the sender's IP to that address.
+//
+// The caller verifies group[1] against the ticket first (VerifyOpenAppCall);
+// algod then checks both signatures and runs the contract, so the payer's
+// half needs no node-side check beyond the group id the node signed into
+// gtxn[1]. A revert comes back enriched like every other submit path.
+func SubmitOpenGroup(ctx context.Context, algod protoalgod.Client, group []types.SignedTxn) error {
+	if len(group) != 2 {
+		return fmt.Errorf("escrow: open group must have 2 txns (got %d)", len(group))
+	}
+	var combined []byte
+	for _, stx := range group {
+		combined = append(combined, msgpack.Encode(stx)...)
+	}
+	if _, err := algod.SendRawTransactionGroup(ctx, combined); err != nil {
+		return enrichSubmitError("open", err)
+	}
+	return nil
+}
+
+// SubmitSettleGroup is the node-side broadcast of a payer-completed atomic
+// settle group (DecodeSettleGroup of a settle ack), for the same reason as
+// SubmitOpenGroup. The caller matches the group to the one it composed; a
+// revert comes back as an *ApprovalError whose Message is the contract's
+// assert text, which names no account.
+func SubmitSettleGroup(ctx context.Context, algod protoalgod.Client, group []types.SignedTxn) error {
+	if len(group) != 2 {
+		return fmt.Errorf("escrow: settle group must have 2 txns (got %d)", len(group))
+	}
+	combined := append(msgpack.Encode(group[0]), msgpack.Encode(group[1])...)
+	if _, err := algod.SendRawTransactionGroup(ctx, combined); err != nil {
+		return enrichSubmitError("settle", err)
+	}
+	return nil
+}
+
+// CompletePresignedOpenGroup takes the 2-tx group from the reserve response
+// (gtxn[0] = usdcPayment has empty Sig, gtxn[1] = open() AppCall is
+// operator-signed), verifies it against spec, and signs gtxn[0] with the
+// payer's signer. It submits nothing: the caller either broadcasts the result
+// (SubmitPresignedOpenGroup) or hands OpenResult.Encoded to the node.
 //
 // The VerifyOpenGroup run against spec happens BEFORE the payer signs
 // anything. This is the payer's only defense on this path: the entire
@@ -1313,12 +1382,11 @@ func DecodeOpenGroup(b64 string) ([]types.SignedTxn, error) {
 // composed by the counterparty node, so without this check a hostile
 // reserve response could hand the payer an arbitrary asset transfer
 // (any amount, any receiver) grouped with an arbitrary app call, and
-// the payer would blind-sign and broadcast it. The spec pins every
+// the payer would blind-sign it. The spec pins every
 // field to the signature-verified ticket (ids, max_price, payer,
 // expiry) plus the caller's own chain config (app id/address, USDC
 // asset) and settlementGraceSeconds (0 from reference callers).
-func (c *Client) SubmitPresignedOpenGroup(
-	ctx context.Context,
+func (c *Client) CompletePresignedOpenGroup(
 	group []types.SignedTxn,
 	payerSigner transaction.TransactionSigner,
 	spec OpenGroupSpec,
@@ -1351,18 +1419,9 @@ func (c *Client) SubmitPresignedOpenGroup(
 	if groupDigest == (types.Digest{}) {
 		return OpenResult{}, fmt.Errorf("escrow: open group missing group id")
 	}
-
-	combined := make([]byte, 0, len(payerSignedBytes[0])+len(appCallEncoded))
-	combined = append(combined, payerSignedBytes[0]...)
-	combined = append(combined, appCallEncoded...)
-
-	txid, err := c.Algod.SendRawTransactionGroup(ctx, combined)
+	encoded, err := EncodeOpenGroup(finalGroup)
 	if err != nil {
-		// Same treatment the single-txn calls get: algod hands back only
-		// "assert failed pc=NNN", so without the ARC-56 source-map lookup the
-		// proxy has no way to tell an MBR-pool revert (retryable, points at
-		// zs.concurrent_slots) from any other open() failure.
-		return OpenResult{}, enrichSubmitError("open", err)
+		return OpenResult{}, err
 	}
 
 	// totalFee is the whole group's committed fee (operator's gtxn[1]
@@ -1379,16 +1438,14 @@ func (c *Client) SubmitPresignedOpenGroup(
 	}
 	signedRaw := [][]byte{payerSignedBytes[0], appCallEncoded}
 
-	// Submit returns one txid, but each member of an Algorand group
-	// has its own txid. Recompute the per-member txids from the
-	// canonical txn bytes so callers (the proxy) can thread
-	// txids[1] (the AppCall) into the envelope's algorand_tx_id —
-	// matching what ComposeOpen returns.
+	// Each member of an Algorand group has its own txid, computed from the
+	// canonical txn bytes, so callers (the proxy) can thread txids[1] (the
+	// AppCall) into the envelope's algorand_tx_id before anything is
+	// broadcast — matching what ComposeOpen returns.
 	txids := make([]string, 2)
 	for i := range finalGroup {
 		txids[i] = crypto.GetTxID(finalGroup[i].Txn)
 	}
-	_ = txid // SendRawTransactionGroup returns the first txn's txid; we use the canonical per-member ids instead
 
 	return OpenResult{
 		GroupID:            base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(groupDigest[:]),
@@ -1397,6 +1454,7 @@ func (c *Client) SubmitPresignedOpenGroup(
 		TxIDs:              txids,
 		TotalFeeMicroalgos: totalFee,
 		PayerFeeMicroalgos: payerFee,
+		Encoded:            encoded,
 	}, nil
 }
 
@@ -1609,25 +1667,11 @@ func (c *Client) SubmitPresignedSettleGroup(
 	payerSigner transaction.TransactionSigner,
 	spec SettleGroupSpec,
 ) (CallResult, error) {
-	// Fail closed before any signature touches the wire. VerifySettleGroup
-	// also enforces the group-size==2 invariant the rest of this function
-	// relies on.
-	if err := VerifySettleGroup(group, spec); err != nil {
+	res, _, err := c.CompletePresignedSettleGroup(group, payerSigner, spec)
+	if err != nil {
 		return CallResult{}, err
 	}
-
-	txns := []types.Transaction{group[0].Txn, group[1].Txn}
-	payerSignedBytes, err := payerSigner.SignTransactions(txns, []int{1})
-	if err != nil {
-		return CallResult{}, fmt.Errorf("escrow: sign payer ack: %w", err)
-	}
-
-	opCallEncoded := msgpack.Encode(group[0])
-
-	combined := make([]byte, 0, len(opCallEncoded)+len(payerSignedBytes[0]))
-	combined = append(combined, opCallEncoded...)
-	combined = append(combined, payerSignedBytes[0]...)
-
+	combined := append(msgpack.Encode(group[0]), res.SignedTxn...)
 	if _, err := c.Algod.SendRawTransactionGroup(ctx, combined); err != nil {
 		// Enriched like every other submit path: a settle group can revert on
 		// ticket-not-found / after-refund-deadline / not-settleable, the three
@@ -1635,6 +1679,32 @@ func (c *Client) SubmitPresignedSettleGroup(
 		// carries only the PC, so without the source-map lookup none of them
 		// is recognizable here either.
 		return CallResult{}, enrichSubmitError("settle", err)
+	}
+	return res, nil
+}
+
+// CompletePresignedSettleGroup is SubmitPresignedSettleGroup without the
+// broadcast: it verifies the group against spec and signs the payer-ack
+// member. It returns the same result, plus the completed group in
+// EncodeSettleGroup's form for a node that submits it (wire.SettleAck).
+func (c *Client) CompletePresignedSettleGroup(group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec SettleGroupSpec) (CallResult, string, error) {
+	// Fail closed before any signature exists. VerifySettleGroup also
+	// enforces the group-size==2 invariant the rest of this function relies on.
+	if err := VerifySettleGroup(group, spec); err != nil {
+		return CallResult{}, "", err
+	}
+	txns := []types.Transaction{group[0].Txn, group[1].Txn}
+	payerSignedBytes, err := payerSigner.SignTransactions(txns, []int{1})
+	if err != nil {
+		return CallResult{}, "", fmt.Errorf("escrow: sign payer ack: %w", err)
+	}
+	completed := []types.SignedTxn{group[0], {}}
+	if err := msgpack.Decode(payerSignedBytes[0], &completed[1]); err != nil {
+		return CallResult{}, "", fmt.Errorf("escrow: decode payer-signed ack: %w", err)
+	}
+	encoded, err := EncodeSettleGroup(completed)
+	if err != nil {
+		return CallResult{}, "", err
 	}
 
 	// totalFee is the whole group's committed fee — operator's gtxn[0]
@@ -1657,7 +1727,7 @@ func (c *Client) SubmitPresignedSettleGroup(
 		SignedTxn:          signedAck,
 		FeeMicroalgos:      totalFee,
 		PayerFeeMicroalgos: payerFee,
-	}, nil
+	}, encoded, nil
 }
 
 // SettleArgs / ProtestArgs / RefundInactiveArgs mirror the contract

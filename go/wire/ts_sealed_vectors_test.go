@@ -32,6 +32,7 @@ type tsSealedRequest struct {
 	Name            string `json:"name"`
 	BodyHex         string `json:"body_hex"`
 	AdmissionTagHex string `json:"admission_tag_hex"`
+	OpenGroup       string `json:"open_group"`
 	EnvelopeJSON    string `json:"envelope_json"`
 }
 
@@ -51,6 +52,10 @@ type tsSealedVectorsFile struct {
 
 	ReserveRequestBodyHex      string `json:"reserve_request_body_hex"`
 	ReserveRequestEnvelopeJSON string `json:"reserve_request_envelope_json"`
+
+	SettleAckTicketID     string `json:"settle_ack_ticket_id"`
+	SettleAckGroup        string `json:"settle_ack_group"`
+	SettleAckEnvelopeJSON string `json:"settle_ack_envelope_json"`
 
 	ResponseKeyHex   string               `json:"response_key_hex"`
 	WrappedKeyB64    string               `json:"wrapped_key_b64"`
@@ -96,7 +101,7 @@ func TestOpensTSSealedArtifacts(t *testing.T) {
 
 	// Both shapes must be present: a tag-less envelope is the one a node refuses
 	// at admission, so its encoding is pinned as carefully as the tagged one.
-	seenTag, seenNoTag := false, false
+	seenTag, seenNoTag, seenOpenGroup := false, false, false
 	for _, r := range v.Requests {
 		t.Run("request_"+r.Name, func(t *testing.T) {
 			got, err := wire.DecryptRequest([]byte(r.EnvelopeJSON), node)
@@ -116,16 +121,32 @@ func TestOpensTSSealedArtifacts(t *testing.T) {
 			if gotTag := hex.EncodeToString(got.AdmissionTag); gotTag != r.AdmissionTagHex {
 				t.Fatalf("admission tag = %q, want %q", gotTag, r.AdmissionTagHex)
 			}
+			if got.OpenGroup != r.OpenGroup {
+				t.Fatalf("open_group = %q, want %q", got.OpenGroup, r.OpenGroup)
+			}
 		})
 		if r.AdmissionTagHex != "" {
 			seenTag = true
 		} else {
 			seenNoTag = true
 		}
+		if r.OpenGroup != "" {
+			seenOpenGroup = true
+		}
 	}
-	if !seenTag || !seenNoTag {
-		t.Fatalf("fixture must carry a request with and without an admission tag (with=%v without=%v)", seenTag, seenNoTag)
+	if !seenTag || !seenNoTag || !seenOpenGroup {
+		t.Fatalf("fixture must carry a request with and without an admission tag, and one with an open group (with=%v without=%v open_group=%v)", seenTag, seenNoTag, seenOpenGroup)
 	}
+
+	t.Run("settle_ack", func(t *testing.T) {
+		got, err := wire.OpenSettleAck([]byte(v.SettleAckEnvelopeJSON), node)
+		if err != nil {
+			t.Fatalf("open TS-sealed settle ack: %v", err)
+		}
+		if want := (wire.SettleAck{TicketID: v.SettleAckTicketID, SettleGroup: v.SettleAckGroup}); got != want || want.SettleGroup == "" {
+			t.Fatalf("settle ack = %+v, want %+v", got, want)
+		}
+	})
 
 	t.Run("reserve_request", func(t *testing.T) {
 		got, err := wire.OpenReserveRequest([]byte(v.ReserveRequestEnvelopeJSON), node)

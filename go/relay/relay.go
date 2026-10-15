@@ -63,6 +63,7 @@ var exactAllowedInnerPaths = map[string]struct{}{
 	"/v1/images/edits":       {},
 	"/v1/models":             {},
 	"/v1/zs/reserve":         {},
+	"/v1/zs/settle-ack":      {},
 	"/v1/zs/details":         {},
 	"/v1/zs/attestation":     {},
 }

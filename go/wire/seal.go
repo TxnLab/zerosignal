@@ -30,6 +30,9 @@ type DecryptedRequest struct {
 	AlgorandTxID     string
 	TicketID         string
 	AdmissionTag     []byte
+	// OpenGroup is the inner header's open_group, opaque at this layer (see
+	// RequestBinding.OpenGroup). Empty when the payer submitted the open itself.
+	OpenGroup string
 }
 
 // DecryptRequest parses a RequestEnvelope, age-decrypts the ciphertext with
@@ -100,6 +103,7 @@ func DecryptRequest(envelopeJSON []byte, nodeIdentities ...age.Identity) (*Decry
 		AlgorandTxID:     header.AlgorandTxID,
 		TicketID:         header.TicketID,
 		AdmissionTag:     admissionTag,
+		OpenGroup:        header.OpenGroup,
 	}, nil
 }
 

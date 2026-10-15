@@ -38,7 +38,9 @@ import {
     generateEphemeralIdentity,
     openSealedHeader,
     ResponseSealer,
+    openSettleAck,
     sealReserveRequest,
+    sealSettleAck,
     SEALED_HEADER_RECEIPT,
     SEALED_HEADER_SETTLE_GROUP,
     unwrapResponseKey,
@@ -49,6 +51,8 @@ interface SealedRequest {
     name: string
     body_hex: string
     admission_tag_hex: string
+    // The inner header's open_group; '' when the payer submitted the open.
+    open_group: string
     envelope_json: string
 }
 
@@ -79,6 +83,10 @@ interface TSSealedVectorsFile {
     requests: SealedRequest[]
     reserve_request_body_hex: string
     reserve_request_envelope_json: string
+    // A sealed settle ack, opened by Go's OpenSettleAck.
+    settle_ack_ticket_id: string
+    settle_ack_group: string
+    settle_ack_envelope_json: string
     response_key_hex: string
     wrapped_key_b64: string
     body_plaintext_hex: string
@@ -107,9 +115,10 @@ async function build(): Promise<TSSealedVectorsFile> {
 
     const requestBody = enc.encode('{"model":"ts-sealed-vector","messages":[{"role":"user","content":"hi"}]}')
     const requests: SealedRequest[] = []
-    for (const [name, admissionTag] of [
-        ['with_admission_tag', tag],
-        ['without_admission_tag', undefined],
+    for (const [name, admissionTag, openGroup] of [
+        ['with_admission_tag', tag, ''],
+        ['without_admission_tag', undefined, ''],
+        ['with_open_group', tag, 'kgEC-ts-sealed-open-group'],
     ] as const) {
         const { envelope } = await wrapRequest({
             body: requestBody,
@@ -118,17 +127,21 @@ async function build(): Promise<TSSealedVectorsFile> {
             admissionTag,
             nodeRecipient: node.recipient,
             ephemeral: reply,
+            ...(openGroup ? { openGroup } : {}),
         })
         requests.push({
             name,
             body_hex: hex.encode(requestBody),
             admission_tag_hex: admissionTag ? hex.encode(admissionTag) : '',
+            open_group: openGroup,
             envelope_json: dec.decode(envelope),
         })
     }
 
     const reserveBody = enc.encode('{"model":"ts-sealed-vector","payer_addr":"TS-SEALED-PAYER"}')
     const reserveEnvelope = await sealReserveRequest(reserveBody, node.recipient)
+    const settleAck = { ticket_id: ticketID, settle_group: 'kgEC-ts-sealed-settle-group' }
+    const settleAckEnvelope = await sealSettleAck(settleAck, node.recipient)
 
     const bodySealer = await ResponseSealer.create({ replyTo: reply.recipient, txID, ticketID, key })
     const bodyPlaintext = enc.encode('{"id":"ts-sealed-vector","object":"chat.completion"}')
@@ -173,6 +186,9 @@ async function build(): Promise<TSSealedVectorsFile> {
         requests,
         reserve_request_body_hex: hex.encode(reserveBody),
         reserve_request_envelope_json: dec.decode(reserveEnvelope),
+        settle_ack_ticket_id: settleAck.ticket_id,
+        settle_ack_group: settleAck.settle_group,
+        settle_ack_envelope_json: dec.decode(settleAckEnvelope),
         response_key_hex: hex.encode(key),
         wrapped_key_b64: streamSealer.wrappedKeyHeader(),
         body_plaintext_hex: hex.encode(bodyPlaintext),
@@ -193,7 +209,7 @@ const key = hex.decode(v.response_key_hex)
 describe('ts_sealed_vectors.json opens with the TS openers', () => {
     it('is the schema this test expects', () => {
         expect(v.version).toBe(1)
-        expect(v.requests.map((r) => r.name)).toEqual(['with_admission_tag', 'without_admission_tag'])
+        expect(v.requests.map((r) => r.name)).toEqual(['with_admission_tag', 'without_admission_tag', 'with_open_group'])
         expect(v.frames.length).toBeGreaterThan(0)
         expect(v.headers.length).toBe(2)
     })
@@ -206,8 +222,16 @@ describe('ts_sealed_vectors.json opens with the TS openers', () => {
             expect(got.algorandTxID).toBe(v.tx_id)
             expect(got.ticketID).toBe(v.ticket_id)
             expect(got.admissionTag ? hex.encode(got.admissionTag) : '').toBe(r.admission_tag_hex)
+            expect(got.openGroup).toBe(r.open_group)
         })
     }
+
+    it('opens the settle ack', async () => {
+        expect(await openSettleAck(enc.encode(v.settle_ack_envelope_json), v.node_age_identity)).toEqual({
+            ticket_id: v.settle_ack_ticket_id,
+            settle_group: v.settle_ack_group,
+        })
+    })
 
     it('unwraps the wrapped response key', async () => {
         const got = await unwrapResponseKey(v.wrapped_key_b64, {

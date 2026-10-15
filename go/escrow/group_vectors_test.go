@@ -67,11 +67,29 @@ type groupVectorsFile struct {
 	Open      struct {
 		Spec  openSpecVector    `json:"spec"`
 		Cases []groupCaseVector `json:"cases"`
+		// Completed is the valid group as a payer hands it to a node that
+		// submits the open (wire.SubmitsOpen). ed25519 is deterministic, so a
+		// port signing with the same payer key must produce these bytes.
+		Completed completedGroupVector `json:"completed"`
 	} `json:"open"`
 	Settle struct {
 		Spec  settleSpecVector  `json:"spec"`
 		Cases []groupCaseVector `json:"cases"`
+		// Completed is the valid group as a payer hands it to a node that
+		// takes the settle ack (wire.TakesSettleAck).
+		Completed completedGroupVector `json:"completed"`
 	} `json:"settle"`
+}
+
+// payerSeed is the byte vectorKey repeats into the payer's ed25519 seed.
+const payerSeed = 2
+
+type completedGroupVector struct {
+	PayerSeed byte `json:"payer_seed"`
+	// Encoded is the completed group in EncodeOpenGroup / EncodeSettleGroup
+	// form, as CompletePresignedOpenGroup / CompletePresignedSettleGroup
+	// return it.
+	Encoded string `json:"encoded"`
 }
 
 type settleSpecVector struct {
@@ -188,7 +206,7 @@ func cloneGroup(g []types.SignedTxn) []types.SignedTxn {
 func buildGroupVectors(t *testing.T) *groupVectorsFile {
 	t.Helper()
 	nodeSK, nodeAddr := vectorKey(1)
-	_, payerAddr := vectorKey(2)
+	payerSK, payerAddr := vectorKey(payerSeed)
 	_, otherAddr := vectorKey(3)
 
 	algod, _ := newFakeAlgodForCompose(t)
@@ -326,7 +344,16 @@ func buildGroupVectors(t *testing.T) *groupVectorsFile {
 		}
 		return &rej.Field
 	})
-	buildSettleVectors(t, f, c, nodeSK, nodeAddr, payerAddr, otherAddr)
+	payerSigner := transaction.BasicAccountTransactionSigner{Account: crypto.Account{PrivateKey: payerSK, Address: payerAddr}}
+	done, err := c.CompletePresignedOpenGroup(cloneGroup(valid), payerSigner, spec)
+	if err != nil {
+		t.Fatalf("CompletePresignedOpenGroup: %v", err)
+	}
+	if _, err := DecodeOpenGroup(done.Encoded); err != nil {
+		t.Fatalf("DecodeOpenGroup(Encoded): %v", err)
+	}
+	f.Open.Completed = completedGroupVector{PayerSeed: payerSeed, Encoded: done.Encoded}
+	buildSettleVectors(t, f, c, nodeSK, nodeAddr, payerSK, payerAddr, otherAddr)
 	return f
 }
 
@@ -394,7 +421,7 @@ func emitCases(t *testing.T, cases []groupMutation, valid []types.SignedTxn, nod
 // (operator half signed, payer ack unsigned) and one variant per guard. Each
 // per-member guard runs on both halves, since VerifySettleGroup checks them
 // with the same code and a port could still wire one half wrong.
-func buildSettleVectors(t *testing.T, f *groupVectorsFile, c *Client, nodeSK ed25519.PrivateKey, nodeAddr, payerAddr, otherAddr types.Address) {
+func buildSettleVectors(t *testing.T, f *groupVectorsFile, c *Client, nodeSK ed25519.PrivateKey, nodeAddr types.Address, payerSK ed25519.PrivateKey, payerAddr, otherAddr types.Address) {
 	t.Helper()
 	_, ownerAddr := vectorKey(4)
 	_, treasuryAddr := vectorKey(5)
@@ -506,6 +533,15 @@ func buildSettleVectors(t *testing.T, f *groupVectorsFile, c *Client, nodeSK ed2
 		}
 		return &rej.Field
 	})
+	payerSigner := transaction.BasicAccountTransactionSigner{Account: crypto.Account{PrivateKey: payerSK, Address: payerAddr}}
+	_, encoded, err := c.CompletePresignedSettleGroup(cloneGroup(valid), payerSigner, spec)
+	if err != nil {
+		t.Fatalf("CompletePresignedSettleGroup: %v", err)
+	}
+	if _, err := DecodeSettleGroup(encoded); err != nil {
+		t.Fatalf("DecodeSettleGroup(encoded): %v", err)
+	}
+	f.Settle.Completed = completedGroupVector{PayerSeed: payerSeed, Encoded: encoded}
 }
 
 func TestGroupVectors(t *testing.T) {

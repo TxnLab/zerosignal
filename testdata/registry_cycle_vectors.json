@@ -1388,7 +1388,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": true
     },
@@ -1411,7 +1411,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     },
@@ -1434,7 +1434,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": true
     },
@@ -1457,7 +1457,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     },
@@ -1480,7 +1480,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": true
     },
@@ -1503,7 +1503,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     },
@@ -1526,7 +1526,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     },
@@ -1549,7 +1549,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": true
     },
@@ -1641,7 +1641,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     },
@@ -1664,7 +1664,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": true
     },
@@ -1687,7 +1687,7 @@
         "builtin_tools": [],
         "max_tool_iters": 0,
         "tool_headroom_per_iteration": 0,
-        "proto_version": "9.11"
+        "proto_version": "9.12"
       },
       "want": false
     }

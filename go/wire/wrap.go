@@ -58,17 +58,34 @@ func WrapRequest(body []byte, txID, ticketID string, admissionTag []byte, nodeRe
 // tag — is framed with the body into the inner-request plaintext and sealed to
 // nodeRecipient, so the marshaled envelope is a single "ciphertext" field.
 func WrapRequestWithIdentity(body []byte, txID, ticketID string, admissionTag []byte, ephemeral *age.X25519Identity, nodeRecipient age.Recipient) ([]byte, error) {
+	return WrapRequestBound(body, RequestBinding{TxID: txID, TicketID: ticketID, AdmissionTag: admissionTag}, ephemeral, nodeRecipient)
+}
+
+// RequestBinding is what the inner-request frame carries beside the body.
+type RequestBinding struct {
+	TxID         string
+	TicketID     string
+	AdmissionTag []byte
+	// OpenGroup is the payer-completed open() group in escrow.EncodeOpenGroup's
+	// form, set only for a node that submits the open itself (SubmitsOpen).
+	// Empty means the payer submitted it and the node finds it by TxID.
+	OpenGroup string
+}
+
+// WrapRequestBound is WrapRequestWithIdentity with the full RequestBinding.
+func WrapRequestBound(body []byte, b RequestBinding, ephemeral *age.X25519Identity, nodeRecipient age.Recipient) ([]byte, error) {
 	if ephemeral == nil {
 		return nil, fmt.Errorf("wrap request: nil ephemeral identity")
 	}
 
 	header := innerRequestHeader{
 		ReplyToPublicKey: ephemeral.Recipient().String(),
-		AlgorandTxID:     txID,
-		TicketID:         ticketID,
+		AlgorandTxID:     b.TxID,
+		TicketID:         b.TicketID,
+		OpenGroup:        b.OpenGroup,
 	}
-	if len(admissionTag) > 0 {
-		header.AdmissionTag = base64.StdEncoding.EncodeToString(admissionTag)
+	if len(b.AdmissionTag) > 0 {
+		header.AdmissionTag = base64.StdEncoding.EncodeToString(b.AdmissionTag)
 	}
 	inner, err := encodeInnerRequest(header, body)
 	if err != nil {

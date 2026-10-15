@@ -643,6 +643,45 @@ caller. Consumers gain a new refusal code and lose one.
 
 ---
 
+## 9.12 — the node submits the open and the settle (minor)
+
+Before 9.12 the payer sent both of a paid turn's transaction groups to algod itself: the
+`open()` group before the inference request, and the atomic settle group after the receipt. Both
+groups name the payer, so the payer's algod provider (Nodely by default) saw the payer's IP
+alongside its address on every turn. A 9.12 payer hands both groups to the serving node, sealed,
+and the node submits them. The node also learns from algod's answer to its own submit whether
+the open was accepted, instead of polling its pool for a group sent elsewhere.
+
+- **Open.** The inner request frame gains `open_group`, the completed open group (payer-signed
+  gtxn[0], the node's own gtxn[1]). The node checks gtxn[1]'s txid against `algorand_tx_id`, runs
+  the same app-call check it ran on a pooled open, and only then submits. algod evaluates the
+  contract's TEAL on submit, so the answer is the admission signal; the node no longer polls the
+  pool for a group the payer sent elsewhere. A rejection is the existing plaintext `402
+  payment_verification_failed`, naming only the failure category. A payer that gets that refusal
+  after handing the group over re-checks its prepaid-pool deposit before its next open. Pool
+  acceptance is still not confirmation, so the open-confirmation watchdog is unchanged.
+- **Settle.** New sealed `POST /v1/zs/settle-ack` (`application/vnd.zs-settle-ack+json`). It
+  carries the payer-signed settle group and is added to the relay allow-list. The node submits
+  the group if it is the one it composed for the ticket. It also accepts the group after its
+  driver's standalone claim, because a matching same-side re-claim is a no-op on chain. On a
+  stream the node writes its ledger row before the receipt frame, since the payer acks as soon
+  as it reads that frame. The
+  payer never broadcasts after a failed ack; the ticket finishes on the driver's path. A missing
+  route is the one exception: when privacy mode finds no ≥ 9.12 relay, the payer broadcasts the
+  group itself rather than sending the ack directly from its own IP.
+- **Gates.** `wire.SubmitsOpen` and `wire.TakesSettleAck`, both failing closed. Against a
+  pre-9.12 node the payer submits both groups itself, as before, and a 9.12 node still accepts a
+  frame with no `open_group`. Mixed fleets are safe in both directions.
+
+This removes the payer's transaction submissions from a turn, not every per-turn link at its
+algod provider. The payer still reads its tickets from algod: the settle confirmation poll after
+each acked turn, and the reconciler's box sweep. A ticket box or settle txid resolves to the
+payer address, so the provider can still tie the payer's IP to the payer through those reads.
+SPEC §3a "Residual payer contact with algod" lists them all; closing them needs the ticket reads
+routed away from the payer's IP too.
+
+---
+
 ## 9.11 — the upstream decides context fit (minor)
 
 A node no longer refuses a prompt as too long as soon as its input-token bound passes the
