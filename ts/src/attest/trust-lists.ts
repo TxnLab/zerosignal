@@ -41,6 +41,7 @@ export function trustedNodeImages(): string[] {
         'ghcr.io/txnlab/zs-node@sha256:aa7cb1b7bb8514e0c15dfacfdef4ec409f7ff7f7356b28beb2fbbfa2a91d6a99',
         'ghcr.io/txnlab/zs-node@sha256:c121377681c75c6b75fc896c9614896294f2e0498a7d06a8317320ca0c9f2815',
         'ghcr.io/txnlab/zs-node@sha256:431196b2d5310556a696eeb344ee4f8f617124c82a30f3a01942a20d1ae306ae',
+        'ghcr.io/txnlab/zs-node@sha256:ccac4239e39f9a9dbfe3c4a82a17210f63128ebfd748bde92bd73dac32708811',
     ]
 }
 
