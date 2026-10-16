@@ -9,8 +9,15 @@
 // itself; the Client builds the rest from Config.
 
 import type { OperatorDetailsModel } from '@txnlab/zs-proto/inject'
-import type { BytesSigner, Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
-import type { SettleAck } from '@txnlab/zs-proto/wire'
+import {
+    type BytesSigner,
+    type ReserveRequest,
+    type Ticket,
+    type UsageReceipt,
+    encodeDeploymentId,
+    knownDeployment,
+} from '@txnlab/zs-proto/ticket'
+import { type SettleAck, usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult } from './ack.js'
 import type { AffinityStore } from './affinity.js'
@@ -92,19 +99,35 @@ export interface HttpReserveClientOptions {
     signer?: BytesSigner | undefined
     timeoutMs?: number | undefined
     clock?: Clock | undefined
+    /**
+     * The payer's own deployment id. When set, a reserve to a node advertising
+     * DEPLOYMENT_BINDING_MIN_VERSION names it, and the ticket must come back
+     * bound to it. Absent keeps the legacy layouts with every node.
+     */
+    deployment?: Uint8Array | undefined
 }
 
 /** httpReserveClient is the default ReserveClient, Go's HTTPReserveClient. */
 export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
     const clock = o.clock ?? Date.now
+    const deployment = knownDeployment(o.deployment)
     return {
         // async, so a missing recipient rejects like every other failure.
         async reserve(op, request, hop, signal) {
             const ref = refOf(op)
             const sealRecipient = sealRecipientOf(op, clock())
+            // Set before signing: a signed deployment selects the bound reserve
+            // layout, and the node reads it to pick the ticket layout.
+            const named = deployment !== undefined && usesDeploymentBinding(op.protoVersion)
+            let sent: ReserveRequest = request
+            if (named) sent = { ...request, deployment: encodeDeploymentId(deployment) }
+            else if (request.deployment !== undefined) {
+                const { deployment: _stale, ...fields } = request
+                sent = fields
+            }
             const call: ReserveCall = {
                 target: { operatorId: ref.op, nodeId: ref.node, baseUrl: op.baseUrl, sealRecipient },
-                request,
+                request: sent,
                 hop,
                 fetch: o.fetch,
                 clock,
@@ -117,7 +140,7 @@ export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
             const r = await reserve(call)
             // reserve() leaves these to its caller; Go's Reserve runs both, and
             // its dispatch trusts the result.
-            verifyTicketSignature(r.ticket, op.ticketSigningKey)
+            verifyTicketSignature(r.ticket, op.ticketSigningKey, deployment, !named)
             if (r.presignedOpenTxn) {
                 try {
                     decodeOpenGroup(r.presignedOpenTxn)

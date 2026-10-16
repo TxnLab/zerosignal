@@ -23,6 +23,7 @@ import { base64 } from '@scure/base'
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
 import { parseObject } from '../util/strictjson.js'
+import { checkDeployment, decodeDeploymentId } from './deployment.js'
 import type { BytesSigner } from './signing.js'
 import { readTicket } from './ticketfields.js'
 import type { UsageType } from './usagetype.js'
@@ -85,6 +86,10 @@ export interface Ticket {
     // input_rate, so a v1-era flat charge is reproduced exactly. One uint64 at
     // the tail of the canonical bytes.
     cache_read_rate: number
+    // base64(32-byte deployment id). Present selects the v3 layout, which
+    // binds the signature to one escrow deployment (see deployment.ts). Absent
+    // on a ticket from a node the payer didn't ask for one.
+    deployment?: string
     // base64(Ed25519 signature over ticketSigDigest). Filled by
     // signTicket; verifyTicket reads it.
     sig?: string
@@ -95,7 +100,9 @@ export interface Ticket {
 // self-terminating in concatenations. v1 covered the base ticket + the later
 // UsageType-discriminator append; bumped v1 → v2 when cache_read_rate was
 // appended (must match proto/go/ticket/ticket.go::ticketSigningTag).
+// v3 inserts the 32-byte deployment id after the tag (ticketSigningTagV3).
 const TICKET_SIGNING_TAG = 'zs-ticket-v2\x00'
+const TICKET_SIGNING_TAG_V3 = 'zs-ticket-v3\x00'
 
 // ticketCanonicalBytes returns the unambiguous byte sequence Ed25519
 // signs (and verifies). Strings → uint32-BE length + raw bytes; numeric
@@ -103,8 +110,10 @@ const TICKET_SIGNING_TAG = 'zs-ticket-v2\x00'
 // proto/go/ticket/ticket.go::Ticket.CanonicalBytes byte-for-byte. Sig
 // is excluded — that's what we're computing.
 export function ticketCanonicalBytes(t: Ticket): Uint8Array {
-    return new CanonicalWriter()
-        .str(TICKET_SIGNING_TAG)
+    const w = new CanonicalWriter()
+    if (t.deployment) w.str(TICKET_SIGNING_TAG_V3).bytes(decodeDeploymentId(t.deployment))
+    else w.str(TICKET_SIGNING_TAG)
+    return w
         .lenStr(t.ticket_id)
         .u64(t.operator_id)
         .u64(t.node_id)
@@ -154,10 +163,23 @@ export async function signTicket(
     t.sig = base64.encode(sig)
 }
 
-// verifyTicket throws if t.sig is not a valid Ed25519 signature of
-// ticketSigDigest(t) under pub. Callers typically recover pub from an
-// Algorand address via decodeAlgorandAddress.
+// verifyTicket accepts only a legacy (v2, unbound) signature. Payers verify
+// with verifyTicketFor.
 export function verifyTicket(t: Ticket, pub: Uint8Array): void {
+    verifyTicketFor(t, pub, undefined, true)
+}
+
+// verifyTicketFor throws unless t.sig is a valid Ed25519 signature of
+// ticketSigDigest(t) under pub and t is bound to want, or unbound while
+// allowLegacy holds. A payer passes allowLegacy only when its reserve named no
+// deployment. Mirrors Go's Ticket.VerifyFor.
+export function verifyTicketFor(
+    t: Ticket,
+    pub: Uint8Array,
+    want: Uint8Array | undefined,
+    allowLegacy: boolean,
+): void {
+    checkDeployment('ticket', t.deployment, want, allowLegacy)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }

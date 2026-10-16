@@ -209,4 +209,38 @@ describe('parseReceiptJSON', () => {
         expect(() => parseReceiptJSON(json)).toThrow(/amount_charged/)
         expect(() => decodeReceiptHeader(b64(json))).toThrow(/amount_charged/)
     })
+
+    // Go's TestVerifyReceipt_FollowsTicketBinding: a receipt is bound exactly
+    // when its ticket is, and to the same deployment.
+    it.each([
+        ['bound ticket, bound receipt', 'A', 'A', undefined],
+        ['bound ticket, legacy receipt', 'A', undefined, 'sig'],
+        ['bound ticket, receipt bound elsewhere', 'A', 'B', 'sig'],
+        ['legacy ticket, legacy receipt', undefined, undefined, undefined],
+        ['legacy ticket, bound receipt', undefined, 'A', 'sig'],
+    ] as const)('%s', async (_name, onTicket, onReceipt, want) => {
+        const ids = { A: b64(new Uint8Array(32).fill(1)), B: b64(new Uint8Array(32).fill(2)) }
+        const k = keypair()
+        const r: UsageReceipt = { ...RECEIPT, ...(onReceipt ? { deployment: ids[onReceipt] } : {}) }
+        await signReceipt(r, k.signer, 'ADDR')
+        const t: Ticket = { ...TICKET, ...(onTicket ? { deployment: ids[onTicket] } : {}) }
+        expect(violation(() => verifyReceipt(r, t, k.pub, sha256(hello)))).toBe(want)
+    })
+
+    it('a ticket verifies only under the binding the reserve asked for', async () => {
+        const mine = new Uint8Array(32).fill(1)
+        const k = keypair()
+        const bound: Ticket = { ...TICKET, deployment: b64(mine) }
+        await signTicket(bound, k.signer, 'ADDR')
+        expect(() => verifyTicketSignature(bound, k.pub, mine, false)).not.toThrow()
+        expect(() => verifyTicketSignature(bound, k.pub, new Uint8Array(32).fill(2), true)).toThrow(
+            TicketSignatureInvalidError,
+        )
+        // No deployment of its own: only a legacy ticket passes.
+        expect(() => verifyTicketSignature(bound, k.pub)).toThrow(TicketSignatureInvalidError)
+        const legacy = { ...TICKET }
+        await signTicket(legacy, k.signer, 'ADDR')
+        expect(() => verifyTicketSignature(legacy, k.pub, mine, false)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature(legacy, k.pub, mine, true)).not.toThrow()
+    })
 })

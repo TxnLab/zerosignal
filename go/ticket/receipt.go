@@ -77,7 +77,11 @@ type UsageReceipt struct {
 	// dedicated image routes and whenever the upstream reports no cached count.
 	// Rides one uint64 at the tail of CanonicalBytes.
 	CachedInputCount uint64 `json:"cached_input_count"`
-	Sig              string `json:"sig"` // base64(Ed25519 over sha256(receiptSigningTag || canonical bytes))
+	// Deployment, when set, selects the v3 layout (see DeploymentID). The node
+	// copies it from the ticket, so a receipt is bound exactly when its ticket
+	// is.
+	Deployment DeploymentID `json:"deployment,omitzero"`
+	Sig        string       `json:"sig"` // base64(Ed25519 over sha256(receiptSigningTag || canonical bytes))
 }
 
 // receiptSigningTag domain-separates UsageReceipt signatures from
@@ -89,8 +93,15 @@ type UsageReceipt struct {
 // later, the appended UsageType discriminators + aux output slot (that append
 // stayed under v1 — the bytes are themselves the break). Bumped v1 → v2
 // alongside ticketSigningTag when CachedInputCount was appended for
-// cached-token pricing.
-const receiptSigningTag = "zs-receipt-v2\x00"
+// cached-token pricing. v3 inserts the deployment id after the tag, as the
+// ticket's v3 does.
+//
+// The Algorand contract takes the receipt digest as an opaque argument, so
+// moving to v3 needs no redeploy.
+const (
+	receiptSigningTag   = "zs-receipt-v2\x00"
+	receiptSigningTagV3 = "zs-receipt-v3\x00"
+)
 
 // CanonicalBytes returns the unambiguous byte sequence Ed25519 signs
 // (and verifies). Identical encoding rules to Ticket.CanonicalBytes:
@@ -98,8 +109,13 @@ const receiptSigningTag = "zs-receipt-v2\x00"
 // excluded (that's what we're computing). Independent of any JSON
 // encoder so a non-Go reimplementation can reproduce the exact bytes.
 func (r *UsageReceipt) CanonicalBytes() []byte {
-	b := make([]byte, 0, 128)
-	b = append(b, receiptSigningTag...)
+	b := make([]byte, 0, 160)
+	if r.Deployment.IsZero() {
+		b = append(b, receiptSigningTag...)
+	} else {
+		b = append(b, receiptSigningTagV3...)
+		b = append(b, r.Deployment[:]...)
+	}
 	b = appendLenStr(b, r.TicketID)
 	b = appendU64(b, r.ActualInputCount)
 	b = appendU64(b, r.ActualOutputCount)
@@ -163,12 +179,21 @@ func (r *UsageReceipt) Sign(ctx context.Context, signer BytesSigner, signingAddr
 	return nil
 }
 
-// Verify returns nil if r.Sig is a valid Ed25519 signature of
-// ReceiptSigDigest(r) under pub. Callers typically recover pub
-// from the operator's SigningAddr via DecodeAlgorandAddress.
-// Verifying the same digest the contract verifies means off-chain
-// Verify and on-chain ed25519verify_bare agree byte-for-byte.
+// Verify accepts only a legacy (v2, unbound) signature. Payers verify with
+// VerifyFor.
 func (r *UsageReceipt) Verify(pub ed25519.PublicKey) error {
+	return r.VerifyFor(pub, DeploymentID{}, true)
+}
+
+// VerifyFor returns nil if r.Sig is a valid Ed25519 signature of
+// ReceiptSigDigest(r) under pub and r is bound to want, or unbound while
+// allowLegacy holds. A payer passes allowLegacy only for a receipt whose
+// ticket was unbound. Verifying the same digest the contract verifies means
+// off-chain VerifyFor and on-chain ed25519verify_bare agree byte-for-byte.
+func (r *UsageReceipt) VerifyFor(pub ed25519.PublicKey, want DeploymentID, allowLegacy bool) error {
+	if err := checkDeployment(r.Deployment, want, allowLegacy); err != nil {
+		return fmt.Errorf("receipt: %w", err)
+	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid ed25519 public key length %d", len(pub))
 	}

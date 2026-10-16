@@ -10,6 +10,8 @@
     "ephemeral_expiry": 1800000600,
     "ephemeral_issued_at": 1800000000,
     "ephemeral_sig": "c2lnbmF0dXJl",
+    "ephemeral_deployment": "ZGVwbG95bWVudA==",
+    "ephemeral_sig_v2": "c2lnbmF0dXJlLXYy",
     "models": [
       {
         "id": "qwen/qwen3-32b",

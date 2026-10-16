@@ -9,11 +9,29 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { algorandDeploymentId, encodeDeploymentId } from '@txnlab/zs-proto/ticket'
+import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
+
 import type { AlgodEscrowChainOptions } from '../src/escrow/algod.js'
+import type { ReserveCall } from '../src/reserve.js'
+
+const GENESIS = new Uint8Array(32).fill(7)
 
 const h = vi.hoisted(() => ({
     built: [] as { opts: AlgodEscrowChainOptions; signal: AbortSignal | undefined }[],
     refresh: (_signal: AbortSignal | undefined): Promise<void> => Promise.resolve(),
+    // The genesis read Client.create makes after the wallet's; a stand-in so
+    // no test reaches a real algod.
+    params: (): Promise<unknown> => Promise.resolve({ genesisHash: new Uint8Array(32).fill(7) }),
+    reserveCalls: [] as ReserveCall[],
+}))
+
+vi.mock('../src/reserve.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../src/reserve.js')>()),
+    reserve: (call: ReserveCall) => {
+        h.reserveCalls.push(call)
+        return Promise.reject(new Error('captured'))
+    },
 }))
 
 vi.mock('../src/escrow/algod.js', async (importOriginal) => {
@@ -32,10 +50,12 @@ vi.mock('../src/escrow/algod.js', async (importOriginal) => {
             return Promise.resolve(30)
         }
     }
-    return { ...real, AlgodEscrowChain: StandInChain }
+    return { ...real, AlgodEscrowChain: StandInChain, suggestedParams: () => h.params() }
 })
 
 const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, testnet } = await import('../src/index.js')
+const { partsOf } = await import('../src/client-parts.js')
+const { testOperator } = await import('./fixtures.js')
 type Config = import('../src/index.js').Config
 
 const signer = { address: 'PAYER', signBytes: async () => new Uint8Array(), signTransactions: async () => [] }
@@ -57,6 +77,8 @@ const stalls = (signal: AbortSignal | undefined) =>
 afterEach(() => {
     h.built.length = 0
     h.refresh = () => Promise.resolve()
+    h.params = () => Promise.resolve({ genesisHash: GENESIS })
+    h.reserveCalls.length = 0
     vi.restoreAllMocks()
 })
 
@@ -104,5 +126,29 @@ describe('Client.create building the wallet', () => {
         await flush()
         ctrl.abort(new Error('caller left'))
         await expect(p).rejects.toThrow('read escrow config: caller left')
+    })
+
+    // The wallet just read the chain, so algod is up: a failed genesis read
+    // is not a blip to start unbound for.
+    it('fails when the genesis read fails after building the wallet', async () => {
+        h.params = () => Promise.reject(new Error('genesis down'))
+        await expect(Client.create(base)).rejects.toThrow('genesis down')
+    })
+
+    // The reserve client it builds names the genesis-derived deployment to a
+    // node that binds.
+    it('hands the deployment to the reserve client it builds', async () => {
+        const c = await Client.create(base)
+        const op = testOperator({
+            ephemeralRecipient: 'age1live',
+            ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600,
+            protoVersion: DEPLOYMENT_BINDING_MIN_VERSION,
+        })
+        await expect(
+            partsOf.get(c)!.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
+        ).rejects.toThrow('captured')
+        const want = encodeDeploymentId(algorandDeploymentId(GENESIS, resolveNetwork(testnet()).escrowAppId))
+        expect(h.reserveCalls[0]!.request.deployment).toBe(want)
+        c.close()
     })
 })

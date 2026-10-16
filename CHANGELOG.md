@@ -643,6 +643,33 @@ caller. Consumers gain a new refusal code and lose one.
 
 ---
 
+## 9.13 — signatures bind the escrow deployment (minor)
+
+Ticket, receipt, reserve-request and ephemeral signatures bound only `(operator_id, node_id)`,
+and those ids repeat across networks. A signing key registered on two deployments (Algorand
+testnet and mainnet today, a Solana deployment next) signed objects valid on both. Each object
+now has a deployment-bound layout: a new tag followed by a 32-byte deployment id, `sha256` of
+the rail, the network's genesis hash and the escrow id (SPEC §3a "Deployment binding").
+
+- **Tags.** `zs-ticket-v3`, `zs-receipt-v3`, `zs-reserve-v2` and `zs-ephemeral-v2` sit beside
+  the old tags, which stay accepted. SPEC §3c now allows a tag added this way in a minor;
+  replacing a tag still needs a major.
+- **Reserve.** A payer names its deployment (`deployment`) on a reserve to a ≥ 9.13 node, signs
+  the bound reserve layout, and requires a ticket bound to that deployment back. The node refuses
+  a reserve naming another deployment with `400 deployment_mismatch`, and binds the ticket and
+  its receipt when the reserve named its own. A reserve with no `deployment` gets the legacy
+  layouts.
+- **Details.** A ≥ 9.13 node publishes `ephemeral_sig_v2` and `ephemeral_deployment` beside
+  `ephemeral_sig`. A payer that knows its deployment requires the bound signature from a ≥ 9.13
+  node.
+- **Gate.** `wire.UsesDeploymentBinding`, failing closed to the legacy layouts. Mixed fleets are
+  safe in both directions. No contract change: `settle()` and `protest()` take the receipt digest
+  as an opaque argument.
+
+The legacy layouts are refused in a later major, once the fleet advertises ≥ 9.13. Until
+then a relay that lowers a node's unsigned `proto_version` can strip the bound ephemeral
+signature, and the payer then accepts that node's legacy ticket and receipt too.
+
 ## 9.12 — the node submits the open and the settle (minor)
 
 Before 9.12 the payer sent both of a paid turn's transaction groups to algod itself: the

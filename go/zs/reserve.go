@@ -381,6 +381,11 @@ type ReserveClient interface {
 type HTTPReserveClient struct {
 	HTTPClient *http.Client
 	Signer     ticket.BytesSigner
+	// Deployment is the payer's own deployment id. When set, a reserve to a
+	// node that advertises wire.DeploymentBindingMinVersion names it, and the
+	// ticket that comes back must be bound to it. Zero keeps the legacy
+	// layouts with every node.
+	Deployment ticket.DeploymentID
 }
 
 // reservePath is the node-side endpoint from SPEC.md § 3a.
@@ -506,6 +511,12 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 		}
 	}()
 	req.ProxyRecipient = ephemeral.Recipient().String()
+	// Set before signing: a signed deployment selects the bound reserve
+	// layout, and the node reads it to decide which ticket layout to issue.
+	req.Deployment = ticket.DeploymentID{}
+	if !c.Deployment.IsZero() && wire.UsesDeploymentBinding(op.ProtoVersion) {
+		req.Deployment = c.Deployment
+	}
 
 	// Mandatory forward secrecy: seal ONLY to the operator's verified, unexpired
 	// ephemeral recipient. Fail fast on no-ephemeral before doing any sign work.
@@ -729,7 +740,10 @@ func (c *HTTPReserveClient) reserveAttempt(
 		return nil, fmt.Errorf("parse reserve response: %w", err)
 	}
 
-	if err := parsed.Ticket.Verify(op.TicketSigningKey); err != nil {
+	// A node we named our deployment to must answer with a ticket bound to
+	// it; one we didn't may answer with either layout, and a bound ticket
+	// must still be bound to us.
+	if err := parsed.Ticket.VerifyFor(op.TicketSigningKey, c.Deployment, req.Deployment.IsZero()); err != nil {
 		return nil, fmt.Errorf("verify ticket: %w", err)
 	}
 	if err := validateTicketShape(&parsed.Ticket, op, req); err != nil {

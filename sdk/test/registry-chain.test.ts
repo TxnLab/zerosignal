@@ -32,6 +32,7 @@ import {
     FETCH_BOX_CONCURRENCY,
     NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
+    deploymentOrFail,
     fetchAllOperators,
     fetchNodesForOperators,
     fetchOperatorsById,
@@ -86,6 +87,8 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
     /** Like gate, for account reads alone. */
     accountGate: Promise<void> | undefined
     onAccountRead: (() => void) | undefined
+    /** Runs as a params read arrives, before it answers. */
+    onParams: (() => void) | undefined
 
     async #enter(path: string, opts?: Record<string, unknown>) {
         this.paths.push(path)
@@ -113,6 +116,8 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
     async get(path: string, query?: Record<string, unknown>, _h?: unknown, opts?: Record<string, unknown>) {
         await this.#enter(path, opts)
         if (path === '/v2/transactions/params') {
+            this.onParams?.()
+            ;(opts?.signal as AbortSignal | undefined)?.throwIfAborted()
             return json({
                 'consensus-version': 'future',
                 fee: 0,
@@ -564,10 +569,27 @@ describe('the chain read', () => {
         fake.accounts.set(SIGNER_A, { amount: 1n, minBalance: 0n })
         const ctl = new AbortController()
         await sourceOf(fake).fetchChain(ctl.signal)
-        // Params, simulate, both listings, the operator and node reads, the account.
-        expect(fake.signals).toHaveLength(7)
+        // Params, simulate, both listings, the operator and node reads, the
+        // deployment's genesis read, the account.
+        expect(fake.signals).toHaveLength(8)
         ctl.abort()
         expect(fake.paths.filter((_, i) => fake.signals[i]?.aborted !== true)).toEqual([])
+    })
+
+    // An abort during the deployment's genesis read is the caller leaving, not
+    // a failed read to warn about and route around.
+    it('propagates an abort during the genesis read', async () => {
+        const fake = new FakeAlgod()
+        fake.setBox(operatorBoxKey(1n), operatorBox({ id: 1n, nextNodeId: 2n }))
+        fake.setBox(nodeBoxKey(1n, 1n), nodeBox({}))
+        const ctl = new AbortController()
+        fake.onParams = () => ctl.abort(new Error('caller gone'))
+        const warnings: string[] = []
+        const logger: Logger = { debug: () => {}, info: () => {}, warn: (m: string) => void warnings.push(m), error: () => {} }
+        await expect(sourceOf(fake, { logger }).fetchChain(ctl.signal)).rejects.toThrow(/caller gone/)
+        // The chain read had finished: the params read is the derivation's.
+        expect(fake.paths.at(-1)).toBe('/v2/transactions/params')
+        expect(warnings.filter((m) => m.includes('deployment'))).toEqual([])
     })
 
     it('stops a read whose caller is gone', async () => {
@@ -578,6 +600,41 @@ describe('the chain read', () => {
         const pending = sourceOf(fake).fetchChain(ctl.signal)
         ctl.abort(new Error('caller gone'))
         await expect(pending).rejects.toThrow(/caller gone/)
+    })
+})
+
+// Go's TestDeploymentOrFail.
+describe('deploymentOrFail', () => {
+    const id = new Uint8Array(32).fill(9)
+    const warnings: string[] = []
+    const logger: Logger = {
+        debug: () => {},
+        info: () => {},
+        warn: (msg: string) => void warnings.push(msg),
+        error: () => {},
+    }
+    const down = new Error('down')
+
+    it('returns the id read', async () => {
+        expect(await deploymentOrFail(async () => id, true, logger)).toBe(id)
+    })
+
+    it('fails when the SDK built the wallet, without warning', async () => {
+        warnings.length = 0
+        await expect(deploymentOrFail(() => Promise.reject(down), true, logger)).rejects.toBe(down)
+        expect(warnings).toEqual([])
+    })
+
+    it("warns and starts unbound with a caller's wallet", async () => {
+        warnings.length = 0
+        expect(await deploymentOrFail(() => Promise.reject(down), false, logger)).toBeUndefined()
+        expect(warnings).toHaveLength(1)
+    })
+
+    it("propagates an abort even with a caller's wallet", async () => {
+        const ctl = new AbortController()
+        ctl.abort()
+        await expect(deploymentOrFail(() => Promise.reject(down), false, logger, ctl.signal)).rejects.toBe(down)
     })
 })
 

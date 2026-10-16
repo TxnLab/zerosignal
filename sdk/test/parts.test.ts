@@ -4,6 +4,8 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { encodeDeploymentId } from '@txnlab/zs-proto/ticket'
+import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ReserveCall } from '../src/reserve.js'
@@ -170,7 +172,32 @@ describe('httpReserveClient', () => {
     it("verifies the ticket's signature under the operator's key", async () => {
         const key = new Uint8Array(32).fill(9)
         await httpReserveClient({ fetch, clock: () => 0 }).reserve({ ...op, ticketSigningKey: key }, request, null)
-        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key)
+        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key, undefined, true)
+    })
+
+    const deployment = new Uint8Array(32).fill(5)
+
+    // A node new enough is asked for a bound ticket, and must give one.
+    it('names the deployment to a node that binds, and demands a bound ticket', async () => {
+        const key = new Uint8Array(32).fill(9)
+        const newer = { ...op, ticketSigningKey: key, protoVersion: DEPLOYMENT_BINDING_MIN_VERSION }
+        await httpReserveClient({ fetch, clock: () => 0, deployment }).reserve(newer, request, null)
+        expect(reserveCalls[0]!.request).toEqual({ ...request, deployment: encodeDeploymentId(deployment) })
+        expect(request).not.toHaveProperty('deployment')
+        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key, deployment, false)
+    })
+
+    it.each(['9.12', '', 'junk'])('keeps the legacy layout with a node advertising %j', async (protoVersion) => {
+        const older = { ...op, protoVersion }
+        await httpReserveClient({ fetch, clock: () => 0, deployment }).reserve(older, { ...request, deployment: 'stale' }, null)
+        expect(reserveCalls[0]!.request).toEqual(request)
+        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, op.ticketSigningKey, deployment, true)
+    })
+
+    it('names nothing without a deployment of its own', async () => {
+        const newer = { ...op, protoVersion: DEPLOYMENT_BINDING_MIN_VERSION }
+        await httpReserveClient({ fetch, clock: () => 0 }).reserve(newer, request, null)
+        expect(reserveCalls[0]!.request).toBe(request)
     })
 
     it('rejects a ticket whose signature does not verify', async () => {

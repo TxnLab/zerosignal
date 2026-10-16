@@ -65,7 +65,11 @@ export function chainAlgod(cfg: ResolvedConfig): algosdk.Algodv2 {
  * host sharing it passes the registry and the stores to each Client, with
  * cfg.teeVerifier so the evidence checks share one collateral cache.
  */
-export function buildDiscovery(cfg: ResolvedConfig, algod: algosdk.Algodv2): BuiltDiscovery {
+export function buildDiscovery(
+    cfg: ResolvedConfig,
+    algod: algosdk.Algodv2,
+    deployment?: Uint8Array,
+): BuiltDiscovery {
     const st = cfg.stores
     const d = cfg.discovery
     // A relay's relay_upstream_unreachable claim is judged against the
@@ -96,6 +100,7 @@ export function buildDiscovery(cfg: ResolvedConfig, algod: algosdk.Algodv2): Bui
         latencyStateMax: d.latencyStateMax,
         logger: cfg.logger,
         clock: cfg.clock,
+        deployment,
     })
     const registry = new DiscoveryRegistry({
         source,

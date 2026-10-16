@@ -19,7 +19,12 @@ import {
     nodeBoxKey,
     operatorBoxKey,
 } from '@txnlab/zs-proto/escrow'
-import { ephemeralSigDigest } from '@txnlab/zs-proto/ticket'
+import {
+    algorandDeploymentId,
+    encodeDeploymentId,
+    ephemeralSigDigest,
+    ephemeralSigDigestV2,
+} from '@txnlab/zs-proto/ticket'
 import { PROTO_VERSION, RELAY_PATH, RELAY_PATH_HEADER, RELAY_TARGET_HEADER, RELAY_TARGET_NODE_HEADER } from '@txnlab/zs-proto/wire'
 import * as ed25519 from '@noble/ed25519'
 import { base64, bech32 } from '@scure/base'
@@ -98,6 +103,8 @@ interface FakeAlgodOptions {
     gate?: (signal: AbortSignal | null | undefined) => Promise<void>
     /** Operators whose node is staging. */
     staging?: number[]
+    /** The genesis read fails. */
+    paramsFail?: boolean
 }
 
 /** algod as discovery reads it: the box listing and box reads; every account read 404s. */
@@ -112,6 +119,20 @@ function fakeAlgod(refs: NodeRef[], o: FakeAlgodOptions = {}) {
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const u = new URL(String(input))
         paths.push(u.pathname)
+        // create's genesis read, ahead of the gate: the gate stands for a
+        // slow discovery read, which this is not.
+        if (u.pathname === '/v2/transactions/params') {
+            // 400, not a 5xx the algod transport would retry for seconds.
+            if (o.paramsFail) return Response.json({ message: 'refused' }, { status: 400 })
+            return Response.json({
+                'consensus-version': 'v1',
+                fee: 0,
+                'genesis-hash': Buffer.alloc(32, 7).toString('base64'),
+                'genesis-id': 'testnet-v1.0',
+                'last-round': 1,
+                'min-fee': 1000,
+            })
+        }
         await gate?.(init?.signal)
         const name = (k: string) => hex(Buffer.from(u.searchParams.get(k)!.replace(/^b64:/, ''), 'base64'))
         if (u.pathname === `/v2/applications/${APP}/boxes`) {
@@ -162,7 +183,10 @@ const details = (over: Record<string, unknown> = {}) =>
 /** Every node answers its details probe. */
 const serve = () => details()
 
-/** The ephemeral advertisement the node at target signs under its on-chain key. */
+/** The deployment fakeAlgod's genesis hash and APP make: what a 9.13 node binds its ephemeral to. */
+const DEPLOYMENT = encodeDeploymentId(algorandDeploymentId(new Uint8Array(32).fill(7), APP))
+
+/** The ephemeral advertisement the node at target signs under its on-chain key, both layouts, as a 9.13 node does. */
 async function ephemeralOf(target: string): Promise<Record<string, unknown>> {
     const r = FLEET.find((f) => host(f) === target)!
     const now = Math.floor(Date.now() / 1000)
@@ -171,8 +195,12 @@ async function ephemeralOf(target: string): Promise<Record<string, unknown>> {
         ephemeral_expiry: now + 600,
         ephemeral_issued_at: now,
         ephemeral_sig: '',
+        ephemeral_deployment: DEPLOYMENT,
+        ephemeral_sig_v2: '',
     }
-    adv.ephemeral_sig = base64.encode(await ed25519.signAsync(ephemeralSigDigest(r.op, r.node, adv), signingSeeds.get(target)!))
+    const key = signingSeeds.get(target)!
+    adv.ephemeral_sig = base64.encode(await ed25519.signAsync(ephemeralSigDigest(r.op, r.node, adv), key))
+    adv.ephemeral_sig_v2 = base64.encode(await ed25519.signAsync(ephemeralSigDigestV2(r.op, r.node, adv), key))
     return adv
 }
 
@@ -289,6 +317,71 @@ describe('Client.create building the registry', () => {
         expect((await held.registry.allModels()).sort()).toEqual(['m-n1-1', 'm-n2-1'])
         const allowed = await clientOver(perNode, { privacy: 'direct', allowStaging: true }, { staging: [3] })
         expect((await allowed.registry.allModels()).sort()).toEqual(['m-n1-1', 'm-n2-1', 'm-n3-1'])
+    })
+
+    // A 9.13 node must present the bound signature for the payer's
+    // deployment, so a node offering only the legacy one is refused. If
+    // create dropped the deployment it would verify on the legacy signature.
+    it('refuses a 9.13 node offering only the legacy ephemeral signature', async () => {
+        const answer = async (call: Call) => {
+            const adv = await ephemeralOf(call.target)
+            if (call.target === host(T)) {
+                delete adv.ephemeral_deployment
+                delete adv.ephemeral_sig_v2
+            }
+            return details(adv)
+        }
+        const { registry } = await clientOver(answer, { privacy: 'direct' })
+        const ops = await registry.allOperators()
+        expect(ops.map((o) => [o.id, o.ephemeralRecipient !== undefined])).toEqual([
+            [T.op, false],
+            [R2.op, true],
+            [R3.op, true],
+        ])
+    })
+
+    // With a caller's wallet this payer may start without algod: a failed
+    // genesis read warns and leaves it unbound rather than failing create.
+    it("starts unbound, with one warning, when the genesis read fails under a caller's wallet", async () => {
+        const warnings: string[] = []
+        const logger = { debug: () => {}, info: () => {}, warn: (m: string) => void warnings.push(m), error: () => {} }
+        await clientOver(serve, { privacy: 'direct', logger }, { paramsFail: true })
+        expect(warnings.filter((m) => m.includes('reserving without a deployment binding'))).toHaveLength(1)
+    })
+
+    // The chat app builds its own source and passes no deployment, so the
+    // source derives it from algod's genesis hash at its first chain read.
+    it('has a host-built source derive the deployment from the chain', async () => {
+        const algod = fakeAlgod(FLEET)
+        vi.stubGlobal('fetch', algod.fetch)
+        const net = fleet(async (call) => {
+            const adv = await ephemeralOf(call.target)
+            if (call.target === host(T)) {
+                delete adv.ephemeral_deployment
+                delete adv.ephemeral_sig_v2
+            }
+            return details(adv)
+        })
+        const source = new ChainOperatorSource({
+            algod: new algosdk.Algodv2('', 'https://algod.example', ''),
+            escrowAppId: APP,
+            fetch: net.fetch,
+            privacy: 'direct',
+        })
+        const registry = new DiscoveryRegistry({ source })
+        await registry.ready
+        registry.start()
+        try {
+            const ops = await registry.allOperators()
+            expect(algod.paths).toContain('/v2/transactions/params')
+            expect(ops.map((o) => [o.id, o.ephemeralRecipient !== undefined])).toEqual([
+                [T.op, false],
+                [R2.op, true],
+                [R3.op, true],
+            ])
+        } finally {
+            await registry.stop()
+        }
     })
 
     it('times each probe out at discovery.detailsTimeout', async () => {

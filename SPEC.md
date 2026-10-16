@@ -111,8 +111,9 @@ A reserve is bound to one specific operator at one specific price. Discovery (wh
 | `payer_sig` † | string | `base64(Ed25519)` by the key behind `payer_addr` over the reserve-request canonical bytes ("Reserve-request signature"). Proves control of `payer_addr` instead of trusting it. An **escrow-mode node requires a valid one**. |
 | `payer_issued_at` † | int64 (optional) | Unix-seconds start of the signature's validity window, `[issued_at, issued_at + 60s]` ("Reserve-request signature"). |
 | `input_bound_version` † | uint8 (optional) | Which input-token bound version computed `input_count`, so the node re-measures with the same function. Omitted or 0 ⇒ version 1. A caller sets `2` only against a target that advertises support; a node rejects an unimplemented version at reserve time ("Input-token bound"). |
+| `deployment` † | string (optional) | `base64` of the caller's 32-byte deployment id ("Deployment binding"). Asks for deployment-bound tickets and receipts, and when `payer_sig` is present selects its bound layout. A caller sets it only against a target advertising `proto_version` ≥ 9.13. |
 
-† Reserve request only: not part of the ticket or `Ticket.CanonicalBytes()`.
+† Reserve request only: not part of the ticket or `Ticket.CanonicalBytes()`. The exception is `deployment`, whose value a bound ticket carries and signs.
 
 **`model` notes.** An explicit `model_pricing` entry is the operator's authoritative "I serve this" declaration. A priced model is reservable whenever the backend is reachable, whether or not the upstream's `/v1/models` lists it (many OpenAI-compatible upstreams list models incompletely). If the backend is entirely unreachable, the reserve is refused `503 provider_unavailable`, and the operator advertises zero models on `/v1/zs/details`.
 
@@ -126,7 +127,7 @@ A reserve is bound to one specific operator at one specific price. Discovery (wh
 
 Sealing the reserve gives **confidentiality** (a relay cannot read `payer_addr`), not **authentication**. The seal is to the node's *published* ephemeral recipient (`/v1/zs/details`), so anyone can seal a reserve naming any `payer_addr`. Unauthenticated, the node's per-account rate limiter would key on a claim an attacker can rotate freely (quota evasion) or spoof with a victim's address (quota griefing). `payer_sig` is an Ed25519 signature by the key behind `payer_addr`. It proves control of the address before the node keys any stateful defense on it.
 
-**Domain tag:** `zs-reserve-v1\x00`, with a trailing NUL like the `zs-ticket-v2` / `zs-receipt-v2` / `zs-ephemeral-v1` / `zs-admission-v1` tags. Its version is independent of theirs.
+**Domain tag:** `zs-reserve-v1\x00`, with a trailing NUL like the `zs-ticket-v2` / `zs-receipt-v2` / `zs-ephemeral-v1` / `zs-admission-v1` tags. Its version is independent of theirs. A request carrying `deployment` is signed under `zs-reserve-v2\x00` instead, with the 32-byte deployment id directly after the tag and the rest of the layout below unchanged ("Deployment binding").
 
 **Canonical bytes.** The signed digest is `sha256` of the following, encoded like `Ticket.CanonicalBytes` (length-prefixed strings, fixed-width big-endian numbers, one 0/1 byte for the boolean):
 
@@ -156,6 +157,33 @@ The image fields (and future video fields) are excluded from the canonical bytes
 **Requirement.** An escrow-mode node **requires** a valid signature on every reserve. A missing, forged, wrong-target or out-of-window `payer_sig` is refused `401 invalid_payer_sig`; a replayed sealed body is refused `409 reserve_replayed`. `payer_sig` and `payer_issued_at` live inside the sealed body and no ticket or receipt signature covers them, so node, proxy and reference client ship signing as one coordinated release. A node has an internal off-switch for test isolation and non-standard unsigned callers; it is not an operator setting.
 
 **Funds gate.** Keypairs are free, so a signature alone cannot stop a caller fielding an unbounded sybil fleet. A node MAY also require the payer to hold a prepaid-pool opt-in (the escrow-app opt-in, a scarce on-chain resource) before reserving a slot. Its refusals are `403 payer_not_opted_in` and, when the node's cold-miss budget for opt-in lookups is exhausted, `503 payer_optin_unavailable`.
+
+### Deployment binding
+
+The four signed objects (ticket, receipt, reserve request, ephemeral advertisement) bind `(operator_id, node_id)`, and those ids are local to one escrow deployment: they repeat across networks. A signing key registered on two deployments (Algorand testnet and mainnet, or Algorand and Solana) would otherwise sign objects valid on both. From 9.13 each object has a second, deployment-bound layout. It is the legacy layout with a new tag and the deployment id inserted directly after the tag:
+
+| Object | Legacy tag | Bound tag |
+|---|---|---|
+| Ticket | `zs-ticket-v2\x00` | `zs-ticket-v3\x00` ‖ deployment |
+| Receipt | `zs-receipt-v2\x00` | `zs-receipt-v3\x00` ‖ deployment |
+| Reserve request | `zs-reserve-v1\x00` | `zs-reserve-v2\x00` ‖ deployment |
+| Ephemeral advertisement | `zs-ephemeral-v1\x00` | `zs-ephemeral-v2\x00` ‖ deployment |
+
+**Deployment id.** 32 bytes:
+
+```
+deployment = sha256("zs-deployment-v1\x00" ‖ u8(rail) ‖ genesis_hash[32] ‖ u32be(len(escrow)) ‖ escrow)
+```
+
+`rail` is `1` for Algorand, `2` for Solana. On Algorand `genesis_hash` is the network's genesis hash and `escrow` is the escrow app id as 8 big-endian bytes; on Solana they are the cluster's genesis hash and the 32-byte escrow program id. On the wire it is `base64` of the 32 bytes. An unbound object omits the field, and a present all-zero id is malformed.
+
+**Who binds what.** A verifier always compares against its **own** deployment id, never one read off the wire. Each layout is chosen per object:
+
+- **Reserve and ticket.** A payer that knows its deployment sets `deployment` on a reserve to a node advertising ≥ 9.13, signs the bound reserve layout, and then requires the ticket to come back bound to that deployment. A ≥ 9.13 node refuses a reserve naming another deployment with `400 deployment_mismatch`, before checking the signature, so the refusal names the cause rather than reading as a bad signature. A payer seldom reaches it: a node on another deployment usually fails the payer's ephemeral check at discovery first. A reserve naming the node's own deployment gets a bound ticket, and its receipt is bound too. A reserve with no `deployment` gets the legacy layouts, so a payer that predates the field keeps working. Against an older node the payer names nothing and accepts a legacy ticket. A bound ticket from any node must name the payer's deployment.
+- **Receipt.** Bound exactly when its ticket is, to the same deployment. The node copies the ticket's `deployment` onto the receipt. `settle()` and `protest()` take the receipt digest as an opaque argument, so the bound layout needs no contract change.
+- **Ephemeral advertisement.** A ≥ 9.13 node publishes both signatures: `ephemeral_sig` over the legacy layout for payers that predate the binding, and `ephemeral_sig_v2` with `ephemeral_deployment` ("Operator details"). A payer that knows its deployment requires the bound signature from a node advertising ≥ 9.13 and judges a bound advertisement by `ephemeral_sig_v2` alone. It accepts the legacy signature from an older node.
+
+**Rollout window.** The legacy layouts stay accepted while payers and nodes move to 9.13. `proto_version` is unsigned, so a relay can lower it and strip the bound fields from details. The payer then checks the legacy ephemeral signature, and because the same version decides whether it names its deployment, it also accepts a legacy ticket and receipt from that node. Until the legacy layouts are refused, the binding holds against honest relays and stale configuration, not against a relay that rewrites details. Refusing them replaces the tags, so it is a later major (§ 3c "Relationship to the crypto domain tags"), made once the fleet advertises ≥ 9.13.
 
 ### Input-token bound
 
@@ -237,6 +265,7 @@ HTTP 200, `Content-Type: application/json`:
     "commit_k":          "<base64 sha256(K_response) — 32 bytes>",
     "input_usage_type":  1,
     "output_usage_type": 1,
+    "deployment":        "<base64 32-byte deployment id — only when the reserve named the node's own; selects the v3 layout>",
     "sig":               "<base64 Ed25519(ticket_signing_key, sha256(CanonicalBytes)) — 64 bytes; off-chain audit only>"
   },
   "wrapped_response_key": "<base64(age_encrypt(K_response, proxy_recipient)) — present whenever proxy_recipient was supplied>",
@@ -260,7 +289,7 @@ So the operator, not the payer, pays the open-time ALGO fee ("Settlement asset m
 
 **Ticket signature.** `ticket.sig` is raw Ed25519 over `sha256(CanonicalBytes())`, used for audit and SDK verification; no on-chain method consumes it. The off-chain verifier resolves the signing key from the destination's `(operator_id, node_id)` node box.
 
-`CanonicalBytes()` places `node_id` (`u64`) right after `operator_id`, then appends `input_usage_type` and `output_usage_type` (one byte each, "Usage types"), then `cache_read_rate` (`u64`) at the tail. `UsageReceipt` canonical bytes end with the matching `cached_input_count` `u64`. The ticket and receipt signing tags carry a literal `v2`: `zs-ticket-v2\x00` and `zs-receipt-v2\x00`.
+`CanonicalBytes()` places `node_id` (`u64`) right after `operator_id`, then appends `input_usage_type` and `output_usage_type` (one byte each, "Usage types"), then `cache_read_rate` (`u64`) at the tail. `UsageReceipt` canonical bytes end with the matching `cached_input_count` `u64`. The ticket and receipt signing tags carry a literal `v2`: `zs-ticket-v2\x00` and `zs-receipt-v2\x00`. Their deployment-bound layouts are `v3` ("Deployment binding").
 
 The authoritative on-chain commitment to `(operatorId, nodeId, maxPrice, expiresAt, payerAddr, settlementGraceSeconds)` is the node's signed gtxn[1] `open()` AppCall. Algorand consensus verifies it at pool admission, and the node's hot signing key signs it.
 
@@ -422,7 +451,7 @@ digest = sha256(CanonicalBytes())
 sig    = Ed25519(node_signing_priv, digest)         # raw — no further prefix
 ```
 
-`CanonicalBytes()` is a length-prefixed binary serialization of every ticket field except `sig`, domain-tagged with `"zs-ticket-v2\x00"`. Its tail is the `input_usage_type` / `output_usage_type` bytes followed by the `cache_read_rate` `u64`. The tag separates ticket signatures from receipt signatures (tagged `"zs-receipt-v2\x00"`) and from any future Ed25519 use. `escrow.protest()` verifies the receipt digest, built the same way with its own tag, on chain with `op.ed25519verifyBare(digest, sig, node_signing_pub)`. The ticket digest is verified off-chain only ("Ticket signature").
+`CanonicalBytes()` is a length-prefixed binary serialization of every ticket field except `sig`, domain-tagged with `"zs-ticket-v2\x00"` (or, for a ticket carrying `deployment`, `"zs-ticket-v3\x00"` followed by the 32-byte deployment id; see "Deployment binding"). Its tail is the `input_usage_type` / `output_usage_type` bytes followed by the `cache_read_rate` `u64`. The tag separates ticket signatures from receipt signatures (tagged `"zs-receipt-v2\x00"`) and from any future Ed25519 use. `escrow.protest()` verifies the receipt digest, built the same way with its own tag, on chain with `op.ed25519verifyBare(digest, sig, node_signing_pub)`. The ticket digest is verified off-chain only ("Ticket signature").
 
 **Not Algorand sign-bytes.** `algosdk crypto.SignBytes`, Pera's `signData`, Defly's `signMessage` and any other API that prefixes its input with Algorand's `"MX"` cannot produce ZeroSignal ticket or receipt signatures. Those APIs sign `Ed25519(priv, "MX" || msg)` over the raw message; ZeroSignal signs a 32-byte sha256 digest of the domain-tagged canonical body. The signer must expose a raw Ed25519 sign operation, or accept the precomputed digest with no further framing. Reference: `ticket.BytesSigner`; raw signing in `proto/go/keystore/keystore.go::SignBytes`.
 
@@ -498,6 +527,7 @@ The cross-operator aggregate a proxy republishes on its own `/v1/zs/details` can
 | Malformed request body (missing model, zero token fields, missing or unparseable `proxy_recipient`) | `400` | code `invalid_reserve` or `invalid_proxy_recipient` |
 | Missing or undecodable `payer_addr` (required for escrow admission) | `400` | code `missing_payer_addr` / `invalid_payer_addr` |
 | `payer_sig` missing (when `zs.require_payer_sig`), forged, bound to another node's `(operator_id, node_id)`, or outside the signature window | `401 Unauthorized` | code `invalid_payer_sig`. The body carries `node_time=<unix>` so a skewed-clock client can resync and re-sign once ("Reserve-request signature"). |
+| `deployment` names an escrow deployment other than the node's: the payer is configured for another network or escrow | `400` | code `deployment_mismatch`. Checked before the signature. Not retryable at this node ("Deployment binding"). |
 | Replayed sealed reserve: a `proxy_recipient` already seen within the signature window | `409 Conflict` | code `reserve_replayed`. A `proxy_recipient` is recorded only by a prior *successful* reservation. The client should re-reserve with a fresh `proxy_recipient`. |
 | Payer holds no prepaid-pool opt-in (when `zs.require_payer_optin`) | `403 Forbidden` | code `payer_not_opted_in`. Opt-in is not funding: a drained but opted-in pool still passes. A client opts in before its first reserve. Both SDKs do when the wallet supports it (their own wallets do): a payer who isn't opted in gets the pool's first deposit before the reserve, and when that payer can't afford it the request ends with `mbr_pool_underfunded` or `wallet_unfunded` before any node holds a slot. See "Funds gate" under "Reserve-request signature". |
 | Opt-in check unavailable: the cold-miss budget is exhausted, or the opt-in probe failed (transient algod) | `503 Service Unavailable` | code `payer_optin_unavailable`, with `Retry-After`. Fails closed, because admitting an unverified payer would reopen slot exhaustion. See "`payer_optin_unavailable` as an alert" below. |
@@ -644,6 +674,7 @@ Verified receipts feed `escrow.protest()`, ledger reconciliation against on-chai
 | `ttft_ms` / `decode_ms` | Operator-measured timing: time to first token, and the decode window from the upstream's first frame (of any kind) to completion. On a non-stream request, or one with no first token, `ttft_ms` is total service time and `decode_ms` is 0. Both are co-signed verbatim on `settle()` (§ 3c). `ttft_ms` feeds the per-operator TTFT-latency metric; `decode_ms` with `actual_output_count` feeds the throughput metric. |
 | `body_hash` | Lowercase hex, always 64 characters, so it is small, case-stable and easy to copy into logs and dispute material. |
 | `input_usage_type` / `output_usage_type` / `aux_output_usage_type` / `aux_output_count` | See "Usage types". |
+| `deployment` | Since 9.13, present exactly when the ticket carries one, with the same value; it selects the bound layout (§ 3a "Deployment binding"). Omitted otherwise. |
 | `sig` | The node's Ed25519 over the digest in "Signature domain" below. |
 
 **Reasoning tokens.** **`actual_output_count` counts every token the model generated, reasoning included.** This defines the count; it is not always the upstream's `completion_tokens` verbatim. OpenAI-compatible providers disagree. Most fold reasoning into `completion_tokens` (`total == prompt + completion`). Others report it separately (`total == prompt + completion + reasoning`), so their `completion_tokens` is visible output only, and billing it as-is would charge for a fraction of the work. A node reconciles the two from the provider's own arithmetic: it adds `reasoning_tokens` only when the reported `total_tokens` confirms that `completion_tokens` excludes it. An absent or inconsistent total leaves the count unchanged, so an unfamiliar upstream under-bills rather than over-bills. A payer-side verifier may assume the count is generated tokens, not rendered ones; a reasoning-heavy turn legitimately reports far more output than the visible answer. Reference: `proto/go/tools.GeneratedOutputTokens`.
@@ -699,6 +730,8 @@ The receipt is still emitted in both cases, with `body_hash` over whatever bytes
 ```
 
 `ticket_id` and `body_hash` are encoded as their wire-form strings (base64 and hex), not decoded first. The layout does not depend on any JSON encoder, so another implementation can reproduce the exact bytes.
+
+A receipt carrying `deployment` (one whose ticket was bound) replaces the leading tag with `"zs-receipt-v3\x00" || deployment[32]` and keeps the rest ("Deployment binding").
 
 **Signature domain.** Same construction as the ticket signature:
 
@@ -1226,6 +1259,8 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
   "ephemeral_issued_at": 1699998500,
   "ephemeral_expiry": 1700000000,
   "ephemeral_sig": "<base64 Ed25519>",
+  "ephemeral_deployment": "<base64 32-byte deployment id>",
+  "ephemeral_sig_v2": "<base64 Ed25519>",
   "models": [
     {
       "id": "gpt-4o-mini",
@@ -1278,6 +1313,8 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
 | `ephemeral_issued_at` | int64 | Unix-seconds **start** of the ephemeral's validity window (its mint or rotation time). See "Ephemeral recipient" below. |
 | `ephemeral_expiry` | int64 | Unix-seconds **end** of the validity window. See "Ephemeral recipient" below. |
 | `ephemeral_sig` | string | base64 Ed25519 signature binding the ephemeral to this node and window. See "Ephemeral recipient" below. |
+| `ephemeral_deployment` | string | Since 9.13: base64 of the node's 32-byte deployment id (§ 3a "Deployment binding"). |
+| `ephemeral_sig_v2` | string | Since 9.13: the same binding plus `ephemeral_deployment`, over the bound layout. See "Ephemeral recipient" below. |
 | `models[].id` | string | Model identifier: the same value as the OpenAI request body's `model` field and `ReserveRequest.model`. See "Which models are listed" below. |
 | `models[].input_rate_usd_per_1m` | float | **Advertised** input rate, USD per 1,000,000 tokens ("Authority of advertised vs. ticket-pinned values" below). Always emitted, including `0`, which means the operator offers this side for free. A free model has both rates `0` and issues `max_price == 0` tickets (§ 3a "Rate derivation"). Nodes that predate this may omit a zero rate; decode an absent value as `0`. |
 | `models[].output_rate_usd_per_1m` | float | **Advertised** output rate, USD per 1,000,000 tokens. Same conventions as the input rate. |
@@ -1318,6 +1355,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
 - `ephemeral_issued_at` is signed, so the `[issued_at, expiry]` window is tamper-evident. It drives a **hard** lifetime cap: `expiry − issued_at` MUST be ≤ `MaxEphemeralLifetime`, so a node cannot advertise a long-lived "ephemeral" it secretly keeps to defeat forward secrecy. It also drives a **soft** relay-staleness signal: on a relayed path, `now − issued_at > FreshnessTarget` downranks the relay (§ 3f). `issued_at` MUST NOT be future-dated (beyond skew).
 - After `ephemeral_expiry`, plus a small verifier skew tolerance, the ephemeral has expired. A sealing party then refuses the operator and refetches or tries another; there is no on-chain key to fall back to.
 - `ephemeral_sig` is over `"zs-ephemeral-v1\0" || be64(operator_id) || be64(node_id) || lenStr(ephemeral_age_pubkey) || i64(ephemeral_expiry) || i64(ephemeral_issued_at)`. `i64` is the 8-byte big-endian two's-complement encoding, as for `expires_at` in the ticket canonical bytes; it equals `be64` for the positive timestamps the protocol produces. The domain tag is **`zs-ephemeral-v1`**. The signature verifies under the public key decoded from the on-chain `signing_addr`, the same key that signs tickets and receipts.
+- Since 9.13 the node also publishes `ephemeral_sig_v2`, over `"zs-ephemeral-v2\0" || deployment[32] || ` the rest of the layout above, with `deployment` sent as `ephemeral_deployment`. A sealing party that knows its own deployment id requires it from a node advertising ≥ 9.13, requires `ephemeral_deployment` to equal its own, and judges a bound advertisement by `ephemeral_sig_v2` alone (§ 3a "Deployment binding"). `ephemeral_sig` stays for sealing parties that predate the binding.
 - The signed `operator_id` and `node_id` are the **chain-resolved** ids, never the JSON's top-level fields, so a substituted `/details` body cannot forge either. `node_id` is bound so that a sibling node's advertisement never validates as this node's, even when an operator reuses one signing key across nodes. Nothing enforces per-node key distinctness, and without the binding, traffic would seal to a key the receiving node cannot decrypt.
 - `ephemeral_age_pubkey` is omitted only when the node advertises no ephemeral, and the other three `ephemeral_*` fields are omitted then too. That makes it unreachable for sealing, so the node 503s `/details` and `/reserve` rather than serve a dead block.
 
@@ -1531,7 +1569,7 @@ A divergence between an advertised value and the eventual ticket is therefore no
 
 `proto_version` advertises the wire-protocol generation a node speaks. Unlike the rest of the details payload, which is *advisory*, `proto_version` **drives routing**: a proxy or direct client filters out operators whose advertised major differs from its own build's constant, before any reserve round-trip.
 
-**Shape.** `<major>.<minor>` strings, currently `"9.11"`. Both segments are non-negative integers. A major alone (`"9"`) decodes as major-only. A patch suffix (`"9.8.1"`) is tolerated; compatibility still consults only the major segment.
+**Shape.** `<major>.<minor>` strings, currently `"9.13"`. Both segments are non-negative integers. A major alone (`"9"`) decodes as major-only. A patch suffix (`"9.8.1"`) is tolerated; compatibility still consults only the major segment.
 
 **Compatibility rule.** Major equality. A proxy or client with `wire.ProtoVersion = "9.11"` accepts operators advertising `"9.0"`, `"9.5"`, or `"9.999.x"`. It rejects a different or unparseable major. Minor-version capability checks are separate and fail closed when a feature requires them.
 
@@ -1539,9 +1577,10 @@ A divergence between an advertised value and the eventual ticket is therefore no
 
 **Relationship to the crypto domain tags.** `proto_version` is independent of the version tags in the cryptographic layer (`zs-admission-v1\x00`, `zs-ticket-v2\x00`, `zs-receipt-v2\x00`, `zs-ephemeral-v1\x00`) and of the `application/vnd.zs+json` MIME. The rules:
 
-- A **minor** bump is reserved for additive, backwards-compatible changes, such as a new optional field on a discovery response or a new SSE event the client can ignore. It MUST NOT touch the domain tags. 9.9 and 9.10 are the minor bumps so far that were not backwards-compatible; see § 3e verifier step 6.
+- A **minor** bump is reserved for additive, backwards-compatible changes, such as a new optional field on a discovery response or a new SSE event the client can ignore. It MUST NOT replace a domain tag (an added one is covered below). 9.9 and 9.10 are the minor bumps so far that were not backwards-compatible; see § 3e verifier step 6.
 - A **major** bump is required for any wire-incompatible change. It MAY come with new domain tags or a new MIME, but need not.
-- Bumping a domain tag (`-v1` → `-v2`), or rotating the request MIME, is always wire-incompatible and MUST come with a major bump of `proto_version`.
+- Replacing a domain tag (`-v1` → `-v2` with `-v1` no longer accepted), or rotating the request MIME, is always wire-incompatible and MUST come with a major bump of `proto_version`.
+- Adding a tag beside one that stays accepted is a minor, provided each side uses the new tag only toward a peer whose advertised minor shows it understands it. 9.13 does this for the deployment-bound layouts (§ 3a "Deployment binding"). Refusing the old tag later is the replacement above.
 
 The asymmetry lets a coordinated `proto_version` bump announce "this generation introduces new envelope crypto" *without* forcing the constant to track every internal tag change. Filtering is a discovery-time signal; the domain tags remain the in-the-clear cryptographic separator. Reference: the tags are `AdmissionTagDomain`, `ticketSigningTag`, `receiptSigningTag` and `ephemeralSigningTag`.
 

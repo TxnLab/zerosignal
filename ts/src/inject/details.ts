@@ -157,6 +157,9 @@ export interface OperatorDetails {
   ephemeral_expiry?: number
   ephemeral_issued_at?: number
   ephemeral_sig?: string
+  /** The deployment-bound signature and the base64 deployment id it binds, beside the legacy one. */
+  ephemeral_deployment?: string
+  ephemeral_sig_v2?: string
   models: OperatorDetailsModel[]
   oracle_source?: string
   oracle_healthy: boolean
@@ -397,6 +400,8 @@ export function parseOperatorDetails(body: unknown): OperatorDetails | null {
     ephemeral_expiry: uint(body.ephemeral_expiry),
     ephemeral_issued_at: uint(body.ephemeral_issued_at),
     ephemeral_sig: str(body.ephemeral_sig),
+    ephemeral_deployment: str(body.ephemeral_deployment),
+    ephemeral_sig_v2: str(body.ephemeral_sig_v2),
     oracle_source: str(body.oracle_source),
     algo_usd_price: rate(body.algo_usd_price),
     algo_usd_at: time(body.algo_usd_at),

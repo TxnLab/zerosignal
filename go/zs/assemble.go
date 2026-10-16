@@ -13,6 +13,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 const (
@@ -50,18 +51,26 @@ func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID u
 			return networkParts{}, configError(err.Error())
 		}
 	}
-	if p.wallet == nil {
+	builtWallet := p.wallet == nil
+	if builtWallet {
 		w, err := buildWallet(ctx, cfg, ac, appID, chain)
 		if err != nil {
 			return networkParts{}, err
 		}
 		p.wallet = w
 	}
+	var deployment ticket.DeploymentID
+	if chain != nil {
+		d, err := readDeploymentID(ctx, chain, appID)
+		if deployment, err = deploymentOrFail(d, err, builtWallet, cfg.Logger); err != nil {
+			return networkParts{}, err
+		}
+	}
 	if p.reserve == nil {
-		p.reserve = newReserveClient(cfg)
+		p.reserve = newReserveClient(cfg, deployment)
 	}
 	if p.registry == nil {
-		p.source = newChainSource(cfg, appID, chain)
+		p.source = newChainSource(cfg, appID, chain, deployment)
 		reg, err := bootRegistry(ctx, cfg, p.source)
 		if err != nil {
 			return networkParts{}, err
@@ -72,6 +81,23 @@ func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID u
 		p.registry, p.stop = reg, reg.Stop
 	}
 	return p, nil
+}
+
+// deploymentOrFail decides what a failed genesis read means. When the SDK
+// built the wallet, that wallet just read the chain, so algod is up and the
+// failure is not a blip worth starting unbound for. A host-supplied wallet
+// means this payer may start without algod; it warns and keeps the legacy
+// layouts until restarted.
+func deploymentOrFail(d ticket.DeploymentID, err error, builtWallet bool, log *slog.Logger) (ticket.DeploymentID, error) {
+	switch {
+	case err == nil:
+		return d, nil
+	case builtWallet:
+		return ticket.DeploymentID{}, err
+	default:
+		log.Warn("could not read the network genesis hash; reserving without a deployment binding", slog.Any("err", err))
+		return ticket.DeploymentID{}, nil
+	}
 }
 
 // buildWallet reads the escrow's config and builds the wallet that opens
@@ -108,23 +134,42 @@ func simulateSender(ac algod.Config, payer string) string {
 	return payer
 }
 
+// readDeploymentID derives the payer's deployment id from the network's
+// genesis hash and the escrow app id: what a node's bound signatures must
+// name.
+func readDeploymentID(ctx context.Context, chain algod.Client, appID uint64) (ticket.DeploymentID, error) {
+	rctx, cancel := context.WithTimeout(ctx, escrowConfigTimeout)
+	defer cancel()
+	sp, err := chain.SuggestedParams(rctx)
+	if err != nil {
+		return ticket.DeploymentID{}, fmt.Errorf("zs: read genesis hash: %w", err)
+	}
+	d, err := ticket.AlgorandDeploymentID(sp.GenesisHash, appID)
+	if err != nil {
+		return ticket.DeploymentID{}, fmt.Errorf("zs: %w", err)
+	}
+	return d, nil
+}
+
 // newReserveClient signs each reserve as the payer (SPEC §3a), and dials
 // with the same guard as inference: a reserve goes to the same
 // node-registered addresses.
-func newReserveClient(cfg Config) *HTTPReserveClient {
+func newReserveClient(cfg Config, deployment ticket.DeploymentID) *HTTPReserveClient {
 	return &HTTPReserveClient{
 		HTTPClient: cfg.nodeHTTPClient(cfg.ReserveTimeout, 0),
 		Signer:     cfg.Signer,
+		Deployment: deployment,
 	}
 }
 
 // newChainSource maps Config onto discovery. The details and attestation
 // probes dial node-registered addresses too, so they get the dial guard.
-func newChainSource(cfg Config, appID uint64, chain algod.Client) *ChainOperatorSource {
+func newChainSource(cfg Config, appID uint64, chain algod.Client, deployment ticket.DeploymentID) *ChainOperatorSource {
 	d := cfg.Discovery
 	probe := cfg.nodeHTTPClient(0, 0)
 	return &ChainOperatorSource{
 		EscrowAppID:        appID,
+		Deployment:         deployment,
 		OperatorIDs:        d.OperatorIDs,
 		ProxyPayerAddr:     cfg.Signer.Address(),
 		Algod:              chain,

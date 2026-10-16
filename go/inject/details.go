@@ -56,6 +56,11 @@ type OperatorDetails struct {
 	EphemeralExpiry    int64  `json:"ephemeral_expiry,omitempty"`
 	EphemeralIssuedAt  int64  `json:"ephemeral_issued_at,omitempty"`
 	EphemeralSig       string `json:"ephemeral_sig,omitempty"`
+	// The deployment-bound signature and the base64 deployment id it binds,
+	// beside the legacy one (ticket.EphemeralAdvertisement.SigV2). Strings
+	// here so this package stays free of ticket; the verifier parses them.
+	EphemeralDeployment string `json:"ephemeral_deployment,omitempty"`
+	EphemeralSigV2      string `json:"ephemeral_sig_v2,omitempty"`
 
 	Models []OperatorDetailsModel `json:"models"`
 

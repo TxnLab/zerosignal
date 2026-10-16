@@ -52,6 +52,7 @@
 import { defaultFetch } from '#default-fetch'
 import type { OperatorDetails } from '@txnlab/zs-proto/inject'
 import type { Operator as SelectionOperator } from '@txnlab/zs-proto/selection'
+import { knownDeployment } from '@txnlab/zs-proto/ticket'
 import { bootstrapProtoVersion } from '@txnlab/zs-proto/wire'
 
 import { fetchFailedStatus, probeAttestation } from '../attestation.js'
@@ -172,6 +173,13 @@ export interface ProbeOptions {
     logger?: Logger | undefined
     /** Wall clock, Unix ms. */
     clock?: Clock | undefined
+    /**
+     * The payer's own deployment id, which a node's bound ephemeral signature
+     * must name. Absent, a ChainOperatorSource derives it from algod's genesis
+     * hash at its first chain read, as Go's zero ChainOperatorSource.Deployment;
+     * until then only the legacy signature is checked.
+     */
+    deployment?: Uint8Array | undefined
 }
 
 /**
@@ -189,12 +197,22 @@ export class NodeProber {
     readonly #latency: RelayLatencyStore
     readonly #log: Logger
     readonly #clock: Clock
+    #deployment: Uint8Array | undefined
     // Each node's most recent probe outcome across cycles, keyed by
     // nodeRefString: an operator's nodes are up and down independently. The
     // fresh rows a cycle probes all start unreachable, so this is what lets
     // the relay pool prefer a relay that answered last cycle.
     readonly #lastReachable = new Map<string, boolean>()
     readonly #stores: DetailsProbeStores
+
+    /** The id bound ephemeral signatures are checked against; undefined checks legacy only. */
+    get deployment(): Uint8Array | undefined {
+        return this.#deployment
+    }
+
+    set deployment(d: Uint8Array | undefined) {
+        this.#deployment = knownDeployment(d)
+    }
 
     constructor(o: ProbeOptions = {}) {
         // The default is built at the first probe: under Node it allocates a
@@ -215,6 +233,7 @@ export class NodeProber {
         // a node half applied.
         this.#log = quietLogger(o.logger ?? discardLogger)
         this.#clock = o.clock ?? Date.now
+        this.#deployment = knownDeployment(o.deployment)
         this.#reputation =
             o.relayReputation ??
             new RelayReputationStore({ clock: this.#clock, targetReachable: (t) => this.recallReachable(t) })
@@ -423,7 +442,7 @@ export class NodeProber {
         op.ephemeralExpiry = 0
         op.ephemeralIssuedAt = 0
         const v = checkEphemeralAdvertisement(
-            { op: op.id, node: op.nodeId },
+            { op: op.id, node: op.nodeId, deployment: this.#deployment },
             op.ticketSigningKey,
             details,
             Math.floor(this.#clock() / 1000),

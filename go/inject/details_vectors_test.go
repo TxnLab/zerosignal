@@ -49,6 +49,8 @@ func fullDetails() inject.OperatorDetails {
 		EphemeralExpiry:       1_800_000_600,
 		EphemeralIssuedAt:     1_800_000_000,
 		EphemeralSig:          "c2lnbmF0dXJl",
+		EphemeralDeployment:   "ZGVwbG95bWVudA==",
+		EphemeralSigV2:        "c2lnbmF0dXJlLXYy",
 		OracleSource:          "pyth",
 		OracleHealthy:         true,
 		AlgoUSDPrice:          0.2375,
