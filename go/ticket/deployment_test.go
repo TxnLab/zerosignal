@@ -84,7 +84,10 @@ func TestDeploymentID_RefusesBadInputs(t *testing.T) {
 		"unknown rail":  func() error { _, err := NewDeploymentID(3, testGenesis(1), []byte{1}); return err },
 		"rail zero":     func() error { _, err := NewDeploymentID(0, testGenesis(1), []byte{1}); return err },
 		"short genesis": func() error { _, err := NewDeploymentID(RailAlgorand, testGenesis(1)[:31], []byte{1}); return err },
-		"long genesis":  func() error { _, err := NewDeploymentID(RailAlgorand, append(testGenesis(1), 0), []byte{1}); return err },
+		"long genesis": func() error {
+			_, err := NewDeploymentID(RailAlgorand, append(testGenesis(1), 0), []byte{1})
+			return err
+		},
 		"empty escrow":  func() error { _, err := NewDeploymentID(RailAlgorand, testGenesis(1), nil); return err },
 		"app id zero":   func() error { _, err := AlgorandDeploymentID(testGenesis(1), 0); return err },
 		"short program": func() error { _, err := SolanaDeploymentID(testGenesis(1), make([]byte, 31)); return err },
