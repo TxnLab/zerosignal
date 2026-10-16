@@ -24,6 +24,7 @@ import {
     setsRelayHopHeader,
     submitsOpen,
     takesSettleAck,
+    usesRailNeutralNames,
 } from '@txnlab/zs-proto/wire'
 
 import { newError } from './codes.js'
@@ -202,6 +203,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
             nodeRecipient: rt.sealRecipient,
             ephemeral: rt.identity,
             ...(handle.openGroup ? { openGroup: handle.openGroup } : {}),
+            neutralNames: usesRailNeutralNames(op.protoVersion),
         })
     } catch (err) {
         log.error('wrap request failed', { endpoint, ...opAttrs(op), ...relayAttrs(hop), err: errText(err) })
@@ -254,7 +256,7 @@ export function settleAckPoster(
 ): ((ack: SettleAck, signal?: AbortSignal) => Promise<void>) | undefined {
     if (!takesSettleAck(op.protoVersion) || !recipient) return undefined
     return async (ack, signal) => {
-        const body = await sealSettleAck(ack, recipient)
+        const body = await sealSettleAck(ack, recipient, usesRailNeutralNames(op.protoVersion))
         let hop: RelayHop | null = null
         if (relayed) {
             const relays = deps.relays

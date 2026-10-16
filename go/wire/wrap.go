@@ -70,6 +70,9 @@ type RequestBinding struct {
 	// form, set only for a node that submits the open itself (SubmitsOpen).
 	// Empty means the payer submitted it and the node finds it by TxID.
 	OpenGroup string
+	// NeutralNames writes TxID and OpenGroup as payment_ref and payment_open.
+	// Set it only for a node that reads them (UsesRailNeutralNames).
+	NeutralNames bool
 }
 
 // WrapRequestBound is WrapRequestWithIdentity with the full RequestBinding.
@@ -80,9 +83,12 @@ func WrapRequestBound(body []byte, b RequestBinding, ephemeral *age.X25519Identi
 
 	header := innerRequestHeader{
 		ReplyToPublicKey: ephemeral.Recipient().String(),
-		AlgorandTxID:     b.TxID,
 		TicketID:         b.TicketID,
-		OpenGroup:        b.OpenGroup,
+	}
+	if b.NeutralNames {
+		header.PaymentRef, header.PaymentOpen = b.TxID, b.OpenGroup
+	} else {
+		header.AlgorandTxID, header.OpenGroup = b.TxID, b.OpenGroup
 	}
 	if len(b.AdmissionTag) > 0 {
 		header.AdmissionTag = base64.StdEncoding.EncodeToString(b.AdmissionTag)

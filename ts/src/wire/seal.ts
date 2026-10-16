@@ -18,7 +18,7 @@ import { base64 } from '@scure/base'
 import { buildBodyAAD, buildFrameAAD, buildHeaderAAD } from './aad.js'
 import { NONCE_SIZE, RESPONSE_KEY_SIZE } from './constants.js'
 import type { RequestEnvelope, ResponseEnvelope } from './envelope.js'
-import { decodeInnerRequest } from './inner.js'
+import { decodeInnerRequest, paymentFields } from './inner.js'
 import { ADMISSION_TAG_SIZE } from './admission.js'
 
 export interface DecryptedRequest {
@@ -35,6 +35,9 @@ export interface DecryptedRequest {
     // The inner header's open_group, opaque at this layer; '' when the payer
     // submitted the open itself.
     openGroup: string
+    // A payment field arrived as payment_ref or payment_open. Diagnostic only:
+    // algorandTxID and openGroup hold the value under either name.
+    neutralNames: boolean
 }
 
 // decryptRequest parses a RequestEnvelope, age-decrypts the ciphertext
@@ -64,6 +67,7 @@ export async function decryptRequest(
     const d = new age.Decrypter()
     d.addIdentity(nodeIdentity)
     const { header, body } = decodeInnerRequest(await d.decrypt(ct))
+    const payment = paymentFields(header)
     if (!header.reply_to_public_key) throw new Error('inner request missing reply_to_public_key')
 
     let admissionTag: Uint8Array | undefined
@@ -81,10 +85,11 @@ export async function decryptRequest(
     return {
         body,
         replyToRecipient: header.reply_to_public_key,
-        algorandTxID: header.algorand_tx_id,
+        algorandTxID: payment.ref,
         ticketID: header.ticket_id ?? '',
         admissionTag,
-        openGroup: header.open_group ?? '',
+        openGroup: payment.open,
+        neutralNames: (header.payment_ref ?? '') !== '' || (header.payment_open ?? '') !== '',
     }
 }
 

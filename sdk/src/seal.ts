@@ -40,6 +40,8 @@ export interface SealRequestArgs {
      * Omitted when the payer submitted the open.
      */
     openGroup?: string
+    /** Write the tx id and open group under their rail-neutral names (usesRailNeutralNames). */
+    neutralNames?: boolean
 }
 
 /**
@@ -61,6 +63,7 @@ export async function sealRequest(a: SealRequestArgs): Promise<Uint8Array> {
         nodeRecipient: a.nodeRecipient,
         ephemeral: a.ephemeral,
         ...(a.openGroup ? { openGroup: a.openGroup } : {}),
+        neutralNames: a.neutralNames ?? false,
     })
     return envelope
 }

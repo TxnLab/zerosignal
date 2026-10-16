@@ -45,9 +45,9 @@ describe('settle ack', () => {
         expect(text).not.toContain(ack.ticket_id)
         expect(text).not.toContain('settle_group')
 
-        expect(await openSettleAck(sealed, node.secret)).toEqual(ack)
+        expect(await openSettleAck(sealed, node.secret)).toEqual({ ...ack, neutralNames: false })
         // Tried in order, as Go's variadic identities are.
-        expect(await openSettleAck(sealed, other.secret, node.secret)).toEqual(ack)
+        expect(await openSettleAck(sealed, other.secret, node.secret)).toEqual({ ...ack, neutralNames: false })
         await expect(openSettleAck(sealed, other.secret)).rejects.toThrow(/open sealed reserve envelope/)
         await expect(openSettleAck(sealed)).rejects.toThrow(/no node identities/)
     })

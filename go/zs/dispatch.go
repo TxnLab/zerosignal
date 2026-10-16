@@ -2520,6 +2520,7 @@ func (s *Client) settleAckPoster(op Operator, recipient age.Recipient, relayed b
 		return nil
 	}
 	return func(ctx context.Context, ack wire.SettleAck) error {
+		ack.NeutralNames = wire.UsesRailNeutralNames(op.ProtoVersion)
 		body, err := wire.SealSettleAck(ack, recipient)
 		if err != nil {
 			return err
@@ -2667,6 +2668,7 @@ func (s *Client) runSealed(
 		TicketID:     ticket.TicketID,
 		AdmissionTag: admissionTag,
 		OpenGroup:    openHandle.OpenGroup,
+		NeutralNames: wire.UsesRailNeutralNames(op.ProtoVersion),
 	}, ephemeral, sealRecipient)
 	timer.RecordEncrypt(time.Since(t0))
 	if err != nil {

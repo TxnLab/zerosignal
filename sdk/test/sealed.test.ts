@@ -17,6 +17,7 @@ import {
     ENCRYPTED_CONTENT_TYPE,
     NODE_SUBMITS_OPEN_MIN_VERSION,
     PROTO_VERSION,
+    RAIL_NEUTRAL_NAMES_MIN_VERSION,
     RELAY_HOP_HEADER,
     RELAY_METHOD_HEADER,
     RELAY_PATH_HEADER,
@@ -30,6 +31,7 @@ import {
     computeAdmissionTag,
     decryptRequest,
     generateEphemeralIdentity,
+    openReserveResponse,
     openSettleAck,
 } from '@txnlab/zs-proto/wire'
 import type { Operator as SelectionOperator } from '@txnlab/zs-proto/selection'
@@ -724,13 +726,14 @@ describe('runSealed', () => {
         // an older node loses the turn, since it ignores the field and waits
         // for an open nobody submitted.
         it.each([
-            [NODE_SUBMITS_OPEN_MIN_VERSION, true, true],
-            [PROTO_VERSION, true, true],
-            ['9.11', true, false],
-            ['', true, false],
+            [NODE_SUBMITS_OPEN_MIN_VERSION, true, true, false],
+            [RAIL_NEUTRAL_NAMES_MIN_VERSION, true, true, true],
+            [PROTO_VERSION, true, true, true],
+            ['9.11', true, false, false],
+            ['', true, false, false],
             // A wallet without openForNode keeps submitting, whatever the node.
-            [NODE_SUBMITS_OPEN_MIN_VERSION, false, false],
-        ] as const)('node %s, openForNode %s: hands off %s', async (version, nodeOpener, handOff) => {
+            [NODE_SUBMITS_OPEN_MIN_VERSION, false, false, false],
+        ] as const)('node %s, openForNode %s: hands off %s, neutral names %s', async (version, nodeOpener, handOff, neutral) => {
             const s = await setup({ protoVersion: version, nodeOpener })
             const ac = new AbortController()
             await runSealed(s.deps, s.em, s.run, ac.signal)
@@ -742,6 +745,8 @@ describe('runSealed', () => {
             expect(dec.openGroup).toBe(handOff ? 'COMPLETEDGROUP' : '')
             // The app call's txid either way, and the tag binds it as before.
             expect(dec.algorandTxID).toBe('APPCALLTXID')
+            // Under the names this node reads: an older one sees no tx id under payment_ref.
+            expect(dec.neutralNames).toBe(neutral)
             expect(dec.admissionTag).toEqual(computeAdmissionTag(new Uint8Array(32).fill(3), 'TKT1', 'APPCALLTXID', dec.body))
             // Journal and watchdog are armed exactly as after a payer submit.
             expect(s.opened).toEqual([[s.handle, s.run.reserved.ticket]])
@@ -1017,7 +1022,9 @@ describe('settleAckPoster', () => {
         const got: { url: string; headers: Record<string, string>; ack: SettleAck }[] = []
         const fetch: Fetch = async (url, init) => {
             const headers = init!.headers as Record<string, string>
-            got.push({ url: String(url), headers, ack: await openSettleAck(init!.body as Uint8Array, id.secret) })
+            // Which name the group came under is pinned by its own test below.
+            const { neutralNames: _names, ...opened } = await openSettleAck(init!.body as Uint8Array, id.secret)
+            got.push({ url: String(url), headers, ack: opened })
             return new Response(status === 202 ? null : '{"error":{"message":"x","code":"ticket_settled"}}', { status })
         }
         return { id, got, fetch }
@@ -1046,6 +1053,21 @@ describe('settleAckPoster', () => {
                 ack,
             },
         ])
+    })
+
+    it.each([
+        [SETTLE_ACK_MIN_VERSION, 'settle_group'],
+        [RAIL_NEUTRAL_NAMES_MIN_VERSION, 'payment_settle'],
+    ])('names the group for a %s node as %s', async (version, key) => {
+        const id = await generateEphemeralIdentity()
+        const plaintexts: Record<string, unknown>[] = []
+        const fetch: Fetch = async (_url, init) => {
+            const plain = await openReserveResponse(init!.body as Uint8Array, id)
+            plaintexts.push(JSON.parse(new TextDecoder().decode(plain)) as Record<string, unknown>)
+            return new Response(null, { status: 202 })
+        }
+        await settleAckPoster({ fetch }, target(version), id.recipient, false)!(ack)
+        expect(plaintexts).toEqual([{ ticket_id: 'TKT', [key]: 'GROUP' }])
     })
 
     it('treats a refusal as final, not a reason to broadcast', async () => {

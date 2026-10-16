@@ -33,12 +33,55 @@ const INNER_HEADER_MAX_LEN = 64 << 10
 // relay cannot read ticket_id / algorand_tx_id and resolve the payer on chain.
 export interface InnerRequestHeader {
     reply_to_public_key: string
-    algorand_tx_id: string
+    // algorand_tx_id and payment_ref are one value under two names: a payer
+    // writes payment_ref only to a node that reads it (usesRailNeutralNames),
+    // since an older node would see no tx id at all.
+    algorand_tx_id?: string
+    payment_ref?: string
     ticket_id?: string
     admission_tag?: string
     // The payer-completed open() group for a node that submits it itself
-    // (submitsOpen). Mirrors Go's innerRequestHeader.OpenGroup.
+    // (submitsOpen), as open_group or, under the neutral names, payment_open.
+    // Mirrors Go's innerRequestHeader.OpenGroup.
     open_group?: string
+    payment_open?: string
+}
+
+/**
+ * paymentFields returns the header's payment reference and open, whichever
+ * names carried them, as Go's innerRequestHeader.paymentFields does. Two
+ * different values under the two names are refused, so the header has exactly
+ * one reading for the admission tag, the payment check and anything else that
+ * reads it.
+ */
+export function paymentFields(h: InnerRequestHeader): { ref: string; open: string } {
+    try {
+        return {
+            ref: pickPaymentField('algorand_tx_id', h.algorand_tx_id, 'payment_ref', h.payment_ref),
+            open: pickPaymentField('open_group', h.open_group, 'payment_open', h.payment_open),
+        }
+    } catch (err) {
+        throw new Error(`inner request header: ${err instanceof Error ? err.message : String(err)}`)
+    }
+}
+
+/**
+ * pickPaymentField returns whichever of a legacy and a rail-neutral field is
+ * set, and refuses two different values. Mirrors Go's wire.oneOf.
+ */
+export function pickPaymentField(legacyName: string, legacy: unknown, neutralName: string, neutral: unknown): string {
+    const l = stringOrEmpty(legacyName, legacy)
+    const n = stringOrEmpty(neutralName, neutral)
+    if (l !== '' && n !== '' && l !== n) throw new Error(`${legacyName} and ${neutralName} disagree`)
+    return n !== '' ? n : l
+}
+
+// Go's json.Unmarshal leaves a string field empty for null or an absent key
+// and refuses any other non-string, so a TS peer must refuse it too.
+function stringOrEmpty(name: string, v: unknown): string {
+    if (v === undefined || v === null) return ''
+    if (typeof v !== 'string') throw new Error(`${name} is not a string`)
+    return v
 }
 
 export function encodeInnerRequest(header: InnerRequestHeader, body: Uint8Array): Uint8Array {

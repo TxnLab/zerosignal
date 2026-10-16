@@ -183,6 +183,9 @@ type fakeNode struct {
 	// lastSealedOpenGroup records the envelope's open_group, which only a
 	// payer handing the open to a 9.12+ node sets.
 	lastSealedOpenGroup string
+	// lastSealedNeutralNames records whether the payment fields arrived as
+	// payment_ref / payment_open.
+	lastSealedNeutralNames bool
 }
 
 // rawKeyBytesSigner satisfies ticket.BytesSigner with a single raw
@@ -525,6 +528,7 @@ func (n *fakeNode) handleSealed(t *testing.T, cfg *nodeConfig, w http.ResponseWr
 	n.mu.Lock()
 	n.lastSealedAlgorandTxID = txID
 	n.lastSealedOpenGroup = dec.OpenGroup
+	n.lastSealedNeutralNames = dec.NeutralNames
 	n.mu.Unlock()
 
 	k, ok := n.keyFor(ticketID)
@@ -2834,7 +2838,9 @@ func TestDispatch_WalletPath_HandsOpenToNodeByVersion(t *testing.T) {
 		version      string
 		wantHandOff  bool
 		wantEnvelope string
+		wantNeutral  bool
 	}{
+		{version: wire.RailNeutralNamesMinVersion, wantHandOff: true, wantEnvelope: "COMPLETEDGROUP", wantNeutral: true},
 		{version: wire.NodeSubmitsOpenMinVersion, wantHandOff: true, wantEnvelope: "COMPLETEDGROUP"},
 		{version: "9.11", wantHandOff: false, wantEnvelope: ""},
 	}
@@ -2861,6 +2867,9 @@ func TestDispatch_WalletPath_HandsOpenToNodeByVersion(t *testing.T) {
 			}
 			if node.lastSealedAlgorandTxID != fw.appCallTxID {
 				t.Errorf("envelope algorand_tx_id = %q, want the app call's", node.lastSealedAlgorandTxID)
+			}
+			if node.lastSealedNeutralNames != tc.wantNeutral {
+				t.Errorf("envelope neutral names = %v, want %v", node.lastSealedNeutralNames, tc.wantNeutral)
 			}
 		})
 	}

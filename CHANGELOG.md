@@ -665,6 +665,14 @@ the rail, the network's genesis hash and the escrow id (SPEC §3a "Deployment bi
 - **Gate.** `wire.UsesDeploymentBinding`, failing closed to the legacy layouts. Mixed fleets are
   safe in both directions. No contract change: `settle()` and `protest()` take the receipt digest
   as an opaque argument.
+- **Rail-neutral payment names.** A ≥ 9.13 node also reads the payment fields a payer sends under
+  names no rail owns: `payment_ref` for the inner header's `algorand_tx_id`, `payment_open` for
+  its `open_group`, and `payment_settle` for the settle ack's `settle_group`. A payer uses them
+  only with a ≥ 9.13 node (`wire.UsesRailNeutralNames`), since an older one would see no tx id.
+  A node refuses a request or ack that names one value under both names, differently. Only the
+  JSON keys change: the admission tag and AAD hash the values. The node-to-payer names
+  (`presigned_open_txn`, `X-Zs-Settle-Group`, `zs-settle-group`) keep their names until the major
+  that drops the legacy layouts, when both ends flip together.
 
 The legacy layouts are refused in a later major, once the fleet advertises ≥ 9.13. Until
 then a relay that lowers a node's unsigned `proto_version` can strip the bound ephemeral

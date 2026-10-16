@@ -7,10 +7,14 @@ package wire
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"filippo.io/age"
 )
 
 func TestInnerRequest_RoundTrip(t *testing.T) {
@@ -35,6 +39,129 @@ func TestInnerRequest_RoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(gotBody, body) {
 		t.Errorf("body = %q, want %q", gotBody, body)
+	}
+}
+
+// The node reads the tx id and open group under either set of names, and
+// refuses a header that names one of them twice with different values: the
+// admission tag binds the tx id, so admitting on the other would check a
+// payment the tag never named.
+func TestPaymentFields(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		h         innerRequestHeader
+		ref, open string
+		ok        bool
+	}{
+		{"legacy", innerRequestHeader{AlgorandTxID: "TX", OpenGroup: "G"}, "TX", "G", true},
+		{"neutral", innerRequestHeader{PaymentRef: "TX", PaymentOpen: "G"}, "TX", "G", true},
+		{"both agreeing", innerRequestHeader{AlgorandTxID: "TX", PaymentRef: "TX", OpenGroup: "G", PaymentOpen: "G"}, "TX", "G", true},
+		{"mixed", innerRequestHeader{PaymentRef: "TX", OpenGroup: "G"}, "TX", "G", true},
+		{"refs disagree", innerRequestHeader{AlgorandTxID: "TX", PaymentRef: "OTHER"}, "", "", false},
+		{"opens disagree", innerRequestHeader{AlgorandTxID: "TX", OpenGroup: "G", PaymentOpen: "H"}, "", "", false},
+		{"neither", innerRequestHeader{}, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref, open, err := tc.h.paymentFields()
+			if (err == nil) != tc.ok {
+				t.Fatalf("err = %v, want ok=%v", err, tc.ok)
+			}
+			if ref != tc.ref || open != tc.open {
+				t.Fatalf("(ref, open) = (%q, %q), want (%q, %q)", ref, open, tc.ref, tc.open)
+			}
+		})
+	}
+}
+
+// The refusal must hold at the node's entry point, not only in the helper: a
+// DecryptRequest that dropped paymentFields' error would take one of two
+// values from a header that names both.
+func TestDecryptRequest_RefusesDisagreeingNames(t *testing.T) {
+	node, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]innerRequestHeader{
+		"refs":  {AlgorandTxID: "TX", PaymentRef: "OTHER"},
+		"opens": {AlgorandTxID: "TX", OpenGroup: "G", PaymentOpen: "H"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h.ReplyToPublicKey = node.Recipient().String()
+			inner, err := encodeInnerRequest(h, []byte("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ct, err := ageSeal(inner, node.Recipient())
+			if err != nil {
+				t.Fatal(err)
+			}
+			env, err := json.Marshal(RequestEnvelope{Ciphertext: base64.StdEncoding.EncodeToString(ct)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := DecryptRequest(env, node); err == nil || !strings.Contains(err.Error(), "disagree") {
+				t.Fatalf("DecryptRequest = %+v, %v; want a disagreement refusal", got, err)
+			}
+		})
+	}
+}
+
+// RequestBinding.NeutralNames picks which names reach the node, and only
+// those: an older node reads an absent algorand_tx_id as "" and admits nothing.
+func TestWrapRequestBound_WritesTheChosenNames(t *testing.T) {
+	node, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, neutral := range []bool{false, true} {
+		env, err := WrapRequestBound([]byte("{}"), RequestBinding{TxID: "TX", TicketID: "T", OpenGroup: "G", NeutralNames: neutral}, reply, node.Recipient())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var outer RequestEnvelope
+		if err := json.Unmarshal(env, &outer); err != nil {
+			t.Fatal(err)
+		}
+		ct, err := base64.StdEncoding.DecodeString(outer.Ciphertext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inner, err := ageOpen(ct, node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, _, err := decodeInnerRequest(inner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := innerRequestHeader{ReplyToPublicKey: reply.Recipient().String(), TicketID: "T", AlgorandTxID: "TX", OpenGroup: "G"}
+		if neutral {
+			want.AlgorandTxID, want.OpenGroup, want.PaymentRef, want.PaymentOpen = "", "", "TX", "G"
+		}
+		if h != want {
+			t.Fatalf("neutral=%v: header %+v, want %+v", neutral, h, want)
+		}
+		got, err := DecryptRequest(env, node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.AlgorandTxID != "TX" || got.OpenGroup != "G" || got.NeutralNames != neutral {
+			t.Fatalf("neutral=%v: decrypted %q %q %v", neutral, got.AlgorandTxID, got.OpenGroup, got.NeutralNames)
+		}
+	}
+
+	// A payer-submitted open carries no group, so payment_ref alone must
+	// still read as the neutral names.
+	env, err := WrapRequestBound([]byte("{}"), RequestBinding{TxID: "TX", TicketID: "T", NeutralNames: true}, reply, node.Recipient())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DecryptRequest(env, node); err != nil || !got.NeutralNames || got.AlgorandTxID != "TX" {
+		t.Fatalf("payment_ref alone: %+v, %v", got, err)
 	}
 }
 

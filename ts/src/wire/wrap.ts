@@ -50,6 +50,9 @@ export interface WrapRequestArgs {
     // escrow.EncodeOpenGroup writes), set only for a node that submits the
     // open itself (submitsOpen). Omit when the payer submitted it.
     openGroup?: string
+    // Write txID and openGroup as payment_ref and payment_open. Set only for
+    // a node that reads them (usesRailNeutralNames).
+    neutralNames?: boolean
 }
 
 export interface WrapRequestResult {
@@ -68,16 +71,19 @@ export interface WrapRequestResult {
 export async function wrapRequest(args: WrapRequestArgs): Promise<WrapRequestResult> {
     const ephemeral = args.ephemeral ?? (await generateEphemeralIdentity())
 
-    const header: InnerRequestHeader = {
-        reply_to_public_key: ephemeral.recipient,
-        algorand_tx_id: args.txID,
-        ticket_id: args.ticketID,
+    const header: InnerRequestHeader = { reply_to_public_key: ephemeral.recipient }
+    // Go omits an empty tx id and ticket id; the node reads a missing key as ''.
+    if (args.txID) {
+        if (args.neutralNames) header.payment_ref = args.txID
+        else header.algorand_tx_id = args.txID
     }
+    if (args.ticketID) header.ticket_id = args.ticketID
     if (args.admissionTag && args.admissionTag.length > 0) {
         header.admission_tag = base64.encode(args.admissionTag)
     }
     if (args.openGroup) {
-        header.open_group = args.openGroup
+        if (args.neutralNames) header.payment_open = args.openGroup
+        else header.open_group = args.openGroup
     }
 
     const e = new age.Encrypter()
