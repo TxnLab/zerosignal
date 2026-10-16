@@ -2146,12 +2146,17 @@ func (c *Client) ComposeSettleLapsed(ctx context.Context, args SettleLapsedArgs,
 //
 // payerAddr is the ticket's payer — the receiver of the inner
 // refund payment, and thus a required ForeignAccounts reference.
+// The treasury is referenced too: the contract redirects the refund
+// there when the payer's USDC holding can't receive it.
 func (c *Client) ComposeRefundInactive(ctx context.Context, args RefundInactiveArgs, callerSigner transaction.TransactionSigner, callerAddr string) (CallResult, error) {
 	if len(args.TicketIDRaw) != 16 {
 		return CallResult{}, fmt.Errorf("escrow: refundInactive ticket id must be 16 bytes (got %d)", len(args.TicketIDRaw))
 	}
 	if _, err := types.DecodeAddress(args.PayerAddr); err != nil {
 		return CallResult{}, fmt.Errorf("escrow: refundInactive payer addr: %w", err)
+	}
+	if c.Treasury == "" {
+		return CallResult{}, fmt.Errorf("escrow: treasury addr not loaded; call RefreshConfig first")
 	}
 	return c.submitSingle(ctx, "refundInactive", callerSigner, callerAddr,
 		[]any{args.TicketIDRaw},
@@ -2161,7 +2166,7 @@ func (c *Client) ComposeRefundInactive(ctx context.Context, args RefundInactiveA
 			{AppID: 0, Name: OperatorBoxKey(args.OperatorID)},
 			{AppID: 0, Name: NodeBoxKey(args.OperatorID, args.NodeID)},
 		},
-		[]string{args.PayerAddr},
+		[]string{args.PayerAddr, c.Treasury},
 		// USDC is referenced by the inner USDC refund the contract
 		// fires when t.maxPrice > 0. HAY is not read on this path.
 		filterNonZero(c.UsdcAssetID),

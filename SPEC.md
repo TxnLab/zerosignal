@@ -778,6 +778,8 @@ Settlement requires committing to the response bytes through the receipt's `body
 
 Tickets escrow USDC, not ALGO. The proxy locks `max_price` microUSDC into the contract at `open()`, in the open group's `usdcPayment`. Every settlement disbursement is also USDC: operator owner, treasury and any payer refund are all transfers of the `usdcAssetId` global the contract was created with.
 
+**An undeliverable leg is forfeited to the treasury.** On `settle`, `settleLapsed` and `refundInactive`, the contract checks whether the payer refund's receiver can hold USDC, and on the two settle paths the operator payout's receiver too. A receiver that has opted out of the asset, or whose holding the asset's freeze address has frozen, cannot. That leg then goes to the treasury, with the note `undeliverable payer refund` or `undeliverable operator payout`, and the call still finalizes. Otherwise either party could strand the other's money. A payer who opts out after an operator claim would make `settleLapsed` revert forever. A frozen operator owner would do the same to the payer's refund, since the ticket keeps the owner it had at `open()` and `refundInactive` refuses an operator-pending ticket. The forfeit is permanent. A payer who opts out loses the refund, and an operator owner who opts out or is frozen loses the payout. The protocol fee leg is never redirected; if the treasury cannot hold USDC, the call reverts until the admin rotates it with `setTreasury`. Every caller of `refundInactive` MUST reference the treasury account, as the settle paths already do, or a forfeit reverts on an unavailable account. Forfeits are not counted in `protoFeesNetCollected`, and a forfeited payout still counts toward the operator's revenue metrics.
+
 **Prepaid box-MBR pool (no per-turn ALGO leg).** Each ticket box's minimum-balance reserve comes from a per-payer **prepaid pool**, so **no ALGO moves in the open group**:
 
 - The payer opts into the app with `depositMbr` and deposits ALGO **once**. The contract account holds it, tracked in the payer's **local state** (`algoBalance`, `openTickets`).
@@ -1153,7 +1155,7 @@ Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the 
 - **Arbiter verification:** confirm the node's claim and its amount. The proxy cannot prove non-delivery cryptographically, so this case relies on the escrow:
   - A node claim moves funds only when the payer acks it with matching args, or through `settleLapsed` once the deadline passes with the claim still pending.
   - Before the deadline, a payer that disputes the claim can send a mismatched `settle()` ack, which freezes the ticket. A payer holding a node-signed receipt can instead `protest()`. A frozen ticket's funds stay locked for off-chain arbitration; no contract method releases them.
-  - If the node never claims, anyone can call `refundInactive` after the deadline and the payer is refunded in full, so the case does not arise.
+  - If the node never claims, anyone can call `refundInactive` after the deadline and the payer is refunded in full, so the case does not arise. (A payer whose USDC holding can no longer receive forfeits that refund to the treasury; see "Settlement asset model".)
 - **Severity:** refund the inference fee plus a small penalty on first offense; derank on repeat. Persistent reneging crosses the threshold into full slash.
 
 #### (d) Cross-wiring / ticket replay
