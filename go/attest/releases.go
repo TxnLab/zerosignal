@@ -164,6 +164,9 @@ func TrustedNodeImages() []string {
 		// v0.28.0 — multi-arch index digest, which is what a compose `image:`
 		// pins. Inserted by zs-node's release-allowlist workflow.
 		"ghcr.io/txnlab/zs-node@sha256:ccac4239e39f9a9dbfe3c4a82a17210f63128ebfd748bde92bd73dac32708811",
+		// v0.29.0 — multi-arch index digest, which is what a compose `image:`
+		// pins. Inserted by zs-node's release-allowlist workflow.
+		"ghcr.io/txnlab/zs-node@sha256:c8b5247c6f17517c6629496dade91beb31362a36c9495734a1da18cd45be3a50",
 		// zs-node-release-list: node-images
 		//
 		// ^ ANCHOR — see the note on the skeleton list's marker above. This is
