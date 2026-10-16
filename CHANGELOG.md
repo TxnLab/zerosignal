@@ -661,7 +661,10 @@ the rail, the network's genesis hash and the escrow id (SPEC §3a "Deployment bi
   layouts.
 - **Details.** A ≥ 9.13 node publishes `ephemeral_sig_v2` and `ephemeral_deployment` beside
   `ephemeral_sig`. A payer that knows its deployment requires the bound signature from a ≥ 9.13
-  node.
+  node. The node also names its deployment in an unsigned `deployment` field, and a payer drops a
+  node naming another, or a ≥ 9.13 node naming none, as a failed probe. The TS SDK now reads a
+  deployment id's base64 as Go does (CR/LF skipped, unused padding bits ignored) everywhere it
+  decodes one, tickets, reserves, receipts and ephemerals included.
 - **Gate.** `wire.UsesDeploymentBinding`, failing closed to the legacy layouts. Mixed fleets are
   safe in both directions. No contract change: `settle()` and `protest()` take the receipt digest
   as an opaque argument.

@@ -56,6 +56,7 @@ import { knownDeployment } from '@txnlab/zs-proto/ticket'
 import { bootstrapProtoVersion } from '@txnlab/zs-proto/wire'
 
 import { fetchFailedStatus, probeAttestation } from '../attestation.js'
+import { checkDetailsDeployment } from '../catalog/deployment.js'
 import { checkEphemeralAdvertisement, recordEphemeralStaleness } from '../catalog/ephemeral.js'
 import { defaults } from '../config.js'
 import { DEFAULT_DETAILS_TIMEOUT_MS, type DetailsProbeStores, RelayHopError, RelayUpstreamUnreachableError, probeDetails } from '../details.js'
@@ -384,6 +385,16 @@ export class NodeProber {
             } catch (e) {
                 err = e
                 outcome = classifyProbeFailure(e, signal)
+            }
+            // A node issuing tickets for another deployment refuses every
+            // reserve this payer sends it, so its answer counts as the target
+            // failing: it is neither listed nor sealable this cycle. Go's
+            // probeOne has the relayed case.
+            const refusal = result === undefined ? undefined : checkDetailsDeployment(result.details, this.#deployment)
+            if (refusal !== undefined) {
+                err = refusal
+                result = undefined
+                outcome = classifyProbeFailure(refusal, signal)
             }
         }
 

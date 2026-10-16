@@ -233,6 +233,29 @@ describe('NodeProber direct', () => {
         expect(p.relayLatency.targetLatency(T)).toBeDefined()
     })
 
+    it('marks a node serving another deployment down, and keeps what it carried', async () => {
+        const mine = new Uint8Array(32).fill(1)
+        const b64 = (fill: number) => btoa(String.fromCharCode(...new Uint8Array(32).fill(fill)))
+        for (const [advertised, admitted] of [
+            [b64(2), false],
+            [undefined, false],
+            [b64(1), true],
+        ] as const) {
+            const { fetch } = network(() => details(advertised === undefined ? {} : { deployment: advertised }))
+            const { logger, lines } = recordingLogger()
+            const p = prober({ fetch, privacy: 'direct', deployment: mine, logger })
+            const op = node(T, { reachable: true, models: ['carried'], reachableAsOf: NOW_MS - 60_000 })
+            await p.enrichSubset([op], null)
+            expect(op.reachable, String(advertised)).toBe(admitted)
+            expect(op.models, String(advertised)).toEqual(admitted ? ['fresh-model'] : ['carried'])
+            expect(op.reachableAsOf, String(advertised)).toBe(admitted ? NOW_MS : NOW_MS - 60_000)
+            expect(p.recallReachable(T), String(advertised)).toBe(admitted)
+            // The refusal is what the log names, so an operator can tell it from a down node.
+            const named = lines.some((l) => l.level === 'warn' && /deployment/.test(String(l.attrs?.err)))
+            expect(named, String(advertised)).toBe(!admitted)
+        }
+    })
+
     it.each([
         ['an error status', () => json(500, {})],
         ['an unreadable body', () => new Response('not json', { status: 200 })],

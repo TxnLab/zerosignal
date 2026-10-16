@@ -45,6 +45,7 @@ func fullDetails() inject.OperatorDetails {
 		NodeID:                2,
 		OwnerAddr:             "OWNERADDR",
 		SigningAddr:           "SIGNINGADDR",
+		Deployment:            "ZGVwbG95bWVudA==",
 		EphemeralAgePubkey:    "age1examplerecipient",
 		EphemeralExpiry:       1_800_000_600,
 		EphemeralIssuedAt:     1_800_000_000,

@@ -13,6 +13,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { base64 } from '@scure/base'
 
+import { decodeGoStdBase64 } from '../util/base64.js'
 import { CanonicalWriter } from '../util/canonical.js'
 
 export const RAIL_ALGORAND = 1
@@ -91,7 +92,7 @@ export function encodeDeploymentId(d: Uint8Array): string {
 export function decodeDeploymentId(s: string): Uint8Array {
     let raw: Uint8Array
     try {
-        raw = base64.decode(s)
+        raw = decodeGoStdBase64(s)
     } catch (err) {
         throw new Error(`decode deployment id: ${err instanceof Error ? err.message : String(err)}`)
     }

@@ -43,6 +43,11 @@ type OperatorDetails struct {
 	NodeID      uint64 `json:"node_id,omitempty"`
 	OwnerAddr   string `json:"owner_addr,omitempty"`
 	SigningAddr string `json:"signing_addr,omitempty"`
+	// Deployment is the base64 escrow deployment id this node issues tickets
+	// for (ticket.DeploymentID). Unsigned: it lets a payer drop a node serving
+	// another network or escrow before reserving, while the signed checks (the
+	// bound ephemeral, ticket and receipt) are what a lying node cannot pass.
+	Deployment string `json:"deployment,omitempty"`
 
 	// The signed short-lived age recipient (forward secrecy by key-erasure).
 	// Mirrors ticket.EphemeralAdvertisement's JSON fields verbatim so the block

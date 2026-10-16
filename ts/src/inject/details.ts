@@ -152,6 +152,8 @@ export interface OperatorDetails {
   node_id?: number
   owner_addr?: string
   signing_addr?: string
+  /** The base64 escrow deployment id the node issues tickets for. Unsigned. */
+  deployment?: string
   /** A seal target needs all four ephemeral fields; any missing means none. */
   ephemeral_age_pubkey?: string
   ephemeral_expiry?: number
@@ -396,6 +398,7 @@ export function parseOperatorDetails(body: unknown): OperatorDetails | null {
     node_id: uint(body.node_id),
     owner_addr: str(body.owner_addr),
     signing_addr: str(body.signing_addr),
+    deployment: str(body.deployment),
     ephemeral_age_pubkey: str(body.ephemeral_age_pubkey),
     ephemeral_expiry: uint(body.ephemeral_expiry),
     ephemeral_issued_at: uint(body.ephemeral_issued_at),
