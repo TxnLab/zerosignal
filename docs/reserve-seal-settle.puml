@@ -15,19 +15,19 @@ participant "Treasury" as T
 
 P -> N: POST /v1/zs/reserve\n(sealed request: application/vnd.zs-reserve+json)
 N --> P: sealed response: application/vnd.zs-reserve-response+json\n(ReserveResponse{Ticket{op_id, node_id, max_price}, wrapped K_response,\n presigned_open_txn} age-sealed to proxy_recipient —\n presigned_open_txn names the payer twice, so a relay must not read it)
-== Open atomic 2-tx group (operator pays all fees) ==
-P --> A: pay max USDC (max_price — what might be consumed)
-N --> A: open() ticket (signed by the node's hot key; carries\n(operatorId, nodeId); draws 1 box-MBR slot from the payer's\nprepaid pool — no per-turn MBR leg)
-== Inference request / streaming response ==
-P -> N: sealed envelope comms to Node\n(relayed single-hop by default when privacy is ON — see flow-transport-relay)
-N <--> A: verify ticket in mempool
-N -> L: decrypt + forward\nto LLM
+== Inference request carries the open group (node submits it; operator pays all fees) ==
+P -> P: complete the open group: sign the USDC payment\n(no broadcast)
+P -> N: sealed envelope comms to Node, carrying the completed open group\n(relayed single-hop by default when privacy is ON — see flow-transport-relay)
+N -> N: decrypt, admit the ticket, check the open\napp call against it
+N --> A: submit the open atomic 2-tx group:\n pay max USDC (payer-signed; max_price — what might be consumed)\n + open() ticket (signed by the node's hot key; carries\n(operatorId, nodeId); draws 1 box-MBR slot from the payer's\nprepaid pool — no per-turn MBR leg)
+N -> L: forward\nto LLM
 L --> N:
 N --> P: sealed streamed response(s)
-N --> P: (UsageReceipt)
-== Atomic Dual Settlement (operator pays all fees) ==
-N --> A: settle(ticket, amountCharged, digest, asOperator=true)
-P --> A: settle(ticket, amountCharged, digest, asOperator=false)
+N --> P: (UsageReceipt + pre-signed settle group)
+== Atomic Dual Settlement (node submits; operator pays all fees) ==
+P -> N: sealed settle ack: the group with the payer's half signed\n(POST /v1/zs/settle-ack, relayed like the request)
+N --> A: settle(ticket, amountCharged, digest, asOperator=true)\n+ the payer's settle(ticket, amountCharged, digest, asOperator=false),\none atomic group
+note over P, A: Against a node older than 9.12 the payer submits both\nthe open group and the settle group to the chain itself.
 A -->> P: refund unconsumed USDC to client
 A -->> N: pay operator for inference
 A -->> T: pay protocol fee

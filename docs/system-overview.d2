@@ -44,6 +44,6 @@ node -> nodeAsRelay: 5. encrypted response {style.stroke: "#AA0000"; style.strok
 nodeAsRelay -> client.Protocol: 6. encrypted response {style.stroke: "#AA0000"; style.stroke-width: 3}
 nodeAsRelay -> proxy.Protocol: 6. encrypted response {style.stroke: "#AA0000"; style.stroke-width: 3}
 
-proxy.Protocol -> chain: open + ack-settle {style.stroke-dash: 3}
-client.Protocol -> chain: open + ack-settle {style.stroke-dash: 3}
-node -> chain: verify + op-settle {style.stroke-dash: 3}
+proxy.Protocol -> chain: reads, deposits, refunds (open + ack-settle only for a pre-9.12 node or with no 9.12 relay) {style.stroke-dash: 3}
+client.Protocol -> chain: reads, deposits, refunds (open + ack-settle only for a pre-9.12 node or with no 9.12 relay) {style.stroke-dash: 3}
+node -> chain: submit payer's open + settle groups, verify, op-settle {style.stroke-dash: 3}

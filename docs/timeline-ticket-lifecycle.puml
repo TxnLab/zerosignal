@@ -13,7 +13,11 @@
 '                     pre-signs gtxn[1] of the open group at fee =
 '                     2 * minTxnFee. Returns Ticket + presigned_open_txn
 '                     + wrapped_response_key. No escrow state yet.
-'   [B] open          2-tx atomic group lands on chain (no feePayment leg):
+'   [B] open          the payer completes the group and hands it to the node
+'                     inside the sealed request (open_group); the node
+'                     checks it and submits it (a pre-9.12 node: the payer
+'                     broadcasts it). The 2-tx atomic group lands on chain
+'                     (no feePayment leg):
 '                       gtxn[0] payer usdcPayment   USDC max_price       fee=0
 '                       gtxn[1] operator AppCall    open(...)            fee=2*minTxnFee
 '                     contract open() asserts Txn.sender == nodeSigning (the
@@ -25,9 +29,11 @@
 '                     emits a signed UsageReceipt and an operator-signed
 '                     atomic settle group (gtxn[0]) bound to a payer-ack
 '                     gtxn[1] template.
-'   [D] claim/ack     normally a single atomic broadcast: proxy signs gtxn[1]
-'                     (payer ack) against the operator's pre-signed gtxn[0],
-'                     submits as a 2-tx group. gtxn[0] flips OPEN ->
+'   [D] claim/ack     normally a single atomic group: proxy signs gtxn[1]
+'                     (payer ack) against the operator's pre-signed gtxn[0]
+'                     and sends the group back on a sealed settle ack; the
+'                     node submits it (a pre-9.12 node: the payer
+'                     broadcasts it). gtxn[0] flips OPEN ->
 '                     PENDING_SETTLE; gtxn[1] (matching args, opposite side)
 '                     finalizes and deletes the box. Same-side re-claim with
 '                     matching args is an idempotent no-op (resolves the
@@ -35,7 +41,8 @@
 '                     Operator-side settlement driver acts as a watchdog
 '                     fallback only — fires standalone after
 '                     zs.settlement_watchdog_seconds (default 30s) if
-'                     the proxy never broadcast.
+'                     no payer ack lands (a failed ack is never
+'                     followed by a payer broadcast of the group).
 '   [E] expires_at    unix-second boundary (TicketRecord.expiresAt); no new
 '                     inference admitted. settle() / protest() still legal
 '                     while status is OPEN or PENDING_SETTLE.
@@ -54,7 +61,7 @@
 ' ========== Design notes ==========
 '   1. Co-signed settle removes the race between settle() and protest().
 '      Finalization requires both sides on-chain; happy path is the atomic
-'      group, where both calls land in a single broadcast. `protest()` is
+'      group, where both calls land in a single submission. `protest()` is
 '      strictly the structured-evidence path — silent disagreement via a
 '      mismatched second settle() call also freezes the ticket.
 '
@@ -124,25 +131,26 @@ note top of OP : returns Ticket + wrapped_response_key\n+ presigned_open_txn (gt
 @25
 PH is "B: open"
 TS is OPEN
-OP is "await req"
-PAY -> TS : 2-tx open group\n(operator-signed gtxn[1] + payer-signed gtxn[0] usdcPayment)
-note bottom of PAY : payer ALGO fee = 0\n(operator's gtxn[1] fee pools the group; box MBR from prepaid pool)
+OP is "admit + submit open"
+PAY -> OP : sealed request\n+ open_group (payer-signed gtxn[0] usdcPayment)
+OP -> TS : 2-tx open group\n(operator-signed gtxn[1] + payer-signed gtxn[0])
+note bottom of PAY : payer ALGO fee = 0\n(operator's gtxn[1] fee pools the group; box MBR from prepaid pool)\npre-9.12 node: the payer broadcasts the group itself
 
 @40
 PH is "C: inference"
 OP is serve
-PAY -> OP : sealed request
 OP -> PAY : sealed response\n+ UsageReceipt + presigned settle group
 
 @70
 PH is "D: claim/ack"
 TS is PENDING_SETTLE
-OP is "watchdog\n(30s default)"
-PAY -> TS : atomic settle group\n(gtxn[0] op first-half + gtxn[1] payer ack)
-note top of PAY : single broadcast in the happy path —\noperator's gtxn[0] flips status, payer's gtxn[1]\nfinalizes (idempotent no-op on same-side\nmatching re-claim).
+OP is "submit ack\n+ watchdog (30s default)"
+PAY -> OP : settle ack\n(payer-signed gtxn[1], sealed)
+OP -> TS : atomic settle group\n(gtxn[0] op first-half + gtxn[1] payer ack)
+note top of PAY : single submission in the happy path —\noperator's gtxn[0] flips status, payer's gtxn[1]\nfinalizes (idempotent no-op on same-side\nmatching re-claim). Pre-9.12 node: the payer\nbroadcasts the group itself.
 
 @90
-note bottom of OP : if proxy never broadcasts, watchdog fires\nstandalone at fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee\n(5 paid, 2 free) after settlement_watchdog_seconds.
+note bottom of OP : if no payer ack lands, watchdog fires\nstandalone at fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee\n(5 paid, 2 free) after settlement_watchdog_seconds.
 OP -> TS : settle(asOperator=true) — standalone
 
 @105

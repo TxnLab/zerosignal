@@ -7,7 +7,10 @@
 ' AppCall) at fee = 2 * minTxnFee and returns it as presigned_open_txn
 ' alongside the signed Ticket and wrapped_response_key. The proxy then
 ' completes the group on the paying request by signing gtxn[0] (usdcPayment,
-' fee = 0) and broadcasting the 2-tx group atomically. The box MBR is drawn
+' fee = 0). Against a node advertising proto_version >= 9.12 it hands the
+' completed group to the node inside the sealed request (open_group) and the
+' node submits it at admission; against an older node the proxy broadcasts the
+' 2-tx group atomically itself. The box MBR is drawn
 ' from the payer's prepaid pool (open() does openTickets++) — no feePayment
 ' leg. Both reserve bodies are sealed: the REQUEST to the serving node
 ' (application/vnd.zs-reserve+json) so a relay can't read payer_addr, and the
@@ -85,10 +88,16 @@ end note
 end
 
 note right of Proxy #lightgray
-  Wallet.Open(reserved) calls escrow.SubmitPresignedOpenGroup,
-  which fills in the payer signature on gtxn[0] (usdcPayment, fee=0)
-  and broadcasts the 2-tx atomic group. Returns the gtxn[1]
-  app-call txid, which becomes the envelope's algorand_tx_id.
+  Node >= 9.12 (wire.SubmitsOpen): Wallet.OpenForNode(reserved)
+  calls escrow.CompletePresignedOpenGroup, which fills in the payer
+  signature on gtxn[0] (usdcPayment, fee=0) and does NOT broadcast;
+  the completed group rides the sealed request as open_group and
+  the node submits it (below).
+  Older node: Wallet.Open(reserved) calls
+  escrow.SubmitPresignedOpenGroup, which signs gtxn[0] the same way
+  and broadcasts the 2-tx atomic group itself.
+  Either way the gtxn[1] app-call txid becomes the envelope's
+  algorand_tx_id.
   Payer pays NO ALGO outer fees on open — the operator's
   gtxn[1] fee (2 * minTxnFee) covers the whole group via
   Algorand fee pooling. The box MBR is not a per-turn leg — it's
@@ -107,7 +116,7 @@ end note
 
 group sealed request
 
-  Proxy -> Node: POST /v1/chat/completions\nContent-Type: application/vnd.zs+json\n{ciphertext}   (identifiers ride inside the seal: reply_to_public_key,\n algorand_tx_id, ticket_id, admission_tag are inner-frame header fields)\n(envelope wrap + AAD binding + tag computation -> flow-request-response)
+  Proxy -> Node: POST /v1/chat/completions\nContent-Type: application/vnd.zs+json\n{ciphertext}   (identifiers ride inside the seal: reply_to_public_key,\n algorand_tx_id, ticket_id, admission_tag — and, for a 9.12 node,\n open_group — are inner-frame header fields)\n(envelope wrap + AAD binding + tag computation -> flow-request-response)
 
   Node -> Node: handlers.go admission gate (encrypted)\n  missing ticket_id -> 402 ticket_required
 
@@ -121,7 +130,7 @@ group sealed request
 
   Node -> Node: defer s.tickets.Release(ticket_id)\n  registered IMMEDIATELY after Consume, before any other call:\n  a consumed-but-never-released slot counts as in-flight forever\n  and would hang every future graceful drain; idempotent
 
-  Node -> Node: VerifyOpenAppCall(pendingTxn, OpenAppCallSpec{\n    AppID, OperatorID, NodeID, MaxPrice, ExpiresAt, CommitK,\n    NodeSigningAddr, PayerAddr})\n  asserts:\n    Txn.sender == NodeSigningAddr   (the serving node's hot key;\n      consensus-verified)\n    ABI args (incl. operatorId, nodeId) match the ticket\n    payerAddr (from ABI arg) consistent with funding gtxn senders\n  rc.payerAddr = payerAddr from the ABI arg\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket,\n    so the caller must re-reserve, never retry the same ticket_id)
+  Node -> Node: verifyPaymentGroup — find the open() app call\n  open_group present (9.12): escrow.DecodeOpenGroup, then require\n    txid(gtxn[1]) == algorand_tx_id\n  absent (payer submitted): poll algod\n    PendingTransactionInformation(algorand_tx_id)\n  then VerifyOpenAppCall(appCall, OpenAppCallSpec{\n    AppID, TicketIDRaw, OperatorID, NodeID, PayerAddr, MaxPrice,\n    NodeSigningAddr})\n  asserts:\n    Txn.sender == NodeSigningAddr   (the serving node's hot key;\n      consensus-verified)\n    ABI args (ticketId, operatorId, nodeId, payerAddr, maxPrice)\n      match the ticket (expiresAt is node-authored, not re-checked)\n    reserved payer_addr == payerAddr ABI arg (signed reserves only)\n    (the payment leg is the contract's check, not the node's)\n  open_group: only now submitOpenGroup -> the node's own algod\n    (never broadcasts an open it would refuse; a contract or pool\n     rejection is a payment failure)\n  rc.payerAddr = payerAddr from the ABI arg\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket,\n    so the caller must re-reserve, never retry the same ticket_id)
 
   Node -> Node: verifyRequestModel(rc.body, rc.admitted.Model)\n  body's model MUST equal the reserved model\n  mismatch -> 400 model_mismatch (sealed, zero-cost receipt)
 
