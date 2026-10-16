@@ -9,6 +9,7 @@
 // picker rules have no Go twin, since Go's proxy has no picker and no
 // automatic model pick.
 
+export * from './deployment.js'
 export * from './ephemeral.js'
 export * from './family.js'
 export * from './probe.js'

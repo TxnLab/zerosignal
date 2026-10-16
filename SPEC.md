@@ -179,9 +179,10 @@ deployment = sha256("zs-deployment-v1\x00" ‖ u8(rail) ‖ genesis_hash[32] ‖
 
 **Who binds what.** A verifier always compares against its **own** deployment id, never one read off the wire. Each layout is chosen per object:
 
-- **Reserve and ticket.** A payer that knows its deployment sets `deployment` on a reserve to a node advertising ≥ 9.13, signs the bound reserve layout, and then requires the ticket to come back bound to that deployment. A ≥ 9.13 node refuses a reserve naming another deployment with `400 deployment_mismatch`, before checking the signature, so the refusal names the cause rather than reading as a bad signature. A payer seldom reaches it: a node on another deployment usually fails the payer's ephemeral check at discovery first. A reserve naming the node's own deployment gets a bound ticket, and its receipt is bound too. A reserve with no `deployment` gets the legacy layouts, so a payer that predates the field keeps working. Against an older node the payer names nothing and accepts a legacy ticket. A bound ticket from any node must name the payer's deployment.
+- **Reserve and ticket.** A payer that knows its deployment sets `deployment` on a reserve to a node advertising ≥ 9.13, signs the bound reserve layout, and then requires the ticket to come back bound to that deployment. A ≥ 9.13 node refuses a reserve naming another deployment with `400 deployment_mismatch`, before checking the signature, so the refusal names the cause rather than reading as a bad signature. A payer seldom reaches it: a node on another deployment usually fails the payer's details and ephemeral checks at discovery first. A reserve naming the node's own deployment gets a bound ticket, and its receipt is bound too. A reserve with no `deployment` gets the legacy layouts, so a payer that predates the field keeps working. Against an older node the payer names nothing and accepts a legacy ticket. A bound ticket from any node must name the payer's deployment.
 - **Receipt.** Bound exactly when its ticket is, to the same deployment. The node copies the ticket's `deployment` onto the receipt. `settle()` and `protest()` take the receipt digest as an opaque argument, so the bound layout needs no contract change.
 - **Ephemeral advertisement.** A ≥ 9.13 node publishes both signatures: `ephemeral_sig` over the legacy layout for payers that predate the binding, and `ephemeral_sig_v2` with `ephemeral_deployment` ("Operator details"). A payer that knows its deployment requires the bound signature from a node advertising ≥ 9.13 and judges a bound advertisement by `ephemeral_sig_v2` alone. It accepts the legacy signature from an older node.
+- **Details.** A ≥ 9.13 node also names its deployment in `deployment` on `/v1/zs/details`, unsigned. A payer that knows its own drops a node naming another, or a ≥ 9.13 node naming none, as it drops a node whose probe failed: the node is neither listed nor sealable that cycle. A string that is not base64 of a nonzero 32-byte id is refused whether or not the payer knows its deployment. The field lets a payer skip a node it could never be served by; the signed bindings above are what a node misstating it cannot pass.
 
 **Rollout window.** The legacy layouts stay accepted while payers and nodes move to 9.13. `proto_version` is unsigned, so a relay can lower it and strip the bound fields from details. The payer then checks the legacy ephemeral signature, and because the same version decides whether it names its deployment, it also accepts a legacy ticket and receipt from that node. Until the legacy layouts are refused, the binding holds against honest relays and stale configuration, not against a relay that rewrites details. Refusing them replaces the tags, so it is a later major (§ 3c "Relationship to the crypto domain tags"), made once the fleet advertises ≥ 9.13.
 
@@ -1257,6 +1258,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
   "node_id": 7,
   "owner_addr": "<owner address>",
   "signing_addr": "<signing address>",
+  "deployment": "<base64 32-byte deployment id>",
   "ephemeral_age_pubkey": "age1...",
   "ephemeral_issued_at": 1699998500,
   "ephemeral_expiry": 1700000000,
@@ -1311,6 +1313,7 @@ Reserve (§ 3a) is where a proxy *commits* to an operator's prices and capacity 
 | `node_id` | uint64 | This node's id within `operator_id` (§ 3 "Node id"). `signing_addr` and the advertised ephemeral recipient belong to this node. One node process advertises exactly one `(operator_id, node_id)`. Omitted when unassigned. |
 | `owner_addr` | string | Owner Algorand address (§ 3 "Operator owner address"). Receives funds at settlement. |
 | `signing_addr` | string | Node signing Algorand address (§ 3 "Node signing address"). Its private key signs tickets; clients verify ticket signatures against the public key decoded from it. |
+| `deployment` | string | Since 9.13: base64 of the 32-byte id of the escrow deployment this node issues tickets for (§ 3a "Deployment binding"). Unsigned; a payer drops a node naming another deployment. |
 | `ephemeral_age_pubkey` | string | The short-lived `age` recipient (`age1...`) for sealing request envelopes (§ 4). It is the **only** encryption recipient. See "Ephemeral recipient" below. |
 | `ephemeral_issued_at` | int64 | Unix-seconds **start** of the ephemeral's validity window (its mint or rotation time). See "Ephemeral recipient" below. |
 | `ephemeral_expiry` | int64 | Unix-seconds **end** of the validity window. See "Ephemeral recipient" below. |

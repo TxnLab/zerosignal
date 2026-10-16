@@ -6,6 +6,7 @@
     "node_id": 2,
     "owner_addr": "OWNERADDR",
     "signing_addr": "SIGNINGADDR",
+    "deployment": "ZGVwbG95bWVudA==",
     "ephemeral_age_pubkey": "age1examplerecipient",
     "ephemeral_expiry": 1800000600,
     "ephemeral_issued_at": 1800000000,

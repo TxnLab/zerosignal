@@ -560,6 +560,16 @@ func (s *ChainOperatorSource) buildSelAll(operators []Operator) []selection.Oper
 // semantics out of band from the scheduled cycle.
 func (s *ChainOperatorSource) probeOne(ctx context.Context, client *DetailsClient, attestation *AttestationClient, selAll []selection.Operator, op *Operator, now time.Time, log *slog.Logger) {
 	resp, usedHop, err := s.probeDetailsWithRetry(ctx, client, selAll, *op, log)
+	if err == nil {
+		// A node issuing tickets for another deployment refuses every reserve
+		// this payer sends it, so its answer counts as the target failing: it
+		// is neither listed nor sealable this cycle. Through a relay this
+		// charges the target for what the relay forwarded, so a relay on
+		// another network, whose directory maps these ids to its own node,
+		// marks an honest target down; that relay is refused on its own probe
+		// and drops to the fallback tier, which ends it within a cycle.
+		err = checkDetailsDeployment(resp, s.deployment())
+	}
 	outcome := classifyProbe(err, ctx.Err())
 	reachable, record := applyProbeOutcome(op, outcome, now)
 	if outcome != probeSucceeded {
@@ -1009,6 +1019,38 @@ func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, n
 	default:
 		return ephemeralVerdict{Outcome: ephemeralRejected, Err: err}
 	}
+}
+
+// errNoDetailsDeployment is a node new enough to name its deployment that
+// names none.
+var errNoDetailsDeployment = errors.New("details: node advertises no escrow deployment")
+
+// checkDetailsDeployment decides whether a node's advertised deployment lets
+// this payer route to it. deployment is the payer's own; zero means it doesn't
+// know it, and any well-formed advertisement passes, as in checkEphemeral. A
+// malformed one is refused either way. The field is unsigned, so a relay can
+// strip it and lower proto_version; the bound ephemeral and ticket checks are
+// what still hold then. The TS SDK's checkDetailsDeployment is the twin,
+// pinned by testdata/details_deployment_vectors.json.
+func checkDetailsDeployment(resp inject.OperatorDetails, deployment ticket.DeploymentID) error {
+	var adv ticket.DeploymentID
+	if resp.Deployment != "" {
+		if err := adv.UnmarshalText([]byte(resp.Deployment)); err != nil {
+			return fmt.Errorf("details: %w", err)
+		}
+	}
+	switch {
+	case deployment.IsZero():
+		return nil
+	case adv.IsZero():
+		if wire.UsesDeploymentBinding(resp.ProtoVersion) {
+			return errNoDetailsDeployment
+		}
+		return nil
+	case adv != deployment:
+		return fmt.Errorf("details: node serves escrow deployment %s, not this payer's", adv)
+	}
+	return nil
 }
 
 // maxDiscoveryRelayAttempts bounds how many distinct relays a single privacy-

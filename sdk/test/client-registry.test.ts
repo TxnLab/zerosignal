@@ -178,8 +178,9 @@ function fleet(answer: (c: Call, signal: AbortSignal | null | undefined) => Resp
     return { fetch, calls }
 }
 
+/** A 9.13 node names its deployment; a payer that knows its own drops one naming none. */
 const details = (over: Record<string, unknown> = {}) =>
-    Response.json({ models: [{ id: 'm' }], oracle_healthy: true, proto_version: PROTO_VERSION, ...over })
+    Response.json({ models: [{ id: 'm' }], oracle_healthy: true, proto_version: PROTO_VERSION, deployment: DEPLOYMENT, ...over })
 /** Every node answers its details probe. */
 const serve = () => details()
 
