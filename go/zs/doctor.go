@@ -20,6 +20,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
 )
 
@@ -463,7 +464,9 @@ func (a *algodDoctorChain) payerDeposit(ctx context.Context) (escrow.PayerDeposi
 }
 
 func (a *algodDoctorChain) nodes(ctx context.Context) ([]Operator, error) {
-	src := newChainSource(a.cfg, a.appID, a.chain)
+	// No deployment: the doctor reports reachability, which the legacy
+	// ephemeral signature answers for every node version.
+	src := newChainSource(a.cfg, a.appID, a.chain, ticket.DeploymentID{})
 	src.ProxyPayerAddr = crypto.GetApplicationAddress(a.appID).String()
 	ctx, cancel := context.WithTimeout(ctx, bootFetchTimeout)
 	defer cancel()

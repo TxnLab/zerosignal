@@ -25,6 +25,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
 import { parseObject } from '../util/strictjson.js'
+import { checkDeployment, decodeDeploymentId } from './deployment.js'
 import type { BytesSigner } from './signing.js'
 import type { UsageType } from './usagetype.js'
 
@@ -66,17 +67,25 @@ export interface UsageReceipt {
     // whenever the upstream reports no cached count. One uint64 at the tail of
     // the canonical bytes.
     cached_input_count: number
+    // base64(32-byte deployment id); present selects the v3 layout. The node
+    // copies it from the ticket, so a receipt is bound exactly when its ticket
+    // is.
+    deployment?: string
     sig?: string // base64(Ed25519 over receiptSigDigest)
 }
 
 // v1 covered the base receipt + the later UsageType-discriminator / aux-output
 // append; bumped v1 → v2 when cached_input_count was appended (must match
-// proto/go/ticket/receipt.go::receiptSigningTag).
+// proto/go/ticket/receipt.go::receiptSigningTag). v3 inserts the deployment id
+// after the tag.
 const RECEIPT_SIGNING_TAG = 'zs-receipt-v2\x00'
+const RECEIPT_SIGNING_TAG_V3 = 'zs-receipt-v3\x00'
 
 export function receiptCanonicalBytes(r: UsageReceipt): Uint8Array {
-    return new CanonicalWriter()
-        .str(RECEIPT_SIGNING_TAG)
+    const w = new CanonicalWriter()
+    if (r.deployment) w.str(RECEIPT_SIGNING_TAG_V3).bytes(decodeDeploymentId(r.deployment))
+    else w.str(RECEIPT_SIGNING_TAG)
+    return w
         .lenStr(r.ticket_id)
         .u64(r.actual_input_count)
         .u64(r.actual_output_count)
@@ -99,7 +108,7 @@ export function receiptCanonicalBytes(r: UsageReceipt): Uint8Array {
 }
 
 // receiptSigDigest returns sha256(canonicalBytes(r)). canonicalBytes
-// already prepends the "zs-receipt-v2\x00" domain tag.
+// already prepends the receipt domain tag.
 export function receiptSigDigest(r: UsageReceipt): Uint8Array {
     return sha256(receiptCanonicalBytes(r))
 }
@@ -127,7 +136,22 @@ export async function signReceipt(
     r.sig = base64.encode(sig)
 }
 
+// verifyReceipt accepts only a legacy (v2, unbound) signature. Payers verify
+// with verifyReceiptFor.
 export function verifyReceipt(r: UsageReceipt, pub: Uint8Array): void {
+    verifyReceiptFor(r, pub, undefined, true)
+}
+
+// verifyReceiptFor throws unless r.sig is valid under pub and r is bound to
+// want, or unbound while allowLegacy holds. A payer passes allowLegacy only for
+// a receipt whose ticket was unbound. Mirrors Go's UsageReceipt.VerifyFor.
+export function verifyReceiptFor(
+    r: UsageReceipt,
+    pub: Uint8Array,
+    want: Uint8Array | undefined,
+    allowLegacy: boolean,
+): void {
+    checkDeployment('receipt', r.deployment, want, allowLegacy)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }
@@ -174,8 +198,11 @@ export function parseReceiptJSON(raw: Uint8Array): UsageReceipt {
 }
 
 function receiptFromJSON(raw: Uint8Array, what: string): UsageReceipt {
-    const { uint, str } = parseObject(raw, what)
+    const { uint, str, present } = parseObject(raw, what)
     const usage = (name: string) => uint(name, 255) as UsageType
+    const deployment = str('deployment')
+    // A present "" is malformed, as Go's UnmarshalText has it.
+    if (present('deployment')) decodeDeploymentId(deployment)
     return {
         ticket_id: str('ticket_id'),
         actual_input_count: uint('actual_input_count'),
@@ -189,6 +216,7 @@ function receiptFromJSON(raw: Uint8Array, what: string): UsageReceipt {
         aux_output_usage_type: usage('aux_output_usage_type'),
         aux_output_count: uint('aux_output_count'),
         cached_input_count: uint('cached_input_count'),
+        ...(deployment ? { deployment } : {}),
         sig: str('sig'),
     }
 }

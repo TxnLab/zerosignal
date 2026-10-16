@@ -118,6 +118,24 @@ type reserveVectorEntry struct {
 	SigDigestHex      string                `json:"sig_digest_hex"`
 }
 
+// deploymentVector pins DeploymentID's preimage. Escrow is hex because the
+// Solana program id is raw bytes and the Algorand app id enters as be64.
+type deploymentVector struct {
+	Rail           uint8  `json:"rail"`
+	GenesisHashHex string `json:"genesis_hash_hex"`
+	EscrowHex      string `json:"escrow_hex"`
+	ExpectedHex    string `json:"expected_hex"`
+}
+
+// ephemeralV2VectorEntry pins the bound layout SigV2 covers.
+type ephemeralV2VectorEntry struct {
+	OperatorID        uint64                        `json:"operator_id"`
+	NodeID            uint64                        `json:"node_id"`
+	Value             ticket.EphemeralAdvertisement `json:"value"`
+	CanonicalBytesHex string                        `json:"canonical_bytes_hex"`
+	SigDigestHex      string                        `json:"sig_digest_hex"`
+}
+
 type algorandAddressVector struct {
 	PubkeyHex       string `json:"pubkey_hex"`
 	ExpectedAddress string `json:"expected_address"`
@@ -141,6 +159,28 @@ type vectorsFile struct {
 	Ephemeral         ephemeralVectorEntry  `json:"ephemeral_advertisement"`
 	Reserve           reserveVectorEntry    `json:"reserve_request"`
 	AlgorandAddress   algorandAddressVector `json:"algorand_address"`
+	// The deployment-bound layouts. The values reuse the unbound entries above
+	// with Deployment set to DeploymentAlgorand's id.
+	DeploymentAlgorand deploymentVector       `json:"deployment_algorand"`
+	DeploymentSolana   deploymentVector       `json:"deployment_solana"`
+	TicketV3           ticketVectorEntry      `json:"ticket_v3"`
+	ReceiptV3          receiptVectorEntry     `json:"receipt_v3"`
+	ReserveV2          reserveVectorEntry     `json:"reserve_request_v2"`
+	EphemeralV2        ephemeralV2VectorEntry `json:"ephemeral_advertisement_v2"`
+	// DeploymentMalformed are wire values both languages refuse in a ticket,
+	// receipt or reserve's "deployment" field. The empty string is among them:
+	// unbound is spelled by omitting the field.
+	DeploymentMalformed []string `json:"deployment_malformed"`
+}
+
+// deploymentMalformed lists wire spellings that UnmarshalText refuses:
+// empty, short, all-zero, long, and not base64.
+var deploymentMalformed = []string{
+	"",
+	"AAAA",
+	base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	base64.StdEncoding.EncodeToString(make([]byte, 33)),
+	"not base64!",
 }
 
 func buildVectors() *vectorsFile {
@@ -298,6 +338,37 @@ func buildVectors() *vectorsFile {
 	rrCanon := rr.CanonicalBytes(42, 7)
 	rrDigest := ticket.ReserveSigDigest(&rr, 42, 7)
 
+	// Deployment ids. Genesis bytes count up from 0 and the Solana program id
+	// counts down from 0xff, so a byte-order slip in either shows.
+	genesis := make([]byte, 32)
+	program := make([]byte, 32)
+	for i := range genesis {
+		genesis[i] = byte(i)
+		program[i] = byte(0xff - i)
+	}
+	const appID = 0x0102030405060708
+	depAlgo, err := ticket.AlgorandDeploymentID(genesis, appID)
+	if err != nil {
+		panic(err)
+	}
+	depSol, err := ticket.SolanaDeploymentID(genesis, program)
+	if err != nil {
+		panic(err)
+	}
+
+	tkV3 := tk
+	tkV3.Deployment = depAlgo
+	tkV3Digest := ticket.TicketSigDigest(&tkV3)
+	rcV3 := rc
+	rcV3.Deployment = depAlgo
+	rcV3Digest := ticket.ReceiptSigDigest(&rcV3)
+	rrV2 := rr
+	rrV2.Deployment = depAlgo
+	rrV2Digest := ticket.ReserveSigDigest(&rrV2, 42, 7)
+	advV2 := adv
+	advV2.Deployment = depAlgo
+	advV2Digest := ticket.EphemeralSigDigestV2(&advV2, 42, 7)
+
 	bodyHashSum := wire.BodyHashOfBody(body)
 	framesHashSum := wire.BodyHashFromFrames(frames)
 	admissionTag := wire.ComputeAdmissionTag(k, ticketID, txID, body)
@@ -308,7 +379,7 @@ func buildVectors() *vectorsFile {
 	headerAADSettle := wire.BuildHeaderAAD(txID, ticketID, wire.SealedHeaderSettleGroup)
 
 	return &vectorsFile{
-		Version: 6,
+		Version: 7,
 		Comment: "Cross-impl byte-parity vectors for the ZeroSignal protocol. " +
 			"Regenerate via: cd proto/go && go test ./ticket -run TestVectors -update. " +
 			"Loaded by both proto/go/ticket/vectors_test.go and proto/ts/test/vectors.test.ts.",
@@ -392,6 +463,60 @@ func buildVectors() *vectorsFile {
 			PubkeyHex:       hex.EncodeToString(pub[:]),
 			ExpectedAddress: addr,
 		},
+		DeploymentAlgorand: deploymentVector{
+			Rail:           uint8(ticket.RailAlgorand),
+			GenesisHashHex: hex.EncodeToString(genesis),
+			EscrowHex:      "0102030405060708",
+			ExpectedHex:    hex.EncodeToString(depAlgo[:]),
+		},
+		DeploymentSolana: deploymentVector{
+			Rail:           uint8(ticket.RailSolana),
+			GenesisHashHex: hex.EncodeToString(genesis),
+			EscrowHex:      hex.EncodeToString(program),
+			ExpectedHex:    hex.EncodeToString(depSol[:]),
+		},
+		TicketV3: ticketVectorEntry{
+			Value:             tkV3,
+			CanonicalBytesHex: hex.EncodeToString(tkV3.CanonicalBytes()),
+			SigDigestHex:      hex.EncodeToString(tkV3Digest[:]),
+		},
+		ReceiptV3: receiptVectorEntry{
+			Value:             rcV3,
+			CanonicalBytesHex: hex.EncodeToString(rcV3.CanonicalBytes()),
+			SigDigestHex:      hex.EncodeToString(rcV3Digest[:]),
+		},
+		ReserveV2: reserveVectorEntry{
+			OperatorID:        42,
+			NodeID:            7,
+			Value:             rrV2,
+			CanonicalBytesHex: hex.EncodeToString(rrV2.CanonicalBytes(42, 7)),
+			SigDigestHex:      hex.EncodeToString(rrV2Digest[:]),
+		},
+		EphemeralV2: ephemeralV2VectorEntry{
+			OperatorID:        42,
+			NodeID:            7,
+			Value:             advV2,
+			CanonicalBytesHex: hex.EncodeToString(advV2.CanonicalBytesV2(42, 7)),
+			SigDigestHex:      hex.EncodeToString(advV2Digest[:]),
+		},
+		DeploymentMalformed: deploymentMalformed,
+	}
+}
+
+// Every malformed spelling must fail the JSON decode of each object that
+// carries the field, not only UnmarshalText on its own.
+func TestDeploymentMalformedRefused(t *testing.T) {
+	for _, v := range deploymentMalformed {
+		field, _ := json.Marshal(map[string]string{"deployment": v})
+		for name, dst := range map[string]any{
+			"ticket":  &ticket.Ticket{},
+			"receipt": &ticket.UsageReceipt{},
+			"reserve": &ticket.ReserveRequest{},
+		} {
+			if err := json.Unmarshal(field, dst); err == nil {
+				t.Errorf("%s accepted deployment %q", name, v)
+			}
+		}
 	}
 }
 

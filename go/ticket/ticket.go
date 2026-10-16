@@ -61,7 +61,12 @@ type Ticket struct {
 	// the wire value is a concrete rate and a v1-era flat charge is reproduced
 	// exactly (no discount). Rides one uint64 at the tail of CanonicalBytes.
 	CacheReadRate uint64 `json:"cache_read_rate"`
-	Sig           string `json:"sig"` // base64(Ed25519 over CanonicalBytes) — filled by Sign
+	// Deployment, when set, selects the v3 layout, which binds the signature to
+	// one escrow deployment (see DeploymentID). The node sets it only when the
+	// payer's reserve named the node's deployment, so a payer that predates the
+	// field keeps receiving v2 tickets.
+	Deployment DeploymentID `json:"deployment,omitzero"`
+	Sig        string       `json:"sig"` // base64(Ed25519 over CanonicalBytes) — filled by Sign
 }
 
 // ticketSigningTag domain-separates Ticket signatures from any other
@@ -74,7 +79,13 @@ type Ticket struct {
 // themselves the hard signature break). Bumped v1 → v2 when CacheReadRate was
 // appended for cached-token pricing. A verifier and issuer on different tag
 // generations produce different signatures, which is the intended hard cutover.
-const ticketSigningTag = "zs-ticket-v2\x00"
+//
+// v3 is v2 with the 32-byte deployment id inserted after the tag. Both are
+// live while payers and nodes roll forward; Deployment selects one.
+const (
+	ticketSigningTag   = "zs-ticket-v2\x00"
+	ticketSigningTagV3 = "zs-ticket-v3\x00"
+)
 
 // CanonicalBytes returns the unambiguous byte sequence Ed25519 signs (and
 // verifies). Strings are encoded as uint32 big-endian length followed by
@@ -85,7 +96,12 @@ const ticketSigningTag = "zs-ticket-v2\x00"
 // Sig is excluded (that's what we're computing).
 func (t *Ticket) CanonicalBytes() []byte {
 	b := make([]byte, 0, 256)
-	b = append(b, ticketSigningTag...)
+	if t.Deployment.IsZero() {
+		b = append(b, ticketSigningTag...)
+	} else {
+		b = append(b, ticketSigningTagV3...)
+		b = append(b, t.Deployment[:]...)
+	}
 	b = appendLenStr(b, t.TicketID)
 	b = appendU64(b, t.OperatorID)
 	b = appendU64(b, t.NodeID)
@@ -113,8 +129,8 @@ func (t *Ticket) CanonicalBytes() []byte {
 
 // Sign populates t.Sig with Ed25519(priv, TicketSigDigest(t)) where
 // TicketSigDigest = sha256(t.CanonicalBytes()). CanonicalBytes()
-// already prepends the ticket-specific domain tag
-// ("zs-ticket-v2\x00"), so the digest binds that tag plus every
+// already prepends the ticket-specific domain tag ("zs-ticket-v2\x00",
+// or "zs-ticket-v3\x00" plus the deployment id), so the digest binds that tag plus every
 // ticket field — cross-protocol reuse (e.g. replaying a receipt
 // signature as a ticket signature) cannot produce a valid signature.
 //
@@ -142,12 +158,22 @@ func (t *Ticket) Sign(ctx context.Context, signer BytesSigner, signingAddr strin
 	return nil
 }
 
-// Verify returns nil if t.Sig is a valid Ed25519 signature of
-// TicketSigDigest(t) under pub. Callers typically recover pub from
-// an Algorand address via DecodeAlgorandAddress. Verifying the same
-// digest the contract verifies means off-chain Verify and on-chain
-// ed25519verify_bare agree byte-for-byte.
+// Verify accepts only a legacy (v2, unbound) signature. Payers verify with
+// VerifyFor, which also accepts v3 for their own deployment.
 func (t *Ticket) Verify(pub ed25519.PublicKey) error {
+	return t.VerifyFor(pub, DeploymentID{}, true)
+}
+
+// VerifyFor returns nil if t.Sig is a valid Ed25519 signature of
+// TicketSigDigest(t) under pub and t is bound to want, or unbound while
+// allowLegacy holds. A payer passes allowLegacy only when its reserve named no
+// deployment, so a node that was asked for v3 cannot answer with v2.
+// Callers typically recover pub from an Algorand address via
+// DecodeAlgorandAddress.
+func (t *Ticket) VerifyFor(pub ed25519.PublicKey, want DeploymentID, allowLegacy bool) error {
+	if err := checkDeployment(t.Deployment, want, allowLegacy); err != nil {
+		return fmt.Errorf("ticket: %w", err)
+	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid ed25519 public key length %d", len(pub))
 	}
@@ -176,7 +202,7 @@ func CommitResponseKey(k [wire.ResponseKeySize]byte) [sha256.Size]byte {
 // TicketSigDigest returns sha256(CanonicalBytes(t)) — the 32-byte
 // value both Ticket.Sign and any consumer's ed25519 verify call feed
 // to ed25519. CanonicalBytes() already includes the
-// "zs-ticket-v2\x00" domain tag so the digest is cross-protocol
+// ticket domain tag so the digest is cross-protocol
 // safe. Committing to a fixed-size digest keeps any on-chain
 // ed25519verify_bare cost constant regardless of how the ticket
 // shape evolves.

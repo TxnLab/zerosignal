@@ -15,7 +15,7 @@
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-export const PROTO_VERSION = '9.12' as const
+export const PROTO_VERSION = '9.13' as const
 
 // LEGACY_PROTO_VERSION is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -209,6 +209,23 @@ export const NODE_SUBMITS_OPEN_MIN_VERSION = '9.12' as const
  */
 export function submitsOpen(protoVersion: string | undefined | null): boolean {
     return protoVersionAtLeast(protoVersion, NODE_SUBMITS_OPEN_MIN_VERSION)
+}
+
+/**
+ * The first PROTO_VERSION at which a node verifies a deployment-bound reserve
+ * signature, issues deployment-bound tickets and receipts when asked, and
+ * publishes the bound ephemeral signature.
+ */
+export const DEPLOYMENT_BINDING_MIN_VERSION = '9.13' as const
+
+/**
+ * Whether a target advertising `protoVersion` understands the reserve's
+ * `deployment` field and so must answer with bound artifacts. Mirrors Go's
+ * `wire.UsesDeploymentBinding`, and fails closed to the legacy layouts the
+ * same way: demanding bound tickets from an older node fails every turn.
+ */
+export function usesDeploymentBinding(protoVersion: string | undefined | null): boolean {
+    return protoVersionAtLeast(protoVersion, DEPLOYMENT_BINDING_MIN_VERSION)
 }
 
 /**

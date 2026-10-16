@@ -44,9 +44,16 @@ import {
     operatorIdFromBoxName,
     windowedRingRevenue,
 } from '@txnlab/zs-proto/escrow'
-import { decodeAlgorandAddress } from '@txnlab/zs-proto/ticket'
+import { algorandDeploymentId, decodeAlgorandAddress } from '@txnlab/zs-proto/ticket'
 
-import { isNotFound, requestOptions, requestTimeoutOrDefault, simulateReadonly, spendableOf } from '../escrow/algod.js'
+import {
+    isNotFound,
+    requestOptions,
+    requestTimeoutOrDefault,
+    simulateReadonly,
+    spendableOf,
+    suggestedParams,
+} from '../escrow/algod.js'
 import type { ModelCapacity, Operator } from '../operator.js'
 import { type Clock, type Logger, discardLogger } from '../ports.js'
 import type { RelayLatencyStore } from '../routing/latency.js'
@@ -358,6 +365,44 @@ function safeId(id: bigint, what: string): number {
 export const SIGNER_BALANCE_CONCURRENCY = 8
 
 /**
+ * readDeploymentId derives the payer's deployment id from the network's
+ * genesis hash and the escrow app id: what a node's bound signatures must
+ * name. Go's readDeploymentID.
+ */
+export async function readDeploymentId(
+    algod: algosdk.Algodv2,
+    appId: bigint,
+    timeoutMs: number,
+    signal?: AbortSignal,
+): Promise<Uint8Array> {
+    const sp = await suggestedParams(algod, timeoutMs, signal)
+    if (!sp.genesisHash) throw new Error('read genesis hash: algod returned none')
+    return algorandDeploymentId(sp.genesisHash, appId)
+}
+
+/**
+ * deploymentOrFail decides what a failed genesis read means, as Go's
+ * deploymentOrFail. When the SDK built the wallet, that wallet just read the
+ * chain, so algod is up and the failure is not a blip worth starting unbound
+ * for. A caller's wallet means this payer may start without algod; it warns
+ * and keeps the legacy layouts. An abort always propagates.
+ */
+export async function deploymentOrFail(
+    read: () => Promise<Uint8Array>,
+    builtWallet: boolean,
+    logger: Logger,
+    signal?: AbortSignal,
+): Promise<Uint8Array | undefined> {
+    try {
+        return await read()
+    } catch (err) {
+        if (builtWallet || signal?.aborted) throw err
+        logger.warn('could not read the network genesis hash; reserving without a deployment binding', { err: message(err) })
+        return undefined
+    }
+}
+
+/**
  * SIGNER_BALANCE_TIMEOUT_MS caps a whole balance pass, Go's
  * signerBalanceTimeout, sized there to fit the refresh budget the details
  * probes share. A signer not read in time keeps its last-known value.
@@ -458,8 +503,26 @@ export class ChainOperatorSource {
      */
     async fetchChain(signal?: AbortSignal): Promise<Operator[]> {
         const ops = await this.#readChainNodes(signal)
+        // Before the probes, which every refresh path runs after this call.
+        await this.#deriveDeployment(signal)
         await this.#fillSignerBalances(ops, signal)
         return ops
+    }
+
+    // Reads the genesis hash once when no deployment was supplied, as Go's
+    // deriveDeployment: a host that builds its own source would otherwise have
+    // every node's ephemeral checked on the legacy signature alone. A failure
+    // is retried on the next chain read.
+    async #deriveDeployment(signal?: AbortSignal): Promise<void> {
+        if (this.#prober.deployment !== undefined) return
+        try {
+            this.#prober.deployment = await readDeploymentId(this.#algod, this.#appId, this.#timeoutMs, signal)
+        } catch (err) {
+            if (signal?.aborted) throw err
+            this.#log.warn('could not derive the escrow deployment; checking ephemeral signatures on the legacy layout', {
+                err: message(err),
+            })
+        }
     }
 
     async #readChainNodes(signal?: AbortSignal): Promise<Operator[]> {

@@ -7,12 +7,17 @@
 // parseReserveResponseJSON share it.
 
 import type { FieldReader } from '../util/strictjson.js'
+import { decodeDeploymentId } from './deployment.js'
 import type { Ticket } from './ticket.js'
 import type { UsageType } from './usagetype.js'
 
 export function readTicket(f: FieldReader): Ticket {
     const usage = (name: string) => f.uint(name, 255) as UsageType
     const sig = f.str('sig')
+    const deployment = f.str('deployment')
+    // Refused here, as Go's UnmarshalText refuses it, rather than at verify.
+    // A present "" is malformed too: unbound is spelled by omitting the field.
+    if (f.present('deployment')) decodeDeploymentId(deployment)
     return {
         ticket_id: f.str('ticket_id'),
         operator_id: f.uint('operator_id'),
@@ -30,6 +35,7 @@ export function readTicket(f: FieldReader): Ticket {
         input_usage_type: usage('input_usage_type'),
         output_usage_type: usage('output_usage_type'),
         cache_read_rate: f.uint('cache_read_rate'),
+        ...(deployment ? { deployment } : {}),
         // Absent, not '', when unsigned: sig is optional on Ticket.
         ...(sig ? { sig } : {}),
     }

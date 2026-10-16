@@ -25,7 +25,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_web_search"
           ],
@@ -116,7 +116,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -160,7 +160,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -254,7 +254,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -298,7 +298,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -319,7 +319,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -381,7 +381,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -404,7 +404,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -427,7 +427,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -477,7 +477,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -511,7 +511,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -545,7 +545,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -615,7 +615,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -647,7 +647,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -720,7 +720,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -745,7 +745,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -771,7 +771,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -796,7 +796,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -842,7 +842,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -866,7 +866,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -909,7 +909,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -929,7 +929,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -949,7 +949,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -988,7 +988,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1008,7 +1008,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1028,7 +1028,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1068,7 +1068,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1088,7 +1088,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1109,7 +1109,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1149,7 +1149,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1170,7 +1170,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1211,7 +1211,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1231,7 +1231,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1270,7 +1270,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_web_read",
             "zs_web_search"
@@ -1297,7 +1297,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_web_search",
             "zs_image_search"
@@ -1359,7 +1359,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1405,7 +1405,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1424,7 +1424,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": true,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_gated_tool"
           ],
@@ -1464,7 +1464,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1483,7 +1483,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": true,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_gated_tool"
           ],
@@ -1531,7 +1531,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1590,7 +1590,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1609,7 +1609,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": 4999999,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_gated_tool"
           ],
@@ -1649,7 +1649,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1668,7 +1668,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [
             "zs_gated_tool"
           ],
@@ -1708,7 +1708,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1727,7 +1727,7 @@
           "reachable_as_of_ms": 1799999400000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1771,7 +1771,7 @@
           "reachable_as_of_ms": 1800000000000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {
@@ -1790,7 +1790,7 @@
           "reachable_as_of_ms": 1799994600000,
           "staging": false,
           "signer_spendable_microalgos": null,
-          "proto_version": "9.12",
+          "proto_version": "9.13",
           "builtin_tools": [],
           "models": [
             {

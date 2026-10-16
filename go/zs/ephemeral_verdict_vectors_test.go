@@ -29,10 +29,12 @@ import (
 const ephemeralVerdictVectorsPath = "../../testdata/ephemeral_verdict_vectors.json"
 
 type ephemeralVerdictAdv struct {
-	AgePubkey string `json:"ephemeral_age_pubkey"`
-	Expiry    int64  `json:"ephemeral_expiry"`
-	IssuedAt  int64  `json:"ephemeral_issued_at"`
-	Sig       string `json:"ephemeral_sig"`
+	AgePubkey  string `json:"ephemeral_age_pubkey"`
+	Expiry     int64  `json:"ephemeral_expiry"`
+	IssuedAt   int64  `json:"ephemeral_issued_at"`
+	Sig        string `json:"ephemeral_sig"`
+	Deployment string `json:"ephemeral_deployment,omitempty"`
+	SigV2      string `json:"ephemeral_sig_v2,omitempty"`
 }
 
 type ephemeralVerdictWant struct {
@@ -40,14 +42,19 @@ type ephemeralVerdictWant struct {
 	Stale   bool             `json:"stale"`
 }
 
+// Deployment is the payer's own (base64, absent when it doesn't know it) and
+// ProtoVersion the node's advertised one; together they decide whether the
+// legacy signature is still enough.
 type ephemeralVerdictCase struct {
-	Name       string               `json:"name"`
-	OperatorID uint64               `json:"operator_id"`
-	NodeID     uint64               `json:"node_id"`
-	SigningKey string               `json:"signing_key"`
-	Now        int64                `json:"now"`
-	Adv        ephemeralVerdictAdv  `json:"advertisement"`
-	Want       ephemeralVerdictWant `json:"want"`
+	Name         string               `json:"name"`
+	OperatorID   uint64               `json:"operator_id"`
+	NodeID       uint64               `json:"node_id"`
+	SigningKey   string               `json:"signing_key"`
+	Now          int64                `json:"now"`
+	Deployment   string               `json:"deployment,omitempty"`
+	ProtoVersion string               `json:"proto_version,omitempty"`
+	Adv          ephemeralVerdictAdv  `json:"advertisement"`
+	Want         ephemeralVerdictWant `json:"want"`
 }
 
 const (
@@ -131,6 +138,12 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 		// mutate edits the wire block after signing.
 		mutate func(*ephemeralVerdictAdv)
 		key    string
+		// signDep, when set, makes the node sign the bound layout too.
+		signDep ticket.DeploymentID
+		// payerDep and proto are the payer's deployment and the node's
+		// advertised version.
+		payerDep ticket.DeploymentID
+		proto    string
 	}
 	c := func(s spec) ephemeralVerdictCase {
 		if s.recip == "" {
@@ -148,7 +161,7 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 		if s.key == "" {
 			s.key = key
 		}
-		adv := ticket.EphemeralAdvertisement{AgePubkey: s.recip, Expiry: s.expiry, IssuedAt: s.issued}
+		adv := ticket.EphemeralAdvertisement{AgePubkey: s.recip, Expiry: s.expiry, IssuedAt: s.issued, Deployment: s.signDep}
 		digest := ticket.EphemeralSigDigest(&adv, s.signOp, s.signNode)
 		wireAdv := ephemeralVerdictAdv{
 			AgePubkey: s.recip,
@@ -156,13 +169,31 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 			IssuedAt:  s.issued,
 			Sig:       base64.StdEncoding.EncodeToString(ed25519.Sign(priv, digest[:])),
 		}
+		if !s.signDep.IsZero() {
+			v2 := ticket.EphemeralSigDigestV2(&adv, s.signOp, s.signNode)
+			wireAdv.Deployment = s.signDep.String()
+			wireAdv.SigV2 = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, v2[:]))
+		}
 		if s.mutate != nil {
 			s.mutate(&wireAdv)
 		}
+		payerDep := ""
+		if !s.payerDep.IsZero() {
+			payerDep = s.payerDep.String()
+		}
 		return ephemeralVerdictCase{
-			Name: s.name, OperatorID: evOp, NodeID: evNode, SigningKey: s.key, Now: s.now, Adv: wireAdv,
+			Name: s.name, OperatorID: evOp, NodeID: evNode, SigningKey: s.key, Now: s.now,
+			Deployment: payerDep, ProtoVersion: s.proto, Adv: wireAdv,
 		}
 	}
+	depOf := func(fill byte) ticket.DeploymentID {
+		d, err := ticket.AlgorandDeploymentID(bytes.Repeat([]byte{fill}, 32), 1001)
+		if err != nil {
+			panic(err)
+		}
+		return d
+	}
+	mine, other := depOf(1), depOf(2)
 	const life = 25 * 60
 	fresh := int64(evNow - 60)
 
@@ -247,6 +278,40 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 		// The window is checked before the recipient is parsed.
 		c(spec{name: "an expired block with an unparseable recipient", recip: "age1notarecipient", issued: evNow - 61 - life, expiry: evNow - 61}),
 		c(spec{name: "a signed all-zero recipient parses", recip: zeroPoint, issued: fresh, expiry: fresh + life}),
+
+		// Deployment binding. A payer that knows its deployment needs the bound
+		// signature from a node new enough to give one; an older node, or a
+		// payer that doesn't know its deployment, gets by on the legacy one.
+		c(spec{name: "bound: a 9.13 node signed for this deployment", issued: fresh, expiry: fresh + life,
+			signDep: mine, payerDep: mine, proto: "9.13"}),
+		c(spec{name: "bound: a 9.13 node signed for another deployment", issued: fresh, expiry: fresh + life,
+			signDep: other, payerDep: mine, proto: "9.13"}),
+		c(spec{name: "bound: a 9.13 node with only the legacy signature", issued: fresh, expiry: fresh + life,
+			payerDep: mine, proto: "9.13"}),
+		c(spec{name: "bound: a 9.12 node with only the legacy signature", issued: fresh, expiry: fresh + life,
+			payerDep: mine, proto: "9.12"}),
+		c(spec{name: "bound: a node with no version and only the legacy signature", issued: fresh, expiry: fresh + life,
+			payerDep: mine}),
+		c(spec{name: "bound: a payer with no deployment reads the legacy signature", issued: fresh, expiry: fresh + life,
+			signDep: other, proto: "9.13"}),
+		c(spec{name: "bound: a v2 signature that does not verify", issued: fresh, expiry: fresh + life,
+			signDep: mine, payerDep: mine, proto: "9.13",
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = a.Sig }}),
+		c(spec{name: "bound: a deployment that is not 32 bytes", issued: fresh, expiry: fresh + life,
+			signDep: mine, payerDep: mine, proto: "9.13",
+			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
+		// The legacy path still parses the deployment: a valid legacy
+		// signature beside a malformed one is refused, as it is when bound.
+		c(spec{name: "bound: a malformed deployment from an older node", issued: fresh, expiry: fresh + life,
+			signDep: mine, payerDep: mine, proto: "9.12",
+			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
+		c(spec{name: "bound: a malformed deployment to a payer that knows none", issued: fresh, expiry: fresh + life,
+			signDep: mine, proto: "9.13",
+			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
+		c(spec{name: "bound: an older node whose bound signature names another deployment", issued: fresh, expiry: fresh + life,
+			signDep: other, payerDep: mine, proto: "9.12"}),
+		c(spec{name: "bound: expiry is still checked", issued: evNow - 61 - life, expiry: evNow - 61,
+			signDep: mine, payerDep: mine, proto: "9.13"}),
 	}
 }
 
@@ -258,19 +323,28 @@ func TestEphemeralVerdictVectors(t *testing.T) {
 			t.Fatalf("%s: signing key: %v", c.Name, err)
 		}
 		resp := inject.OperatorDetails{
-			EphemeralAgePubkey: c.Adv.AgePubkey,
-			EphemeralExpiry:    c.Adv.Expiry,
-			EphemeralIssuedAt:  c.Adv.IssuedAt,
-			EphemeralSig:       c.Adv.Sig,
+			EphemeralAgePubkey:  c.Adv.AgePubkey,
+			EphemeralExpiry:     c.Adv.Expiry,
+			EphemeralIssuedAt:   c.Adv.IssuedAt,
+			EphemeralSig:        c.Adv.Sig,
+			EphemeralDeployment: c.Adv.Deployment,
+			EphemeralSigV2:      c.Adv.SigV2,
+			ProtoVersion:        c.ProtoVersion,
 		}
-		v := checkEphemeral(resp, key, time.Unix(c.Now, 0), c.OperatorID, c.NodeID)
+		var payerDep ticket.DeploymentID
+		if c.Deployment != "" {
+			if err := payerDep.UnmarshalText([]byte(c.Deployment)); err != nil {
+				t.Fatalf("%s: deployment: %v", c.Name, err)
+			}
+		}
+		v := checkEphemeral(resp, key, time.Unix(c.Now, 0), c.OperatorID, c.NodeID, payerDep)
 		cases[i].Want = ephemeralVerdictWant{Outcome: v.Outcome, Stale: v.Stale}
 	}
 	f := struct {
 		Comment string                 `json:"comment"`
 		Cases   []ephemeralVerdictCase `json:"cases"`
 	}{
-		Comment: "Generated by proto/go/zs TestEphemeralVerdictVectors. Each case is one probe's advertisement as the wire carries it, checked against the node's chain-resolved (operator_id, node_id) and Ed25519 signing_key (hex) at now (unix seconds). want.outcome is absent | verified | expired | rejected | unparseable; want.stale is the relay-staleness signal, set only on a verified block.",
+		Comment: "Generated by proto/go/zs TestEphemeralVerdictVectors. Each case is one probe's advertisement as the wire carries it, checked against the node's chain-resolved (operator_id, node_id) and Ed25519 signing_key (hex) at now (unix seconds), by a payer whose own deployment id is deployment (absent: unknown) against a node advertising proto_version. want.outcome is absent | verified | expired | rejected | unparseable; want.stale is the relay-staleness signal, set only on a verified block.",
 		Cases:   cases,
 	}
 	out, err := json.MarshalIndent(f, "", "  ")

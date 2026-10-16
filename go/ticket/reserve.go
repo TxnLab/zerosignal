@@ -116,14 +116,27 @@ type ReserveRequest struct {
 	// wire.UsesTightInputBound confirms the target advertises >= 9.2. See
 	// SPEC.md § 3a "Input-token bound".
 	InputBoundVersion uint8 `json:"input_bound_version,omitempty"`
+	// Deployment is the escrow deployment the payer believes the node is on.
+	// It does two jobs: when signed it selects the v2 payer-signature layout,
+	// and whether signed or not it asks the node for deployment-bound (v3)
+	// tickets and receipts. A node on another deployment refuses the reserve,
+	// which is how a payer configured for testnet finds out it reached a
+	// mainnet node. A caller only sets it after wire.UsesDeploymentBinding
+	// confirms the target; a node that predates the field ignores it, and a
+	// payer that predates it gets v2 tickets.
+	Deployment DeploymentID `json:"deployment,omitzero"`
 }
 
 // reserveSigningTag domain-separates the reserve-request payer signature from
 // Ticket / UsageReceipt / EphemeralAdvertisement signatures and any other
 // Ed25519 the system may introduce. The trailing NUL matches the whole family
 // (zs-ticket-v2\x00, zs-receipt-v2\x00, zs-ephemeral-v1\x00,
-// zs-admission-v1\x00) — self-terminating in any concatenation.
-const reserveSigningTag = "zs-reserve-v1\x00"
+// zs-admission-v1\x00) — self-terminating in any concatenation. v2 inserts the
+// deployment id after the tag.
+const (
+	reserveSigningTag   = "zs-reserve-v1\x00"
+	reserveSigningTagV2 = "zs-reserve-v2\x00"
+)
 
 // MaxReserveSigAge is the short validity window a verifier enforces on a
 // payer signature: a reserve is immediate and per-request, so the window is
@@ -155,7 +168,8 @@ var ErrReserveSigExpired = errors.New("reserve signature expired")
 // LOCKED layout (any change requires a vectors regeneration + the matching TS
 // edit): reserveSigningTag ‖ lenStr(PayerAddr) ‖ u64(OperatorID) ‖
 // u64(NodeID) ‖ lenStr(Model) ‖ u64(InputCount) ‖ u64(MaxOutputCount) ‖
-// bool(Stream) ‖ lenStr(ProxyRecipient) ‖ i64(IssuedAt).
+// bool(Stream) ‖ lenStr(ProxyRecipient) ‖ i64(IssuedAt). With Deployment set,
+// reserveSigningTagV2 ‖ deployment[32] replaces the leading tag.
 //
 // Target binding — (operatorID, nodeID) are NOT wire fields; both ends already
 // know them out of band (the signer from the node it routes to, the verifier
@@ -172,8 +186,13 @@ var ErrReserveSigExpired = errors.New("reserve signature expired")
 // Ticket.CanonicalBytes — the age seal already gives the ciphertext integrity,
 // so the signature's job is binding, not integrity.
 func (r *ReserveRequest) CanonicalBytes(operatorID, nodeID uint64) []byte {
-	b := make([]byte, 0, 160)
-	b = append(b, reserveSigningTag...)
+	b := make([]byte, 0, 192)
+	if r.Deployment.IsZero() {
+		b = append(b, reserveSigningTag...)
+	} else {
+		b = append(b, reserveSigningTagV2...)
+		b = append(b, r.Deployment[:]...)
+	}
 	b = appendLenStr(b, r.PayerAddr)
 	b = appendU64(b, operatorID)
 	b = appendU64(b, nodeID)
@@ -240,7 +259,21 @@ func (r *ReserveRequest) Sign(ctx context.Context, signer BytesSigner, payerAddr
 // ErrReserveSigExpired so the node can 401 a stale-but-genuine signature with
 // node_time for a one-shot client resync rather than treat it as a forgery.
 // now is injected so callers can test boundaries deterministically.
+//
+// Verify accepts only the legacy (v1, unbound) layout; nodes verify with
+// VerifyFor.
 func (r *ReserveRequest) Verify(pub ed25519.PublicKey, operatorID, nodeID uint64, now time.Time, skew time.Duration) error {
+	return r.VerifyFor(pub, operatorID, nodeID, now, skew, DeploymentID{}, true)
+}
+
+// VerifyFor is Verify that also accepts the v2 layout bound to want, the
+// verifying node's own deployment. allowLegacy admits an unbound signature.
+// The deployment check runs first so a payer on another network gets
+// ErrDeploymentMismatch rather than a generic signature failure.
+func (r *ReserveRequest) VerifyFor(pub ed25519.PublicKey, operatorID, nodeID uint64, now time.Time, skew time.Duration, want DeploymentID, allowLegacy bool) error {
+	if err := checkDeployment(r.Deployment, want, allowLegacy); err != nil {
+		return fmt.Errorf("reserve: %w", err)
+	}
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid ed25519 public key length %d", len(pub))
 	}

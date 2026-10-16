@@ -19,7 +19,9 @@ import (
 // the cryptographic domain tags (AdmissionTagDomain, ticketSigningTag,
 // receiptSigningTag) which are bumped independently when a signing or
 // AEAD layout changes. A new major MAY but does not HAVE to bump a
-// domain tag; bumping a domain tag SHOULD always bump the major.
+// domain tag; replacing a domain tag SHOULD always bump the major, while
+// adding one beside a tag that stays accepted, gated on the peer's minor, is
+// a minor (SPEC.md §3c).
 //
 // The companion field on the wire is the proto_version key in
 // OperatorDetails (see proto/go/inject/details.go and SPEC.md §3c
@@ -27,7 +29,7 @@ import (
 //
 // What each generation changed — and why it was a major or a minor — is in
 // proto/CHANGELOG.md. Add an entry there when you bump this.
-const ProtoVersion = "9.12"
+const ProtoVersion = "9.13"
 
 // LegacyProtoVersion is the value substituted for a missing
 // proto_version field on the wire (nodes that predate the field). With
@@ -259,6 +261,25 @@ const NodeSubmitsOpenMinVersion = "9.12"
 // submits.
 func SubmitsOpen(protoVersion string) bool {
 	return ProtoVersionAtLeast(protoVersion, NodeSubmitsOpenMinVersion)
+}
+
+// DeploymentBindingMinVersion is the first ProtoVersion at which a node
+// verifies a deployment-bound reserve signature, issues deployment-bound
+// tickets and receipts when asked, and publishes the bound ephemeral
+// signature. The new domain tags sit beside the old ones rather than replacing
+// them, which is why this is a minor.
+const DeploymentBindingMinVersion = "9.13"
+
+// UsesDeploymentBinding reports whether a target advertising protoVersion
+// understands the reserve's deployment field and so must answer with bound
+// artifacts.
+//
+// Fails closed to the legacy layouts: naming the deployment to an older node
+// is harmless (it ignores the field) but then demanding bound tickets from it
+// fails every turn, while treating a new node as old costs only the
+// cross-deployment binding for that turn.
+func UsesDeploymentBinding(protoVersion string) bool {
+	return ProtoVersionAtLeast(protoVersion, DeploymentBindingMinVersion)
 }
 
 // AppComposeMinVersion is the first ProtoVersion at which a dstack-tdx

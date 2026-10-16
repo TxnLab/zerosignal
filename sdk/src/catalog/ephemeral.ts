@@ -13,9 +13,12 @@ import { bech32 } from '@scure/base'
 import {
     DEFAULT_EPHEMERAL_SKEW_SEC,
     EphemeralExpiredError,
+    decodeDeploymentId,
     ephemeralStale,
     verifyEphemeral,
+    verifyEphemeralFor,
 } from '@txnlab/zs-proto/ticket'
+import { usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 
 import type { NodeRef } from '../types.js'
 
@@ -25,12 +28,21 @@ export interface EphemeralWireFields {
     ephemeral_expiry?: number | undefined
     ephemeral_issued_at?: number | undefined
     ephemeral_sig?: string | undefined
+    ephemeral_deployment?: string | undefined
+    ephemeral_sig_v2?: string | undefined
+    /** The node's advertised version, which decides whether the legacy signature is enough. */
+    proto_version?: string | undefined
 }
 
-/** The chain-resolved node the advertisement must have been signed for. */
+/**
+ * The chain-resolved node the advertisement must have been signed for, and the
+ * payer's own deployment id (absent: unknown, so only the legacy signature is
+ * checked).
+ */
 export interface EphemeralTarget {
     op: bigint | number
     node: bigint | number
+    deployment?: Uint8Array | undefined
 }
 
 /**
@@ -76,7 +88,16 @@ export function checkEphemeralAdvertisement(
     const expiry = intField(wire.ephemeral_expiry)
     const issuedAt = intField(wire.ephemeral_issued_at)
     const sig = stringField(wire.ephemeral_sig)
-    if (typeof recipient !== 'string' || expiry === null || issuedAt === null || sig === null) {
+    const advDeployment = stringField(wire.ephemeral_deployment)
+    const sigV2 = stringField(wire.ephemeral_sig_v2)
+    if (
+        typeof recipient !== 'string' ||
+        expiry === null ||
+        issuedAt === null ||
+        sig === null ||
+        advDeployment === null ||
+        sigV2 === null
+    ) {
         return { outcome: 'rejected', error: new Error('ephemeral advertisement: a field has the wrong type') }
     }
     const adv = {
@@ -84,9 +105,28 @@ export function checkEphemeralAdvertisement(
         ephemeral_expiry: expiry,
         ephemeral_issued_at: issuedAt,
         ephemeral_sig: sig,
+        ...(advDeployment ? { ephemeral_deployment: advDeployment } : {}),
+        ...(sigV2 ? { ephemeral_sig_v2: sigV2 } : {}),
     }
     try {
-        verifyEphemeral(target.op, target.node, adv, signingPubKey, nowSec, DEFAULT_EPHEMERAL_SKEW_SEC)
+        // Go parses the deployment before any check, so a malformed one is
+        // refused even on the legacy path.
+        if (advDeployment) decodeDeploymentId(advDeployment)
+        if (!target.deployment) {
+            verifyEphemeral(target.op, target.node, adv, signingPubKey, nowSec, DEFAULT_EPHEMERAL_SKEW_SEC)
+        } else {
+            const allowLegacy = !usesDeploymentBinding(stringField(wire.proto_version) ?? '')
+            verifyEphemeralFor(
+                target.op,
+                target.node,
+                adv,
+                signingPubKey,
+                nowSec,
+                DEFAULT_EPHEMERAL_SKEW_SEC,
+                target.deployment,
+                allowLegacy,
+            )
+        }
     } catch (err) {
         if (err instanceof EphemeralExpiredError) return { outcome: 'expired' }
         return { outcome: 'rejected', error: asError(err) }

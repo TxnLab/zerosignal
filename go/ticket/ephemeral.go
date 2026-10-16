@@ -50,6 +50,11 @@ type EphemeralAdvertisement struct {
 	Expiry    int64  `json:"ephemeral_expiry"`     // unix seconds — end of the validity window
 	IssuedAt  int64  `json:"ephemeral_issued_at"`  // unix seconds — start of the window (key mint/rotation time); signed, so [IssuedAt, Expiry] is tamper-evident
 	Sig       string `json:"ephemeral_sig"`        // base64(Ed25519 over EphemeralSigDigest)
+	// Deployment and SigV2 carry the deployment-bound signature alongside the
+	// legacy one. A node publishes both, because the advertisement is served
+	// to every payer and a payer that predates the fields reads only Sig.
+	Deployment DeploymentID `json:"ephemeral_deployment,omitzero"`
+	SigV2      string       `json:"ephemeral_sig_v2,omitempty"` // base64(Ed25519 over EphemeralSigDigestV2)
 }
 
 // ephemeralSigningTag domain-separates EphemeralAdvertisement signatures
@@ -61,11 +66,17 @@ type EphemeralAdvertisement struct {
 // joining the signed bytes, then NodeID at the proto-6.0 major). It did not
 // need to move: changing the layout already makes the old and new digests
 // disjoint, so signatures across the cutover cannot cross-validate — the hard
-// break was carried by wire.ProtoVersion, not by this string. SPEC.md says v1
-// and so does this constant. If prose here ever claims a v2 or v3, the prose
-// is what is wrong: editing the constant to match it would silently cut
-// proxy and node over to different signatures.
-const ephemeralSigningTag = "zs-ephemeral-v1\x00"
+// break was carried by wire.ProtoVersion, not by this string. The legacy tag
+// that Sig covers is v1 in SPEC.md and here; prose claiming otherwise is what
+// is wrong, since editing the constant to match it would silently cut proxy
+// and node over to different signatures.
+//
+// v2 is a separate tag for the deployment-bound layout SigV2 covers, not a
+// renaming of v1: both are signed while the legacy layout stays accepted.
+const (
+	ephemeralSigningTag   = "zs-ephemeral-v1\x00"
+	ephemeralSigningTagV2 = "zs-ephemeral-v2\x00"
+)
 
 // DefaultEphemeralSkew is the clock-skew tolerance a verifier applies to the
 // advertised expiry: a block is treated as live until now > Expiry + skew.
@@ -126,12 +137,32 @@ var ErrEphemeralLifetimeTooLong = errors.New("ephemeral advertisement lifetime e
 func (a *EphemeralAdvertisement) CanonicalBytes(operatorID, nodeID uint64) []byte {
 	b := make([]byte, 0, 128)
 	b = append(b, ephemeralSigningTag...)
+	return a.appendBody(b, operatorID, nodeID)
+}
+
+// CanonicalBytesV2 is the deployment-bound layout SigV2 covers:
+// ephemeralSigningTagV2 ‖ deployment[32] ‖ the v1 body. With no Deployment it
+// still writes 32 zero bytes, which no verifier accepts (checkDeployment
+// refuses an unbound v2), so the zero case cannot sign anything usable.
+func (a *EphemeralAdvertisement) CanonicalBytesV2(operatorID, nodeID uint64) []byte {
+	b := make([]byte, 0, 160)
+	b = append(b, ephemeralSigningTagV2...)
+	b = append(b, a.Deployment[:]...)
+	return a.appendBody(b, operatorID, nodeID)
+}
+
+func (a *EphemeralAdvertisement) appendBody(b []byte, operatorID, nodeID uint64) []byte {
 	b = appendU64(b, operatorID)
 	b = appendU64(b, nodeID)
 	b = appendLenStr(b, a.AgePubkey)
 	b = appendI64(b, a.Expiry)
 	b = appendI64(b, a.IssuedAt)
 	return b
+}
+
+// EphemeralSigDigestV2 is sha256(CanonicalBytesV2), the digest SigV2 signs.
+func EphemeralSigDigestV2(a *EphemeralAdvertisement, operatorID, nodeID uint64) [sha256.Size]byte {
+	return sha256.Sum256(a.CanonicalBytesV2(operatorID, nodeID))
 }
 
 // EphemeralSigDigest returns sha256(CanonicalBytes(operatorID, nodeID)) — the
@@ -163,15 +194,27 @@ func (a *EphemeralAdvertisement) Sign(ctx context.Context, signer BytesSigner, s
 	if signer == nil {
 		return errors.New("ephemeral sign: signer is nil")
 	}
-	digest := EphemeralSigDigest(a, operatorID, nodeID)
-	sig, err := signer.SignBytes(ctx, signingAddr, digest[:])
+	sign := func(digest [sha256.Size]byte) (string, error) {
+		sig, err := signer.SignBytes(ctx, signingAddr, digest[:])
+		if err != nil {
+			return "", fmt.Errorf("ephemeral sign: %w", err)
+		}
+		if len(sig) != ed25519.SignatureSize {
+			return "", fmt.Errorf("ephemeral sign: signer returned %d-byte signature, want %d", len(sig), ed25519.SignatureSize)
+		}
+		return base64.StdEncoding.EncodeToString(sig), nil
+	}
+	sig, err := sign(EphemeralSigDigest(a, operatorID, nodeID))
 	if err != nil {
-		return fmt.Errorf("ephemeral sign: %w", err)
+		return err
 	}
-	if len(sig) != ed25519.SignatureSize {
-		return fmt.Errorf("ephemeral sign: signer returned %d-byte signature, want %d", len(sig), ed25519.SignatureSize)
+	sigV2 := ""
+	if !a.Deployment.IsZero() {
+		if sigV2, err = sign(EphemeralSigDigestV2(a, operatorID, nodeID)); err != nil {
+			return err
+		}
 	}
-	a.Sig = base64.StdEncoding.EncodeToString(sig)
+	a.Sig, a.SigV2 = sig, sigV2
 	return nil
 }
 
@@ -198,11 +241,37 @@ func (a *EphemeralAdvertisement) Sign(ctx context.Context, signer BytesSigner, s
 // logging a stale-but-genuine advertisement as an attack. Pass
 // DefaultEphemeralSkew for skew; now is injected so callers can test boundaries
 // deterministically.
+//
+// Verify checks only the legacy Sig; payers verify with VerifyFor.
 func (a *EphemeralAdvertisement) Verify(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration) error {
+	return a.verify(pub, now, operatorID, nodeID, skew, false)
+}
+
+// VerifyFor checks SigV2 when the advertisement is bound, after requiring its
+// Deployment to equal want, and checks the legacy Sig only when it is unbound
+// and allowLegacy holds. A bound advertisement is judged by SigV2 alone: Sig
+// is there for payers that predate the binding.
+//
+// allowLegacy is the payer's call from the node's advertised proto_version.
+// That version is unsigned, so during the rollout a relay can strip the v2
+// fields and lower it; closing that requires refusing legacy outright, which
+// is the end of the dual-accept window.
+func (a *EphemeralAdvertisement) VerifyFor(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration, want DeploymentID, allowLegacy bool) error {
+	if err := checkDeployment(a.Deployment, want, allowLegacy); err != nil {
+		return fmt.Errorf("ephemeral: %w", err)
+	}
+	return a.verify(pub, now, operatorID, nodeID, skew, !a.Deployment.IsZero())
+}
+
+func (a *EphemeralAdvertisement) verify(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration, bound bool) error {
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid ed25519 public key length %d", len(pub))
 	}
-	sig, err := base64.StdEncoding.DecodeString(a.Sig)
+	encoded, digest := a.Sig, EphemeralSigDigest(a, operatorID, nodeID)
+	if bound {
+		encoded, digest = a.SigV2, EphemeralSigDigestV2(a, operatorID, nodeID)
+	}
+	sig, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return fmt.Errorf("decode ephemeral sig: %w", err)
 	}
@@ -211,7 +280,6 @@ func (a *EphemeralAdvertisement) Verify(pub ed25519.PublicKey, now time.Time, op
 	}
 	// The chain-resolved (operator_id, node_id) enters the digest here, so a
 	// substituted id — cross-operator or sibling-node — can never validate.
-	digest := EphemeralSigDigest(a, operatorID, nodeID)
 	if !ed25519.Verify(pub, digest[:], sig) {
 		return errors.New("ephemeral signature verification failed")
 	}

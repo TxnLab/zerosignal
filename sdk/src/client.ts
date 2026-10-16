@@ -35,6 +35,7 @@ import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
 import { type JournalDeps, Reconciler, journalOpen, journalReceipt, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
+import { deploymentOrFail, readDeploymentId } from './registry/chain.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
 import { Settles } from './settles.js'
@@ -96,6 +97,20 @@ export class Client {
     static async create(config: Config, signal?: AbortSignal): Promise<Client> {
         const cfg = resolveConfig(config)
         for (const w of cfg.warnings) cfg.logger.warn(w)
+        const algod = cfg.wallet === undefined || cfg.registry === undefined ? chainAlgod(cfg) : undefined
+        // The wallet first, as in Go: its read is the one that fails create,
+        // so it fails before the slow discovery rather than after.
+        const builtWallet = cfg.wallet === undefined
+        const wallet = cfg.wallet ?? (await buildWallet(cfg, algod!, signal))
+        const deployment =
+            algod === undefined
+                ? undefined
+                : await deploymentOrFail(
+                      () => readDeploymentId(algod, cfg.network.escrowAppId, ESCROW_CONFIG_TIMEOUT_MS, signal),
+                      builtWallet,
+                      cfg.logger,
+                      signal,
+                  )
         const reserveClient =
             cfg.reserveClient ??
             httpReserveClient({
@@ -103,17 +118,14 @@ export class Client {
                 signer: payerBytesSigner(cfg.signer),
                 timeoutMs: cfg.reserveTimeout,
                 clock: cfg.clock,
+                deployment,
             })
-        const algod = cfg.wallet === undefined || cfg.registry === undefined ? chainAlgod(cfg) : undefined
-        // The wallet first, as in Go: its read is the one that fails create,
-        // so it fails before the slow discovery rather than after.
-        const wallet = cfg.wallet ?? (await buildWallet(cfg, algod!, signal))
 
         let st = cfg.stores
         let registry = cfg.registry
         let built: BuiltDiscovery | undefined
         if (registry === undefined) {
-            built = buildDiscovery(cfg, algod!)
+            built = buildDiscovery(cfg, algod!, deployment)
             try {
                 await untilAborted(built.registry.ready, signal)
             } catch (err) {

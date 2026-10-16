@@ -5,6 +5,7 @@
 
 import { readFileSync } from 'node:fs'
 import { hexToBytes } from '@noble/hashes/utils.js'
+import { decodeDeploymentId } from '@txnlab/zs-proto/ticket'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -20,11 +21,16 @@ interface VectorCase {
     node_id: number
     signing_key: string
     now: number
+    /** The payer's own deployment id, base64; absent when it doesn't know it. */
+    deployment?: string
+    proto_version?: string
     advertisement: {
         ephemeral_age_pubkey: string
         ephemeral_expiry: number
         ephemeral_issued_at: number
         ephemeral_sig: string
+        ephemeral_deployment?: string
+        ephemeral_sig_v2?: string
     }
     want: { outcome: EphemeralVerdict['outcome']; stale: boolean }
 }
@@ -51,11 +57,13 @@ describe('checkEphemeralAdvertisement vectors', () => {
     for (const ids of ['number', 'bigint'] as const) {
         it(`matches Go for every case, with ${ids} ids`, () => {
             for (const c of vectors.cases) {
+                const deployment = c.deployment ? decodeDeploymentId(c.deployment) : undefined
                 const target =
                     ids === 'bigint'
-                        ? { op: BigInt(c.operator_id), node: BigInt(c.node_id) }
-                        : { op: c.operator_id, node: c.node_id }
-                const v = checkEphemeralAdvertisement(target, hexToBytes(c.signing_key), c.advertisement, c.now)
+                        ? { op: BigInt(c.operator_id), node: BigInt(c.node_id), deployment }
+                        : { op: c.operator_id, node: c.node_id, deployment }
+                const wire = { ...c.advertisement, proto_version: c.proto_version }
+                const v = checkEphemeralAdvertisement(target, hexToBytes(c.signing_key), wire, c.now)
                 expect({ name: c.name, outcome: v.outcome, stale: staleOf(v) }).toEqual({
                     name: c.name,
                     ...c.want,

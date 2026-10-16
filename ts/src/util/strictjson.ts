@@ -24,6 +24,8 @@ export interface FieldReader {
     str(name: string): string
     bool(name: string): boolean
     object(name: string): FieldReader
+    /** present is a field neither absent nor null: where Go's decode runs a TextUnmarshaler. */
+    present(name: string): boolean
 }
 
 /** parseObject JSON-decodes raw and reads its fields; what prefixes every error. */
@@ -81,5 +83,6 @@ function fieldReader(parsed: unknown, what: string): FieldReader {
             const v = get(name)
             return fieldReader(absent(v) ? {} : v, `${what}: ${name}`)
         },
+        present: (name) => !absent(get(name)),
     }
 }

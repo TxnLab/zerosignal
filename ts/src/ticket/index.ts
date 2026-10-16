@@ -4,6 +4,7 @@
  */
 
 export * from './signing.js'
+export * from './deployment.js'
 export * from './usagetype.js'
 export * from './ticket.js'
 export * from './receipt.js'

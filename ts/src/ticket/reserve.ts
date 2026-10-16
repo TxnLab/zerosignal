@@ -18,6 +18,7 @@ import { base64 } from '@scure/base'
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
 import { parseObject } from '../util/strictjson.js'
+import { checkDeployment, decodeDeploymentId } from './deployment.js'
 import type { BytesSigner } from './signing.js'
 import type { Ticket } from './ticket.js'
 import { readTicket } from './ticketfields.js'
@@ -97,6 +98,12 @@ export interface ReserveRequest {
     // bytes, so it is additive and changes no signature. Only set after
     // usesTightInputBound confirms the target advertises >= 9.2.
     input_bound_version?: number
+    // base64(32-byte deployment id) the payer believes the node is on. Signed,
+    // it selects the v2 payer-signature layout; signed or not, it asks the node
+    // for deployment-bound tickets and receipts, and a node on another
+    // deployment refuses the reserve. Only set after usesDeploymentBinding
+    // confirms the target. Mirrors Go's ReserveRequest.Deployment.
+    deployment?: string
 }
 
 export interface ReserveResponse {
@@ -134,6 +141,8 @@ export function parseReserveResponseJSON(raw: Uint8Array): ReserveResponse {
 // matches the whole family (must equal proto/go/ticket/reserve.go
 // reserveSigningTag). New independent domain — no suffix bump on the others.
 export const RESERVE_SIGNING_TAG = 'zs-reserve-v1\x00'
+// The deployment-bound layout: this tag, then the 32-byte deployment id.
+export const RESERVE_SIGNING_TAG_V2 = 'zs-reserve-v2\x00'
 
 // MAX_RESERVE_SIG_AGE_SEC is the short validity window a verifier enforces on a
 // payer signature. A reserve is immediate and per-request, so the window is
@@ -165,7 +174,8 @@ export class ReserveSigExpiredError extends Error {
 // LOCKED layout (any change requires a vectors regeneration + the matching Go
 // edit): RESERVE_SIGNING_TAG ‖ lenStr(payer_addr) ‖ u64(operatorId) ‖
 // u64(nodeId) ‖ lenStr(model) ‖ u64(input_count) ‖ u64(max_output_count) ‖
-// bool(stream) ‖ lenStr(proxy_recipient) ‖ i64(payer_issued_at).
+// bool(stream) ‖ lenStr(proxy_recipient) ‖ i64(payer_issued_at). With
+// deployment set, RESERVE_SIGNING_TAG_V2 ‖ deployment[32] replaces the tag.
 //
 // operatorId / nodeId are NOT wire fields — both ends know them out of band
 // (target binding, see the Go doc), so they enter as parameters. proxy_recipient
@@ -177,8 +187,10 @@ export function reserveCanonicalBytes(
     nodeId: number | bigint,
     r: ReserveRequest,
 ): Uint8Array {
-    return new CanonicalWriter()
-        .str(RESERVE_SIGNING_TAG)
+    const w = new CanonicalWriter()
+    if (r.deployment) w.str(RESERVE_SIGNING_TAG_V2).bytes(decodeDeploymentId(r.deployment))
+    else w.str(RESERVE_SIGNING_TAG)
+    return w
         .lenStr(r.payer_addr ?? '')
         .u64(operatorId)
         .u64(nodeId)
@@ -236,6 +248,9 @@ export async function signReserveRequest(
 // (1) signature; (2) not-before; (3) the short window last, throwing
 // ReserveSigExpiredError so a stale-but-genuine signature is distinguishable.
 // nowUnixSec is injected so callers can test boundaries deterministically.
+//
+// verifyReserveRequest accepts only the legacy (v1, unbound) layout; nodes
+// verify with verifyReserveRequestFor.
 export function verifyReserveRequest(
     operatorId: number | bigint,
     nodeId: number | bigint,
@@ -244,6 +259,23 @@ export function verifyReserveRequest(
     nowUnixSec: number,
     skewSec: number,
 ): void {
+    verifyReserveRequestFor(operatorId, nodeId, r, pub, nowUnixSec, skewSec, undefined, true)
+}
+
+// verifyReserveRequestFor also accepts the v2 layout bound to want, the
+// verifying node's own deployment; allowLegacy admits an unbound signature.
+// The deployment check runs first. Mirrors Go's ReserveRequest.VerifyFor.
+export function verifyReserveRequestFor(
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    r: ReserveRequest,
+    pub: Uint8Array,
+    nowUnixSec: number,
+    skewSec: number,
+    want: Uint8Array | undefined,
+    allowLegacy: boolean,
+): void {
+    checkDeployment('reserve', r.deployment, want, allowLegacy)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }

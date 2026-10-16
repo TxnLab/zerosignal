@@ -18,6 +18,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/keystore"
+	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
@@ -82,9 +83,13 @@ func TestNewChainSource_MapsConfig(t *testing.T) {
 			LatencyStateMax:    13,
 		},
 	}.withDefaults()
-	src := newChainSource(cfg, 99, nil)
+	dep := ticket.DeploymentID{9}
+	src := newChainSource(cfg, 99, nil, dep)
 	if src.EscrowAppID != 99 || src.ProxyPayerAddr != "PAYER" || !slices.Equal(src.OperatorIDs, []uint64{3, 5}) {
 		t.Errorf("app %d payer %q ids %v", src.EscrowAppID, src.ProxyPayerAddr, src.OperatorIDs)
+	}
+	if src.Deployment != dep {
+		t.Error("deployment dropped: the ephemeral check would fall back to the legacy signature")
 	}
 	if src.DetailsTimeout != 7*time.Second || src.DetailsConcurrency != 11 || src.LatencyStateMax != 13 {
 		t.Errorf("timeout %v concurrency %d latency max %d", src.DetailsTimeout, src.DetailsConcurrency, src.LatencyStateMax)
@@ -99,7 +104,7 @@ func TestNewChainSource_MapsConfig(t *testing.T) {
 		t.Error("probe clients not built")
 	}
 	cfg.Privacy = PrivacyDirect
-	if newChainSource(cfg, 99, nil).Privacy {
+	if newChainSource(cfg, 99, nil, ticket.DeploymentID{}).Privacy {
 		t.Error("direct relays the discovery probes")
 	}
 }
@@ -148,9 +153,9 @@ func TestBuiltClients_BlockPrivateTargetsUnlessAllowed(t *testing.T) {
 	defer srv.Close()
 	for _, allow := range []bool{false, true} {
 		cfg := Config{Signer: fakeSigner{addr: "PAYER"}, AllowPrivateHosts: allow}.withDefaults()
-		src := newChainSource(cfg, 1, nil)
+		src := newChainSource(cfg, 1, nil, ticket.DeploymentID{})
 		for name, hc := range map[string]*http.Client{
-			"reserve":     newReserveClient(cfg).HTTPClient,
+			"reserve":     newReserveClient(cfg, ticket.DeploymentID{}).HTTPClient,
 			"details":     src.Details.HTTP,
 			"attestation": src.Attestation.HTTP,
 		} {
@@ -168,9 +173,13 @@ func TestBuiltClients_BlockPrivateTargetsUnlessAllowed(t *testing.T) {
 // The reserve is signed as the payer, and each attempt is bounded.
 func TestNewReserveClient_MapsConfig(t *testing.T) {
 	signer := fakeSigner{addr: "PAYER"}
-	rc := newReserveClient(Config{Signer: signer, ReserveTimeout: 3 * time.Second})
+	dep := ticket.DeploymentID{9}
+	rc := newReserveClient(Config{Signer: signer, ReserveTimeout: 3 * time.Second}, dep)
 	if rc.Signer != signer {
 		t.Error("reserve is not signed by the payer")
+	}
+	if rc.Deployment != dep {
+		t.Error("deployment dropped: reserves would never ask for bound tickets")
 	}
 	if rc.HTTPClient == nil || rc.HTTPClient.Timeout != 3*time.Second {
 		t.Errorf("reserve client %+v, want a 3s timeout", rc.HTTPClient)

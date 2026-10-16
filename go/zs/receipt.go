@@ -92,7 +92,13 @@ func VerifyReceipt(c ReceiptCheck) error {
 			Err:       fmt.Errorf("operator signing key length %d, want %d", len(c.Operator.TicketSigningKey), ed25519.PublicKeySize),
 		}
 	}
-	if err := c.Receipt.Verify(c.Operator.TicketSigningKey); err != nil {
+	// A receipt is bound exactly when its ticket is, and to the same
+	// deployment; the ticket's binding was checked against ours at reserve.
+	var want ticket.DeploymentID
+	if c.Ticket != nil {
+		want = c.Ticket.Deployment
+	}
+	if err := c.Receipt.VerifyFor(c.Operator.TicketSigningKey, want, want.IsZero()); err != nil {
 		return &ReceiptError{
 			Violation: ReceiptViolationSig,
 			Err:       fmt.Errorf("receipt signature verify: %w", err),

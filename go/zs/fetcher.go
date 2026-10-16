@@ -51,6 +51,11 @@ type ChainOperatorSource struct {
 	// EscrowAppID is the ZeroSignalEscrow application id — required.
 	EscrowAppID uint64
 
+	// Deployment is this payer's own deployment id, which a node's bound
+	// ephemeral signature must name. Zero has the chain read derive it from
+	// algod's genesis hash.
+	Deployment ticket.DeploymentID
+
 	// OperatorIDs, when non-empty, restricts which operator IDs are
 	// loaded. Empty means "fetch every currently-registered operator".
 	OperatorIDs []uint64
@@ -227,6 +232,45 @@ type ChainOperatorSource struct {
 	// chainClock overrides the day the revenue windows end on in tests; nil =
 	// time.Now.
 	chainClock func() time.Time
+
+	// derivedMu guards derivedDeployment, the id the chain read derives from
+	// algod's genesis hash when Deployment is unset. A host that builds its
+	// own source would otherwise leave every node's ephemeral checked on the
+	// legacy signature alone.
+	derivedMu         sync.Mutex
+	derivedDeployment ticket.DeploymentID
+}
+
+// deployment is the id the probes check bound ephemeral signatures against:
+// Deployment when set, else the one the chain read derived. Zero until then.
+func (s *ChainOperatorSource) deployment() ticket.DeploymentID {
+	if !s.Deployment.IsZero() {
+		return s.Deployment
+	}
+	s.derivedMu.Lock()
+	defer s.derivedMu.Unlock()
+	return s.derivedDeployment
+}
+
+// deriveDeployment reads the genesis hash once, when no id was supplied. A
+// failure is retried on the next chain read; until one succeeds the probes
+// accept legacy signatures, which is what a source with no id did before.
+func (s *ChainOperatorSource) deriveDeployment(ctx context.Context) {
+	if !s.deployment().IsZero() || s.Algod == nil || s.EscrowAppID == 0 {
+		return
+	}
+	d, err := readDeploymentID(ctx, s.Algod, s.EscrowAppID)
+	if err != nil {
+		log := s.Log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("could not derive the escrow deployment; checking ephemeral signatures on the legacy layout", slog.Any("err", err))
+		return
+	}
+	s.derivedMu.Lock()
+	s.derivedDeployment = d
+	s.derivedMu.Unlock()
 }
 
 // recallReachable returns the last-known reachability for a node (false when
@@ -281,6 +325,8 @@ func (s *ChainOperatorSource) FetchChain(ctx context.Context) ([]Operator, error
 	if err != nil {
 		return nil, err
 	}
+	// Before the probes, which every refresh path runs after this call.
+	s.deriveDeployment(ctx)
 	s.fillSignerBalances(ctx, ops)
 	return ops, nil
 }
@@ -823,7 +869,7 @@ func (s *ChainOperatorSource) applyEphemeralAdvertisement(op *Operator, resp inj
 	// recipient pinned from an earlier cycle.
 	clearEphemeral(op)
 
-	v := checkEphemeral(resp, op.TicketSigningKey, time.Now(), op.ID, op.NodeID)
+	v := checkEphemeral(resp, op.TicketSigningKey, time.Now(), op.ID, op.NodeID, s.deployment())
 	switch v.Outcome {
 	case ephemeralVerified:
 		op.EphemeralRecipient = v.Recipient
@@ -913,9 +959,20 @@ type ephemeralVerdict struct {
 // checkEphemeral verifies one probe's advertisement against the node's
 // chain-resolved identity: applyEphemeralAdvertisement's decision, without
 // its writes and logs.
-func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, now time.Time, operatorID, nodeID uint64) ephemeralVerdict {
+//
+// deployment is the payer's own. Zero means the payer doesn't know it, and
+// only the legacy signature is checked. Otherwise a node advertising
+// wire.DeploymentBindingMinVersion must present the bound signature for that
+// deployment, and an older node passes on the legacy one.
+func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, deployment ticket.DeploymentID) ephemeralVerdict {
 	if resp.EphemeralAgePubkey == "" {
 		return ephemeralVerdict{Outcome: ephemeralAbsent}
+	}
+	var advDeployment ticket.DeploymentID
+	if resp.EphemeralDeployment != "" {
+		if err := advDeployment.UnmarshalText([]byte(resp.EphemeralDeployment)); err != nil {
+			return ephemeralVerdict{Outcome: ephemeralRejected, Err: err}
+		}
 	}
 	adv := ticket.EphemeralAdvertisement{
 		AgePubkey: resp.EphemeralAgePubkey,
@@ -924,14 +981,22 @@ func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, n
 		// it Verify rejects every block on the lifetime cap (Expiry-0 ≫
 		// MaxEphemeralLifetime). A 3.0 node omits it → IssuedAt 0 → correctly
 		// rejected (it signed an older layout anyway).
-		IssuedAt: resp.EphemeralIssuedAt,
-		Sig:      resp.EphemeralSig,
+		IssuedAt:   resp.EphemeralIssuedAt,
+		Sig:        resp.EphemeralSig,
+		Deployment: advDeployment,
+		SigV2:      resp.EphemeralSigV2,
 	}
 	// The chain-resolved pair goes to Verify rather than riding on adv: the
 	// signed canonical bytes bind both, so a sibling node's advertisement
 	// (possible under a shared operator signing key) can never validate as
 	// this node's.
-	err := adv.Verify(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew)
+	var err error
+	if deployment.IsZero() {
+		err = adv.Verify(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew)
+	} else {
+		allowLegacy := !wire.UsesDeploymentBinding(resp.ProtoVersion)
+		err = adv.VerifyFor(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew, deployment, allowLegacy)
+	}
 	switch {
 	case err == nil:
 		recipient, perr := age.ParseX25519Recipient(resp.EphemeralAgePubkey)

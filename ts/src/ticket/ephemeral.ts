@@ -35,6 +35,7 @@ import { base64 } from '@scure/base'
 
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
+import { checkDeployment, decodeDeploymentId } from './deployment.js'
 import type { BytesSigner } from './signing.js'
 
 export interface EphemeralAdvertisement {
@@ -49,6 +50,11 @@ export interface EphemeralAdvertisement {
     // base64(Ed25519 signature over ephemeralSigDigest). Filled by
     // signEphemeral; verifyEphemeral reads it.
     ephemeral_sig?: string
+    // The deployment-bound signature, published beside the legacy one because
+    // the advertisement is served to every payer and an older payer reads
+    // only ephemeral_sig. Mirrors Go's Deployment / SigV2.
+    ephemeral_deployment?: string
+    ephemeral_sig_v2?: string
 }
 
 // EPHEMERAL_SIGNING_TAG domain-separates EphemeralAdvertisement signatures
@@ -61,11 +67,14 @@ export interface EphemeralAdvertisement {
 // major). It did not need to move: changing the layout already makes the old
 // and new digests disjoint, so signatures across the cutover cannot
 // cross-validate — the hard break was carried by PROTO_VERSION, not by this
-// string. SPEC.md says v1 and so does this constant. If prose here ever claims
-// a v2 or v3, the prose is what is wrong: editing the constant to match it
+// string. The legacy tag ephemeral_sig covers is v1 in SPEC.md and here; prose
+// claiming otherwise is what is wrong, since editing the constant to match it
 // would silently cut client and node over to different signatures. Mirrors
 // proto/go/ticket/ephemeral.go ephemeralSigningTag.
 export const EPHEMERAL_SIGNING_TAG = 'zs-ephemeral-v1\x00'
+// The deployment-bound layout ephemeral_sig_v2 covers: this tag, then the
+// 32-byte deployment id, then the v1 body.
+export const EPHEMERAL_SIGNING_TAG_V2 = 'zs-ephemeral-v2\x00'
 
 // DEFAULT_EPHEMERAL_SKEW_SEC is the clock-skew tolerance (seconds) a verifier
 // applies to the advertised expiry: a block is treated as live until
@@ -135,14 +144,45 @@ export function ephemeralCanonicalBytes(
     nodeId: number | bigint,
     a: EphemeralAdvertisement,
 ): Uint8Array {
-    return new CanonicalWriter()
-        .str(EPHEMERAL_SIGNING_TAG)
+    return ephemeralBody(new CanonicalWriter().str(EPHEMERAL_SIGNING_TAG), operatorId, nodeId, a)
+}
+
+// ephemeralCanonicalBytesV2 is the bound layout. Unlike Go's CanonicalBytesV2,
+// which writes 32 zero bytes for an unbound advertisement, it throws: no
+// verifier accepts that shape, and nothing here needs to produce it.
+export function ephemeralCanonicalBytesV2(
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    a: EphemeralAdvertisement,
+): Uint8Array {
+    if (!a.ephemeral_deployment) throw new Error('ephemeral: v2 layout needs ephemeral_deployment')
+    const w = new CanonicalWriter().str(EPHEMERAL_SIGNING_TAG_V2).bytes(decodeDeploymentId(a.ephemeral_deployment))
+    return ephemeralBody(w, operatorId, nodeId, a)
+}
+
+function ephemeralBody(
+    w: CanonicalWriter,
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    a: EphemeralAdvertisement,
+): Uint8Array {
+    return w
         .u64(operatorId)
         .u64(nodeId)
         .lenStr(a.ephemeral_age_pubkey)
         .i64(a.ephemeral_expiry)
         .i64(a.ephemeral_issued_at)
         .finish()
+}
+
+// ephemeralSigDigestV2 is sha256(ephemeralCanonicalBytesV2), the digest
+// ephemeral_sig_v2 signs.
+export function ephemeralSigDigestV2(
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    a: EphemeralAdvertisement,
+): Uint8Array {
+    return sha256(ephemeralCanonicalBytesV2(operatorId, nodeId, a))
 }
 
 // ephemeralSigDigest returns sha256(ephemeralCanonicalBytes(operatorId,
@@ -175,12 +215,18 @@ export async function signEphemeral(
     signingAddr: string,
 ): Promise<void> {
     if (!signer) throw new Error('ephemeral sign: signer is nil')
-    const digest = ephemeralSigDigest(operatorId, nodeId, a)
-    const sig = await signer.signBytes(signingAddr, digest)
-    if (sig.length !== 64) {
-        throw new Error(`ephemeral sign: signer returned ${sig.length}-byte signature, want 64`)
+    const sign = async (digest: Uint8Array): Promise<string> => {
+        const sig = await signer.signBytes(signingAddr, digest)
+        if (sig.length !== 64) {
+            throw new Error(`ephemeral sign: signer returned ${sig.length}-byte signature, want 64`)
+        }
+        return base64.encode(sig)
     }
-    a.ephemeral_sig = base64.encode(sig)
+    const sig = await sign(ephemeralSigDigest(operatorId, nodeId, a))
+    const sigV2 = a.ephemeral_deployment ? await sign(ephemeralSigDigestV2(operatorId, nodeId, a)) : undefined
+    a.ephemeral_sig = sig
+    if (sigV2) a.ephemeral_sig_v2 = sigV2
+    else delete a.ephemeral_sig_v2
 }
 
 // verifyEphemeral checks that a.ephemeral_sig is a valid Ed25519 signature of
@@ -205,6 +251,9 @@ export async function signEphemeral(
 // callers fall back silently rather than logging a stale-but-genuine
 // advertisement as an attack. Pass DEFAULT_EPHEMERAL_SKEW_SEC for skewSec;
 // nowUnixSec is injected so callers can test boundaries deterministically.
+//
+// verifyEphemeral checks only the legacy ephemeral_sig; payers verify with
+// verifyEphemeralFor.
 export function verifyEphemeral(
     operatorId: number | bigint,
     nodeId: number | bigint,
@@ -213,20 +262,52 @@ export function verifyEphemeral(
     nowUnixSec: number,
     skewSec: number,
 ): void {
+    verifyEphemeralSig(operatorId, nodeId, a, pub, nowUnixSec, skewSec, false)
+}
+
+// verifyEphemeralFor checks ephemeral_sig_v2 when the advertisement is bound,
+// after requiring its ephemeral_deployment to equal want, and the legacy
+// ephemeral_sig only when it is unbound and allowLegacy holds. allowLegacy is
+// the payer's call from the node's advertised proto_version, which is unsigned;
+// the Go doc on VerifyFor says what that leaves open during the rollout.
+export function verifyEphemeralFor(
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    a: EphemeralAdvertisement,
+    pub: Uint8Array,
+    nowUnixSec: number,
+    skewSec: number,
+    want: Uint8Array | undefined,
+    allowLegacy: boolean,
+): void {
+    checkDeployment('ephemeral', a.ephemeral_deployment, want, allowLegacy)
+    verifyEphemeralSig(operatorId, nodeId, a, pub, nowUnixSec, skewSec, Boolean(a.ephemeral_deployment))
+}
+
+function verifyEphemeralSig(
+    operatorId: number | bigint,
+    nodeId: number | bigint,
+    a: EphemeralAdvertisement,
+    pub: Uint8Array,
+    nowUnixSec: number,
+    skewSec: number,
+    bound: boolean,
+): void {
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }
-    if (!a.ephemeral_sig) throw new Error('ephemeral signature missing')
+    const encoded = bound ? a.ephemeral_sig_v2 : a.ephemeral_sig
+    if (!encoded) throw new Error('ephemeral signature missing')
     let sig: Uint8Array
     try {
-        sig = decodeGoStdBase64(a.ephemeral_sig)
+        sig = decodeGoStdBase64(encoded)
     } catch (err) {
         throw new Error(`decode ephemeral sig: ${err instanceof Error ? err.message : String(err)}`)
     }
     if (sig.length !== 64) {
         throw new Error(`invalid ed25519 signature length ${sig.length}`)
     }
-    const digest = ephemeralSigDigest(operatorId, nodeId, a)
+    const digest = bound ? ephemeralSigDigestV2(operatorId, nodeId, a) : ephemeralSigDigest(operatorId, nodeId, a)
     if (!ed25519.verify(sig, digest, pub)) {
         throw new Error('ephemeral signature verification failed')
     }
