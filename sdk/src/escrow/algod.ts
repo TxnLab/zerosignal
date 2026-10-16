@@ -410,7 +410,11 @@ export class AlgodEscrowChain implements EscrowChain {
         return { txId: r.txid, feeMicroalgos: Number(r.fee) }
     }
 
-    /** refundInactive() fires at most the USDC refund (Go's ComposeRefundInactive). */
+    /**
+     * refundInactive() fires at most the USDC refund (Go's ComposeRefundInactive).
+     * The treasury is referenced because the contract redirects the refund
+     * there when the payer's USDC holding can't receive it.
+     */
     async refundInactive(c: RefundInactiveCall, signal?: AbortSignal): Promise<string> {
         checkLen('refundInactive ticket id', c.ticketIdRaw, TICKET_ID_LEN)
         checkAddr('refundInactive payer addr', c.payer)
@@ -421,7 +425,7 @@ export class AlgodEscrowChain implements EscrowChain {
                 method: 'refundInactive',
                 args: [c.ticketIdRaw],
                 boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
-                accounts: [c.payer],
+                accounts: [c.payer, g.treasury],
                 assets: [g.usdcAssetId],
                 inners: 1n,
             },

@@ -46,9 +46,12 @@ note over Proxy
   - reserveClient.Reserve(op, ..., payer_addr) per candidate until one accepts
       -> ReservedTicket{Ticket, ResponseKey (=K), AgeIdentity (=ephemeral),
                         PreSignedOpenGroup (node gtxn[1] signed)}
-  - wallet.Open(reserved) submits the 2-tx atomic group (the node's
-      pre-signed gtxn[1] open() + proxy-signed gtxn[0] usdcPayment at
-      fee=0; box MBR drawn from the payer's prepaid pool, openTickets++)
+  - completes the 2-tx open group (the node's pre-signed gtxn[1]
+      open() + proxy-signed gtxn[0] usdcPayment at fee=0; box MBR
+      drawn from the payer's prepaid pool, openTickets++):
+        node >= 9.12 (wire.SubmitsOpen): wallet.OpenForNode(reserved)
+          completes it WITHOUT submitting -> open_group, for the node
+        older node: wallet.Open(reserved) broadcasts it itself
       -> tx_id = gtxn[1].txid (the open() AppCall txid)
   - recipient = op's signed ephemeral age recipient (/v1/zs/details,
       verified under the on-chain signing key; no on-chain anchor — SPEC §8)
@@ -57,11 +60,11 @@ end note
 
 Proxy -> Proxy: admission_tag = proto.ComputeAdmissionTag(K, ticket_id, tx_id, body)\n  HMAC-SHA256(K, "zs-admission-v1\\0" || ticket_id || \\0 ||\n              tx_id || \\0 || sha256(body))\n  proves possession of K_response so the node accepts BEFORE Consume\n  (mempool-race ticket hijack mitigation — proto/docs/admission-tag.md)
 
-Proxy -> Proxy: proto.WrapRequestWithIdentity(body, tx_id, ticket_id,\n                                              admission_tag, ephemeral, op.AgeRecipient)\n  reuses the reserve-time ephemeral as reply_to_public_key (one private\n  key unwraps both wrapped_response_key and X-Zs-Response-Key)\n  frame inner request: "zsrq" || 1 || u32(len) || headerJSON || body\n    headerJSON = {reply_to_public_key, algorand_tx_id, ticket_id, admission_tag}\n  age.Encrypt(inner, op.AgeRecipient) -> ciphertext\n  marshal RequestEnvelope{ciphertext}   (nothing else — SPEC §4)
+Proxy -> Proxy: proto.WrapRequestWithIdentity(body, tx_id, ticket_id,\n                                              admission_tag, ephemeral, op.AgeRecipient)\n  reuses the reserve-time ephemeral as reply_to_public_key (one private\n  key unwraps both wrapped_response_key and X-Zs-Response-Key)\n  frame inner request: "zsrq" || 1 || u32(len) || headerJSON || body\n    headerJSON = {reply_to_public_key, algorand_tx_id, ticket_id, admission_tag,\n                  open_group (9.12 node only)}\n  age.Encrypt(inner, op.AgeRecipient) -> ciphertext\n  marshal RequestEnvelope{ciphertext}   (nothing else — SPEC §4)
 
 Proxy -> Node: POST <op.BaseURL>/v1/chat/completions\nContent-Type: application/vnd.zs+json\n(no Authorization — admission is the on-chain seal + admission_tag,\n not a bearer key; the proxy injects no upstream auth)\n{ciphertext}   (identifiers ride inside the seal)
 
-Node -> Node: DecryptRequest(rawBody)\n  age.Decrypt with the in-memory ephemeral X25519 identity\n  (current or overlap-window previous; rotated ~20 min, no\n   long-lived anchor / node.key — SPEC §8)\n  -> {body, reply_to_recipient, tx_id, ticket_id, admission_tag}
+Node -> Node: DecryptRequest(rawBody)\n  age.Decrypt with the in-memory ephemeral X25519 identity\n  (current or overlap-window previous; rotated ~20 min, no\n   long-lived anchor / node.key — SPEC §8)\n  -> {body, reply_to_recipient, tx_id, ticket_id, admission_tag,\n      open_group (when handed over)}
 
 Node -> Node: s.tickets.Peek(ticket_id)\n  non-destructive lookup of K_response\n  missing / consumed -> 402 ticket_invalid
 
@@ -71,7 +74,7 @@ Node -> Node: refuseEnvelope: verifyReplyTo(rc, peeked)   (admission.go)\n  inne
 
 Node -> Node: s.tickets.Consume(ticket_id)\n  flip consumed=true atomically\n  rc.admitted = {K_response, max_price, model, expires_at}\n  defer s.tickets.Release(ticket_id)
 
-Node -> Node: VerifyOpenAppCall(pendingTxn, OpenAppCallSpec{...,\n                  NodeSigningAddr, PayerAddr})\n  asserts Txn.sender == NodeSigningAddr (the serving node's hot key;\n    consensus-verified)\n  asserts ABI args (incl. operatorId, nodeId) match the ticket\n  rc.payerAddr = payerAddr from the payerAddr ABI arg (NOT Txn.Sender)\n  unlocks "zs:" + base64(HMAC(operator_key, payer_addr)) safety-id injection\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket)
+Node -> Node: verifyPaymentGroup — find the open() app call\n  open_group present: DecodeOpenGroup; txid(gtxn[1]) MUST == tx_id\n  absent: poll algod PendingTransactionInformation(tx_id)\n  VerifyOpenAppCall(appCall, OpenAppCallSpec{...,\n                  NodeSigningAddr, PayerAddr})\n  asserts Txn.sender == NodeSigningAddr (the serving node's hot key;\n    consensus-verified)\n  asserts ABI args (incl. operatorId, nodeId) match the ticket\n  rc.payerAddr = payerAddr from the payerAddr ABI arg (NOT Txn.Sender)\n  unlocks "zs:" + base64(HMAC(operator_key, payer_addr)) safety-id injection\n  open_group: only after the check, submitOpenGroup -> escrow.SubmitOpenGroup\n    on the node's own algod (admits on a clean submit, no polling)\n  failure -> 402 payment_verification_failed (plaintext; BURNS the ticket)
 
 Node -> Node: verifyRequestModel(rc.body, rc.admitted.Model)\n  body's model MUST equal the reserved model\n  mismatch -> 400 model_mismatch (sealed, zero-cost receipt)\n  *post-Consume on purpose: escrow is already open, so settle it at zero*
 
@@ -94,9 +97,9 @@ alt non-streaming (SPEC §5.2)
 
   Node -> Node: composeSettleGroup (best-effort)\n  escrow.ComposeSettleGroup(SettleArgs{...,\n      OperatorOwnerAddr, AsOperator=true},\n      operator-signer, signing-addr)\n  pre-signs gtxn[0] (op first-half, fee=(2+SettleInnerCount+gapOpUps)*minTxnFee\n  — sized to inners that fire: 5 for a paid ticket, 2 for a free model) against an\n  unsigned gtxn[1] payer-ack template (sender=t.payer, fee=0,\n  identical args). On algod outage: skipped, header omitted.
 
-  Node -> Node: rc.atomicSettleTxID = crypto.GetTxID(group[0].Txn)\n  txid is fixed at compose time (signature has no effect on\n  canonical txn bytes); stamped on the settlement-ledger row\n  via MarkServed.SettleTxID so the row carries the on-chain\n  reference even when the proxy (not the driver) submits finalize.
+  Node -> Node: rc.atomicSettleTxID = crypto.GetTxID(group[0].Txn)\n  rc.atomicAckTxID    = crypto.GetTxID(group[1].Txn)\n  txids are fixed at compose time (signature has no effect on\n  canonical txn bytes); stamped on the settlement-ledger row\n  via MarkServed.SettleTxID / AckTxID, before the receipt goes out.\n  SettleTxID gives the row its on-chain reference when the driver\n  isn't the submitter; AckTxID is what /v1/zs/settle-ack matches.
 
-  Node -> Node: markServed(rc, receipt)\n  settlement.Entry{TicketID, Receipt, MaxPrice, PayerAddr,\n                   ServedAt, NotBefore=now+watchdog,\n                   SettleTxID=rc.atomicSettleTxID}
+  Node -> Node: markServed(rc, receipt)\n  settlement.Entry{TicketID, Receipt, MaxPrice, PayerAddr,\n                   ServedAt, NotBefore=now+watchdog,\n                   SettleTxID=rc.atomicSettleTxID,\n                   AckTxID=rc.atomicAckTxID}
 
   Node -> Node: newSealer(rc) -> NewResponseSealerWithKey(replyTo,\n                                  tx_id, ticket_id, admitted.K)\n  age.Encrypt(K, replyTo) -> wrapped_key\n  chacha20poly1305.New(K) -> aead
 
@@ -112,7 +115,7 @@ alt non-streaming (SPEC §5.2)
 
   Proxy -> Proxy: OpenSealedHeader(X-Zs-Receipt / X-Zs-Settle-Group) then decode\n  validate receipt body_hash matches plaintext\n  validate receipt sig under operator's signing pubkey\n  affinity.Record(...) for tool_call ids if any
 
-  Proxy -> Proxy: wallet.AckSettle(ctx, receipt, presignedSettleGroup)\n  if group present:\n    escrow.SubmitPresignedSettleGroup\n      sign gtxn[1] (payer ack, fee=0) in place\n      broadcast [gtxn[0], gtxn[1]] atomically\n      payer ALGO outer-fee = 0\n  else (algod-outage fallback):\n    escrow.ComposeSettleStandalone(asOperator=false,\n      fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee — 5 paid, 2 free)\n    sign + broadcast a single-txn payer ack\n    (rare path; operator's settlement driver becomes sole finalize path\n     when no atomic group was emitted)
+  Proxy -> Proxy: wallet.AckSettle(ctx, receipt, presignedSettleGroup)\n  if group present:\n    sign gtxn[1] (payer ack, fee=0) in place; payer ALGO outer-fee = 0\n    node >= 9.12 (wire.TakesSettleAck):\n      escrow.CompletePresignedSettleGroup (no broadcast), then\n      settleAckPoster -> POST /v1/zs/settle-ack (below)\n    older node: escrow.SubmitPresignedSettleGroup\n      broadcast [gtxn[0], gtxn[1]] atomically\n    no >= 9.12 relay: escrow.SubmitSettleGroup of the group\n      already completed (decided before anything is sent)\n  else (algod-outage fallback):\n    escrow.ComposeSettleStandalone(asOperator=false,\n      fee=(1+SettleInnerCount+1+gapOpUps)*minTxnFee — 5 paid, 2 free)\n    sign + broadcast a single-txn payer ack\n    (rare path; operator's settlement driver becomes sole finalize path\n     when no atomic group was emitted)
 
   Proxy --> Client: 200 OK\nContent-Type: application/json\n(plaintext; X-Zs-* headers stripped)
 
@@ -140,7 +143,7 @@ else streaming (SPEC §5.3)
   end
 
   Node --> Proxy: event: zs-receipt\ndata: <base64(nonce || AEAD(canonical UsageReceipt, FrameAAD(tx_id, ticket_id, frame_index)))>\n  sealed via sealer.SealStreamFrame — carries ticket_id, so it must not\n  reach a relay in cleartext; continues the monotonic frame_index sequence\n  (takes the slot the zs-settle-group header frame skipped)
-  Proxy -> Proxy: DecryptSSEDataValue(data, K, tx_id, ticket_id, frame_index) -> UsageReceipt; frame_index++\n  validate receipt + commit_k + body_hash\n  wallet.AckSettle(ctx, receipt, cached_settle_group)\n    -> SubmitPresignedSettleGroup or standalone fallback\n  affinity.Record(...) if tool_calls observed
+  Proxy -> Proxy: DecryptSSEDataValue(data, K, tx_id, ticket_id, frame_index) -> UsageReceipt; frame_index++\n  validate receipt + commit_k + body_hash\n  wallet.AckSettle(ctx, receipt, cached_settle_group)\n    -> settle ack to the node (9.12), SubmitPresignedSettleGroup\n       (older node), or standalone fallback\n  affinity.Record(...) if tool_calls observed
 
   note over Node, Proxy
     Plaintext frames (no "event: zs") and named events
@@ -154,6 +157,25 @@ else streaming (SPEC §5.3)
 
 end
 
+== Settle ack (9.12+ node; after the response, in the background) ==
+
+Proxy -> Node: POST <op.BaseURL>/v1/zs/settle-ack   (settleAckPoster)\nContent-Type: application/vnd.zs-settle-ack+json\n{ciphertext}: wire.SealSettleAck to the node's ephemeral recipient\n  plaintext {ticket_id, settle_group (gtxn[1] now payer-signed)}\n  sealed because the group names the payer; through a >= 9.12 relay\n  when the request was relayed (flow-transport-relay), direct otherwise
+
+Node -> Node: handleSettleAck\n  OpenSettleAck -> DecodeSettleGroup   (else 400 bad_settle_ack)\n  ledger row for ticket_id             (else 404 settle_ack_unknown_ticket)\n  txid(gtxn[1]) == row.AckTxID         (else 400 settle_ack_mismatch)\n  row served / settling / pending_lapse (else 409 settle_ack_too_late)\n  escrow.SubmitSettleGroup on the node's own algod\n    (refused, not held by algod -> 409 settle_ack_rejected)
+
+Node --> Proxy: 202 Accepted\n  plaintext; no status or code names the ticket (a relay reads it)
+
+note over Proxy, Node
+  A failed ack is never followed by a payer broadcast of the group: a
+  refusal is the node's answer about its own group, and a transport
+  failure may have delivered it. The ticket finishes on the driver path
+  below (the payer's reconciler may still send a standalone payer ack
+  after its ~2 min grace while the box is OPEN or holds a matching
+  operator claim). The one
+  fallback is pre-flight: no >= 9.12 relay to carry the ack, so the proxy
+  broadcasts the group itself rather than sending it from its own IP.
+end note
+
 == Settlement watchdog (operator side, asynchronous) ==
 
 note over Node
@@ -161,7 +183,8 @@ note over Node
   Entry.NotBefore, the settlement driver sweeps unsettled
   ledger rows. For each candidate row:
     1. Pre-flight: BoxChecker.TicketBoxExists(ticketId)
-       - missing  -> proxy already atomic-finalized OR open()
+       - missing  -> atomic group already finalized (acked or
+                     payer-broadcast) OR open()
                      never confirmed
                      -> markExternallyFinalized (preserves
                         operator_addr + settle_tx_id) or

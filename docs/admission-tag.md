@@ -19,7 +19,7 @@ around it:
 
 | Attempt | Control | Refusal |
 |---|---|---|
-| Scrape `ticket_id` off the public `open()` and race a forged envelope | admission tag, verified pre-`Consume` | 402 `admission_tag_invalid` |
+| Scrape `ticket_id` off the public `open()` and race a forged envelope (payer broadcasts its own open) | admission tag, verified pre-`Consume` | 402 `admission_tag_invalid` |
 | Replay a captured tag against a different body | `sha256(body)` inside the MAC | 402 `admission_tag_invalid` |
 | Splice a tag across tickets or app-call txids | both ids, NUL-separated, inside the MAC | 402 `admission_tag_invalid` |
 | Re-frame a plaintext inner frame to the attacker's own reply-to | reply-to bound to the reserve-time `proxy_recipient` | 402 `reply_to_mismatch` |
@@ -34,8 +34,9 @@ Three vantages, with materially different reach. Only the first is what the tag 
 **1. Public-chain observer.** Reads the `open()` group from any algod, for free, the moment it hits
 the mempool: `ticket_id`, the app-call txid, the payer address, `max_price`, `expires_at`, the
 operator and node ids, and the node's ticket signature. Sees neither `K_response` (never in a public
-artifact) nor the prompt (age-encrypted to the node). **This is the live vantage** — sealing the
-wire did nothing to it, because `open()` is public by construction.
+artifact) nor the prompt (age-encrypted to the node). **This is the live vantage** for a payer that
+broadcasts its own open — sealing the wire did nothing to it, because `open()` is public by
+construction. A payer that hands the open to a 9.12 node closes it (see the attack below).
 
 **2. On-path observer or relay.** Sees `{ciphertext}` and transport headers, nothing else. The
 identifiers ride the age-sealed inner frame (`"zsrq" || version || headerLen || headerJSON ||
@@ -66,6 +67,12 @@ The window opens when the `Payment + escrow.open()` group is admitted to the mem
 the legitimate caller's sealed POST reaches the node — in practice single-digit to tens of
 milliseconds. An adversary colocated with the same algod sees the `open()` at the earliest possible
 moment and so gets the largest usable share of it.
+
+Against a node advertising 9.12 the window does not open for a payer that hands the group over
+(`open_group`, SPEC § 4), as both reference SDKs do: the group first reaches the mempool when the
+node submits it, which happens after `Consume`, so by the time `ticket_id` is public the ticket is
+already spent. The tag still defends a payer of a pre-9.12 node, and any payer that broadcasts the
+group itself.
 
 Inside that window an attacker holds everything needed to *address* a request: the legitimate
 `ticket_id` and app-call txid from the mempool, and the node's published age recipient. They seal an
@@ -203,8 +210,8 @@ reserved it.
 **Payment-verification failure is the deliberate asymmetry.** It runs *after* `Consume`, and failing
 it deletes the store entry — the ticket is gone, not reset to unconsumed. That keeps the store
 single-transition, so a `ticket_id` is never resurrected and a replayed envelope can never race a
-retry. The cost is that a transient algod failure during the node's mempool poll also burns the
-ticket. The client contract is therefore: on `payment_verification_failed`, **re-reserve** — never
+retry. The cost is that a transient algod failure during the node's mempool poll, or a failed submit of
+a handed-over open group, also burns the ticket. The client contract is therefore: on `payment_verification_failed`, **re-reserve** — never
 retry the same `ticket_id`. See [`../SPEC.md`](../SPEC.md) § 3a for the refund path that recovers
 the escrow.
 
@@ -216,7 +223,7 @@ request. That is what `wrapped_response_key` on the reserve response is for: the
 
 The caller reuses that same reserve-time ephemeral identity as the request's `reply_to_public_key`,
 so one private key unwraps both `wrapped_response_key` and the response's `X-Zs-Response-Key`. The
-tag itself is computed after the `open()` group is submitted (it commits to the app-call txid) and
+tag itself is computed after the `open()` group is completed (it commits to the app-call txid) and
 before the envelope is wrapped, over the plaintext body.
 
 Because the recipient is signed context in the reserve's canonical bytes, it doubles as the reserve

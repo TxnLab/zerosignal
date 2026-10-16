@@ -77,8 +77,10 @@ Relay -> Target: POST <target.base_url>/v1/chat/completions\nContent-Type: appli
 note over Target
   Target decrypts + admits EXACTLY as the direct flow
   (flow-request-response.puml / flow-ticket-reserve.puml):
-    DecryptRequest -> Peek(ticket_id) -> verifyAdmissionTag
-    -> VerifyOpenAppCall -> Consume -> upstream LLM -> seal response.
+    DecryptRequest -> Peek(ticket_id) -> verifyAdmissionTag -> Consume
+    -> verifyPaymentGroup (VerifyOpenAppCall; for a 9.12 payer it then
+       submits the handed-over open_group from the TARGET's algod)
+    -> upstream LLM -> seal response.
   The relay changed NONE of these bytes. The ONLY difference the target
   observes is the source IP = the relay's, never the client's.
   A relay that mutated any AAD-bound byte => AEAD fails CLOSED here
@@ -93,17 +95,36 @@ Relay --> Proxy: streamRelayBody(w, resp.Body)\n  raw io.Copy + Flush after ever
 note over Proxy
   The proxy handles the response identically to the direct case:
     UnwrapResponseKey -> verifyCommitK -> DecryptBody / DecryptSSEDataValue
-    -> validate receipt + body_hash -> wallet.AckSettle (atomic settle group)
-    -> deliver plaintext to the OpenAI-SDK client (X-Zs-* stripped).
+    -> validate receipt + body_hash -> deliver plaintext to the OpenAI-SDK
+       client (X-Zs-* stripped)
+    -> wallet.AckSettle (atomic settle group): for a 9.12 target, the
+       settle ack below; otherwise the proxy broadcasts the group.
   The relay hop is invisible to all of it.
 end note
 
-== Same mechanic at the other two relay call sites ==
+== Settle ack (9.12 target; relayed because the request was) ==
+
+note over Proxy
+  settleAckPoster picks a FRESH hop from relays that themselves advertise
+  >= 9.12 (wire.TakesSettleAck) — an older relay's allow-list refuses the
+  path. A direct ack would tie the payer's IP to the target the relay hid.
+  No such relay => errNoSettleAckRoute, decided before anything is sent:
+  the proxy broadcasts the settle group itself instead (never a direct ack).
+end note
+
+Proxy -> Relay: POST <relay.BaseURL>/v1/zs/relay\nContent-Type: application/vnd.zs-settle-ack+json\nX-Zs-Relay-Target / X-Zs-Relay-Target-Node: <target ids>\nX-Zs-Relay-Path: /v1/zs/settle-ack\nX-Zs-Relay-Method: POST\n{ciphertext}   (sealed to the target's ephemeral recipient:\n  {ticket_id, settle_group} — the group names the payer)
+Relay -> Target: POST <target.base_url>/v1/zs/settle-ack\n  (same verbatim forward as above)
+Target -> Chain: handleSettleAck: txid(gtxn[1]) == ledger AckTxID,\n  then submit the settle group from the TARGET's algod
+Target --> Relay: 202 Accepted   (plaintext; no response names the ticket)
+Relay --> Proxy: 202 Accepted
+
+== Same mechanic at the other relay call sites ==
 
 note over Proxy, Target
   Reserve and discovery use the IDENTICAL relay route, differing only in
-  inner path / method / body (relay indirection has THREE proxy edit sites,
-  no single chokepoint):
+  inner path / method / body (relay indirection has FIVE proxy edit sites
+  — inference, the settle ack above, reserve, the details probe, the
+  attestation fetch — no single chokepoint):
 
     Reserve  — HTTPReserveClient.Reserve(..., hop) -> ApplyRelay
       X-Zs-Relay-Path: /v1/zs/reserve     Method: POST
@@ -138,9 +159,10 @@ note over Proxy, Target
                => "who talked to whom, never WHAT" — the body is sealed to
                   the target's age key; the relay holds no key and cannot
                   decrypt, forge admission, or tamper.
-               It also cannot read the PAYER: every leg of both the reserve
-                  and inference round-trips is sealed, so the payer address,
-                  ticket_id and algorand_tx_id are all off the wire (SPEC §3f).
+               It also cannot read the PAYER: every leg of the reserve and
+                  inference round-trips and the settle ack is sealed, so the
+                  payer address, ticket_id, algorand_tx_id, open_group and
+                  settle group are all off the wire (SPEC §3f).
   TARGET sees: the RELAY's IP + the decrypted prompt
                => "WHAT was asked, never who" — it never receives the
                   client IP at all.
@@ -150,6 +172,11 @@ note over Proxy, Target
   RESIDUAL: open() is a public Algorand txn, so a relay can still correlate
   (client IP, target, timing) against the chain to guess the payer. Linkage
   is reduced to statistical timing, not eliminated — SPEC §3f.
+  ALGOD: against a 9.12 target the TARGET submits the open and the settle,
+  so the payer submits nothing per turn; its algod provider can still tie
+  the payer's IP to the payer through the payer's per-ticket reads (settle
+  confirmation poll, reconciler, refund watchdog) — SPEC §3a "Residual
+  payer contact with algod".
   Out of scope for single-hop: hiding the TARGET's IP from the client.
 end note
 

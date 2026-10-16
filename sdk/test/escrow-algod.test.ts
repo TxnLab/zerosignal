@@ -662,12 +662,13 @@ describe('AlgodEscrowChain settle calls', () => {
         expect(fake.sent).toHaveLength(1)
     })
 
-    it('refunds an inactive ticket with the payer and USDC referenced', async () => {
+    // The treasury receives the refund when the payer's USDC holding can't.
+    it('refunds an inactive ticket with the payer, treasury and USDC referenced', async () => {
         const txid = await chain.refundInactive({ ticketIdRaw: TICKET, operatorId: 7n, nodeId: 1n, payer: PAYER })
         const [t] = lastSent(fake)
         expect(txid).toBe(t!.txn.txID())
         expect(t!.txn.fee).toBe(2n * MIN_FEE)
-        expect(t!.txn.applicationCall!.accounts.map(String)).toEqual([PAYER])
+        expect(t!.txn.applicationCall!.accounts.map(String)).toEqual([PAYER, TREASURY])
         expect(t!.txn.applicationCall!.foreignAssets).toEqual([USDC])
     })
 

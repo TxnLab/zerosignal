@@ -1517,6 +1517,47 @@ func TestComposeSettleLapsed_IncludesTreasuryRef(t *testing.T) {
 	}
 }
 
+// The contract redirects an undeliverable payer refund to the treasury, an
+// inner receiver the AVM rejects unless the call references it.
+func TestComposeRefundInactive_IncludesTreasuryRef(t *testing.T) {
+	const appID = uint64(1234)
+	payer := crypto.GenerateAccount()
+	caller := crypto.GenerateAccount()
+	treasury := crypto.GenerateAccount()
+
+	algod, _ := newFakeAlgodForCompose(t)
+	client, err := NewClient(appID, algod)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client.UsdcAssetID = 31566704
+	client.Treasury = treasury.Address.String()
+
+	ticketIDRaw := make([]byte, 16)
+	copy(ticketIDRaw, "ticket-id-16byte")
+
+	res, err := client.ComposeRefundInactive(
+		context.Background(),
+		RefundInactiveArgs{TicketIDRaw: ticketIDRaw, OperatorID: 7, NodeID: 1, PayerAddr: payer.Address.String()},
+		transaction.BasicAccountTransactionSigner{Account: caller},
+		caller.Address.String(),
+	)
+	if err != nil {
+		t.Fatalf("ComposeRefundInactive: %v", err)
+	}
+
+	var stx types.SignedTxn
+	if err := msgpack.Decode(res.SignedTxn, &stx); err != nil {
+		t.Fatalf("decode signed txn: %v", err)
+	}
+	if !containsAddr(stx.Txn.Accounts, payer.Address) {
+		t.Errorf("AppAccounts missing payer %s (got %v)", payer.Address, stx.Txn.Accounts)
+	}
+	if !containsAddr(stx.Txn.Accounts, treasury.Address) {
+		t.Errorf("AppAccounts missing treasury %s (got %v)", treasury.Address, stx.Txn.Accounts)
+	}
+}
+
 // TestComposeSettle_GuardsMissingTreasury asserts each settle composer
 // errors clearly when c.Treasury is unset, before any algod round-trip.
 // stubAlgod panics on every method call, so an unintended algod hit
@@ -1569,6 +1610,14 @@ func TestComposeSettle_GuardsMissingTreasury(t *testing.T) {
 		transaction.BasicAccountTransactionSigner{Account: caller}, caller.Address.String(),
 	); err == nil || !strings.Contains(err.Error(), "treasury addr not loaded") {
 		t.Errorf("ComposeSettleLapsed: expected treasury-not-loaded error, got %v", err)
+	}
+
+	if _, err := client.ComposeRefundInactive(
+		context.Background(),
+		RefundInactiveArgs{TicketIDRaw: ticketIDRaw, OperatorID: 7, NodeID: 1, PayerAddr: payer.Address.String()},
+		transaction.BasicAccountTransactionSigner{Account: caller}, caller.Address.String(),
+	); err == nil || !strings.Contains(err.Error(), "treasury addr not loaded") {
+		t.Errorf("ComposeRefundInactive: expected treasury-not-loaded error, got %v", err)
 	}
 }
 

@@ -21,6 +21,14 @@
 '   * Standalone settle / settleLapsed: single app call, so it DOES add a base
 '             op-up: fee = (1 outer + SettleInnerCount + 1 base op-up + gapOpUps)
 '             * minTxnFee — 5 for a paid ticket, 2 for a free model.
+'   * Who submits (9.12+): against a node advertising proto_version >= 9.12
+'             the payer completes both groups but broadcasts neither (save
+'             the settle group when no >= 9.12 relay can carry the ack). The open
+'             group rides the sealed inference request as open_group and the
+'             node submits it at admission (wire.SubmitsOpen); the settle group
+'             goes back on a sealed POST /v1/zs/settle-ack and the node submits
+'             it (wire.TakesSettleAck). Against an older node the payer
+'             broadcasts both itself (the "else" branches below).
 '   * Payer ALGO net cost on the happy path is 0 microALGO. Operator
 '     absorbs ~8,000 microALGO/request, recovered through USDC rates.
 '     (The box-MBR ALGO is a one-time recoverable per-payer pool deposit
@@ -78,11 +86,28 @@ note over Proxy, Operator
   open() does openTickets++ to claim one slot from the pool.
 end note
 
-Proxy -> Proxy: SubmitPresignedOpenGroup\n  decode presigned_open_txn -> SignedTxn for gtxn[1]\n  build gtxn[0] usdcPayment (sender=payer, fee=0) per the\n  shape pinned at reserve time\n  sign gtxn[0] with payer key\n  assemble [gtxn0, gtxn1] and broadcast atomically
-Proxy -> Escrow: submit signed 2-tx group
+alt node advertises proto_version >= 9.12 (wire.SubmitsOpen) — the node submits
+  Proxy -> Proxy: Wallet.OpenForNode -> escrow.CompletePresignedOpenGroup\n  decode presigned_open_txn -> SignedTxn for gtxn[1]\n  build gtxn[0] usdcPayment (sender=payer, fee=0) per the\n  shape pinned at reserve time\n  sign gtxn[0] with payer key\n  assemble [gtxn0, gtxn1] — NO broadcast: the payer submits\n  no transaction naming itself on the turn's open
+  Proxy -> Proxy: gtxn[1] app-call txid -> inner header's algorand_tx_id\n  completed group -> inner header's open_group\n  (both inside the seal; open_group names the payer)
+  Proxy -> Operator: sealed inference request carrying open_group\n  (see flow-request-response)
+  Operator -> Operator: verifyPaymentGroup (after Consume)\n  escrow.DecodeOpenGroup(open_group)\n  require txid(gtxn[1]) == algorand_tx_id\n  VerifyOpenAppCall(gtxn[1], ticket spec)\n  — checked BEFORE submitting, so the node never\n    broadcasts an open it would refuse
+  Operator -> Escrow: submitOpenGroup -> escrow.SubmitOpenGroup\n  (the node's own algod)
+else older node — the payer submits
+  Proxy -> Proxy: Wallet.Open -> escrow.SubmitPresignedOpenGroup\n  build + sign gtxn[0] as above, then broadcast\n  [gtxn0, gtxn1] atomically
+  Proxy -> Escrow: submit signed 2-tx group
+  Proxy -> Proxy: gtxn[1] app-call txid threaded into the\n  inner-request header's algorand_tx_id (inside the seal)\n  (group id retained on OpenHandle for audit only;\n   see flow-request-response)
+end
 Escrow -> Escrow: open()  (ZeroSignalEscrow.algo.ts::open)\n  resolve the serving node from the (operatorId, nodeId) node box\n  consensus check: Txn.sender == nodeRecord.signing (node's hot key)\n  (Algorand pool admission verifies the node's Ed25519 sig over the\n   canonical txn bytes — no in-contract ed25519verify_bare;\n   "consensus-verified operator")\n  require usdcPayment.assetAmount == max_price\n  require payer opted-in AND\n          (openTickets + 1) * mbrForTicket() <= algoBalance\n  openTickets++  (draw one box-MBR slot from the prepaid pool)\n  bind t.payer = payerAddr (from ABI arg, NOT Txn.Sender)\n  snapshot operatorId, nodeId, operatorOwner (operator-box payout),\n           nodeSigning (node-box key) onto the TicketRecord\n  create TicketRecord box keyed by ticket_id;  status = STATUS_OPEN
-Escrow --> Proxy: per-tx txids (gtxn[0], gtxn[1]) + group id
-Proxy -> Proxy: gtxn[1] app-call txid threaded into the\n  inner-request header's algorand_tx_id (inside the seal)\n  (group id retained on OpenHandle for audit only;\n   see flow-request-response)
+note right of Escrow
+  algod evaluates the TEAL before it pools the group. On the
+  9.12 path the node admits on a clean submit, without polling;
+  a contract or pool rejection (prepaid-pool shortfall,
+  insufficient USDC) -> 402 payment_verification_failed, the
+  ticket is burned, and the payer re-checks its prepaid-pool
+  deposit before its next open. On the payer-submitted path
+  the node polls PendingTransactionInformation(algorand_tx_id).
+  Pool acceptance is not confirmation on either path.
+end note
 
 == 2. Inference round-trip ==
 
@@ -95,10 +120,11 @@ note over Proxy, Operator #lightgray
                             (X-Zs-Settle-Group header /
                              event: zs-settle-group SSE frame)
   The proxy completes gtxn[1] of the settle group (payer ack)
-  for atomic broadcast in the next phase.
+  in the next phase, then hands the group back to the node
+  (9.12+) or broadcasts it itself (older node).
 end note
 
-Proxy <-> Operator: sealed request / response\n(+ signed UsageReceipt + presigned settle group)
+Proxy <-> Operator: sealed request / response\n(the 9.12 request is the one carrying open_group above)\n(+ signed UsageReceipt + presigned settle group)
 
 == 3a. Happy path — atomic settle group (operator first-half + payer ack) ==
 
@@ -122,18 +148,36 @@ note over Proxy, Escrow
   testing their own deployment).
 end note
 
-Proxy -> Escrow: SubmitPresignedSettleGroup\n  decode X-Zs-Settle-Group / event: zs-settle-group\n  sign gtxn[1] in place (payer key, fee=0)\n  broadcast [gtxn[0], gtxn[1]] atomically
+alt node advertises proto_version >= 9.12 (wire.TakesSettleAck) — the node submits
+  Proxy -> Proxy: OpenHandle.AckSettle -> escrow.CompletePresignedSettleGroup\n  decode X-Zs-Settle-Group / event: zs-settle-group\n  verify the group against the receipt-derived spec\n  sign gtxn[1] in place (payer key, fee=0) — NO broadcast
+  Proxy -> Operator: POST /v1/zs/settle-ack   (settleAckPoster)\nContent-Type: application/vnd.zs-settle-ack+json\n{ciphertext} sealed to the node's ephemeral recipient:\n  {ticket_id, settle_group}\n  through a >= 9.12 relay when the request was relayed,\n  direct otherwise
+  Operator -> Operator: handleSettleAck\n  txid(gtxn[1]) must equal the ledger row's AckTxID\n    (stamped at MarkServed; it covers the group id, so the\n     one comparison pins both members) else 400 settle_ack_mismatch\n  row served / settling / pending_lapse, else 409 settle_ack_too_late
+  Operator -> Escrow: escrow.SubmitSettleGroup [gtxn[0], gtxn[1]]
+  Operator --> Proxy: 202 Accepted   (plaintext; no response names the ticket)
+else older node, or no >= 9.12 relay to carry the ack
+  Proxy -> Escrow: older node: SubmitPresignedSettleGroup\n  decode X-Zs-Settle-Group / event: zs-settle-group\n  sign gtxn[1] in place (payer key, fee=0)\n  broadcast [gtxn[0], gtxn[1]] atomically\nno >= 9.12 relay (errNoSettleAckRoute, decided before\n  anything is sent): broadcast the group already\n  completed above (escrow.SubmitSettleGroup)
+end
+note right of Proxy
+  A failed ack (a refusal, or a transport
+  failure that may have delivered it) is
+  NEVER followed by a payer broadcast of
+  the group: the ticket finishes on the
+  operator's driver path (3b, then 3c).
+  The payer's reconciler may still send a
+  standalone payer ack later (receipt
+  journaled, ~2 min grace, box still OPEN
+  or holding a matching operator claim).
+end note
 Escrow -> Escrow: settle() — gtxn[0] (operator first-half)\n  asOperator=true  =>  require Txn.sender == t.nodeSigning\n  load TicketRecord; status must be OPEN\n  require amount_charged <= max_price\n  require latestTimestamp <= expires_at + grace\n  record (amount, digest, pendingBy = OPERATOR)\n  status -> STATUS_PENDING_SETTLE
 Escrow -> Escrow: settle() — gtxn[1] (payer ack)\n  asOperator=false =>  require Txn.sender == t.payer\n  require side != pendingBy (or args match exactly: idempotent no-op)\n  match (amount, digest) -> finalize:\n    inner-axfer payer USDC (max_price - charged - fee_paid)\n    inner-axfer operator_owner  USDC opPayout\n    inner-axfer treasury        USDC fee_paid    (skipped when 0)\n    write metrics to BOTH the (operatorId,nodeId) node box (per-node)\n      and the operatorId operator box (rollup)\n    openTickets-- (release the box-MBR slot back to the pool;\n                   NO inner ALGO refund)\n  delete TicketRecord box
-Escrow --> Proxy: ok (atomic match -> box deleted)
 Escrow --> Operator: USDC inner-axfer (operator owner)
 Escrow --> Payer: USDC residual refund\n(box-MBR slot released to the payer's prepaid pool —\n recoverable later via withdrawMbr / closeDeposit)
 
 note right of Operator
   Operator's settlement driver acts as a watchdog only — it
   waits zs.settlement_watchdog_seconds (default 30s) before
-  considering a standalone fire. If the box is gone (proxy
-  atomic-finalized first), it records the externally-finalized
+  considering a standalone fire. If the box is gone (the atomic
+  group landed first, whoever submitted it), it records the externally-finalized
   state via MarkSettling+MarkSettled and exits. Eager firing
   is safe (idempotency tweak) but wastes ~5,000 microALGO of
   outer-fee per occurrence.
@@ -142,8 +186,8 @@ end note
 == 3b. Watchdog standalone — operator fires alone after delay ==
 
 note over Operator, Escrow
-  Triggered when the proxy never broadcasts an ack (offline,
-  killed, etc.) within the watchdog window. Box still exists,
+  Triggered when no payer ack lands within the watchdog window
+  (proxy offline or killed, or a failed settle ack). Box still exists,
   status still OPEN, no operator claim recorded yet.
 end note
 
