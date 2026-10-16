@@ -33,6 +33,10 @@ type DecryptedRequest struct {
 	// OpenGroup is the inner header's open_group, opaque at this layer (see
 	// RequestBinding.OpenGroup). Empty when the payer submitted the open itself.
 	OpenGroup string
+	// NeutralNames reports that a payment field arrived as payment_ref or
+	// payment_open (RequestBinding.NeutralNames). Diagnostic only: admission
+	// reads AlgorandTxID and OpenGroup, which hold the value under either name.
+	NeutralNames bool
 }
 
 // DecryptRequest parses a RequestEnvelope, age-decrypts the ciphertext with
@@ -78,6 +82,10 @@ func DecryptRequest(envelopeJSON []byte, nodeIdentities ...age.Identity) (*Decry
 	if err != nil {
 		return nil, err
 	}
+	paymentRef, paymentOpen, err := header.paymentFields()
+	if err != nil {
+		return nil, err
+	}
 	if header.ReplyToPublicKey == "" {
 		return nil, errors.New("inner request missing reply_to_public_key")
 	}
@@ -100,10 +108,11 @@ func DecryptRequest(envelopeJSON []byte, nodeIdentities ...age.Identity) (*Decry
 	return &DecryptedRequest{
 		Body:             body,
 		ReplyToRecipient: recipient,
-		AlgorandTxID:     header.AlgorandTxID,
+		AlgorandTxID:     paymentRef,
 		TicketID:         header.TicketID,
 		AdmissionTag:     admissionTag,
-		OpenGroup:        header.OpenGroup,
+		OpenGroup:        paymentOpen,
+		NeutralNames:     header.PaymentRef != "" || header.PaymentOpen != "",
 	}, nil
 }
 

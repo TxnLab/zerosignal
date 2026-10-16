@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -33,7 +34,13 @@ type tsSealedRequest struct {
 	BodyHex         string `json:"body_hex"`
 	AdmissionTagHex string `json:"admission_tag_hex"`
 	OpenGroup       string `json:"open_group"`
+	NeutralNames    bool   `json:"neutral_names"`
 	EnvelopeJSON    string `json:"envelope_json"`
+}
+
+type tsRefusedArtifact struct {
+	Name         string `json:"name"`
+	EnvelopeJSON string `json:"envelope_json"`
 }
 
 type tsSealedVectorsFile struct {
@@ -56,6 +63,13 @@ type tsSealedVectorsFile struct {
 	SettleAckTicketID     string `json:"settle_ack_ticket_id"`
 	SettleAckGroup        string `json:"settle_ack_group"`
 	SettleAckEnvelopeJSON string `json:"settle_ack_envelope_json"`
+	// The same ack under the rail-neutral name, payment_settle.
+	SettleAckNeutralEnvelopeJSON string `json:"settle_ack_neutral_envelope_json"`
+
+	// Artifacts naming one payment value under both names, differently; both
+	// openers must refuse them.
+	RefusedRequests   []tsRefusedArtifact `json:"refused_requests"`
+	RefusedSettleAcks []tsRefusedArtifact `json:"refused_settle_acks"`
 
 	ResponseKeyHex   string               `json:"response_key_hex"`
 	WrappedKeyB64    string               `json:"wrapped_key_b64"`
@@ -101,7 +115,7 @@ func TestOpensTSSealedArtifacts(t *testing.T) {
 
 	// Both shapes must be present: a tag-less envelope is the one a node refuses
 	// at admission, so its encoding is pinned as carefully as the tagged one.
-	seenTag, seenNoTag, seenOpenGroup := false, false, false
+	seenTag, seenNoTag, seenOpenGroup, seenNeutral := false, false, false, false
 	for _, r := range v.Requests {
 		t.Run("request_"+r.Name, func(t *testing.T) {
 			got, err := wire.DecryptRequest([]byte(r.EnvelopeJSON), node)
@@ -124,29 +138,62 @@ func TestOpensTSSealedArtifacts(t *testing.T) {
 			if got.OpenGroup != r.OpenGroup {
 				t.Fatalf("open_group = %q, want %q", got.OpenGroup, r.OpenGroup)
 			}
+			if got.NeutralNames != r.NeutralNames {
+				t.Fatalf("neutral names = %v, want %v", got.NeutralNames, r.NeutralNames)
+			}
 		})
 		if r.AdmissionTagHex != "" {
 			seenTag = true
 		} else {
 			seenNoTag = true
 		}
-		if r.OpenGroup != "" {
+		if r.OpenGroup != "" && !r.NeutralNames {
 			seenOpenGroup = true
 		}
+		if r.OpenGroup != "" && r.NeutralNames {
+			seenNeutral = true
+		}
 	}
-	if !seenTag || !seenNoTag || !seenOpenGroup {
-		t.Fatalf("fixture must carry a request with and without an admission tag, and one with an open group (with=%v without=%v open_group=%v)", seenTag, seenNoTag, seenOpenGroup)
+	if !seenTag || !seenNoTag || !seenOpenGroup || !seenNeutral {
+		t.Fatalf("fixture must carry a request with and without an admission tag, and an open group under each set of names (with=%v without=%v open_group=%v neutral=%v)", seenTag, seenNoTag, seenOpenGroup, seenNeutral)
 	}
 
-	t.Run("settle_ack", func(t *testing.T) {
-		got, err := wire.OpenSettleAck([]byte(v.SettleAckEnvelopeJSON), node)
-		if err != nil {
-			t.Fatalf("open TS-sealed settle ack: %v", err)
-		}
-		if want := (wire.SettleAck{TicketID: v.SettleAckTicketID, SettleGroup: v.SettleAckGroup}); got != want || want.SettleGroup == "" {
-			t.Fatalf("settle ack = %+v, want %+v", got, want)
-		}
-	})
+	for name, ack := range map[string]struct {
+		json    string
+		neutral bool
+	}{
+		"settle_ack":         {v.SettleAckEnvelopeJSON, false},
+		"settle_ack_neutral": {v.SettleAckNeutralEnvelopeJSON, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := wire.OpenSettleAck([]byte(ack.json), node)
+			if err != nil {
+				t.Fatalf("open TS-sealed settle ack: %v", err)
+			}
+			want := wire.SettleAck{TicketID: v.SettleAckTicketID, SettleGroup: v.SettleAckGroup, NeutralNames: ack.neutral}
+			if got != want || want.SettleGroup == "" {
+				t.Fatalf("settle ack = %+v, want %+v", got, want)
+			}
+		})
+	}
+
+	if len(v.RefusedRequests) == 0 || len(v.RefusedSettleAcks) == 0 {
+		t.Fatalf("fixture carries %d refused requests and %d refused acks; both must be non-empty", len(v.RefusedRequests), len(v.RefusedSettleAcks))
+	}
+	for _, r := range v.RefusedRequests {
+		t.Run("refused_request_"+r.Name, func(t *testing.T) {
+			if got, err := wire.DecryptRequest([]byte(r.EnvelopeJSON), node); err == nil || !strings.Contains(err.Error(), "disagree") {
+				t.Fatalf("DecryptRequest = %+v, %v; want a disagreement refusal", got, err)
+			}
+		})
+	}
+	for _, r := range v.RefusedSettleAcks {
+		t.Run("refused_settle_ack_"+r.Name, func(t *testing.T) {
+			if got, err := wire.OpenSettleAck([]byte(r.EnvelopeJSON), node); err == nil || !strings.Contains(err.Error(), "disagree") {
+				t.Fatalf("OpenSettleAck = %+v, %v; want a disagreement refusal", got, err)
+			}
+		})
+	}
 
 	t.Run("reserve_request", func(t *testing.T) {
 		got, err := wire.OpenReserveRequest([]byte(v.ReserveRequestEnvelopeJSON), node)

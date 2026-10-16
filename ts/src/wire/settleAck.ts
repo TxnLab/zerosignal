@@ -12,6 +12,7 @@
 import * as age from 'age-encryption'
 import { base64 } from '@scure/base'
 
+import { pickPaymentField } from './inner.js'
 import type { SealedReserveEnvelope } from './reserveSeal.js'
 import { protoVersionAtLeast } from './version.js'
 
@@ -47,10 +48,17 @@ export interface SettleAck {
     settle_group: string
 }
 
-/** sealSettleAck marshals ack and age-seals it to the node's recipient ("age1..."). */
-export async function sealSettleAck(ack: SettleAck, nodeRecipient: string): Promise<Uint8Array> {
+/**
+ * sealSettleAck marshals ack and age-seals it to the node's recipient
+ * ("age1..."). neutralNames writes the group as payment_settle; set it only for
+ * a node that reads it (usesRailNeutralNames).
+ */
+export async function sealSettleAck(ack: SettleAck, nodeRecipient: string, neutralNames = false): Promise<Uint8Array> {
     if (!nodeRecipient) throw new Error('seal settle ack: empty node recipient')
-    const body = new TextEncoder().encode(JSON.stringify({ ticket_id: ack.ticket_id, settle_group: ack.settle_group }))
+    const wire = neutralNames
+        ? { ticket_id: ack.ticket_id, payment_settle: ack.settle_group }
+        : { ticket_id: ack.ticket_id, settle_group: ack.settle_group }
+    const body = new TextEncoder().encode(JSON.stringify(wire))
     const e = new age.Encrypter()
     e.addRecipient(nodeRecipient)
     const env: SealedReserveEnvelope = { ciphertext: base64.encode(await e.encrypt(body)) }
@@ -62,7 +70,12 @@ export async function sealSettleAck(ack: SettleAck, nodeRecipient: string): Prom
  * in order as Go's OpenSettleAck does. It lives here so a TS peer can play the
  * node and round-trip tests need no Go.
  */
-export async function openSettleAck(envelopeJSON: Uint8Array, ...nodeIdentities: string[]): Promise<SettleAck> {
+/** An opened settle ack, with which name the group arrived under (Go's SettleAck.NeutralNames). */
+export interface OpenedSettleAck extends SettleAck {
+    neutralNames: boolean
+}
+
+export async function openSettleAck(envelopeJSON: Uint8Array, ...nodeIdentities: string[]): Promise<OpenedSettleAck> {
     if (nodeIdentities.length === 0) throw new Error('open settle ack: no node identities supplied')
     let env: SealedReserveEnvelope
     try {
@@ -85,14 +98,16 @@ export async function openSettleAck(envelopeJSON: Uint8Array, ...nodeIdentities:
     } catch (err) {
         throw new Error(`open sealed reserve envelope: ${err instanceof Error ? err.message : String(err)}`)
     }
-    let ack: Partial<SettleAck> | null
+    let ack: (Partial<SettleAck> & { payment_settle?: unknown }) | null
+    let settleGroup: string
     try {
-        ack = JSON.parse(new TextDecoder().decode(body)) as Partial<SettleAck> | null
+        ack = JSON.parse(new TextDecoder().decode(body)) as typeof ack
+        settleGroup = pickPaymentField('settle_group', ack?.settle_group, 'payment_settle', ack?.payment_settle)
     } catch (err) {
         throw new Error(`parse settle ack: ${err instanceof Error ? err.message : String(err)}`)
     }
     const ticketId = typeof ack?.ticket_id === 'string' ? ack.ticket_id : ''
-    const settleGroup = typeof ack?.settle_group === 'string' ? ack.settle_group : ''
     if (!ticketId || !settleGroup) throw new Error('settle ack missing ticket_id or settle_group')
-    return { ticket_id: ticketId, settle_group: settleGroup }
+    const neutralNames = typeof ack?.payment_settle === 'string' && ack.payment_settle !== ''
+    return { ticket_id: ticketId, settle_group: settleGroup, neutralNames }
 }

@@ -7,6 +7,20 @@ package wire
 
 import "testing"
 
+// The TS twin pins the same literal: a Go gate drifting to 9.14 would keep
+// sending the legacy names to every 9.13 node while TS payers used the new
+// ones, and every Go test that builds its cases from the constant would agree.
+func TestUsesRailNeutralNames(t *testing.T) {
+	for v, want := range map[string]bool{"9.12": false, "9.13": true, "10.0": true, "": false} {
+		if got := UsesRailNeutralNames(v); got != want {
+			t.Errorf("UsesRailNeutralNames(%q) = %v, want %v", v, got, want)
+		}
+	}
+	if !UsesRailNeutralNames(ProtoVersion) {
+		t.Errorf("this build (%s) does not use its own rail-neutral names", ProtoVersion)
+	}
+}
+
 func TestProtoVersionCompatible(t *testing.T) {
 	tests := []struct {
 		name  string

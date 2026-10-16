@@ -29,12 +29,14 @@ import { describe, it, expect } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { hex } from '@scure/base'
+import * as age from 'age-encryption'
+import { base64, hex } from '@scure/base'
 
 import {
     decryptBody,
     decryptRequest,
     decryptSSEDataValue,
+    encodeInnerRequest,
     generateEphemeralIdentity,
     openSealedHeader,
     ResponseSealer,
@@ -53,6 +55,15 @@ interface SealedRequest {
     admission_tag_hex: string
     // The inner header's open_group; '' when the payer submitted the open.
     open_group: string
+    // Sealed under the rail-neutral names (payment_ref, payment_open).
+    neutral_names: boolean
+    envelope_json: string
+}
+
+// An artifact both openers must refuse: it names one payment value under the
+// legacy and the rail-neutral name, differently.
+interface RefusedArtifact {
+    name: string
     envelope_json: string
 }
 
@@ -87,6 +98,10 @@ interface TSSealedVectorsFile {
     settle_ack_ticket_id: string
     settle_ack_group: string
     settle_ack_envelope_json: string
+    // The same ack sealed under the rail-neutral name (payment_settle).
+    settle_ack_neutral_envelope_json: string
+    refused_requests: RefusedArtifact[]
+    refused_settle_acks: RefusedArtifact[]
     response_key_hex: string
     wrapped_key_b64: string
     body_plaintext_hex: string
@@ -115,10 +130,11 @@ async function build(): Promise<TSSealedVectorsFile> {
 
     const requestBody = enc.encode('{"model":"ts-sealed-vector","messages":[{"role":"user","content":"hi"}]}')
     const requests: SealedRequest[] = []
-    for (const [name, admissionTag, openGroup] of [
-        ['with_admission_tag', tag, ''],
-        ['without_admission_tag', undefined, ''],
-        ['with_open_group', tag, 'kgEC-ts-sealed-open-group'],
+    for (const [name, admissionTag, openGroup, neutralNames] of [
+        ['with_admission_tag', tag, '', false],
+        ['without_admission_tag', undefined, '', false],
+        ['with_open_group', tag, 'kgEC-ts-sealed-open-group', false],
+        ['with_neutral_names', tag, 'kgEC-ts-sealed-open-group', true],
     ] as const) {
         const { envelope } = await wrapRequest({
             body: requestBody,
@@ -128,12 +144,14 @@ async function build(): Promise<TSSealedVectorsFile> {
             nodeRecipient: node.recipient,
             ephemeral: reply,
             ...(openGroup ? { openGroup } : {}),
+            neutralNames,
         })
         requests.push({
             name,
             body_hex: hex.encode(requestBody),
             admission_tag_hex: admissionTag ? hex.encode(admissionTag) : '',
             open_group: openGroup,
+            neutral_names: neutralNames,
             envelope_json: dec.decode(envelope),
         })
     }
@@ -142,6 +160,32 @@ async function build(): Promise<TSSealedVectorsFile> {
     const reserveEnvelope = await sealReserveRequest(reserveBody, node.recipient)
     const settleAck = { ticket_id: ticketID, settle_group: 'kgEC-ts-sealed-settle-group' }
     const settleAckEnvelope = await sealSettleAck(settleAck, node.recipient)
+    const settleAckNeutralEnvelope = await sealSettleAck(settleAck, node.recipient, true)
+
+    // wrapRequest and sealSettleAck can't write a disagreeing pair, so these
+    // are framed and sealed by hand.
+    const refusedRequests: RefusedArtifact[] = []
+    for (const [name, fields] of [
+        ['refs_disagree', { algorand_tx_id: txID, payment_ref: 'TX-TS-SEALED-OTHER' }],
+        ['opens_disagree', { payment_ref: txID, open_group: 'kgEC-a', payment_open: 'kgEC-b' }],
+    ] as const) {
+        const e = new age.Encrypter()
+        e.addRecipient(node.recipient)
+        const inner = encodeInnerRequest({ reply_to_public_key: reply.recipient, ticket_id: ticketID, ...fields }, requestBody)
+        const env = { ciphertext: base64.encode(await e.encrypt(inner)) }
+        refusedRequests.push({ name, envelope_json: JSON.stringify(env) })
+    }
+    const refusedSettleAcks: RefusedArtifact[] = [
+        {
+            name: 'groups_disagree',
+            envelope_json: dec.decode(
+                await sealReserveRequest(
+                    enc.encode(JSON.stringify({ ticket_id: ticketID, settle_group: 'kgEC-a', payment_settle: 'kgEC-b' })),
+                    node.recipient,
+                ),
+            ),
+        },
+    ]
 
     const bodySealer = await ResponseSealer.create({ replyTo: reply.recipient, txID, ticketID, key })
     const bodyPlaintext = enc.encode('{"id":"ts-sealed-vector","object":"chat.completion"}')
@@ -189,6 +233,9 @@ async function build(): Promise<TSSealedVectorsFile> {
         settle_ack_ticket_id: settleAck.ticket_id,
         settle_ack_group: settleAck.settle_group,
         settle_ack_envelope_json: dec.decode(settleAckEnvelope),
+        settle_ack_neutral_envelope_json: dec.decode(settleAckNeutralEnvelope),
+        refused_requests: refusedRequests,
+        refused_settle_acks: refusedSettleAcks,
         response_key_hex: hex.encode(key),
         wrapped_key_b64: streamSealer.wrappedKeyHeader(),
         body_plaintext_hex: hex.encode(bodyPlaintext),
@@ -209,7 +256,12 @@ const key = hex.decode(v.response_key_hex)
 describe('ts_sealed_vectors.json opens with the TS openers', () => {
     it('is the schema this test expects', () => {
         expect(v.version).toBe(1)
-        expect(v.requests.map((r) => r.name)).toEqual(['with_admission_tag', 'without_admission_tag', 'with_open_group'])
+        expect(v.requests.map((r) => r.name)).toEqual([
+            'with_admission_tag',
+            'without_admission_tag',
+            'with_open_group',
+            'with_neutral_names',
+        ])
         expect(v.frames.length).toBeGreaterThan(0)
         expect(v.headers.length).toBe(2)
     })
@@ -223,15 +275,39 @@ describe('ts_sealed_vectors.json opens with the TS openers', () => {
             expect(got.ticketID).toBe(v.ticket_id)
             expect(got.admissionTag ? hex.encode(got.admissionTag) : '').toBe(r.admission_tag_hex)
             expect(got.openGroup).toBe(r.open_group)
+            expect(got.neutralNames).toBe(r.neutral_names)
         })
     }
 
-    it('opens the settle ack', async () => {
-        expect(await openSettleAck(enc.encode(v.settle_ack_envelope_json), v.node_age_identity)).toEqual({
-            ticket_id: v.settle_ack_ticket_id,
-            settle_group: v.settle_ack_group,
+    for (const [name, json, neutralNames] of [
+        ['settle_group', v.settle_ack_envelope_json, false],
+        ['payment_settle', v.settle_ack_neutral_envelope_json, true],
+    ] as const) {
+        it(`opens the settle ack sent as ${name}`, async () => {
+            expect(await openSettleAck(enc.encode(json), v.node_age_identity)).toEqual({
+                ticket_id: v.settle_ack_ticket_id,
+                settle_group: v.settle_ack_group,
+                neutralNames,
+            })
         })
+    }
+
+    it('carries the artifacts that must be refused', () => {
+        expect(v.refused_requests.map((r) => r.name)).toEqual(['refs_disagree', 'opens_disagree'])
+        expect(v.refused_settle_acks.map((r) => r.name)).toEqual(['groups_disagree'])
     })
+
+    for (const r of v.refused_requests) {
+        it(`refuses the ${r.name} request`, async () => {
+            await expect(decryptRequest(enc.encode(r.envelope_json), v.node_age_identity)).rejects.toThrow(/disagree/)
+        })
+    }
+
+    for (const r of v.refused_settle_acks) {
+        it(`refuses the ${r.name} settle ack`, async () => {
+            await expect(openSettleAck(enc.encode(r.envelope_json), v.node_age_identity)).rejects.toThrow(/disagree/)
+        })
+    }
 
     it('unwraps the wrapped response key', async () => {
         const got = await unwrapResponseKey(v.wrapped_key_b64, {

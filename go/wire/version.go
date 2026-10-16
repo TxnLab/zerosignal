@@ -282,6 +282,20 @@ func UsesDeploymentBinding(protoVersion string) bool {
 	return ProtoVersionAtLeast(protoVersion, DeploymentBindingMinVersion)
 }
 
+// RailNeutralNamesMinVersion is the first ProtoVersion at which a node reads
+// the payment fields a payer sends under their rail-neutral names:
+// payment_ref, payment_open and payment_settle beside algorand_tx_id,
+// open_group and settle_group. Nodes accept both until the legacy names are
+// dropped in a major.
+const RailNeutralNamesMinVersion = "9.13"
+
+// UsesRailNeutralNames reports whether a target advertising protoVersion
+// reads the rail-neutral names. Fails closed to the legacy names, which every
+// node reads.
+func UsesRailNeutralNames(protoVersion string) bool {
+	return ProtoVersionAtLeast(protoVersion, RailNeutralNamesMinVersion)
+}
+
 // AppComposeMinVersion is the first ProtoVersion at which a dstack-tdx
 // node publishes the compose preimage (TEEEvidenceBundle.AppCompose).
 const AppComposeMinVersion = "9.6"

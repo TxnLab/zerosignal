@@ -44,6 +44,17 @@ type SettleAck struct {
 	// escrow.EncodeSettleGroup's form: the node's own gtxn[0] as it sent it,
 	// and the payer-signed gtxn[1].
 	SettleGroup string `json:"settle_group"`
+	// NeutralNames writes SettleGroup as payment_settle rather than
+	// settle_group. Set it only for a node that reads it
+	// (UsesRailNeutralNames); OpenSettleAck reports which name arrived.
+	NeutralNames bool `json:"-"`
+}
+
+// settleAckJSON is SettleAck on the wire.
+type settleAckJSON struct {
+	TicketID      string `json:"ticket_id"`
+	SettleGroup   string `json:"settle_group,omitempty"`
+	PaymentSettle string `json:"payment_settle,omitempty"`
 }
 
 // SealSettleAck marshals ack and age-seals it to the node's recipient.
@@ -51,7 +62,13 @@ func SealSettleAck(ack SettleAck, nodeRecipient age.Recipient) ([]byte, error) {
 	if nodeRecipient == nil {
 		return nil, errors.New("seal settle ack: nil node recipient")
 	}
-	body, err := json.Marshal(ack)
+	out := settleAckJSON{TicketID: ack.TicketID}
+	if ack.NeutralNames {
+		out.PaymentSettle = ack.SettleGroup
+	} else {
+		out.SettleGroup = ack.SettleGroup
+	}
+	body, err := json.Marshal(out)
 	if err != nil {
 		return nil, fmt.Errorf("marshal settle ack: %w", err)
 	}
@@ -68,12 +85,16 @@ func OpenSettleAck(envelopeJSON []byte, nodeIdentities ...age.Identity) (SettleA
 	if err != nil {
 		return SettleAck{}, err
 	}
-	var ack SettleAck
-	if err := json.Unmarshal(body, &ack); err != nil {
+	var in settleAckJSON
+	if err := json.Unmarshal(body, &in); err != nil {
 		return SettleAck{}, fmt.Errorf("parse settle ack: %w", err)
 	}
-	if ack.TicketID == "" || ack.SettleGroup == "" {
+	group, err := oneOf("settle_group", in.SettleGroup, "payment_settle", in.PaymentSettle)
+	if err != nil {
+		return SettleAck{}, fmt.Errorf("parse settle ack: %w", err)
+	}
+	if in.TicketID == "" || group == "" {
 		return SettleAck{}, errors.New("settle ack missing ticket_id or settle_group")
 	}
-	return ack, nil
+	return SettleAck{TicketID: in.TicketID, SettleGroup: group, NeutralNames: in.PaymentSettle != ""}, nil
 }

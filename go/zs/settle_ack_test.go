@@ -79,6 +79,26 @@ func TestSettleAckPoster(t *testing.T) {
 		}
 	})
 
+	t.Run("the group goes under the name the node reads", func(t *testing.T) {
+		for _, tc := range []struct {
+			version string
+			neutral bool
+		}{
+			{wire.SettleAckMinVersion, false},
+			{wire.RailNeutralNamesMinVersion, true},
+		} {
+			node, got := settleAckNode(t, id, http.StatusAccepted)
+			s := newAckClient(t, nil)
+			post := s.settleAckPoster(Operator{ProtoVersion: tc.version, BaseURL: node.URL}, id.Recipient(), false)
+			if err := post(context.Background(), ack); err != nil {
+				t.Fatal(err)
+			}
+			if len(*got) != 1 || (*got)[0].NeutralNames != tc.neutral || (*got)[0].SettleGroup != ack.SettleGroup {
+				t.Errorf("%s node received %+v, want neutral names %v", tc.version, *got, tc.neutral)
+			}
+		}
+	})
+
 	t.Run("a refusal is final, not a reason to broadcast", func(t *testing.T) {
 		node, _ := settleAckNode(t, id, http.StatusConflict)
 		s := newAckClient(t, nil)

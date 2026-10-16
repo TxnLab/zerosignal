@@ -951,6 +951,8 @@ Since 9.12 the payer does not broadcast the completed settle group. It sends the
 {"ticket_id": "<the ticket's id>", "settle_group": "<base64 msgpack of [gtxn0, gtxn1]>"}
 ```
 
+A node advertising ≥ 9.13 also reads `settle_group` as `payment_settle`, and a payer uses that name only with such a node (`wire.UsesRailNeutralNames`). An ack carrying both names with different values is refused with `400 bad_settle_ack`.
+
 `settle_group` is in the same form as `X-Zs-Settle-Group`, with gtxn[1] now signed by the payer. The ack is sealed because the group names the payer, and the ack usually travels through a relay. A relayed ack goes through a relay advertising ≥ 9.12, since an older relay's allow-list refuses the path (§ 3f "What goes through the relay"). When privacy mode finds no such relay, the payer broadcasts the group itself rather than sending the ack directly from its own IP.
 
 **What the node checks.** The ack carries no admission tag and needs none:
@@ -2864,14 +2866,17 @@ The envelope carries **nothing but ciphertext**. Everything the node needs rides
 |---|---|---|---|
 | `ciphertext` | envelope | base64 string | Age output (binary, not armored) of the inner-request frame, encrypted to the node's advertised **ephemeral** X25519 recipient as the sole recipient ("Sealing recipient" below). |
 | `reply_to_public_key` | inner header | string | The proxy's ephemeral X25519 public key in age's `age1...` bech32 format. The node uses it as the age recipient when wrapping the response symmetric key. The node checks it against the ticket's `proxy_recipient` (note below). |
-| `algorand_tx_id` | inner header | string | Txid of the request's escrow.open **app call** (gtxn[1] of the group; note below). The node **MUST** bind it into the AEAD AAD of every sealed response payload per § 6. It is **not** echoed in the response envelope. |
+| `algorand_tx_id` | inner header | string | Sent as `payment_ref` to a ≥ 9.13 node (below). Txid of the request's escrow.open **app call** (gtxn[1] of the group; note below). The node **MUST** bind it into the AEAD AAD of every sealed response payload per § 6. It is **not** echoed in the response envelope. |
 | `ticket_id` | inner header | string | References a `Ticket` previously obtained from the node's reserve endpoint (§ 3a). AAD-bound alongside `algorand_tx_id` on every sealed response payload per § 6. Admission is always ticket-gated (the node rejects unadmitted POSTs), so every request carries one. |
 | `open_group` | inner header | string (optional, since 9.12) | The completed open group for the node to submit: base64 of a msgpack array of the two signed transactions, the payer-signed gtxn[0] then the node's own gtxn[1], in the same form as `presigned_open_txn` (§ 3a "Who submits the group"). gtxn[1]'s txid MUST equal `algorand_tx_id`. Absent means the caller submitted the group itself. Rides inside the seal because the group names the payer. |
+| `payment_ref`, `payment_open` | inner header | string (optional, since 9.13) | `algorand_tx_id` and `open_group` under rail-neutral names (note below). |
 | `admission_tag` | inner header | string (optional) | base64 of `HMAC-SHA256(K_response, "zs-admission-v1\0" \|\| ticket_id \|\| \0 \|\| algorand_tx_id \|\| \0 \|\| sha256(body))`. Proves the sender holds `K_response`, delivered to the proxy at reserve time via `wrapped_response_key`. Required when `ticket_id` is present and the node enforces admission tagging; missing or mismatched → `402 admission_tag_invalid` (note below). |
 
 **`reply_to_public_key`.** The proxy reuses the identity it declared at reserve time as `proxy_recipient`, so one private key unwraps both `wrapped_response_key` (reserve) and `X-Zs-Response-Key` (response). **The node enforces this**: a value other than the ticket's `proxy_recipient` is rejected with `402 reply_to_mismatch`, before `Consume`.
 
 **`algorand_tx_id`.** The group is two transactions: the payer's usdcPayment (gtxn[0]) and the node-signed AppCall (gtxn[1]). The node pre-signs gtxn[1] and delivers it at reserve time as `presigned_open_txn` (§ 3a); the proxy signs gtxn[0] against it and either hands the group over as `open_group` or submits it itself. The proxy puts gtxn[1]'s app-call txid in this field. With `open_group` the node checks the handed-over gtxn[1] against it; without, the node looks the txid up directly via algod's `PendingTransactionInformation`. The group id is NOT a valid lookup key, so the app-call txid is used; the proxy keeps the group id for audit only.
+
+**Rail-neutral names.** A node advertising `proto_version` ≥ 9.13 also reads `algorand_tx_id` as `payment_ref` and `open_group` as `payment_open`. The payer uses the neutral names only with such a node (`wire.UsesRailNeutralNames`); an older node would find no tx id. A node accepts a value under either name, and MUST refuse a header that carries both names with different values, so the header has one reading: the admission tag, the payment check and anything else that reads it all see the same value. Only the key changes: the admission tag and every AAD hash the value. The legacy names are dropped in the major that refuses the legacy signing layouts (§ 3a "Deployment binding").
 
 **`admission_tag`.** The node verifies it before `Consume`, so a forged tag does not burn the ticket (§ 3a "Sealed request envelope").
 

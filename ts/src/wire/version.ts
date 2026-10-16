@@ -229,6 +229,22 @@ export function usesDeploymentBinding(protoVersion: string | undefined | null): 
 }
 
 /**
+ * The first PROTO_VERSION at which a node reads the payment fields under their
+ * rail-neutral names: `payment_ref`, `payment_open` and `payment_settle` beside
+ * `algorand_tx_id`, `open_group` and `settle_group`.
+ */
+export const RAIL_NEUTRAL_NAMES_MIN_VERSION = '9.13' as const
+
+/**
+ * Whether a target advertising `protoVersion` reads the rail-neutral names.
+ * Mirrors Go's `wire.UsesRailNeutralNames`, and fails closed to the legacy
+ * names, which every node reads.
+ */
+export function usesRailNeutralNames(protoVersion: string | undefined | null): boolean {
+    return protoVersionAtLeast(protoVersion, RAIL_NEUTRAL_NAMES_MIN_VERSION)
+}
+
+/**
  * The first PROTO_VERSION at which a dstack-tdx node publishes the compose
  * preimage (`TeeEvidenceBundle.app_compose`).
  */

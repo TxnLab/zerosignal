@@ -46,13 +46,48 @@ var innerRequestMagic = [4]byte{'z', 's', 'r', 'q'}
 // relay cannot read ticket_id / algorand_tx_id and resolve the payer on chain.
 type innerRequestHeader struct {
 	ReplyToPublicKey string `json:"reply_to_public_key"`
-	AlgorandTxID     string `json:"algorand_tx_id"`
-	TicketID         string `json:"ticket_id,omitempty"`
-	AdmissionTag     string `json:"admission_tag,omitempty"`
-	// OpenGroup is the payer-completed open() group (escrow.EncodeOpenGroup)
-	// for a node that submits it itself (SubmitsOpen). Sealed for the same
-	// reason as the rest: the group names the payer.
-	OpenGroup string `json:"open_group,omitempty"`
+	// AlgorandTxID and PaymentRef are one value under two names: a payer
+	// writes payment_ref only to a node that reads it (UsesRailNeutralNames),
+	// since an older node would see no tx id at all.
+	AlgorandTxID string `json:"algorand_tx_id,omitempty"`
+	PaymentRef   string `json:"payment_ref,omitempty"`
+	TicketID     string `json:"ticket_id,omitempty"`
+	AdmissionTag string `json:"admission_tag,omitempty"`
+	// OpenGroup (payment_open under the neutral names) is the payer-completed
+	// open() group (escrow.EncodeOpenGroup) for a node that submits it itself
+	// (SubmitsOpen). Sealed for the same reason as the rest: the group names
+	// the payer.
+	OpenGroup   string `json:"open_group,omitempty"`
+	PaymentOpen string `json:"payment_open,omitempty"`
+}
+
+// paymentFields returns the header's payment reference and open, whichever
+// names carried them. A header naming one value twice, differently, is
+// refused rather than resolved, so the header has exactly one reading: the
+// admission tag and the payment check both take the value resolved here,
+// and anything else that ever reads the raw header must not be able to see a
+// different one.
+func (h innerRequestHeader) paymentFields() (ref, open string, err error) {
+	ref, err = oneOf("algorand_tx_id", h.AlgorandTxID, "payment_ref", h.PaymentRef)
+	if err == nil {
+		open, err = oneOf("open_group", h.OpenGroup, "payment_open", h.PaymentOpen)
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("inner request header: %w", err)
+	}
+	return ref, open, nil
+}
+
+// oneOf returns whichever of a legacy and a rail-neutral field is set, and
+// refuses two different values.
+func oneOf(legacyName, legacy, neutralName, neutral string) (string, error) {
+	if legacy != "" && neutral != "" && legacy != neutral {
+		return "", fmt.Errorf("%s and %s disagree", legacyName, neutralName)
+	}
+	if neutral != "" {
+		return neutral, nil
+	}
+	return legacy, nil
 }
 
 // encodeInnerRequest builds the frame. body is appended verbatim.
