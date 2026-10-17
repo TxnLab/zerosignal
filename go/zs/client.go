@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/algorand/go-algorand-sdk/v2/types"
-
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
@@ -398,13 +396,12 @@ func (s *Client) networkName() string { return string(s.cfg.Network.Algod.Resolv
 // settlementHandle is the subset of *OpenHandle the response builders use to
 // settle or dispute a ticket.
 type settlementHandle interface {
-	// AckSettle finalizes the ticket. When presignedSettleGroup is
-	// non-empty, it's the operator's pre-signed atomic settle group
-	// from X-Zs-Settle-Group — the wallet signs the payer-ack
-	// member and submits as a 2-tx group (payer pays 0 ALGO at
-	// settle). When empty, falls back to the standalone path
-	// (payer pays ~5,000 µALGO outer fee).
-	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, presignedSettleGroup []types.SignedTxn) (txid string, feeMicroalgos uint64, groupRejected bool, err error)
+	// AckSettle finalizes the ticket. When settleGroup is non-empty, it's
+	// the operator's pre-signed atomic settle group from X-Zs-Settle-Group,
+	// already checked to decode — the wallet signs the payer-ack member and
+	// submits as a 2-tx group (payer pays 0 ALGO at settle). When empty,
+	// falls back to the standalone path (payer pays ~5,000 µALGO outer fee).
+	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (txid string, feeMicroalgos uint64, groupRejected bool, err error)
 	// Protest freezes the ticket. The payer signs and pays for it, so the fee
 	// is the payer's.
 	Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (txid string, feeMicroalgos uint64, err error)
@@ -413,15 +410,16 @@ type settlementHandle interface {
 // WalletOpener is the escrow side of the payer: *Wallet, or a fake that
 // returns deterministic txids without a running algod.
 //
-// Open takes the operator's pre-signed 2-tx open group from the reserve
-// response (gtxn[1] = open() AppCall signed by operator; gtxn[0] =
-// usdcPayment template for the wallet to sign as the payer) and submits
-// it. The per-ticket box MBR is drawn from the payer's prepaid MBR pool
-// at open(), not a funding leg in this group. PayerAddr populates
+// Open takes the node's pre-signed open from the reserve response
+// (ReservedTicket.PresignedOpen), completes it as the payer and submits it.
+// On Algorand that is the 2-tx open group (gtxn[1] = open() AppCall signed
+// by operator; gtxn[0] = usdcPayment template for the wallet to sign as the
+// payer), and the per-ticket box MBR is drawn from the payer's prepaid MBR
+// pool at open(), not a funding leg in this group. PayerAddr populates
 // ReserveRequest.PayerAddr so the operator can pre-sign the open group
 // bound to this address.
 type WalletOpener interface {
-	Open(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error)
+	Open(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpen string) (*OpenHandle, error)
 	PayerAddr() string
 }
 
@@ -452,5 +450,5 @@ type DepositRechecker interface {
 // OpenHandle.OpenGroup for the sealed request. A wallet without it keeps
 // submitting, which every node still accepts. *Wallet implements it.
 type NodeOpener interface {
-	OpenForNode(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error)
+	OpenForNode(ctx context.Context, ticket *ticket.Ticket, op Operator, presignedOpen string) (*OpenHandle, error)
 }

@@ -27,11 +27,16 @@ import (
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
-// fakePool is a scriptable poolEscrow for unit-testing the prepaid-MBR-pool
+// fakePool is a scriptable EscrowChain for unit-testing the prepaid-MBR-pool
 // path (EnsureDeposit + the Open deposit-revert retry) without a live
 // algod/keystore. Each field overrides the corresponding seam method; counters
 // record calls so tests can assert how many deposits/submits fired.
 type fakePool struct {
+	// EscrowChain answers every call the pool path doesn't make; nil unless a
+	// test sets it, so a test that hands a pool wallet's handle to the
+	// watchdog, the settle watch or a settle call panics until it does.
+	EscrowChain
+
 	ticketMbr    uint64
 	freeQuotaMbr uint64
 	// quotaBoxExists mirrors the real client: once the payer has a quota box the
@@ -150,9 +155,24 @@ var (
 	testSignerAddr = func() string { var a types.Address; a[0] = 0xBB; return a.String() }()
 )
 
+// testOpenGroup and testSettleGroup are two empty transactions in each
+// group's wire form: enough to decode, and the fakes read nothing more.
+var (
+	testOpenGroup   = mustEncodeGroup(escrow.EncodeOpenGroup)
+	testSettleGroup = mustEncodeGroup(escrow.EncodeSettleGroup)
+)
+
+func mustEncodeGroup(encode func([]types.SignedTxn) (string, error)) string {
+	s, err := encode([]types.SignedTxn{{}, {}})
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 func newPoolWallet(p *fakePool) *Wallet {
 	return &Wallet{
-		pool:      p,
+		chain:     p,
 		keystore:  fakeKeystore{},
 		payerAddr: testPayerAddr,
 	}
@@ -194,8 +214,8 @@ func TestPrepareDeposit_DepositsAgainAfterClose(t *testing.T) {
 		t.Fatalf("escrow.NewClient: %v", err)
 	}
 	pool := &fakePool{ticketMbr: testTicketMbr, minFee: 1_000, spendable: 100_000_000}
+	pool.EscrowChain = NewEscrowChain(client)
 	w := newPoolWallet(pool)
-	w.escrow = client
 	w.keystore = encodingSigner{}
 	if err := w.PrepareDeposit(ctx); err != nil {
 		t.Fatalf("PrepareDeposit: %v", err)
@@ -750,7 +770,7 @@ func TestOpen_DepositRevert_RetryFiresWhenTopUpDeposits(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true // skip the upfront ensure so the revert path is what tops up
 
-	h, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	h, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err != nil {
 		t.Fatalf("Open: unexpected err: %v", err)
 	}
@@ -777,7 +797,7 @@ func TestOpenForNode_CompletesWithoutSubmitting(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true
 
-	h, err := w.OpenForNode(context.Background(), validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	h, err := w.OpenForNode(context.Background(), validTicket(), validOperator(), testOpenGroup)
 	if err != nil {
 		t.Fatalf("OpenForNode: %v", err)
 	}
@@ -805,7 +825,7 @@ func TestOpen_SubmitsAndCarriesNoGroup(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true
 
-	h, err := w.Open(context.Background(), validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	h, err := w.Open(context.Background(), validTicket(), validOperator(), testOpenGroup)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -835,7 +855,7 @@ func TestOpen_DepositRevert_NoTopUpSurfacesOriginal(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true
 
-	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	_, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err == nil {
 		t.Fatal("Open: expected error to surface, got nil")
 	}
@@ -868,7 +888,7 @@ func TestOpen_DepositRevert_TopUpFailureRidesAlong(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true
 
-	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	_, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if !errors.Is(err, ErrDepositUnaffordable) {
 		t.Errorf("err = %v, want the top-up's ErrDepositUnaffordable", err)
 	}
@@ -915,8 +935,8 @@ func algodAnsweringSubmit(t *testing.T, submit func(http.ResponseWriter)) algod.
 	return c
 }
 
-// TestPoolEscrowAdapter_RevertStaysTyped covers the one link in the
-// open→429 chain that no other test touches: poolEscrowAdapter is the sole
+// TestEscrowClientChain_RevertStaysTyped covers the one link in the
+// open→429 chain that no other test touches: NewEscrowChain is the sole
 // production edge between escrow.Client and Wallet.Open, and every other test
 // on this path substitutes fakePool for it.
 //
@@ -926,7 +946,7 @@ func algodAnsweringSubmit(t *testing.T, submit func(http.ResponseWriter)) algod.
 // which a %v erases. A type-erasing wrap here silently converts every
 // MBR-pool revert from an actionable 429 naming zs.concurrent_slots into an
 // opaque 502.
-func TestPoolEscrowAdapter_RevertStaysTyped(t *testing.T) {
+func TestEscrowClientChain_RevertStaysTyped(t *testing.T) {
 	spec, err := escrow.GetSpec()
 	if err != nil {
 		t.Fatal(err)
@@ -969,7 +989,7 @@ func TestPoolEscrowAdapter_RevertStaysTyped(t *testing.T) {
 
 	// The chain-config fields are stamped by the adapter, so the spec here
 	// carries only the per-request half.
-	_, err = poolEscrowAdapter{c: client}.SubmitPresignedOpenGroup(
+	_, err = NewEscrowChain(client).SubmitPresignedOpenGroup(
 		context.Background(), group,
 		transaction.BasicAccountTransactionSigner{Account: payer},
 		escrow.OpenGroupSpec{
@@ -1008,7 +1028,7 @@ func TestPoolEscrowAdapter_RevertStaysTyped(t *testing.T) {
 // the group is verified. Every other OpenForNode test runs on fakePool, so an
 // unstamped spec would verify against app 0 and refuse every real hand-off
 // with the suite green.
-func TestPoolEscrowAdapter_CompleteStampsTheChain(t *testing.T) {
+func TestEscrowClientChain_CompleteStampsTheChain(t *testing.T) {
 	payer := crypto.GenerateAccount()
 	operator := crypto.GenerateAccount()
 	client, err := escrow.NewClient(1234, algodRejectingSubmit(t, 1))
@@ -1033,7 +1053,7 @@ func TestPoolEscrowAdapter_CompleteStampsTheChain(t *testing.T) {
 		t.Fatalf("ComposeOpenGroup: %v", err)
 	}
 
-	res, err := poolEscrowAdapter{c: client}.CompletePresignedOpenGroup(group,
+	res, err := NewEscrowChain(client).CompletePresignedOpenGroup(group,
 		transaction.BasicAccountTransactionSigner{Account: payer},
 		escrow.OpenGroupSpec{
 			TicketIDRaw:     ticketIDRaw,
@@ -1081,7 +1101,7 @@ func TestOpen_RevertStaysTyped(t *testing.T) {
 	w := newPoolWallet(pool)
 	w.depositReady = true
 
-	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	_, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err == nil {
 		t.Fatal("Open: expected the revert to surface, got nil")
 	}
@@ -1118,7 +1138,7 @@ func TestOpen_UnaffordableTopUp_ProceedsOnFreeSlot(t *testing.T) {
 	}
 	w := newPoolWallet(pool) // depositReady false → ensureDepositForServe runs
 
-	h, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	h, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err != nil {
 		t.Fatalf("Open: unexpected err (should proceed on free slot): %v", err)
 	}
@@ -1154,7 +1174,7 @@ func TestOpen_UnaffordableTopUp_ZeroFreeSlots_Fatal(t *testing.T) {
 	}
 	w := newPoolWallet(pool)
 
-	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	_, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err == nil {
 		t.Fatal("Open: expected ErrDepositUnaffordable, got nil")
 	}
@@ -1180,7 +1200,7 @@ func TestOpen_Success_TwoTxIDs(t *testing.T) {
 	}
 	w := newPoolWallet(pool)
 
-	h, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	h, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err != nil {
 		t.Fatalf("Open: unexpected err: %v", err)
 	}
@@ -1230,7 +1250,7 @@ func TestOpen_WrongTxIDCount(t *testing.T) {
 	}
 	w := newPoolWallet(pool)
 
-	_, err := w.Open(ctx, validTicket(), validOperator(), []types.SignedTxn{{}, {}})
+	_, err := w.Open(ctx, validTicket(), validOperator(), testOpenGroup)
 	if err == nil || !strings.Contains(err.Error(), "want 2") {
 		t.Fatalf("err = %v, want a 'want 2' txid-count error", err)
 	}

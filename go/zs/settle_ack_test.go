@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"filippo.io/age"
-	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
@@ -166,7 +165,7 @@ func TestSettleAckPoster(t *testing.T) {
 // runSealed wired onto it.
 type handleWallet struct{ h *OpenHandle }
 
-func (w handleWallet) Open(context.Context, *ticket.Ticket, Operator, []types.SignedTxn) (*OpenHandle, error) {
+func (w handleWallet) Open(context.Context, *ticket.Ticket, Operator, string) (*OpenHandle, error) {
 	return w.h, nil
 }
 func (handleWallet) PayerAddr() string { return "PAYER" }

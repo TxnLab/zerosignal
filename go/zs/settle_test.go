@@ -36,7 +36,7 @@ type scriptedSettleHandle struct {
 	panicWith     any
 }
 
-func (h *scriptedSettleHandle) AckSettle(context.Context, *ticket.UsageReceipt, []types.SignedTxn) (string, uint64, bool, error) {
+func (h *scriptedSettleHandle) AckSettle(context.Context, *ticket.UsageReceipt, string) (string, uint64, bool, error) {
 	if h.panicWith != nil {
 		panic(h.panicWith)
 	}
@@ -84,7 +84,7 @@ func settleClient() *Client {
 
 // check runs checkReceipt with slot in its context. matching picks whether the
 // computed body hash is the receipt's (a paid turn) or not (a protest).
-func (f settleFixture) check(c *Client, slot *settleSlot, h settlementHandle, matching bool, group []types.SignedTxn) settleSubmit {
+func (f settleFixture) check(c *Client, slot *settleSlot, h settlementHandle, matching bool, group string) settleSubmit {
 	computed := wire.BodyHashOfBody(f.plaintext)
 	if !matching {
 		computed = wire.BodyHashOfBody([]byte("other content"))
@@ -115,23 +115,23 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 		name     string
 		handle   *scriptedSettleHandle
 		matching bool
-		group    []types.SignedTxn
+		group    string
 		want     Settlement
 		wantErr  error
 		watched  bool
 	}{
-		{"atomic", &scriptedSettleHandle{txid: "GROUPTX"}, true, []types.SignedTxn{{}, {}},
+		{"atomic", &scriptedSettleHandle{txid: "GROUPTX"}, true, testSettleGroup,
 			Settlement{Kind: SettleAtomic, TxID: "GROUPTX"}, nil, false},
-		{"payer ack without a group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000}, true, nil,
+		{"payer ack without a group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000}, true, "",
 			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000}, nil, true},
-		{"payer ack after a rejected group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000, groupRejected: true}, true, []types.SignedTxn{{}, {}},
+		{"payer ack after a rejected group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000, groupRejected: true}, true, testSettleGroup,
 			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000}, nil, true},
-		{"failed ack", &scriptedSettleHandle{txid: "IGNORED", fee: 7, err: ackErr}, true, []types.SignedTxn{{}, {}},
+		{"failed ack", &scriptedSettleHandle{txid: "IGNORED", fee: 7, err: ackErr}, true, testSettleGroup,
 			Settlement{Kind: SettleAtomic}, ackErr, true},
 		// The payer signs the protest, so its fee is the payer's.
-		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, nil,
+		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, "",
 			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000}, nil, false},
-		{"failed protest", &scriptedSettleHandle{txid: "IGNORED", err: ackErr}, false, nil,
+		{"failed protest", &scriptedSettleHandle{txid: "IGNORED", err: ackErr}, false, "",
 			Settlement{Kind: SettleProtest}, ackErr, true},
 	}
 	for _, tc := range cases {
@@ -175,7 +175,7 @@ func TestRunReceiptChecks_ReturnsTheSubmitsFee(t *testing.T) {
 	f := newSettleFixture(t)
 	check := settleClient().runReceiptChecks(withSettleSlot(context.Background(), newSettleSlot()),
 		endpointChatCompletions, "m", f.tkt, f.op, &scriptedSettleHandle{txid: "ACKTX", fee: 1000},
-		f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, nil, nil)
+		f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, "", nil)
 	if check.settled.FeesMicroAlgos != 1000 || check.settled.TxID != "ACKTX" || check.violation != "" {
 		t.Errorf("check = %+v, want the ack's ACKTX and 1000, no violation", check)
 	}
@@ -187,7 +187,7 @@ func TestCheckReceipt_NothingToSubmitLeavesTheSlotUnexpected(t *testing.T) {
 	f := newSettleFixture(t)
 	// No escrow was opened.
 	slot := newSettleSlot()
-	if submit := f.check(settleClient(), slot, nil, true, nil); submit != nil {
+	if submit := f.check(settleClient(), slot, nil, true, ""); submit != nil {
 		t.Error("no handle: built a submit")
 	}
 	if slot.expected {
@@ -198,7 +198,7 @@ func TestCheckReceipt_NothingToSubmitLeavesTheSlotUnexpected(t *testing.T) {
 	bad.AmountCharged++
 	f.receipt = &bad
 	slot = newSettleSlot()
-	if submit := f.check(settleClient(), slot, &scriptedSettleHandle{}, true, nil); submit != nil {
+	if submit := f.check(settleClient(), slot, &scriptedSettleHandle{}, true, ""); submit != nil {
 		t.Error("a bad signature built a submit")
 	}
 	if slot.expected {
@@ -211,7 +211,7 @@ func TestCheckReceipt_NothingToSubmitLeavesTheSlotUnexpected(t *testing.T) {
 func TestCheckReceipt_PanickingSubmitFinishesTheSlot(t *testing.T) {
 	f := newSettleFixture(t)
 	slot := newSettleSlot()
-	submit := f.check(settleClient(), slot, &scriptedSettleHandle{panicWith: "boom"}, true, nil)
+	submit := f.check(settleClient(), slot, &scriptedSettleHandle{panicWith: "boom"}, true, "")
 	func() {
 		defer func() {
 			if p := recover(); p != "boom" {
@@ -236,7 +236,7 @@ func TestSubmitAfterResponse_FinishesTheSlot(t *testing.T) {
 	} {
 		c := settleClient()
 		slot := newSettleSlot()
-		c.submitAfterResponse(f.tkt.TicketID, f.check(c, slot, h, true, nil))
+		c.submitAfterResponse(f.tkt.TicketID, f.check(c, slot, h, true, ""))
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := c.WaitSettles(ctx); err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -333,7 +333,7 @@ func TestWait_TurnWithoutASubmit(t *testing.T) {
 
 // watchStep is one answer to a settle lookup.
 type watchStep struct {
-	out settleOutcome
+	out SettleOutcome
 	err error
 }
 
@@ -346,11 +346,11 @@ type watchedSettleHandle struct {
 	txid   atomic.Value // the txid last looked up
 }
 
-func (h *watchedSettleHandle) settleOutcome(_ context.Context, txid string) (settleOutcome, error) {
+func (h *watchedSettleHandle) settleOutcome(_ context.Context, txid string) (SettleOutcome, error) {
 	h.txid.Store(txid)
 	n := int(h.looks.Add(1))
 	if len(h.script) == 0 {
-		return settlePending, nil
+		return SettlePending, nil
 	}
 	s := h.script[min(n, len(h.script))-1]
 	return s.out, s.err
@@ -374,27 +374,27 @@ func TestCheckReceipt_SettlesPastAPanickingSpendGuard(t *testing.T) {
 	f := newSettleFixture(t)
 	c := settleClient()
 	c.spend = panicGuard{}
-	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "A"}, true, nil); submit == nil {
+	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "A"}, true, ""); submit == nil {
 		t.Error("no settle after Settle panicked")
 	}
-	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "P"}, false, nil); submit == nil {
+	if submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "P"}, false, ""); submit == nil {
 		t.Error("no protest after Release panicked")
 	}
 }
 
 func TestConfirmSettled_DropsTheRowOnceTheSettleIsConfirmed(t *testing.T) {
 	shortConfirmWatch(t, 300*time.Millisecond)
-	pending, landed, dropped := watchStep{out: settlePending}, watchStep{out: settleLanded}, watchStep{out: settleDropped}
+	pending, landed, dropped := watchStep{out: SettlePending}, watchStep{out: SettleLanded}, watchStep{out: SettleDropped}
 	failing := watchStep{err: errors.New("algod down")}
 
-	group := []types.SignedTxn{{}, {}}
+	group := testSettleGroup
 	handle := func(s scriptedSettleHandle, script ...watchStep) *watchedSettleHandle {
 		return &watchedSettleHandle{scriptedSettleHandle: s, script: script}
 	}
 	cases := []struct {
 		name      string
 		handle    *watchedSettleHandle
-		group     []types.SignedTxn
+		group     string
 		noJournal bool
 		wantRow   bool
 		wantLooks int // 0: never watched; -1: watched until the deadline
@@ -405,7 +405,7 @@ func TestConfirmSettled_DropsTheRowOnceTheSettleIsConfirmed(t *testing.T) {
 		{"lookups keep failing", handle(scriptedSettleHandle{txid: "G"}, failing), group, false, true, -1},
 		{"dropped from the pool", handle(scriptedSettleHandle{txid: "G"}, pending, dropped), group, false, true, 2},
 		// The operator still has to match a payer-only ack.
-		{"payer ack", handle(scriptedSettleHandle{txid: "A"}, landed), nil, false, true, 0},
+		{"payer ack", handle(scriptedSettleHandle{txid: "A"}, landed), "", false, true, 0},
 		{"rejected group", handle(scriptedSettleHandle{txid: "A", groupRejected: true}, landed), group, false, true, 0},
 		{"failed submit", handle(scriptedSettleHandle{err: errors.New("algod down")}, landed), group, false, true, 0},
 		// No journal, no row to drop: nothing to wait on algod for.
@@ -455,15 +455,44 @@ func TestSettleOutcomeOf(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		info models.PendingTransactionInfoResponse
-		want settleOutcome
+		want SettleOutcome
 	}{
-		{"in the pool", models.PendingTransactionInfoResponse{}, settlePending},
-		{"confirmed", models.PendingTransactionInfoResponse{ConfirmedRound: 1}, settleLanded},
-		{"dropped", models.PendingTransactionInfoResponse{PoolError: "overspend"}, settleDropped},
+		{"in the pool", models.PendingTransactionInfoResponse{}, SettlePending},
+		{"confirmed", models.PendingTransactionInfoResponse{ConfirmedRound: 1}, SettleLanded},
+		{"dropped", models.PendingTransactionInfoResponse{PoolError: "overspend"}, SettleDropped},
 	} {
 		if got := settleOutcomeOf(tc.info); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A settle group that doesn't decode is passed on as none, so the ack goes
+// standalone: passed through, the wallet's own decode would fail inside the
+// atomic branch, which surfaces the error and sends no ack at all.
+func TestCheckSettleGroupHeader(t *testing.T) {
+	f := newSettleFixture(t)
+	for _, tc := range []struct{ name, header, want string }{
+		{"absent", "", ""},
+		{"malformed", "AAAA", ""},
+		{"not base64", "not-base64!", ""},
+		{"decodes", testSettleGroup, testSettleGroup},
+	} {
+		if got := checkSettleGroupHeader(settleClient(), tc.header, f.op, f.tkt, nil); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The bridge reads the deployment's settings off the client: the grace here
+// is every refund watchdog deadline, and the app id every settle group spec.
+func TestEscrowClientChain_Config(t *testing.T) {
+	got := NewEscrowChain(&escrow.Client{AppID: 42, SettlementGraceDefault: 600}).Config()
+	if got != (EscrowChainConfig{AppID: 42, SettlementGraceDefault: 600}) {
+		t.Errorf("Config = %+v, want app 42 and grace 600", got)
+	}
+	if NewEscrowChain(nil) != nil {
+		t.Error("NewEscrowChain(nil) is a non-nil chain the wallet's nil guards would miss")
 	}
 }
 
@@ -487,15 +516,15 @@ func TestOpenHandle_SettleOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		algod   *pendingAlgod
-		want    settleOutcome
+		want    SettleOutcome
 		wantErr bool
 	}{
-		{"confirmed", &pendingAlgod{info: models.PendingTransactionInfoResponse{ConfirmedRound: 9}}, settleLanded, false},
-		{"pending", &pendingAlgod{}, settlePending, false},
-		{"lookup failed", &pendingAlgod{err: fail}, settlePending, true},
+		{"confirmed", &pendingAlgod{info: models.PendingTransactionInfoResponse{ConfirmedRound: 9}}, SettleLanded, false},
+		{"pending", &pendingAlgod{}, SettlePending, false},
+		{"lookup failed", &pendingAlgod{err: fail}, SettlePending, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &OpenHandle{TicketID: "T", wallet: &Wallet{escrow: &escrow.Client{Algod: tc.algod}}}
+			h := &OpenHandle{TicketID: "T", wallet: &Wallet{chain: NewEscrowChain(&escrow.Client{Algod: tc.algod})}}
 			got, err := h.settleOutcome(context.Background(), "TX")
 			if got != tc.want || (err != nil) != tc.wantErr {
 				t.Errorf("settleOutcome = %v, %v; want %v (error %v)", got, err, tc.want, tc.wantErr)
@@ -508,6 +537,9 @@ func TestOpenHandle_SettleOutcome(t *testing.T) {
 	if _, err := (&OpenHandle{}).settleOutcome(context.Background(), "TX"); err == nil {
 		t.Error("a handle with no wallet reported an outcome")
 	}
+	if _, err := NewEscrowChain(&escrow.Client{}).SettleOutcome(context.Background(), "TX"); err == nil {
+		t.Error("a chain with no algod reported an outcome")
+	}
 }
 
 // Close ends a watch WaitSettles would otherwise wait out, and the row stays.
@@ -519,7 +551,7 @@ func TestConfirmSettled_CloseEndsTheWatch(t *testing.T) {
 	j := newMemJournal()
 	c.journal = j
 	_ = j.Put(context.Background(), TicketRecord{TicketID: f.tkt.TicketID})
-	_, _ = f.check(c, newSettleSlot(), &watchedSettleHandle{scriptedSettleHandle: scriptedSettleHandle{txid: "G"}}, true, []types.SignedTxn{{}, {}})()
+	_, _ = f.check(c, newSettleSlot(), &watchedSettleHandle{scriptedSettleHandle: scriptedSettleHandle{txid: "G"}}, true, testSettleGroup)()
 
 	c.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -585,7 +617,7 @@ func TestWaitSettles_NamesAConfirmationApart(t *testing.T) {
 	c := settleClient()
 	c.journal = newMemJournal()
 	h := &watchedSettleHandle{scriptedSettleHandle: scriptedSettleHandle{txid: "G"}}
-	_, _ = f.check(c, newSettleSlot(), h, true, []types.SignedTxn{{}, {}})()
+	_, _ = f.check(c, newSettleSlot(), h, true, testSettleGroup)()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()

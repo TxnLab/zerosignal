@@ -6,7 +6,7 @@
 // The payer's prepaid ticket-MBR pool: the ALGO in escrow that backs each open
 // ticket's box, so open() carries no ALGO leg. Mirrors go/zs/wallet.go's
 // EnsureDeposit, planDeposit and FreePoolHeadroom. The chain I/O arrives
-// through MbrPoolChain, as Go's arrives through its poolEscrow seam.
+// through MbrPoolChain, as Go's arrives through its EscrowChain.
 
 import { defaults } from './config.js'
 
@@ -139,8 +139,8 @@ export function mbrPoolState(ticketMbr: bigint, deposit: PayerDeposit): MbrPoolS
 
 /**
  * MbrPoolChain is the chain the pool is read and funded through: the escrow
- * app's readonly calls, the payer's account, and the deposit group. Go's
- * poolEscrow.
+ * app's readonly calls, the payer's account, and the deposit group. The pool
+ * half of Go's EscrowChain.
  */
 export interface MbrPoolChain {
     /** Box MBR per ticket (mbrForTicket). */

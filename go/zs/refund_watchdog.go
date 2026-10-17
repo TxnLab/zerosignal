@@ -200,19 +200,20 @@ type ticketProbe struct {
 // Nil-safe on every input so test fakes (detached handles) and wiring
 // without a watchdog are no-ops.
 func (rw *RefundWatchdog) Track(h *OpenHandle, expiresAt int64) {
-	if rw == nil || h == nil || h.wallet == nil || h.wallet.escrow == nil {
+	if rw == nil || h == nil || h.wallet == nil || h.wallet.chain == nil {
 		return
 	}
+	chain := h.wallet.chain
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
 		rw.log.Warn("refund watchdog: undecodable ticket id; not tracking",
 			slog.String("ticket_id", h.TicketID), slog.Any("err", err))
 		return
 	}
-	grace := time.Duration(h.wallet.escrow.SettlementGraceDefault) * time.Second
+	grace := time.Duration(chain.Config().SettlementGraceDefault) * time.Second
 	deadline := time.Unix(expiresAt, 0).Add(grace + rw.margin)
 	probe := func(ctx context.Context) (ticketProbe, error) {
-		rec, err := h.wallet.escrow.ReadTicketBox(ctx, ticketIDRaw)
+		rec, err := chain.ReadTicketBox(ctx, ticketIDRaw)
 		if err != nil {
 			return ticketProbe{}, err
 		}

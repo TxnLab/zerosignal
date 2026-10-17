@@ -15,7 +15,6 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/wire"
-	"github.com/algorand/go-algorand-sdk/v2/types"
 )
 
 // noteLog collects the events a turn notes.
@@ -160,7 +159,7 @@ func TestReserveWithTransientRetry_NoRelayLeftAnnouncesNoRetry(t *testing.T) {
 // on that path reaching for the turn's note would.
 type noteSpyHandle struct{ scriptedSettleHandle }
 
-func (h *noteSpyHandle) AckSettle(ctx context.Context, r *ticket.UsageReceipt, g []types.SignedTxn) (string, uint64, bool, error) {
+func (h *noteSpyHandle) AckSettle(ctx context.Context, r *ticket.UsageReceipt, g string) (string, uint64, bool, error) {
 	noteFrom(ctx)(Done{})
 	return h.scriptedSettleHandle.AckSettle(ctx, r, g)
 }
@@ -172,7 +171,7 @@ func TestCheckReceipt_SettleCarriesNoNote(t *testing.T) {
 	var log noteLog
 	ctx := withNote(withSettleSlot(context.Background(), newSettleSlot()), log.note)
 	submit, _ := settleClient().checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op,
-		&noteSpyHandle{scriptedSettleHandle{txid: "ACK"}}, f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, nil, nil)
+		&noteSpyHandle{scriptedSettleHandle{txid: "ACK"}}, f.receipt, wire.BodyHashOfBody(f.plaintext), f.plaintext, "", nil)
 	if submit == nil {
 		t.Fatal("a verified receipt built no submit")
 	}

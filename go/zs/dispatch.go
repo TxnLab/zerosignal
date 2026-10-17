@@ -27,7 +27,6 @@ import (
 	"filippo.io/age"
 
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
-	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/inject"
@@ -2596,9 +2595,9 @@ func (s *Client) runSealed(
 	var openHandle *OpenHandle
 	var err error
 	if no, ok := s.wallet.(NodeOpener); ok && wire.SubmitsOpen(op.ProtoVersion) {
-		openHandle, err = no.OpenForNode(ctx, ticket, op, rt.PreSignedOpenGroup)
+		openHandle, err = no.OpenForNode(ctx, ticket, op, rt.PresignedOpen)
 	} else {
-		openHandle, err = s.wallet.Open(ctx, ticket, op, rt.PreSignedOpenGroup)
+		openHandle, err = s.wallet.Open(ctx, ticket, op, rt.PresignedOpen)
 	}
 	if err != nil {
 		// The open didn't commit — back the reservation out so a failed attempt
@@ -3638,9 +3637,9 @@ func (s *Client) verifyNonStreamReceipt(ctx context.Context, headerVal, settleGr
 			slog.Any("err", err))
 		return nil, nil, ""
 	}
-	presignedSettleGroup := decodeSettleGroupHeader(s, settleGroupHeaderVal, op, tkt, hop)
+	settleGroup := checkSettleGroupHeader(s, settleGroupHeaderVal, op, tkt, hop)
 	// Only the violation is known before the reply: the submit runs after it.
-	submit, check := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, presignedSettleGroup, hop)
+	submit, check := s.checkReceipt(ctx, endpoint, model, tkt, op, handle, &receipt, wire.BodyHashOfBody(plaintext), plaintext, settleGroup, hop)
 	return &receipt, submit, check.violation
 }
 
@@ -3669,47 +3668,43 @@ func (s *Client) submitAfterResponse(ticketID string, submit settleSubmit) {
 	})
 }
 
-// settleOutcome is where a submitted settle transaction stands.
-type settleOutcome int
+// SettleOutcome is where a submitted settle transaction stands.
+type SettleOutcome int
 
 const (
-	settlePending settleOutcome = iota
-	settleLanded
-	settleDropped
+	SettlePending SettleOutcome = iota
+	SettleLanded
+	SettleDropped
 )
 
 // settleOutcomeOf reads algod's pending-pool answer for a transaction. The
 // ticket's box being absent is not an answer: an open submitted without
 // waiting for confirmation has no box yet either.
-func settleOutcomeOf(info models.PendingTransactionInfoResponse) settleOutcome {
+func settleOutcomeOf(info models.PendingTransactionInfoResponse) SettleOutcome {
 	switch {
 	case info.ConfirmedRound > 0:
-		return settleLanded
+		return SettleLanded
 	case info.PoolError != "":
-		return settleDropped
+		return SettleDropped
 	default:
-		return settlePending
+		return SettlePending
 	}
 }
 
 // settleWatcher is a settlementHandle that can look up a submitted settle.
 type settleWatcher interface {
-	settleOutcome(ctx context.Context, txid string) (settleOutcome, error)
+	settleOutcome(ctx context.Context, txid string) (SettleOutcome, error)
 }
 
 // The real handle must stay a watcher: confirmSettled finds it by type
 // assertion, so a drifted signature would turn the watch off silently.
 var _ settleWatcher = (*OpenHandle)(nil)
 
-func (h *OpenHandle) settleOutcome(ctx context.Context, txid string) (settleOutcome, error) {
-	if h.wallet == nil || h.wallet.escrow == nil || h.wallet.escrow.Algod == nil {
-		return settlePending, errors.New("zs: handle has no algod")
+func (h *OpenHandle) settleOutcome(ctx context.Context, txid string) (SettleOutcome, error) {
+	if h.wallet == nil || h.wallet.chain == nil {
+		return SettlePending, errors.New("zs: handle has no escrow chain")
 	}
-	info, err := h.wallet.escrow.Algod.PendingTransactionInformation(ctx, txid)
-	if err != nil {
-		return settlePending, err
-	}
-	return settleOutcomeOf(info), nil
+	return h.wallet.chain.SettleOutcome(ctx, txid)
 }
 
 // How long confirmSettled watches a settle, and how often it looks. Algorand
@@ -3755,7 +3750,7 @@ func (s *Client) confirmSettled(ticketID, txid string, handle settlementHandle) 
 			switch {
 			case err != nil:
 				lastErr = err
-			case out == settleLanded:
+			case out == SettleLanded:
 				dctx, dcancel := context.WithTimeout(context.Background(), journalTimeout)
 				defer dcancel()
 				if err := s.journal.Delete(dctx, ticketID); err != nil {
@@ -3763,7 +3758,7 @@ func (s *Client) confirmSettled(ticketID, txid string, handle settlementHandle) 
 				}
 				s.log.Debug("ack-settle confirmed", slog.String("ticket_id", ticketID), slog.String("txid", txid))
 				return
-			case out == settleDropped:
+			case out == SettleDropped:
 				s.log.Info("ack-settle dropped from the pool; the ticket reconciler finishes it",
 					slog.String("ticket_id", ticketID), slog.String("txid", txid))
 				return
@@ -3886,25 +3881,26 @@ func openSealedResponseMeta(s *Client, sealedVal string, opener *wire.ResponseOp
 	return string(plaintext)
 }
 
-// decodeSettleGroupHeader parses the optional X-Zs-Settle-Group
-// header. Absence is normal (older nodes; soft-failure on the node
-// side); presence-but-malformed is logged at warn so an operator
-// emitting bad bytes is observable, but the proxy still falls back
-// to the standalone-ack path.
-func decodeSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticket.Ticket, hop *RelayHop) []types.SignedTxn {
+// checkSettleGroupHeader passes on the optional X-Zs-Settle-Group header
+// when it decodes, and "" when it is absent or doesn't. Absence is normal
+// (older nodes; soft-failure on the node side); presence-but-malformed is
+// logged at warn so an operator emitting bad bytes is observable, but the
+// proxy still falls back to the standalone-ack path. The wallet decodes it
+// again to use it; checking here keeps a malformed group from being counted
+// as an atomic settle.
+func checkSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticket.Ticket, hop *RelayHop) string {
 	if headerVal == "" {
-		return nil
+		return ""
 	}
-	group, err := escrow.DecodeSettleGroup(headerVal)
-	if err != nil {
+	if _, err := escrow.DecodeSettleGroup(headerVal); err != nil {
 		s.log.Warn("settle-group header malformed; falling back to standalone ack",
 			opAttr(op),
 			relayAttr(hop),
 			slog.String("ticket_id", tkt.TicketID),
 			slog.Any("err", err))
-		return nil
+		return ""
 	}
-	return group
+	return headerVal
 }
 
 // runReceiptChecks dispatches to the shared verifier and drives the
@@ -3936,10 +3932,10 @@ func (s *Client) runReceiptChecks(
 	receipt *ticket.UsageReceipt,
 	computed [32]byte,
 	plaintext []byte,
-	presignedSettleGroup []types.SignedTxn,
+	settleGroup string,
 	hop *RelayHop,
 ) receiptCheck {
-	submit, check := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, presignedSettleGroup, hop)
+	submit, check := s.checkReceipt(ctx, endpoint, model, ticket, op, handle, receipt, computed, plaintext, settleGroup, hop)
 	if submit != nil {
 		_, _ = submit()
 	}
@@ -3977,7 +3973,7 @@ func (s *Client) checkReceipt(
 	receipt *ticket.UsageReceipt,
 	computed [32]byte,
 	plaintext []byte,
-	presignedSettleGroup []types.SignedTxn,
+	settleGroup string,
 	hop *RelayHop,
 ) (settleSubmit, *receiptCheck) {
 	check := &receiptCheck{}
@@ -4065,8 +4061,8 @@ func (s *Client) checkReceipt(
 			// A failing ack does not fail the turn: the refund watchdog keeps
 			// tracking the ticket, so the escrow is still recovered on chain.
 			// Only Wait reports it.
-			atomic := len(presignedSettleGroup) > 0
-			txid, fee, groupRejected, err := handle.AckSettle(settleCtx, receipt, presignedSettleGroup)
+			atomic := settleGroup != ""
+			txid, fee, groupRejected, err := handle.AckSettle(settleCtx, receipt, settleGroup)
 			if groupRejected && s.nodeExcluder != nil {
 				// The node handed a fraudulent atomic settle group (rekey /
 				// ClearState / value mismatch vs its own receipt). Proven
@@ -4332,7 +4328,7 @@ func (s *Client) buildFrameFactory(
 		// X-Zs-Settle-Group header on non-streaming. The node
 		// emits it BEFORE the `zs-receipt` frame so this slot is
 		// populated by the time runReceiptChecks runs.
-		var presignedSettleGroup []types.SignedTxn
+		var settleGroup string
 
 		var (
 			contentFrames      [][]byte
@@ -4455,7 +4451,7 @@ func (s *Client) buildFrameFactory(
 
 			case wire.StreamEventSettleGroup:
 				// Sealed SSE frame carrying the operator's pre-signed atomic
-				// settle group. Cache the decoded value so the upcoming
+				// settle group. Cache the checked value so the upcoming
 				// `zs-receipt` frame's runReceiptChecks → AckSettle can use it
 				// for an atomic submit (payer pays 0 ALGO). Sealed under the
 				// header AAD, not the frame AAD, so it does not consume a
@@ -4467,7 +4463,7 @@ func (s *Client) buildFrameFactory(
 				if sg != "" {
 					tailOpened = true
 				}
-				presignedSettleGroup = decodeSettleGroupHeader(s, sg, op, tkt, hop)
+				settleGroup = checkSettleGroupHeader(s, sg, op, tkt, hop)
 				return outFrame{}, nil // swallowed; client doesn't see it
 
 			case wire.StreamEventReceipt:
@@ -4522,7 +4518,7 @@ func (s *Client) buildFrameFactory(
 					&receipt,
 					wire.BodyHashFromFrames(contentFrames),
 					flat,
-					presignedSettleGroup,
+					settleGroup,
 					hop,
 				)
 				// Payer-facing fee breakdown from the proxy payer's cached

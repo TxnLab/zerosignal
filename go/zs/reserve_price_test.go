@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/ticket"
-
-	"github.com/algorand/go-algorand-sdk/v2/types"
 )
 
 func TestAddU64_FitsUpToMaxUint64(t *testing.T) {
@@ -29,7 +27,7 @@ func TestAddU64_FitsUpToMaxUint64(t *testing.T) {
 // feeRateNow can read a controllable protocol-fee rate.
 type fakeFeeWallet struct{ fee uint64 }
 
-func (fakeFeeWallet) Open(context.Context, *ticket.Ticket, Operator, []types.SignedTxn) (*OpenHandle, error) {
+func (fakeFeeWallet) Open(context.Context, *ticket.Ticket, Operator, string) (*OpenHandle, error) {
 	return nil, nil
 }
 func (fakeFeeWallet) PayerAddr() string                                { return "" }

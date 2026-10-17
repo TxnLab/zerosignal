@@ -33,7 +33,7 @@ type fakeSettlementHandle struct {
 	protestCalls  int
 }
 
-func (f *fakeSettlementHandle) AckSettle(_ context.Context, _ *ticket.UsageReceipt, _ []types.SignedTxn) (string, uint64, bool, error) {
+func (f *fakeSettlementHandle) AckSettle(_ context.Context, _ *ticket.UsageReceipt, _ string) (string, uint64, bool, error) {
 	f.ackCalls++
 	// err=nil, so the dispatcher takes the success branch — the exact path where
 	// the Resolve-gate must NOT un-track a rejected-then-standalone settle.
@@ -92,7 +92,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 	handle := &fakeSettlementHandle{groupRejected: true}
 	// Non-empty ⇒ the atomic path is attempted; AckSettle rejects it and the
 	// dispatcher excludes the node.
-	group := []types.SignedTxn{{}, {}}
+	group := testSettleGroup
 
 	check := srv.runReceiptChecks(
 		context.Background(), endpointChatCompletions, "test-model",

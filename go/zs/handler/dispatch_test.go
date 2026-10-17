@@ -25,8 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/algorand/go-algorand-sdk/v2/types"
-
 	"filippo.io/age"
 	"golang.org/x/crypto/chacha20poly1305"
 
@@ -2761,7 +2759,7 @@ func (f *fakeWallet) PayerAddr() string {
 	return "TESTPAYERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXAAAAAA"
 }
 
-func (f *fakeWallet) Open(_ context.Context, ticket *ticket.Ticket, op zs.Operator, _ []types.SignedTxn) (*zs.OpenHandle, error) {
+func (f *fakeWallet) Open(_ context.Context, ticket *ticket.Ticket, op zs.Operator, _ string) (*zs.OpenHandle, error) {
 	f.openCalls++
 	f.lastOp = op
 	f.lastTID = ticket.TicketID
@@ -2819,7 +2817,7 @@ type fakeNodeOpener struct {
 	openForNodeCalls int
 }
 
-func (f *fakeNodeOpener) OpenForNode(ctx context.Context, tk *ticket.Ticket, op zs.Operator, g []types.SignedTxn) (*zs.OpenHandle, error) {
+func (f *fakeNodeOpener) OpenForNode(ctx context.Context, tk *ticket.Ticket, op zs.Operator, g string) (*zs.OpenHandle, error) {
 	f.openForNodeCalls++
 	h, err := f.Open(ctx, tk, op, g)
 	if err != nil {
