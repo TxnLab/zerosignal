@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/settle"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -65,44 +66,55 @@ func (a reconcileAction) String() string {
 	return "wait"
 }
 
-// decideTicket is what the sweep does about one journaled ticket, given its
-// box (nil when gone) and the time. The contract's rules come from
-// escrow.Classify; what this adds is the payer's own receipt:
+// decideTicket is decideSettlement for a ZeroSignalEscrow box (nil when gone).
+func decideTicket(rec TicketRecord, box *escrow.TicketRecord, now time.Time, lapseFallback time.Duration) reconcileAction {
+	if box == nil {
+		return decideSettlement(rec, nil, false, now, lapseFallback)
+	}
+	view := box.View()
+	matched := rec.Settle != nil && claimMatches(*rec.Settle, box)
+	return decideSettlement(rec, &view, matched, now, lapseFallback)
+}
+
+// decideSettlement is what the sweep does about one journaled ticket, given
+// its rail-neutral view (nil when gone), whether the operator's pending claim
+// carries the payer's recorded receipt, and the time. The contract's rules come
+// from settle.Classify; what this adds is the payer's own receipt:
 //
 //   - A settle is legal only inside the window, so a recorded receipt is
-//     re-fired there: against an OPEN box, or a box carrying the operator's
+//     re-fired there: against an open ticket, or one carrying the operator's
 //     claim when the claim matches the receipt (a mismatch would freeze it).
 //   - Past the window an operator claim goes to settleLapsed, but only once
 //     lapseFallback has passed, since the node's own driver normally does it.
-//   - A missing box is finished only once the ticket has expired: the open is
+//   - A missing ticket is finished only once it has expired: the open is
 //     submitted without waiting for confirmation, and the contract accepts it
 //     until expires_at.
-func decideTicket(rec TicketRecord, box *escrow.TicketRecord, now time.Time, lapseFallback time.Duration) reconcileAction {
-	if box == nil {
+func decideSettlement(rec TicketRecord, t *settle.Ticket, claimMatched bool, now time.Time, lapseFallback time.Duration) reconcileAction {
+	if t == nil {
 		if now.After(rec.ExpiresAt.Add(reconcileSkew)) {
 			return reconcileForget
 		}
 		return reconcileWait
 	}
-	switch escrow.Classify(box, now.Add(-reconcileSkew)) {
-	case escrow.VerdictArbitrate:
+	switch settle.Classify(*t, now.Add(-reconcileSkew)) {
+	case settle.VerdictArbitrate:
 		return reconcileForget
-	case escrow.VerdictRefund:
+	case settle.VerdictRefund:
 		return reconcileRefund
-	case escrow.VerdictLapse:
-		if now.After(box.SettlementDeadline().Add(lapseFallback)) {
+	case settle.VerdictLapse:
+		if now.After(t.DeadlineTime().Add(lapseFallback)) {
 			return reconcileLapse
 		}
 		return reconcileWait
-	case escrow.VerdictWait:
+	case settle.VerdictWait:
 		if rec.Status != TicketSettlePending || rec.Settle == nil || now.Sub(rec.UpdatedAt) < settlePendingGrace ||
-			now.Add(reconcileSkew).After(box.SettlementDeadline()) {
+			now.Add(reconcileSkew).After(t.DeadlineTime()) {
 			return reconcileWait
 		}
 		switch {
-		case box.Status == escrow.StatusOpen:
+		case t.Status == settle.StatusOpen:
 			return reconcileResettle
-		case box.Status == escrow.StatusPendingSettle && box.PendingBy == escrow.PendingByOperator && claimMatches(*rec.Settle, box):
+		case t.Status == settle.StatusPendingOperator && claimMatched:
 			return reconcileResettle
 		}
 	}

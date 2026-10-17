@@ -92,6 +92,7 @@ The canonical implementation; it generates every golden vector.
 | `attest` | TEE measurement checks: Intel TDX quote parsing, dstack event-log replay into RTMR3, compose-file policy, PCK chain and collateral, and the trusted dstack OS images and zs-node releases. |
 | `inject` | Body mutators applied before sealing (`DefaultStoreFalse`, `DropEmptyTools`, `DropRoutingPreferences`, `InjectSafetyIdentifier`, `InjectStreamOptionsIncludeUsage`) plus `FitsContextWindow`; discovery shapes (`OperatorDetails` / `OperatorDetailsModel` / `ModelReasoning`, `TEEAdvertisement` / `TEEEvidenceBundle`). None touch message/reasoning/tool history. |
 | `tools` | Built-in tool registry + tool-loop helpers (chat/responses rewriters, frame stitchers, marker/effect/status frame marshaling). |
+| `settle` | The settlement rules every payment rail shares: the ticket view, `Classify` (what call a live ticket allows now), and the protocol fee math (`NetFee`, `ComputeFeeBreakdown`). |
 | `escrow` | `ZeroSignalEscrow` ABI client (embedded ARC-56 JSON). `ComposeOpen` / `ComposeSettle` / `ComposeProtest`, `VerifyOpenAppCall` / `VerifyOpenGroup`, box decoders, operator-registry helpers. |
 | `algod` | Thin `Client` interface over the algod SDK, plus per-network presets (escrow app id, endpoints). |
 | `algo` | Adapts a keystore entry into a `TransactionSigner` for `AtomicTransactionComposer` groups. |
@@ -111,7 +112,7 @@ The canonical implementation; it generates every golden vector.
 
 A port of the vectored Go packages so a browser can speak the protocol directly to a node.
 Subpaths: `wire`, `ticket`, `selection`, `pricing`, `imageprice`, `tokenize`, `transient`,
-`steering`, `relay`, `attest`, `inject`, `escrow`, `tools`, plus the fixtures under `testdata/*`. See
+`steering`, `relay`, `attest`, `inject`, `escrow`, `settle`, `tools`, plus the fixtures under `testdata/*`. See
 [`ts/README.md`](./ts/README.md).
 
 Wire-shaped types use snake_case property names matching the JSON wire format, so `JSON.stringify(envelope)` produces the bytes the Go side emits — no field-rename layer. Function names are camelCase.
