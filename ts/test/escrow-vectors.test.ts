@@ -17,14 +17,12 @@ import { hex } from '@scure/base'
 
 import {
     classify,
-    computeFeeBreakdown,
     decodeNodeRecord,
     decodeOperatorRecord,
     decodeTicketRecord,
     boundedRingGapIters,
     freeQuotaBoxKey,
     gapOpUpsForIters,
-    netFee,
     nodeBoxKey,
     nodeBoxPrefix,
     nodeBoxPrefixForOperator,
@@ -104,8 +102,6 @@ describe('escrow_vectors.json', () => {
             v.records.nodes,
             v.revenue_windows,
             v.classify,
-            v.fees.net_fee,
-            v.fees.fee_breakdown,
             v.fees.settle_inner_count,
             v.fees.ring_gap,
             v.fees.gap_op_ups_for_iters,
@@ -291,29 +287,6 @@ describe('escrow_vectors.json', () => {
     })
 
     describe('fees', () => {
-        for (const c of v.fees.net_fee) {
-            it(`netFee(${c.amount_charged}, ${c.fee_bps}, ${c.discount_bps})`, () => {
-                expect(String(netFee(BigInt(c.amount_charged), BigInt(c.fee_bps), BigInt(c.discount_bps)))).toBe(c.want)
-                // TicketRecord decodes the bps as numbers; that path must agree too.
-                expect(String(netFee(BigInt(c.amount_charged), Number(c.fee_bps), Number(c.discount_bps)))).toBe(c.want)
-            })
-        }
-        for (const c of v.fees.fee_breakdown) {
-            it(`computeFeeBreakdown(${c.amount_charged}, ${c.max_price}, ${c.fee_bps})`, () => {
-                const b = computeFeeBreakdown(
-                    BigInt(c.amount_charged),
-                    BigInt(c.max_price),
-                    BigInt(c.fee_bps),
-                    BigInt(c.discount_bps),
-                )
-                expect([b.amountCharged, b.netFee, b.refund, b.totalDebit].map(String)).toEqual([
-                    c.amount_charged,
-                    c.net_fee,
-                    c.refund,
-                    c.total_debit,
-                ])
-            })
-        }
         for (const c of v.fees.settle_inner_count) {
             it(`settleInnerCount(${c.amount_charged}, ${c.max_price})`, () => {
                 expect(String(settleInnerCount(BigInt(c.amount_charged), BigInt(c.max_price)))).toBe(c.want)

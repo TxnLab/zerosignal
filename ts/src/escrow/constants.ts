@@ -27,7 +27,9 @@ export const OPERATOR_STATUS_EVICTED = 2
 
 export const NODE_STATUS_ACTIVE = 1
 
-export const BPS_DENOMINATOR = 10_000n
+// One value for every rail, so escrow re-exports settle's rather than keeping
+// a twin that could drift.
+export { BPS_DENOMINATOR } from '../settle/fee.js'
 export const REVENUE_BUCKET_COUNT = 30
 // Indexed by ticket UsageType: 1=Tokens, 2=Images, 3=Characters, 4=Seconds,
 // the rest reserved; slot 0 (None) is unused.

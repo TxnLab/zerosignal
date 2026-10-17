@@ -8,14 +8,8 @@
 // zs-proto's classify; this adds what only the payer knows, its own receipt.
 // proto/testdata/reconcile_vectors.json pins it against Go.
 
-import {
-    PENDING_BY_OPERATOR,
-    STATUS_OPEN,
-    STATUS_PENDING_SETTLE,
-    type TicketRecord as TicketBox,
-    classify,
-    settlementDeadline,
-} from '@txnlab/zs-proto/escrow'
+import { type TicketRecord as TicketBox, ticketView } from '@txnlab/zs-proto/escrow'
+import { SettleStatus, type TicketView, classify } from '@txnlab/zs-proto/settle'
 
 import type { NodeRef, TicketStatus } from './types.js'
 
@@ -116,6 +110,23 @@ export function decideTicket(
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
+    if (box === null) return decideSettlement(rec, null, false, clock, lapseFallbackMs)
+    const matched = rec.settle !== undefined && claimMatches(rec.settle, box)
+    return decideSettlement(rec, ticketView(box), matched, clock, lapseFallbackMs)
+}
+
+// decideSettlement is decideTicket over the rail-neutral view of the ticket
+// (null when gone), with the rail's answer to whether the operator's pending
+// claim carries the payer's recorded receipt. Module-private, like Go's: a
+// second rail's wrapper calls it from inside the SDK, and exporting it would
+// make it semver surface before that rail exists.
+function decideSettlement(
+    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle'>,
+    view: TicketView | null,
+    claimMatched: boolean,
+    clock: { nowMs: number; chainMs?: number },
+    lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
+): ReconcileAction {
     // Whole milliseconds: a clock a caller extrapolated can be fractional,
     // which BigInt refuses, and the skew pad dwarfs what flooring drops. A
     // clock that isn't a number at all decides nothing.
@@ -128,11 +139,11 @@ export function decideTicket(
     // so a missing box is forgotten and the grace has elapsed.
     const expiresAt = Number.isFinite(rec.expiresAt) ? rec.expiresAt : 0
     const updatedAt = Number.isFinite(rec.updatedAt) ? rec.updatedAt : 0
-    if (box === null) {
+    if (view === null) {
         return chainMs > expiresAt + RECONCILE_SKEW_MS ? 'forget' : 'wait'
     }
-    const deadlineMs = settlementDeadline(box) * 1000n
-    switch (classify(box, new Date(chainMs - RECONCILE_SKEW_MS))) {
+    const deadlineMs = view.deadline * 1000n
+    switch (classify(view, new Date(chainMs - RECONCILE_SKEW_MS))) {
         case 'arbitrate':
             return 'forget'
         case 'refundInactive':
@@ -149,10 +160,8 @@ export function decideTicket(
             ) {
                 return 'wait'
             }
-            if (box.status === STATUS_OPEN) return 'settle'
-            if (box.status === STATUS_PENDING_SETTLE && box.pendingBy === PENDING_BY_OPERATOR && claimMatches(s, box)) {
-                return 'settle'
-            }
+            if (view.status === SettleStatus.Open) return 'settle'
+            if (view.status === SettleStatus.PendingOperator && claimMatched) return 'settle'
             return 'wait'
         }
     }

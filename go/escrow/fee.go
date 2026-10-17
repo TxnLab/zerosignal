@@ -5,47 +5,21 @@
 
 package escrow
 
-// BpsDenominator is the basis-points denominator (100% = 10_000 bps),
-// mirroring BPS_DENOMINATOR in ZeroSignalEscrow.algo.ts.
-const BpsDenominator = 10_000
+import "github.com/TxnLab/zerosignal/go/settle"
 
-// FeeBreakdown is the payer-facing decomposition of a settled request under
-// the additive fee model, derived from the operator-signed AmountCharged and
-// the open-time fee snapshot (FeeBps / DiscountBps) stored on the ticket box.
-// All amounts are microUSDC.
-type FeeBreakdown struct {
-	// AmountCharged is the operator's base (net) take — what the operator
-	// receives in full. Copied from the signed receipt.
-	AmountCharged uint64
-	// NetFee is the protocol fee the payer pays ON TOP of AmountCharged. Goes
-	// to the treasury. The HAY fee discount is retired (DiscountBps is always
-	// 0), so NetFee always equals the gross fee.
-	NetFee uint64
-	// Refund is what the escrow returns to the payer: MaxPrice (grossed up at
-	// reserve) minus the operator payout minus the net fee.
-	Refund uint64
-	// TotalDebit is the payer's actual cost: AmountCharged + NetFee.
-	TotalDebit uint64
-}
+// BpsDenominator mirrors BPS_DENOMINATOR in ZeroSignalEscrow.algo.ts. The fee
+// math itself is rail-neutral and lives in package settle; what stays here is
+// sizing ZeroSignalEscrow's settle group.
+const BpsDenominator = settle.BpsDenominator
 
-// NetFee returns the protocol fee (microUSDC) charged on top of amountCharged
-// for the fixed-at-open rate (feeBps gross, discountBps HAY discount). It is a
-// byte-for-byte mirror of ZeroSignalEscrow.finalizeSettlement's fee math:
-//
-//	grossFee = floor(amountCharged * feeBps / 10000)
-//	netFee   = floor(grossFee * (10000 - discountBps) / 10000)
-//
-// feeBps is capped at PROTOCOL_FEE_BPS_MAX (2000) and discountBps at 8000 by
-// the contract, so for any realistic amountCharged the uint64 products stay
-// well clear of overflow — same assumption the contract's own uint64
-// arithmetic makes. A discountBps > 10000 (impossible on-chain) would wrap the
-// (10000 - discountBps) term, so it is clamped here defensively.
+// FeeBreakdown is settle.FeeBreakdown: ZeroSignalEscrow.finalizeSettlement
+// computes the same fee as the Solana program.
+type FeeBreakdown = settle.FeeBreakdown
+
+// NetFee is settle.NetFee, floor for floor ZeroSignalEscrow.finalizeSettlement's
+// fee math.
 func NetFee(amountCharged, feeBps, discountBps uint64) uint64 {
-	if discountBps > BpsDenominator {
-		discountBps = BpsDenominator
-	}
-	grossFee := amountCharged * feeBps / BpsDenominator
-	return grossFee * (BpsDenominator - discountBps) / BpsDenominator
+	return settle.NetFee(amountCharged, feeBps, discountBps)
 }
 
 // SettleInnerCount returns an upper bound on the number of USDC disbursement
@@ -70,7 +44,7 @@ func NetFee(amountCharged, feeBps, discountBps uint64) uint64 {
 // fire when amountCharged > 0, and the refund inner can only fire when
 // maxPrice > amountCharged + netFee, which implies maxPrice > amountCharged.
 //
-// It deliberately does NOT take feeBps, even though ComputeFeeBreakdown above
+// It deliberately does NOT take feeBps, even though ComputeFeeBreakdown
 // mirrors the contract exactly. The authoritative feeBps is the ticket's
 // open-time snapshot on its box; a composer on the response hot path has only
 // the cached protocol-fee global, and an admin fee rotation mid-ticket makes
@@ -97,22 +71,7 @@ func SettleInnerCount(amountCharged, maxPrice uint64) uint64 {
 // under-funding reverts the settle on every retry.
 const settleLapsedMaxInners uint64 = 3
 
-// ComputeFeeBreakdown returns the full payer-facing breakdown for a settled
-// request: operator payout (amountCharged), net protocol fee, payer refund, and
-// total debit. maxPrice is the escrowed ceiling (grossed up at reserve). When
-// amountCharged + netFee exceeds maxPrice (should never happen — the contract
-// asserts otherwise — but guards a corrupt/old snapshot), Refund clamps to 0.
+// ComputeFeeBreakdown is settle.ComputeFeeBreakdown.
 func ComputeFeeBreakdown(amountCharged, maxPrice, feeBps, discountBps uint64) FeeBreakdown {
-	netFee := NetFee(amountCharged, feeBps, discountBps)
-	totalDebit := amountCharged + netFee
-	var refund uint64
-	if maxPrice > totalDebit {
-		refund = maxPrice - totalDebit
-	}
-	return FeeBreakdown{
-		AmountCharged: amountCharged,
-		NetFee:        netFee,
-		Refund:        refund,
-		TotalDebit:    totalDebit,
-	}
+	return settle.ComputeFeeBreakdown(amountCharged, maxPrice, feeBps, discountBps)
 }

@@ -28,7 +28,7 @@ with algosdk `Transaction` objects, so the SDK and your wallet must share one co
 The protocol primitives (`@txnlab/zs-proto`) come with it, at exactly the version this release
 was built with, under `@txnlab/zerosignal/proto` and `@txnlab/zerosignal/proto/<name>`
 (`wire`, `ticket`, `selection`, `steering`, `relay`, `transient`, `inject`, `pricing`,
-`tokenize`, `imageprice`, `escrow`, `attest`, `tools`).
+`tokenize`, `imageprice`, `escrow`, `settle`, `attest`, `tools`).
 
 ## Ports
 

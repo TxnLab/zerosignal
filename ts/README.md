@@ -45,12 +45,13 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 | `…/steering` | The arithmetic behind a payer's own routing signals: relay-reputation `decay` / `bump` / `relayDownranked`, target backoff (`backoffWindowMs`, `recordFailure`, `backoffRemaining`), and the weights-digest `weightsConsensus`. The stores they feed stay with the payer |
 | `…/relay` | Relay request metadata and the inner-path allow-list |
 | `…/tools` | What a payer reads off a tool-bearing stream: the sealed tool-status and image progress / partial / completed frames with `parseStatusEvent` and `partialImageDataUrl`, `ToolAction` and its source icons (`iconHostKey`, `iconDataUrl`, `sanitizeIcons`), `isLinkableUrl` for any URL that becomes an href, and the usage shapes with `generatedOutputTokens` |
-| `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `classify` (what call a ticket box allows now), settlement fee math |
+| `…/escrow` | Escrow app box keys, ticket / operator / node record decoders, `ticketView` and `classify` over a ticket box, settle-group sizing; re-exports `settle`'s fee math |
+| `…/settle` | The settlement rules every rail shares: `TicketView`, `SettleStatus`, `classify` (what call a live ticket allows now), and the protocol fee math (`netFee`, `computeFeeBreakdown`) |
 | `…/attest` | dstack / Intel TDX measurement checks and compose-file policy |
 | `…/inject` | The `/v1/zs/details` discovery types and `parseOperatorDetails`, retention tiers (`isKnownRetention`, `combineRetention`), TEE modes, the payer's pre-seal body mutators (`dropRoutingPreferences`, `dropPromptCacheKey`, `dropEmptyTools`, `clampMaxOutput`), tool classification (`classifyToolEntry`, `normalizeToolName`), server-side tool-growth detection, request-dialect helpers |
 | `…/testdata/*` | The golden-vector fixtures this package is tested against |
 
-`escrow`, `pricing`, `transient`, `steering`, and `relay` are subpath-only: their names
+`escrow`, `settle`, `pricing`, `transient`, `steering`, and `relay` are subpath-only: their names
 (`classify`, `wait`, `decay`, `buildRequest`, …) are package-qualified in Go and would be
 ambiguous at the root.
 

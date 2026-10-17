@@ -76,6 +76,10 @@
             "types": "./dist/escrow/index.d.ts",
             "import": "./dist/escrow/index.js"
         },
+        "./settle": {
+            "types": "./dist/settle/index.d.ts",
+            "import": "./dist/settle/index.js"
+        },
         "./tools": {
             "types": "./dist/tools/index.d.ts",
             "import": "./dist/tools/index.js"
