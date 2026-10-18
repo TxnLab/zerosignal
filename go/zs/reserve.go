@@ -20,8 +20,6 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/algorand/go-algorand-sdk/v2/types"
-
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/transient"
@@ -61,15 +59,13 @@ type ReservedTicket struct {
 	// and inference on one recipient. Never nil on a successful Reserve.
 	SealRecipient age.Recipient
 
-	// PreSignedOpenGroup is the operator-pre-signed 2-tx open group
-	// the proxy completes via SubmitPresignedOpenGroup at open time.
-	// gtxn[1] (the operator's open() AppCall) is signed; gtxn[0]
-	// (the payer-signed usdcPayment) carries an empty Sig and is
-	// signed by the wallet at submit. The per-ticket box MBR is no
-	// longer a funding leg here — it's drawn from the payer's prepaid
-	// MBR pool at open(). Empty when the operator's node is running
-	// ticket-only admission (no on-chain escrow).
-	PreSignedOpenGroup []types.SignedTxn
+	// PresignedOpen is the node's pre-signed open as the reserve response
+	// carried it (presigned_open_txn), for the wallet to complete. Reserve has
+	// checked that it decodes; only the wallet reads it. On Algorand it is the
+	// 2-tx open group: gtxn[1] (the operator's open() AppCall) is signed and
+	// gtxn[0] (the payer's usdcPayment) is left for the wallet to sign. Empty
+	// when the node sent none.
+	PresignedOpen string
 }
 
 // Wipe zeroes ResponseKey and AgeIdentity, best effort. SPEC § 3: the payer
@@ -772,22 +768,23 @@ func (c *HTTPReserveClient) reserveAttempt(
 		return nil, errors.New("reserve commit_k mismatch: wrapped_response_key does not hash to ticket.commit_k")
 	}
 
-	var presigned []types.SignedTxn
+	// Checked here, as the TS SDK's reserve leg does, so a group that can't
+	// decode fails the reserve and dispatch moves to the next candidate rather
+	// than failing at open.
 	if parsed.PreSignedOpenTxn != "" {
-		presigned, err = escrow.DecodeOpenGroup(parsed.PreSignedOpenTxn)
-		if err != nil {
+		if _, err := escrow.DecodeOpenGroup(parsed.PreSignedOpenTxn); err != nil {
 			clear(key[:])
 			return nil, fmt.Errorf("decode presigned open group: %w", err)
 		}
 	}
 
 	return &ReservedTicket{
-		Ticket:             &parsed.Ticket,
-		ResponseKey:        key,
-		AgeIdentity:        ephemeral,
-		AlgoUSDPrice:       parsed.AlgoUSDPrice,
-		PreSignedOpenGroup: presigned,
-		SealRecipient:      sealRecipient,
+		Ticket:        &parsed.Ticket,
+		ResponseKey:   key,
+		AgeIdentity:   ephemeral,
+		AlgoUSDPrice:  parsed.AlgoUSDPrice,
+		PresignedOpen: parsed.PreSignedOpenTxn,
+		SealRecipient: sealRecipient,
 	}, nil
 }
 

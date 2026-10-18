@@ -22,7 +22,6 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
-	"github.com/algorand/go-algorand-sdk/v2/types"
 )
 
 var reconcileNow = time.Unix(1_800_000_000, 0)
@@ -407,7 +406,7 @@ func TestReconciler_PanickingGuardAfterASubmitIsNoFailure(t *testing.T) {
 // failingOpenWallet's Open always fails, as a payer short of funds does.
 type failingOpenWallet struct{}
 
-func (failingOpenWallet) Open(context.Context, *ticket.Ticket, Operator, []types.SignedTxn) (*OpenHandle, error) {
+func (failingOpenWallet) Open(context.Context, *ticket.Ticket, Operator, string) (*OpenHandle, error) {
 	return nil, errors.New("insufficient funds")
 }
 func (failingOpenWallet) PayerAddr() string { return "PAYER" }

@@ -234,8 +234,12 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	if w.PayerAddr() != "PAYER" || w.keystore != cfg.Signer || w.depositSlots != 7 {
 		t.Errorf("payer %q keystore %v slots %d, want PAYER, the Signer and 7", w.PayerAddr(), w.keystore, w.depositSlots)
 	}
-	if w.escrow.AppID != 1 || w.escrow.TicketMbr != 123_400 || w.escrow.UsdcAssetID != 31566704 {
-		t.Errorf("escrow app %d mbr %d usdc %d, want the configured app's config", w.escrow.AppID, w.escrow.TicketMbr, w.escrow.UsdcAssetID)
+	ec, ok := w.chain.(escrowClientChain)
+	if !ok {
+		t.Fatalf("wallet chain %T, want the escrow client's", w.chain)
+	}
+	if ec.AppID != 1 || ec.TicketMbr != 123_400 || ec.UsdcAssetID != 31566704 {
+		t.Errorf("escrow app %d mbr %d usdc %d, want the configured app's config", ec.AppID, ec.TicketMbr, ec.UsdcAssetID)
 	}
 	got := senders()
 	if len(got) == 0 {
@@ -357,7 +361,7 @@ func TestOpenHandle_StandaloneAckSubmitsTheReceipt(t *testing.T) {
 	h, submitted := walletHandle(t)
 	r := &ticket.UsageReceipt{AmountCharged: 11, TtftMs: 12, DecodeMs: 13, ActualInputCount: 14, ActualOutputCount: 15,
 		OutputUsageType: 16, AuxOutputUsageType: 17, AuxOutputCount: 18}
-	_, fee, _, err := h.AckSettle(context.Background(), r, nil)
+	_, fee, _, err := h.AckSettle(context.Background(), r, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,8 +379,9 @@ func TestOpenHandle_StandaloneAckSubmitsTheReceipt(t *testing.T) {
 }
 
 // settleGroupFor composes the node's atomic settle group for receipt r on h's
-// ticket, signed by a fresh node key that h's operator then names.
-func settleGroupFor(t *testing.T, h *OpenHandle, r *ticket.UsageReceipt) []types.SignedTxn {
+// ticket, signed by a fresh node key that h's operator then names, and its
+// wire form.
+func settleGroupFor(t *testing.T, h *OpenHandle, r *ticket.UsageReceipt) ([]types.SignedTxn, string) {
 	t.Helper()
 	node := crypto.GenerateAccount()
 	h.Operator.SigningAddr = node.Address.String()
@@ -384,12 +389,16 @@ func settleGroupFor(t *testing.T, h *OpenHandle, r *ticket.UsageReceipt) []types
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := h.wallet.escrow.ComposeSettleGroup(context.Background(), h.payerSettleArgs(raw, settleArgsOf(r)),
+	group, err := h.wallet.chain.(escrowClientChain).ComposeSettleGroup(context.Background(), h.payerSettleArgs(raw, settleArgsOf(r)),
 		transaction.BasicAccountTransactionSigner{Account: node}, node.Address.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return group
+	encoded, err := escrow.EncodeSettleGroup(group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return group, encoded
 }
 
 // A node that takes the ack gets the completed group and nothing is
@@ -398,11 +407,11 @@ func settleGroupFor(t *testing.T, h *OpenHandle, r *ticket.UsageReceipt) []types
 func TestOpenHandle_AckHandedToNode(t *testing.T) {
 	h, submitted := walletHandle(t)
 	r := &ticket.UsageReceipt{AmountCharged: 11}
-	group := settleGroupFor(t, h, r)
+	group, encoded := settleGroupFor(t, h, r)
 	var got wire.SettleAck
 	h.deliverAck = func(_ context.Context, ack wire.SettleAck) error { got = ack; return nil }
 
-	txid, _, rejected, err := h.AckSettle(context.Background(), r, group)
+	txid, _, rejected, err := h.AckSettle(context.Background(), r, encoded)
 	if err != nil || rejected {
 		t.Fatalf("err %v, rejected %v", err, rejected)
 	}
@@ -439,10 +448,10 @@ func TestOpenHandle_AckDeliveryFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, submitted := walletHandle(t)
 			r := &ticket.UsageReceipt{AmountCharged: 11}
-			group := settleGroupFor(t, h, r)
+			_, encoded := settleGroupFor(t, h, r)
 			h.deliverAck = func(context.Context, wire.SettleAck) error { return tc.deliverErr }
 
-			_, _, _, err := h.AckSettle(context.Background(), r, group)
+			_, _, _, err := h.AckSettle(context.Background(), r, encoded)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
 			}
@@ -488,7 +497,7 @@ func refsNode3_4(tx types.Transaction) bool {
 func TestOpenHandle_NoSettleGroupIsNotARejectedGroup(t *testing.T) {
 	h, submitted := walletHandle(t)
 	h.Operator.SigningAddr = crypto.GenerateAccount().Address.String()
-	_, _, rejected, err := h.AckSettle(context.Background(), &ticket.UsageReceipt{AmountCharged: 11}, nil)
+	_, _, rejected, err := h.AckSettle(context.Background(), &ticket.UsageReceipt{AmountCharged: 11}, "")
 	if err != nil || rejected {
 		t.Errorf("err %v, groupRejected %v; want a plain standalone settle", err, rejected)
 	}

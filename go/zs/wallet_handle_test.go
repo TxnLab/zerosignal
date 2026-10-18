@@ -24,7 +24,7 @@ func TestOpenHandle_NilWalletGuard(t *testing.T) {
 	h := &OpenHandle{TicketID: "dGlja2V0LXhvcnZvenp6MDA="}
 	r := &ticket.UsageReceipt{}
 
-	if _, _, _, err := h.AckSettle(context.Background(), r, nil); err == nil || !strings.Contains(err.Error(), "detached") {
+	if _, _, _, err := h.AckSettle(context.Background(), r, ""); err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Errorf("AckSettle on detached handle: err=%v, want 'detached'", err)
 	}
 	if _, _, err := h.Protest(context.Background(), r, []byte{}, escrow.ProtestReasonBodyHash); err == nil || !strings.Contains(err.Error(), "detached") {

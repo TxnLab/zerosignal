@@ -16,7 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/algorand/go-algorand-sdk/v2/transaction"
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/algo"
@@ -32,17 +31,12 @@ import (
 // post-response verification path can call AckSettle or Protest with
 // the right bound arguments.
 type Wallet struct {
-	escrow    *escrow.Client
+	// chain is every escrow call the wallet makes, so a test fakes it without
+	// a live algod.
+	chain     EscrowChain
 	keystore  algo.MultipleWalletSigner
 	payerAddr string
 	log       *slog.Logger // nil: slog.Default()
-
-	// pool is the narrow escrow-dependency surface the prepaid-MBR-pool
-	// path (EnsureDeposit + the Open deposit-revert retry) drives. It's a
-	// seam over *escrow.Client (poolEscrowAdapter) so unit tests can inject a
-	// fake without a live algod/keystore. AckSettle / Protest / RefundInactive
-	// stay on the concrete w.escrow — they're not part of the pool surface.
-	pool poolEscrow
 
 	// depositSlots is the prepaid-MBR-pool working set (concurrent ticket
 	// boxes the auto-deposit backs), from zs.concurrent_slots; 0 falls
@@ -65,7 +59,7 @@ type Wallet struct {
 }
 
 // quotaMbrDue is the free-quota box MBR this payer's pool still has to cover,
-// with the box-exists answer latched. See poolEscrow.FreeQuotaMbrDueFor.
+// with the box-exists answer latched. See EscrowChain.FreeQuotaMbrDueFor.
 //
 // Note the asymmetry the latch can't fix: a payer who only ever uses PAID
 // models never gets a quota box, so the term stays due forever and every
@@ -79,116 +73,11 @@ func (w *Wallet) quotaMbrDue(ctx context.Context) uint64 {
 	if w.quotaBoxKnown.Load() {
 		return 0
 	}
-	due := w.pool.FreeQuotaMbrDueFor(ctx, w.payerAddr)
+	due := w.chain.FreeQuotaMbrDueFor(ctx, w.payerAddr)
 	if due == 0 {
 		w.quotaBoxKnown.Store(true)
 	}
 	return due
-}
-
-// poolEscrow is the narrow escrow surface the prepaid-MBR-pool path depends
-// on. Kept tight (only what EnsureDeposit + the Open retry need) so the test
-// fake stays small; the production binding is poolEscrowAdapter over
-// *escrow.Client.
-type poolEscrow interface {
-	// TicketMBR is the per-ticket box MBR (µALGO) the pool backs per slot.
-	// 0 means RefreshConfig hasn't loaded it yet.
-	TicketMBR() uint64
-	// FreeQuotaMbrDueFor is the free-quota box MBR this payer's pool STILL has
-	// to cover: the full term while they have no quota box, 0 once open() has
-	// created one (it's charged exactly once and never refunded). Exactness
-	// matters for a payer who opens a free ticket — a flat term would leave them
-	// carrying an idle slice of ALGO forever after the charge could no longer
-	// recur. It buys nothing for a paid-only payer, who never gets a box and so
-	// keeps the term due indefinitely (see Wallet.quotaMbrDue). Fails open (full
-	// term) on a read error.
-	FreeQuotaMbrDueFor(ctx context.Context, payerAddr string) uint64
-	// ReadPayerDeposit returns the payer's pool state (AlgoBalance on
-	// deposit + live OpenTickets count).
-	ReadPayerDeposit(ctx context.Context, payerAddr string) (escrow.PayerDeposit, error)
-	// IsPayerOptedIn distinguishes "no pool yet" (OptIn on first deposit)
-	// from "opted in with a drained balance" (NoOp top-up).
-	IsPayerOptedIn(ctx context.Context, payerAddr string) (bool, error)
-	// SpendableMicroAlgos is the payer's withdrawable ALGO (Amount −
-	// MinBalance): the affordability ceiling for the deposit Payment + fees.
-	SpendableMicroAlgos(ctx context.Context, payerAddr string) (uint64, error)
-	// MinTxnFee is the network's per-txn minimum fee (µALGO), used to size
-	// the deposit group's pooled fee for the affordability check.
-	MinTxnFee(ctx context.Context) (uint64, error)
-	// ComposeDepositMbr funds (or tops up) the pool; optIn carries the
-	// OnComplete=OptIn on the first deposit.
-	ComposeDepositMbr(ctx context.Context, amount uint64, optIn bool, signer transaction.TransactionSigner, signerAddr string) (escrow.CallResult, error)
-	// SubmitPresignedOpenGroup verifies the node-delivered 2-tx open group
-	// against spec (every field pinned to the signature-verified ticket —
-	// the group is counterparty-composed, so this runs BEFORE the payer
-	// signs gtxn[0] = usdcPayment; gtxn[1] = open() AppCall is
-	// operator-signed), then completes + broadcasts it.
-	SubmitPresignedOpenGroup(ctx context.Context, group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error)
-	// CompletePresignedOpenGroup runs the same verification and signature but
-	// broadcasts nothing, for a node that submits the group itself.
-	CompletePresignedOpenGroup(group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error)
-}
-
-// poolEscrowAdapter is the production poolEscrow, wrapping *escrow.Client.
-// It bridges the field-vs-method gap (TicketMbr is a struct field) and the
-// two reads the escrow.Client doesn't surface directly (spendable balance,
-// min-fee) via its embedded algod SDK client.
-type poolEscrowAdapter struct{ c *escrow.Client }
-
-func (a poolEscrowAdapter) TicketMBR() uint64 { return a.c.TicketMbr }
-func (a poolEscrowAdapter) FreeQuotaMbrDueFor(ctx context.Context, payerAddr string) uint64 {
-	return a.c.FreeQuotaMbrDueFor(ctx, payerAddr)
-}
-
-func (a poolEscrowAdapter) ReadPayerDeposit(ctx context.Context, payerAddr string) (escrow.PayerDeposit, error) {
-	return a.c.ReadPayerDeposit(ctx, payerAddr)
-}
-
-func (a poolEscrowAdapter) IsPayerOptedIn(ctx context.Context, payerAddr string) (bool, error) {
-	return a.c.IsPayerOptedIn(ctx, payerAddr)
-}
-
-func (a poolEscrowAdapter) SpendableMicroAlgos(ctx context.Context, payerAddr string) (uint64, error) {
-	acct, err := a.c.Algod.SDKClient().AccountInformation(payerAddr).Do(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("escrow: account info for spendable balance: %w", err)
-	}
-	if acct.Amount < acct.MinBalance {
-		return 0, nil
-	}
-	return acct.Amount - acct.MinBalance, nil
-}
-
-func (a poolEscrowAdapter) MinTxnFee(ctx context.Context) (uint64, error) {
-	sp, err := a.c.Algod.SuggestedParams(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("escrow: suggested params for min fee: %w", err)
-	}
-	return sp.MinFee, nil
-}
-
-func (a poolEscrowAdapter) ComposeDepositMbr(ctx context.Context, amount uint64, optIn bool, signer transaction.TransactionSigner, signerAddr string) (escrow.CallResult, error) {
-	return a.c.ComposeDepositMbr(ctx, amount, optIn, signer, signerAddr)
-}
-
-func (a poolEscrowAdapter) SubmitPresignedOpenGroup(ctx context.Context, group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error) {
-	// Stamp the chain-config slice of the spec here rather than in
-	// Wallet.Open: the escrow client is its single source of truth
-	// (RefreshConfig-loaded), and it keeps the pool seam's callers free of
-	// *escrow.Client field access so the fake stays a pure recorder.
-	return a.c.SubmitPresignedOpenGroup(ctx, group, payerSigner, a.stampChain(spec))
-}
-
-func (a poolEscrowAdapter) CompletePresignedOpenGroup(group []types.SignedTxn, payerSigner transaction.TransactionSigner, spec escrow.OpenGroupSpec) (escrow.OpenResult, error) {
-	return a.c.CompletePresignedOpenGroup(group, payerSigner, a.stampChain(spec))
-}
-
-func (a poolEscrowAdapter) stampChain(spec escrow.OpenGroupSpec) escrow.OpenGroupSpec {
-	spec.AppID = a.c.AppID
-	spec.AppAddress = a.c.AppAddr
-	spec.UsdcAssetID = a.c.UsdcAssetID
-	spec.TicketMbr = a.c.TicketMbr
-	return spec
 }
 
 // WalletConfig groups the dependencies buildWallet assembles. Keeping
@@ -222,8 +111,7 @@ func NewWallet(cfg WalletConfig) (*Wallet, error) {
 		return nil, fmt.Errorf("wallet: keystore has no private key for payer address %s", cfg.PayerAddr)
 	}
 	return &Wallet{
-		escrow:       cfg.Escrow,
-		pool:         poolEscrowAdapter{c: cfg.Escrow},
+		chain:        NewEscrowChain(cfg.Escrow),
 		keystore:     cfg.Keystore,
 		payerAddr:    cfg.PayerAddr,
 		depositSlots: cfg.DepositSlots,
@@ -250,10 +138,10 @@ func (w *Wallet) PayerAddr() string { return w.payerAddr }
 // on-chain open-time snapshot remains the settlement authority. See
 // escrow.Client.ProtocolFeeBpsNow.
 func (w *Wallet) ProtocolFeeBps(ctx context.Context) (feeBps uint64, err error) {
-	if w == nil || w.escrow == nil {
+	if w == nil || w.chain == nil {
 		return 0, errors.New("wallet: escrow client unavailable")
 	}
-	return w.escrow.ProtocolFeeBpsNow(ctx)
+	return w.chain.ProtocolFeeBps(ctx)
 }
 
 // OpenHandle is the per-request state Wallet.Open returns. The
@@ -331,8 +219,8 @@ var errNoSettleAckRoute = errors.New("zs: no relay serves the settle ack")
 // contract's global default apply. When the proxy wants a tighter
 // window it'll thread a per-ticket value through here; that's a
 // step-8 knob.
-func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error) {
-	return w.open(ctx, tk, op, presignedOpenGroup, true)
+func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpen string) (*OpenHandle, error) {
+	return w.open(ctx, tk, op, presignedOpen, true)
 }
 
 // OpenForNode is Open for a node that submits the group itself
@@ -344,11 +232,11 @@ func (w *Wallet) Open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 // the caller arms the refund watchdog and journals the ticket exactly as after
 // Open. The contract refuses an open past the ticket's expires_at, which bounds
 // how long a node can hold it.
-func (w *Wallet) OpenForNode(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn) (*OpenHandle, error) {
-	return w.open(ctx, tk, op, presignedOpenGroup, false)
+func (w *Wallet) OpenForNode(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpen string) (*OpenHandle, error) {
+	return w.open(ctx, tk, op, presignedOpen, false)
 }
 
-func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpenGroup []types.SignedTxn, submit bool) (*OpenHandle, error) {
+func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presignedOpen string, submit bool) (*OpenHandle, error) {
 	if tk == nil {
 		return nil, errors.New("wallet: open: ticket is nil")
 	}
@@ -358,8 +246,12 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 	if op.OwnerAddr == "" || op.SigningAddr == "" {
 		return nil, errors.New("wallet: open: operator addresses incomplete")
 	}
-	if len(presignedOpenGroup) == 0 {
+	if presignedOpen == "" {
 		return nil, errors.New("wallet: open: presignedOpenGroup is empty (operator did not return a pre-signed open group on reserve)")
+	}
+	presignedOpenGroup, err := escrow.DecodeOpenGroup(presignedOpen)
+	if err != nil {
+		return nil, fmt.Errorf("wallet: open: decode presigned open group: %w", err)
 	}
 
 	ticketIDRaw, err := decodeTicketID(tk.TicketID)
@@ -371,7 +263,7 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 	// field comes from the signature-verified ticket or the chain-resolved
 	// operator snapshot — never from the group itself. The chain-config
 	// slice (app id/address, USDC asset, ticket MBR) is stamped by
-	// poolEscrowAdapter from the escrow client, its single source of truth.
+	// the EscrowChain from the escrow client, its single source of truth.
 	// SettlementGraceSeconds is pinned to 0 (the contract's `grace` default
 	// applies), which is what makes the refund watchdog's deadline
 	// D = expires_at + default grace sound; a node that authored a different
@@ -409,7 +301,7 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 		// No retry here: nothing reached the chain, so a pool revert can only
 		// surface at the node, which refuses with payment_verification_failed and
 		// the dispatcher answers with RecheckDeposit.
-		result, err := w.pool.CompletePresignedOpenGroup(presignedOpenGroup, signer, openSpec)
+		result, err := w.chain.CompletePresignedOpenGroup(presignedOpenGroup, signer, openSpec)
 		if err != nil {
 			return nil, fmt.Errorf("wallet: complete presigned open group: %w", err)
 		}
@@ -420,7 +312,7 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 		h.OpenGroup = result.Encoded
 		return h, nil
 	}
-	result, err := w.pool.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
+	result, err := w.chain.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
 	if err != nil {
 		// An open() that reverts on a prepaid-pool guard ('payer has no MBR
 		// deposit' / 'insufficient MBR deposit') is identifiable — the escrow
@@ -457,7 +349,7 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 			deposited = 0 // nothing landed; the guard is unchanged, so don't retry
 		}
 		if deposited > 0 {
-			result, err = w.pool.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
+			result, err = w.chain.SubmitPresignedOpenGroup(ctx, presignedOpenGroup, signer, openSpec)
 		}
 		// The re-ensure's failure is the one the caller can act on (it names
 		// the ALGO the pool needs), so it rides along with the revert; with
@@ -490,7 +382,10 @@ func (w *Wallet) handleFor(tk *ticket.Ticket, op Operator, result escrow.OpenRes
 }
 
 // AckSettle is the payer's matching co-sign on an operator-initiated
-// settle call. The contract enforces that:
+// settle call. settleGroup is the node's group in its wire form, or "" for
+// none; the caller checks that it decodes first (checkSettleGroupHeader), as
+// one that doesn't fails the ack outright rather than going standalone. The
+// contract enforces that:
 //  1. the payer's amountCharged / receiptDigest / receiptSig match
 //     what the operator submitted first (or the slot freezes);
 //  2. both calls happen inside the settle window.
@@ -515,18 +410,24 @@ func (w *Wallet) handleFor(tk *ticket.Ticket, op Operator, result escrow.OpenRes
 // It stays true through the standalone fallback so the caller can locally
 // downrank the node even though the payment still settled. It is NOT set for a
 // spec-build failure (our decode, not the node's fault) or a plain algod error.
-func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, presignedSettleGroup []types.SignedTxn) (txid string, feeMicroalgos uint64, groupRejected bool, err error) {
+func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (txid string, feeMicroalgos uint64, groupRejected bool, err error) {
 	if h.wallet == nil {
 		return "", 0, false, errors.New("wallet: ack-settle on detached OpenHandle (test-only or misconstructed)")
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
-	return ackSettle(len(presignedSettleGroup) > 0, ackSettleDeps{
+	return ackSettle(settleGroup != "", ackSettleDeps{
 		spec: func() (escrow.SettleGroupSpec, error) { return h.settleGroupSpec(receipt) },
 		submitGroup: func(spec escrow.SettleGroupSpec) (escrow.CallResult, error) {
-			if h.deliverAck == nil {
-				return h.wallet.escrow.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+			// The caller checked that it decodes (checkSettleGroupHeader), so a
+			// failure here is a group no node sent and surfaces as the error.
+			presignedSettleGroup, err := escrow.DecodeSettleGroup(settleGroup)
+			if err != nil {
+				return escrow.CallResult{}, err
 			}
-			res, encoded, err := h.wallet.escrow.CompletePresignedSettleGroup(presignedSettleGroup, signer, spec)
+			if h.deliverAck == nil {
+				return h.wallet.chain.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+			}
+			res, encoded, err := h.wallet.chain.CompletePresignedSettleGroup(presignedSettleGroup, signer, spec)
 			if err != nil {
 				return escrow.CallResult{}, err
 			}
@@ -538,7 +439,7 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 				if derr != nil {
 					return escrow.CallResult{}, derr
 				}
-				if err := escrow.SubmitSettleGroup(ctx, h.wallet.escrow.Algod, completed); err != nil {
+				if err := h.wallet.chain.SubmitSettleGroup(ctx, completed); err != nil {
 					return escrow.CallResult{}, err
 				}
 				return res, nil
@@ -650,7 +551,7 @@ func (h *OpenHandle) settleStandalone(ctx context.Context, a SettleArgs) (escrow
 		return escrow.CallResult{}, fmt.Errorf("decode ticket id: %w", err)
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
-	return h.wallet.escrow.ComposeSettleStandalone(ctx, h.payerSettleArgs(ticketIDRaw, a), signer, h.wallet.payerAddr)
+	return h.wallet.chain.ComposeSettleStandalone(ctx, h.payerSettleArgs(ticketIDRaw, a), signer, h.wallet.payerAddr)
 }
 
 // payerSettleArgs is the payer's half of settle() for a. The contract freezes
@@ -685,7 +586,7 @@ func (c walletChain) readBox(ctx context.Context, ticketID string) (*escrow.Tick
 	if err != nil {
 		return nil, err
 	}
-	return c.w.escrow.ReadTicketBox(ctx, raw)
+	return c.w.chain.ReadTicketBox(ctx, raw)
 }
 
 // handle is an OpenHandle for rec. The box's operator owner is the one the
@@ -739,7 +640,7 @@ func (h *OpenHandle) settleGroupSpec(receipt *ticket.UsageReceipt) (escrow.Settl
 		return escrow.SettleGroupSpec{}, fmt.Errorf("decode operator signing addr: %w", err)
 	}
 	return escrow.SettleGroupSpec{
-		AppID:               h.wallet.escrow.AppID,
+		AppID:               h.wallet.chain.Config().AppID,
 		TicketIDRaw:         ticketIDRaw,
 		AmountCharged:       receipt.AmountCharged,
 		ReceiptDigest:       ticket.ReceiptSigDigest(receipt),
@@ -778,7 +679,7 @@ func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, 
 	receiptDigest := ticket.ReceiptSigDigest(receipt)
 
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
-	res, err := h.wallet.escrow.ComposeProtest(ctx, escrow.ProtestArgs{
+	res, err := h.wallet.chain.ComposeProtest(ctx, escrow.ProtestArgs{
 		TicketIDRaw:    ticketIDRaw,
 		AmountCharged:  receipt.AmountCharged,
 		ReceiptDigest:  receiptDigest,
@@ -807,7 +708,7 @@ func (h *OpenHandle) RefundInactive(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("wallet: refund-inactive decode ticket id: %w", err)
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
-	res, err := h.wallet.escrow.ComposeRefundInactive(ctx, escrow.RefundInactiveArgs{
+	res, err := h.wallet.chain.ComposeRefundInactive(ctx, escrow.RefundInactiveArgs{
 		TicketIDRaw: ticketIDRaw,
 		OperatorID:  h.Operator.ID,
 		NodeID:      h.Operator.NodeID,
@@ -852,7 +753,7 @@ func (h *OpenHandle) SettleLapsed(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("wallet: settle-lapsed decode ticket id: %w", err)
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
-	res, err := h.wallet.escrow.ComposeSettleLapsed(ctx, escrow.SettleLapsedArgs{
+	res, err := h.wallet.chain.ComposeSettleLapsed(ctx, escrow.SettleLapsedArgs{
 		TicketIDRaw:       ticketIDRaw,
 		OperatorID:        h.Operator.ID,
 		NodeID:            h.Operator.NodeID,
@@ -969,7 +870,7 @@ func (w *Wallet) PrepareDeposit(ctx context.Context) error {
 	if ready {
 		return nil
 	}
-	optedIn, err := w.pool.IsPayerOptedIn(ctx, w.payerAddr)
+	optedIn, err := w.chain.IsPayerOptedIn(ctx, w.payerAddr)
 	if err != nil {
 		return fmt.Errorf("wallet: prepaid pool opt-in check: %w", err)
 	}
@@ -996,11 +897,11 @@ func (w *Wallet) RecheckDeposit() {
 // pool that just can't reach its full working-set target but can still serve
 // the request.
 func (w *Wallet) freeDepositSlots(ctx context.Context) (uint64, error) {
-	ticketMbr := w.pool.TicketMBR()
+	ticketMbr := w.chain.TicketMBR()
 	if ticketMbr == 0 {
 		return 0, errors.New("wallet: free-deposit-slots: ticket MBR not loaded (call RefreshConfig first)")
 	}
-	dep, err := w.pool.ReadPayerDeposit(ctx, w.payerAddr)
+	dep, err := w.chain.ReadPayerDeposit(ctx, w.payerAddr)
 	if err != nil {
 		return 0, fmt.Errorf("wallet: free-deposit-slots read: %w", err)
 	}
@@ -1012,7 +913,7 @@ func (w *Wallet) freeDepositSlots(ctx context.Context) (uint64, error) {
 // (or a fully-drained one); use the on-chain opt-in check inside
 // EnsureDeposit to tell those apart.
 func (w *Wallet) ReadDeposit(ctx context.Context) (escrow.PayerDeposit, error) {
-	return w.pool.ReadPayerDeposit(ctx, w.payerAddr)
+	return w.chain.ReadPayerDeposit(ctx, w.payerAddr)
 }
 
 // DepositShortfall reports how much µALGO `slots` of free working-set
@@ -1026,15 +927,15 @@ func (w *Wallet) DepositShortfall(ctx context.Context, slots uint64) (shortfall 
 	if slots == 0 {
 		slots = DefaultDepositSlots
 	}
-	ticketMbr := w.pool.TicketMBR()
+	ticketMbr := w.chain.TicketMBR()
 	if ticketMbr == 0 {
 		return 0, false, errors.New("wallet: deposit-shortfall: ticket MBR not loaded (call RefreshConfig first)")
 	}
-	dep, err := w.pool.ReadPayerDeposit(ctx, w.payerAddr)
+	dep, err := w.chain.ReadPayerDeposit(ctx, w.payerAddr)
 	if err != nil {
 		return 0, false, fmt.Errorf("wallet: deposit-shortfall read: %w", err)
 	}
-	optedIn, err := w.pool.IsPayerOptedIn(ctx, w.payerAddr)
+	optedIn, err := w.chain.IsPayerOptedIn(ctx, w.payerAddr)
 	if err != nil {
 		return 0, false, fmt.Errorf("wallet: deposit-shortfall opt-in check: %w", err)
 	}
@@ -1271,12 +1172,12 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 	if slots == 0 {
 		slots = DefaultDepositSlots
 	}
-	ticketMbr := w.pool.TicketMBR()
+	ticketMbr := w.chain.TicketMBR()
 	if ticketMbr == 0 {
 		return "", 0, errors.New("wallet: ensure-deposit: ticket MBR not loaded (call RefreshConfig first)")
 	}
 
-	dep, err := w.pool.ReadPayerDeposit(ctx, w.payerAddr)
+	dep, err := w.chain.ReadPayerDeposit(ctx, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit read: %w", err)
 	}
@@ -1285,16 +1186,16 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 	if shortfall == 0 {
 		return "", 0, nil // pool already covers the working set
 	}
-	optedIn, err := w.pool.IsPayerOptedIn(ctx, w.payerAddr)
+	optedIn, err := w.chain.IsPayerOptedIn(ctx, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit opt-in check: %w", err)
 	}
 
-	minFee, err := w.pool.MinTxnFee(ctx)
+	minFee, err := w.chain.MinTxnFee(ctx)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit min fee: %w", err)
 	}
-	spendable, err := w.pool.SpendableMicroAlgos(ctx, w.payerAddr)
+	spendable, err := w.chain.SpendableMicroAlgos(ctx, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit balance check: %w", err)
 	}
@@ -1315,7 +1216,7 @@ func (w *Wallet) EnsureDeposit(ctx context.Context, slots uint64) (txid string, 
 			ErrDepositUnaffordable, backed, slots, what, plan.Need, part, 2*minFee, optInNote(!optedIn), spendable)
 	}
 	signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
-	res, err := w.pool.ComposeDepositMbr(ctx, plan.Amount, !optedIn, signer, w.payerAddr)
+	res, err := w.chain.ComposeDepositMbr(ctx, plan.Amount, !optedIn, signer, w.payerAddr)
 	if err != nil {
 		return "", 0, fmt.Errorf("wallet: ensure-deposit: %w", err)
 	}
@@ -1346,7 +1247,7 @@ func optInNote(firstDeposit bool) string {
 // and reverts otherwise.
 func (w *Wallet) WithdrawDeposit(ctx context.Context, amount uint64) (string, error) {
 	signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
-	res, err := w.escrow.ComposeWithdrawMbr(ctx, amount, signer, w.payerAddr)
+	res, err := w.chain.ComposeWithdrawMbr(ctx, amount, signer, w.payerAddr)
 	if err != nil {
 		return "", fmt.Errorf("wallet: withdraw-deposit: %w", err)
 	}
@@ -1358,7 +1259,7 @@ func (w *Wallet) WithdrawDeposit(ctx context.Context, amount uint64) (string, er
 // ticket (incl. frozen) is still live (openTickets != 0).
 func (w *Wallet) CloseDeposit(ctx context.Context) (string, error) {
 	signer := algo.SignWithAccountForATC(w.keystore, w.payerAddr)
-	res, err := w.escrow.ComposeCloseDeposit(ctx, signer, w.payerAddr)
+	res, err := w.chain.ComposeCloseDeposit(ctx, signer, w.payerAddr)
 	if err != nil {
 		return "", fmt.Errorf("wallet: close-deposit: %w", err)
 	}

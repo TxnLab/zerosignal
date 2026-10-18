@@ -105,7 +105,7 @@ export interface AckSettleCall extends AckSettlePorts {
     /**
      * Whether the node sent a settle group that decodes; check it with
      * decodeSettleGroup first. One that doesn't is absent, as Go's
-     * decodeSettleGroupHeader has it: a decode failure inside submitGroup is
+     * checkSettleGroupHeader has it: a decode failure inside submitGroup is
      * an ordinary error, and the ack would then not go standalone.
      */
     atomic: boolean

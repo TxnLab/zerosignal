@@ -353,6 +353,43 @@ func TestHTTPReserveClient_CommitKMismatchRejected(t *testing.T) {
 	}
 }
 
+// An open group that can't decode fails the reserve, so dispatch moves to the
+// next candidate rather than failing at open; one that decodes reaches the
+// wallet byte for byte.
+func TestHTTPReserveClient_PresignedOpenIsCheckedThenPassedOn(t *testing.T) {
+	for _, tc := range []struct {
+		name, group, wantErr string
+	}{
+		{"undecodable", "not-a-group", "decode presigned open group"},
+		{"decodes", testOpenGroup, ""},
+		{"absent", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+			h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rr := h.decodeReserve(t, r)
+				resp := h.issueValidTicket(t, rr)
+				resp.PreSignedOpenTxn = tc.group
+				writeSealedReserve(t, w, resp, rr.ProxyRecipient)
+			})
+			c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+			rt, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rt.PresignedOpen != tc.group {
+				t.Errorf("PresignedOpen = %q, want the node's %q", rt.PresignedOpen, tc.group)
+			}
+		})
+	}
+}
+
 func TestHTTPReserveClient_TicketModelMismatch(t *testing.T) {
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {})
 	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

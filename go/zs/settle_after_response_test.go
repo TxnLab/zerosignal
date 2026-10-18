@@ -33,7 +33,7 @@ type blockingSettlementHandle struct {
 	release chan struct{}
 }
 
-func (b *blockingSettlementHandle) AckSettle(context.Context, *ticket.UsageReceipt, []types.SignedTxn) (string, uint64, bool, error) {
+func (b *blockingSettlementHandle) AckSettle(context.Context, *ticket.UsageReceipt, string) (string, uint64, bool, error) {
 	close(b.started)
 	<-b.release
 	return "ACK_TXID", 0, false, nil
