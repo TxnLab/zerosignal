@@ -460,6 +460,7 @@ func TestSettleOutcomeOf(t *testing.T) {
 		{"in the pool", models.PendingTransactionInfoResponse{}, SettlePending},
 		{"confirmed", models.PendingTransactionInfoResponse{ConfirmedRound: 1}, SettleLanded},
 		{"dropped", models.PendingTransactionInfoResponse{PoolError: "overspend"}, SettleDropped},
+		{"confirmed over a pool error", models.PendingTransactionInfoResponse{ConfirmedRound: 1, PoolError: "overspend"}, SettleLanded},
 	} {
 		if got := settleOutcomeOf(tc.info); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)

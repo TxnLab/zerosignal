@@ -27,7 +27,7 @@ import {
 
 import type { SettleSubmission } from '../ack.js'
 import type { PayerDeposit } from '../mbr.js'
-import type { EscrowCall } from '../parts.js'
+import type { EscrowCall, SettleOutcome } from '../parts.js'
 import { type Clock, type Logger, type Signer, SignerAddressError, discardLogger } from '../ports.js'
 import { untilAborted } from '../sleep.js'
 import type {
@@ -350,6 +350,12 @@ export class AlgodEscrowChain implements EscrowChain {
         }
     }
 
+    async settleOutcome(txId: string, signal?: AbortSignal): Promise<SettleOutcome> {
+        signal?.throwIfAborted()
+        const info = await this.#algod.pendingTransactionInformation(txId).do(undefined, this.#opts(signal))
+        return settleOutcomeOf(info)
+    }
+
     /**
      * The payer's standalone settle (Go's ComposeSettleStandalone). The fee
      * pools the disbursements this settle fires if it finalizes, finalize's
@@ -620,6 +626,17 @@ export function requestTimeoutOrDefault(ms: number | undefined): number {
 export function requestOptions(timeoutMs: number, signal?: AbortSignal): RequestOptions {
     const timeout = AbortSignal.timeout(timeoutMs)
     return { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }
+}
+
+/**
+ * settleOutcomeOf reads algod's pending-pool answer for a transaction, as Go's
+ * settleOutcomeOf does: confirmed is landed, a pool error is dropped, and
+ * anything else is still pending.
+ */
+export function settleOutcomeOf(info: { confirmedRound?: bigint; poolError: string }): SettleOutcome {
+    if ((info.confirmedRound ?? 0n) > 0n) return 'landed'
+    if (info.poolError !== '') return 'dropped'
+    return 'pending'
 }
 
 /** Amount less min-balance, floored at zero: an account below its own minimum can send nothing. */

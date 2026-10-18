@@ -11,18 +11,25 @@ import type { TransactionSigner } from 'algosdk'
 import type { BytesSigner } from '@txnlab/zs-proto/ticket'
 
 /**
- * Signer holds the payer's key, for one address.
+ * PayerSigner is the half of the payer's key every rail uses: its address and
+ * raw Ed25519 over bytes, which signs the reserve request.
  *
  * `signBytes` is raw Ed25519 over the bytes given: the SDK hands it a 32-byte
  * sha256 digest of a domain-tagged canonical body. It is NOT go-algorand-sdk's
  * `SignBytes` (which prepends "MX") and not ARC-1 `signData`; a wallet whose
  * sign-bytes flow tags or prefixes the message cannot implement it.
- *
- * `signTransactions` signs Algorand transactions (escrow open, settle,
- * refund), with algosdk's TransactionSigner contract.
  */
-export interface Signer extends BytesSigner {
+export interface PayerSigner extends BytesSigner {
     readonly address: string
+}
+
+/**
+ * Signer holds the payer's key, for one address, on the Algorand rail: the
+ * PayerSigner half, plus `signTransactions`, which signs Algorand
+ * transactions (escrow open, settle, refund) with algosdk's TransactionSigner
+ * contract. Another rail pairs PayerSigner with its own transaction half.
+ */
+export interface Signer extends PayerSigner {
     signTransactions: TransactionSigner
 }
 
@@ -42,7 +49,7 @@ export class SignerAddressError extends Error {
  * signer backed by several keys would otherwise sign a reserve with whichever
  * one it was asked for, and the node would bind the ticket to that account.
  */
-export function payerBytesSigner(signer: Signer): BytesSigner {
+export function payerBytesSigner(signer: PayerSigner): BytesSigner {
     return {
         signBytes(address, msg) {
             if (address !== signer.address) {

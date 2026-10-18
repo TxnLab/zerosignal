@@ -21,12 +21,19 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
 )
 
-// Signer holds the payer's key. It signs raw Ed25519 digests (the reserve
-// request: not MX-prefixed, not ARC-1) and Algorand transactions (escrow
-// open, settle, refund) for one address.
-type Signer interface {
+// PayerSigner is the half of the payer's key every rail uses: its address and
+// raw Ed25519 over digests (the reserve request: not MX-prefixed, not ARC-1).
+type PayerSigner interface {
 	Address() string
 	ticket.BytesSigner
+}
+
+// Signer holds the payer's key, for one address, on the Algorand rail: the
+// PayerSigner half plus the signer of Algorand transactions (escrow open,
+// settle, refund). Another rail pairs PayerSigner with its own transaction
+// half.
+type Signer interface {
+	PayerSigner
 	algo.MultipleWalletSigner
 }
 
