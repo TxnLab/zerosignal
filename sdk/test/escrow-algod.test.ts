@@ -23,6 +23,7 @@ import {
 } from '@txnlab/zs-proto/escrow'
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { settleOutcomeOf } from '../src/escrow/algod.js'
 import { ESCROW_METHOD_SIGNATURES } from '../src/escrow/generated/abi.js'
 import {
     APPROVAL_ASSERT,
@@ -67,6 +68,8 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
     sendError: string | undefined
     simAnswers: Record<string, SimAnswer> = {}
     simulated: { method: string; sender: string; accounts: string[] }[] = []
+    /** Pool answers by txid; a number is the status a read fails with. */
+    pending = new Map<string, { confirmedRound?: bigint; poolError: string } | number>()
     paths: string[] = []
     /** Each request's signal, as fetch would get it. */
     signals: (AbortSignal | undefined)[] = []
@@ -103,6 +106,14 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
             if (v === undefined) throw httpError(404, 'box not found')
             if (typeof v === 'number') throw httpError(v, 'algod unavailable')
             return json({ name, round: 100, value: b64(v) })
+        }
+        const pending = /^\/v2\/transactions\/pending\/([A-Z2-7]+)$/.exec(path)
+        if (pending) {
+            const p = this.pending.get(pending[1]!)
+            if (p === undefined) throw httpError(404, 'txn not found')
+            if (typeof p === 'number') throw httpError(p, 'algod unavailable')
+            const resp = new algosdk.modelsv2.PendingTransactionResponse({ ...p, txn: pendingTxn() })
+            return { status: 200, body: algosdk.encodeMsgpack(resp), headers: { 'content-type': 'application/msgpack' } }
         }
         if (path === `/v2/applications/${APP}`) {
             const state = [...this.globals].map(([k, v]) => ({
@@ -180,6 +191,17 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
         })
         return { status: 200, body: algosdk.encodeMsgpack(resp), headers: { 'content-type': 'application/msgpack' } }
     }
+}
+
+/** Any signed transaction: the pool answer carries one, and settleOutcome reads none of it. */
+function pendingTxn(): algosdk.SignedTransaction {
+    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+        sender: PAYER,
+        receiver: PAYER,
+        amount: 0,
+        suggestedParams: { fee: 0, flatFee: true, minFee: MIN_FEE, firstValid: 1, lastValid: 2, genesisHash: new Uint8Array(32), genesisID: 'dev-v1' },
+    })
+    return new algosdk.SignedTransaction({ txn })
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -311,6 +333,40 @@ const settleCall = (over: Partial<{ amountCharged: bigint; maxPrice: bigint }> =
     operatorOwnerAddr: OWNER,
     operatorId: 7n,
     nodeId: 1n,
+})
+
+// Go's settleOutcomeOf, case for case: the journal row goes only once the
+// settle is confirmed, and a pool error leaves it for the sweep.
+describe('settleOutcomeOf', () => {
+    it('reads the pool answer as Go does', () => {
+        expect(settleOutcomeOf({ poolError: '' })).toBe('pending')
+        expect(settleOutcomeOf({ confirmedRound: 0n, poolError: '' })).toBe('pending')
+        expect(settleOutcomeOf({ confirmedRound: 1n, poolError: '' })).toBe('landed')
+        expect(settleOutcomeOf({ poolError: 'overspend' })).toBe('dropped')
+        expect(settleOutcomeOf({ confirmedRound: 1n, poolError: 'overspend' })).toBe('landed')
+    })
+})
+
+// TestOpenHandle_SettleOutcome: the txid reaches algod's pool read, the
+// caller's signal rides it, and a failed read is no outcome.
+describe('AlgodEscrowChain settleOutcome', () => {
+    const TXID = 'A'.repeat(52)
+
+    it('reads the pool answer for the settle it was given', async () => {
+        fake.pending.set(TXID, { confirmedRound: 7n, poolError: '' })
+        const ac = new AbortController()
+        expect(await chain.settleOutcome(TXID, ac.signal)).toBe('landed')
+        expect(fake.paths).toEqual([`/v2/transactions/pending/${TXID}`])
+        ac.abort()
+        expect(fake.signals.at(-1)?.aborted).toBe(true)
+        fake.pending.set(TXID, { poolError: 'overspend' })
+        expect(await chain.settleOutcome(TXID)).toBe('dropped')
+    })
+
+    it('passes a failed read on', async () => {
+        fake.pending.set(TXID, 503)
+        await expect(chain.settleOutcome(TXID)).rejects.toThrow(/503/)
+    })
 })
 
 describe('AlgodEscrowChain config', () => {

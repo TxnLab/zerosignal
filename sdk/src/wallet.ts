@@ -21,7 +21,7 @@ import { type CompletedOpenGroup, completeOpenGroup, type OpenGroupSpec } from '
 import { completeSettleGroup } from './escrow/settle.js'
 import { type MbrDeposit, type MbrPoolChain, MbrDepositUnaffordableError, ensureMbrDeposit, mbrPoolState } from './mbr.js'
 import type { Operator } from './operator.js'
-import type { EscrowCall, OpenHandle, ProtestReasonCode, WalletOpener } from './parts.js'
+import type { EscrowCall, OpenHandle, ProtestReasonCode, SettleOutcome, WalletOpener } from './parts.js'
 import { type Logger, type Signer, discardLogger } from './ports.js'
 import type { SettleArgs } from './reconcile.js'
 import { refundSources } from './refund-watchdog.js'
@@ -101,6 +101,12 @@ export interface EscrowChain extends MbrPoolChain {
      * refusal; a revert commits nothing, so the same group can be sent again.
      */
     sendGroup(signed: Uint8Array, method: 'open' | 'settle', signal?: AbortSignal): Promise<void>
+    /**
+     * Where a submitted settle stands (Go's EscrowChain.SettleOutcome). A
+     * missing ticket box is not an answer: an open the node hasn't submitted
+     * yet has none either, so this reads the transaction itself.
+     */
+    settleOutcome(txId: string, signal?: AbortSignal): Promise<SettleOutcome>
     settleStandalone(c: PayerSettleCall, signal?: AbortSignal): Promise<SettleSubmission>
     protest(c: ProtestCall, signal?: AbortSignal): Promise<EscrowCall>
     refundInactive(c: RefundInactiveCall, signal?: AbortSignal): Promise<string>
@@ -471,7 +477,7 @@ export class Wallet implements WalletOpener {
 
     // graceSeconds is the grace global the open was checked against, which
     // the refund watchdog times its first read by.
-    #handle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'refundInactive' | 'settleLapsed'>, graceSeconds: bigint): OpenHandle {
+    #handle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'refundInactive' | 'settleLapsed' | 'settleOutcome'>, graceSeconds: bigint): OpenHandle {
         const chain = this.#chain
         const signer = this.#signer
         const payer = signer.address
@@ -562,6 +568,9 @@ export class Wallet implements WalletOpener {
                         chain.settleLapsed({ ...ids(), operatorOwnerAddr: fields.operator.ownerAddr, payer }, signal))(),
                 )
             },
+            // Lets the Client see an atomic settle land and drop the journal
+            // row then, as Go's handle does, rather than leave it to the sweep.
+            settleOutcome: (txId, signal) => chain.settleOutcome(txId, signal),
         }
         refundSources.set(h, {
             graceSeconds,

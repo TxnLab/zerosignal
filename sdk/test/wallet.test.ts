@@ -173,6 +173,7 @@ class FakeChain implements EscrowChain {
     protest = (c: unknown, signal?: AbortSignal) => this.#record('protest', c, { txId: 'PROTEST', feeMicroalgos: 2000 }, signal)
     refundInactive = (c: unknown, signal?: AbortSignal) => this.#record('refundInactive', c, 'REFUND', signal)
     settleLapsed = (c: unknown, signal?: AbortSignal) => this.#record('settleLapsed', c, 'LAPSE', signal)
+    settleOutcome = (txId: string, signal?: AbortSignal) => this.#record('settleOutcome', txId, 'landed' as const, signal)
     withdrawMbr = (payer: string, amount: bigint, signal?: AbortSignal) =>
         this.#record('withdrawMbr', [payer, amount], 'WITHDRAW', signal)
     closeDeposit = (payer: string, signal?: AbortSignal) => this.#record('closeDeposit', payer, 'CLOSE', signal)
@@ -816,6 +817,16 @@ describe('OpenHandle', () => {
     it('reads an empty group as none', async () => {
         const r = await (await open()).ackSettle(receipt, '')
         expect(r).toEqual({ txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false })
+    })
+
+    // Without it the Client never sees an atomic settle land, and the journal
+    // row waits for the sweep, where Go's handle drops it at once.
+    it('looks up a settle through the chain', async () => {
+        const h = await open()
+        const signal = new AbortController().signal
+        expect(await h.settleOutcome?.('SETTLETX', signal)).toBe('landed')
+        expect(chain.calls.settleOutcome).toEqual(['SETTLETX'])
+        expect(chain.signals.settleOutcome).toBe(signal)
     })
 
     it("passes the request's signal to each chain call", async () => {
