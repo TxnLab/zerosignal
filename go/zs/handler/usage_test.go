@@ -51,7 +51,7 @@ func TestReceiptUsageFrame_FeeBreakdown(t *testing.T) {
 	tk := &ticket.Ticket{MaxPrice: 1_100_000}
 	op := zs.Operator{ID: 7}
 
-	fr := receiptUsageFrame(r, tk, op, 0, 0, 0, 1000, 0, true)
+	fr := receiptUsageFrame(r, tk, op, paidFees{}, 1000, 0, true)
 	var u usageBody
 	if err := json.Unmarshal(fr.Data, &u); err != nil {
 		t.Fatalf("unmarshal frame: %v", err)
@@ -63,7 +63,7 @@ func TestReceiptUsageFrame_FeeBreakdown(t *testing.T) {
 		t.Errorf("frame fee = %+v", u.Fee)
 	}
 
-	fr2 := receiptUsageFrame(r, tk, op, 0, 0, 0, 0, 0, false)
+	fr2 := receiptUsageFrame(r, tk, op, paidFees{}, 0, 0, false)
 	if strings.Contains(string(fr2.Data), `"fee"`) {
 		t.Errorf("fee key present when snapshot absent: %s", fr2.Data)
 	}
@@ -119,7 +119,7 @@ func TestCORSExposesEveryUsageHeader(t *testing.T) {
 		&ticket.UsageReceipt{TicketID: "tid", AmountCharged: 1_000},
 		&ticket.Ticket{MaxPrice: 2_000},
 		zs.Operator{ID: 7, NodeID: 2, OwnerAddr: "OWNER"},
-		1_000, 0, 0.25, 1000, 0, true)
+		paidFees{open: 1_000, usdRate: 0.25, unit: zs.FeeUnitOf(ticket.RailAlgorand)}, 1000, 0, true)
 	w := httptest.NewRecorder()
 	writeCORSHeaders(w, httptest.NewRequest(http.MethodOptions, "/v1/chat/completions", nil))
 	exposed := map[string]bool{}
@@ -131,7 +131,36 @@ func TestCORSExposesEveryUsageHeader(t *testing.T) {
 			t.Errorf("Access-Control-Expose-Headers omits %s", name)
 		}
 	}
-	if len(h) < 21 {
+	if len(h) < 25 {
 		t.Fatalf("only %d usage headers set; the fixture no longer reaches every branch", len(h))
+	}
+}
+
+// The names that say ALGO are sent only for fees in ALGO: on another rail
+// they would hold another coin's units.
+func TestUsage_AlgoNamesOnlyForALGO(t *testing.T) {
+	for _, c := range []struct {
+		rail ticket.Rail
+		algo bool
+	}{{ticket.RailAlgorand, true}, {ticket.RailSolana, false}} {
+		ev := zs.ReceiptVerified{
+			Receipt:         ticket.UsageReceipt{TicketID: "tid", AmountCharged: 1},
+			OpenNetworkFees: 5000, NativeUSD: 150, FeeUnit: zs.FeeUnitOf(c.rail),
+		}
+		h := http.Header{}
+		setUsageHeaders(h, ev)
+		if got := h.Get("X-Zs-Fees-Amount") == "5000" && h.Get("X-Zs-Fees-Usd-Rate") == "150"; !got {
+			t.Errorf("rail %d: fees %q at rate %q, want 5000 at 150", c.rail, h.Get("X-Zs-Fees-Amount"), h.Get("X-Zs-Fees-Usd-Rate"))
+		}
+		if has := h.Get("X-Zs-Fees-Microalgos") != "" || h.Get("X-Zs-Algo-Usd-Rate") != ""; has != c.algo {
+			t.Errorf("rail %d: ALGO headers sent %v, want %v", c.rail, has, c.algo)
+		}
+		data := string(usageFrame(ev).Data)
+		if has := strings.Contains(data, `"algo_`); has != c.algo {
+			t.Errorf("rail %d: algo_* keys in %s: %v, want %v", c.rail, data, has, c.algo)
+		}
+		if !strings.Contains(data, `"network_fees":{"amount":5000,"currency":"`+zs.FeeUnitOf(c.rail).Currency) {
+			t.Errorf("rail %d: frame %s lacks network_fees", c.rail, data)
+		}
 	}
 }

@@ -263,8 +263,13 @@ func TestDispatch_Stream_UsageFrameOptIn(t *testing.T) {
 		return w.Body.String()
 	}
 	t.Run("emitted on opt-in", func(t *testing.T) {
-		if body := optIn(t, verifyingReceipt); !strings.Contains(body, "zs.usage") {
+		body := optIn(t, verifyingReceipt)
+		if !strings.Contains(body, "zs.usage") {
 			t.Errorf("opt-in client did not receive the zs.usage frame: %s", body)
+		}
+		// An Algorand turn still carries the names that say ALGO.
+		if !strings.Contains(body, `"algo_fees_microalgos":`) || !strings.Contains(body, `"currency":"ALGO","decimals":6`) {
+			t.Errorf("usage frame lacks the ALGO fee names: %s", body)
 		}
 	})
 	// A receipt that failed its checks is not what the turn cost.

@@ -12,6 +12,7 @@ import { StreamDecoder } from './decode.js'
 import { type Delivery, StreamEmitter } from './emit.js'
 import type { ZsError } from './errors.js'
 import type { Event } from './events.js'
+import type { FeeUnit } from './network.js'
 import type { Operator } from './operator.js'
 import type { Logger } from './ports.js'
 import type { Reserved } from './parts.js'
@@ -117,7 +118,7 @@ export interface Stream {
 export type TurnRunner = (em: Emitter, slot: SettleSlot, signal: AbortSignal) => Promise<void>
 
 // A fresh one per turn: the caller owns what wait returns.
-const noSettlement = (): SettleResult => ({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 } })
+const noSettlement = (): SettleResult => ({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } })
 
 /** TurnStream is the Stream Client.stream returns. */
 export class TurnStream implements Stream {
@@ -127,15 +128,17 @@ export class TurnStream implements Stream {
     readonly #signal: AbortSignal | undefined
     readonly #logger: Logger | undefined
     readonly #slot = new SettleSlot()
+    readonly #feeUnit: FeeUnit
     #started = false
     #err: ZsError | undefined
 
-    constructor(run: TurnRunner, req: Request, signal?: AbortSignal, logger?: Logger) {
+    constructor(run: TurnRunner, req: Request, feeUnit: FeeUnit, signal?: AbortSignal, logger?: Logger) {
         this.#run = run
         this.#endpoint = req.endpoint
         this.#framesOnly = req.framesOnly ?? false
         this.#signal = signal
         this.#logger = logger
+        this.#feeUnit = feeUnit
     }
 
     get err(): ZsError | undefined {
@@ -153,6 +156,7 @@ export class TurnStream implements Stream {
             () => leave.abort(),
             this.#signal,
             this.#framesOnly ? null : new StreamDecoder(this.#endpoint),
+            this.#feeUnit,
         )
         const slot = this.#slot
         const done = (async () => {
@@ -263,7 +267,7 @@ export interface Emitter {
     /** The ticket a node signed. */
     reserved(r: Reserved, op: Operator): void
     /** The escrow open; nothing is resent after it. */
-    committed(ticketId: string, openTxId: string, feesMicroAlgos: number): void
+    committed(ticketId: string, openTxId: string, networkFees: number): void
     /** Ends the request with err before any response has started. */
     fail(err: ZsError): void
     /**

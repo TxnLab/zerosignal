@@ -66,6 +66,20 @@ export function feeBreakdownFor(amountCharged: number, maxPrice: number, feeBps:
     return out
 }
 
+/**
+ * Whether the fees are in ALGO. The names that say ALGO (X-Zs-Fees-Microalgos,
+ * X-Zs-Algo-Usd-Rate, the frame's algo_* keys) are sent only then, never
+ * holding another coin's units.
+ */
+function isAlgo(ev: ReceiptVerified): boolean {
+    return ev.feeUnit.currency === 'ALGO'
+}
+
+// Go's paidFees.usd: 10 ** 6 is 1e6 exactly, so ALGO fees convert as they did.
+function feesUsd(ev: ReceiptVerified, total: number): number {
+    return (total / 10 ** ev.feeUnit.decimals) * ev.nativeUsd
+}
+
 /** A dollar figure as Go's "$%.6f" writes it. */
 export function dollars(x: number): string {
     return `$${fixed6(x)}`
@@ -118,7 +132,8 @@ export function plainFloat(x: number): string {
 export function setUsageHeaders(h: Headers, ev: ReceiptVerified): void {
     const r = ev.receipt
     const t = ev.ticket
-    const totalFees = ev.openFeesMicroAlgos + ev.settleFeesMicroAlgos
+    const totalFees = ev.openNetworkFees + ev.settleNetworkFees
+    const algo = isAlgo(ev)
     h.set('X-Zs-Ticket-Id', r.ticket_id)
     // Operator and node ids are 1-based on chain; 0 is unset.
     if (ev.target.op !== 0) h.set('X-Zs-Operator-Id', String(ev.target.op))
@@ -136,11 +151,16 @@ export function setUsageHeaders(h: Headers, ev: ReceiptVerified): void {
     h.set('X-Zs-Max-Price-Amount', String(t.max_price))
     // Always sent, 0 for no floor, so a caller can rely on its presence.
     h.set('X-Zs-Min-Price-Amount', String(t.min_price))
-    h.set('X-Zs-Fees-Microalgos', String(totalFees))
+    h.set('X-Zs-Fees-Amount', String(totalFees))
+    h.set('X-Zs-Fees-Currency', ev.feeUnit.currency)
+    h.set('X-Zs-Fees-Decimals', String(ev.feeUnit.decimals))
+    if (algo) h.set('X-Zs-Fees-Microalgos', String(totalFees))
     if (r.amount_charged > 0) h.set('X-Zs-Inference-Amount-Usd', dollars(r.amount_charged / 10 ** DECIMALS))
-    if (ev.algoUsd > 0) {
-        h.set('X-Zs-Fees-Usd', dollars((totalFees / 1_000_000) * ev.algoUsd))
-        h.set('X-Zs-Algo-Usd-Rate', plainFloat(ev.algoUsd))
+    if (ev.nativeUsd > 0) {
+        const rate = plainFloat(ev.nativeUsd)
+        h.set('X-Zs-Fees-Usd', dollars(feesUsd(ev, totalFees)))
+        h.set('X-Zs-Fees-Usd-Rate', rate)
+        if (algo) h.set('X-Zs-Algo-Usd-Rate', rate)
     }
     const fb = feeBreakdownFor(r.amount_charged, t.max_price, ev.feeBps, ev.feeBpsKnown)
     if (fb !== undefined) {
@@ -162,7 +182,8 @@ export function setUsageHeaders(h: Headers, ev: ReceiptVerified): void {
 export function usageFrame(ev: ReceiptVerified): StreamFrame {
     const r = ev.receipt
     const t = ev.ticket
-    const totalFees = ev.openFeesMicroAlgos + ev.settleFeesMicroAlgos
+    const totalFees = ev.openNetworkFees + ev.settleNetworkFees
+    const algo = isAlgo(ev)
     // Keys in Go's field order, each omitted where Go's omitempty would.
     const inference: Record<string, unknown> = { amount: r.amount_charged, currency: CURRENCY, decimals: DECIMALS }
     if (r.amount_charged > 0) inference.amount_usd = r.amount_charged / 10 ** DECIMALS
@@ -175,12 +196,22 @@ export function usageFrame(ev: ReceiptVerified): StreamFrame {
     u.inference = inference
     u.max_price_amount = t.max_price
     if (t.min_price !== 0) u.min_price_amount = t.min_price
-    u.algo_fees_microalgos = totalFees
-    if (ev.algoUsd > 0) {
-        const usd = (totalFees / 1_000_000) * ev.algoUsd
-        if (usd !== 0) u.algo_fees_usd = usd
-        u.algo_usd_rate = ev.algoUsd
+    const networkFees: Record<string, unknown> = {
+        amount: totalFees,
+        currency: ev.feeUnit.currency,
+        decimals: ev.feeUnit.decimals,
     }
+    if (algo) u.algo_fees_microalgos = totalFees
+    if (ev.nativeUsd > 0) {
+        const usd = feesUsd(ev, totalFees)
+        if (usd !== 0) networkFees.amount_usd = usd
+        networkFees.usd_rate = ev.nativeUsd
+        if (algo) {
+            if (usd !== 0) u.algo_fees_usd = usd
+            u.algo_usd_rate = ev.nativeUsd
+        }
+    }
+    u.network_fees = networkFees
     const fee = feeBreakdownFor(r.amount_charged, t.max_price, ev.feeBps, ev.feeBpsKnown)
     if (fee !== undefined) u.fee = fee
     return { ...emptyFrame(), event: USAGE_FRAME_EVENT, data: new TextEncoder().encode(goJSON(u)) }

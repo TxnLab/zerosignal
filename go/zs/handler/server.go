@@ -296,7 +296,8 @@ func writeCORSHeaders(w http.ResponseWriter, r *http.Request) {
 			"X-Zs-Actual-Input-Count, X-Zs-Actual-Output-Count, "+
 			"X-Zs-Inference-Amount, X-Zs-Inference-Currency, X-Zs-Inference-Decimals, "+
 			"X-Zs-Inference-Amount-Usd, X-Zs-Max-Price-Amount, X-Zs-Min-Price-Amount, "+
-			"X-Zs-Fees-Microalgos, X-Zs-Fees-Usd, X-Zs-Algo-Usd-Rate, "+
+			"X-Zs-Fees-Amount, X-Zs-Fees-Currency, X-Zs-Fees-Decimals, X-Zs-Fees-Usd, X-Zs-Fees-Usd-Rate, "+
+			"X-Zs-Fees-Microalgos, X-Zs-Algo-Usd-Rate, "+
 			"X-Zs-Fee-Bps, X-Zs-Discount-Bps, X-Zs-Platform-Fee-Microusdc, X-Zs-Refund-Microusdc, "+
 			"X-Zs-Total-Debit-Microusdc, X-Zs-Total-Debit-Usd, "+
 			"X-Zs-Max-Output-Clamped")

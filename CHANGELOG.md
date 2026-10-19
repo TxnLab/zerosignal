@@ -31,6 +31,35 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-19 — network fees are reported in the rail's coin (0.8.0)
+
+A payer's network fees now have names that do not assume ALGO, so a Solana rail can report
+lamports without filling fields named for µALGO.
+
+- **Headers:** `X-Zs-Fees-Amount` (base units), `X-Zs-Fees-Currency` (`ALGO`, `SOL`),
+  `X-Zs-Fees-Decimals` (6, 9) and `X-Zs-Fees-Usd-Rate`. `X-Zs-Fees-Usd` converts by the
+  decimals, which for ALGO gives the same figure as before. Each is on the CORS expose list.
+- **The `zs.usage` frame:** a `network_fees` object, `{amount, currency, decimals, amount_usd,
+  usd_rate}`, after the `algo_*` keys and before `fee`. `amount_usd` and `usd_rate` are left
+  out when the rate is unknown.
+- **The USD rate is ALGO's.** Nodes report only an ALGO/USD rate in the reserve response, so
+  `NativeUSD`, `X-Zs-Fees-Usd-Rate` and `X-Zs-Fees-Usd` are 0 or absent on any other rail
+  until a node reports its rail's own rate.
+- **Events and records:** `NetworkFees` on `PaymentCommitted`, `SettleSubmitted` and
+  `Settlement`. `ReceiptVerified` gains `OpenNetworkFees`, `SettleNetworkFees`, `NativeUSD` and
+  `FeeUnit{Currency, Decimals}` (TS `networkFees`, `openNetworkFees`, `settleNetworkFees`,
+  `nativeUsd`, `feeUnit`). `FeeUnitOf(rail)` / `feeUnitOf(rail)` gives a rail's unit.
+
+**Consumer-visible.** Every old name is still sent and still populated on Algorand, so a host
+reading `X-Zs-Fees-Microalgos`, `algo_fees_microalgos` or `FeesMicroAlgos` sees no change
+there. On any other rail those names are absent (headers, frame keys) or 0 (event fields),
+never holding another coin's units. They are deprecated and go no earlier than one release
+after the Solana rail ships. The new TS fields are required, on the events and on the
+`Settlement` record, so a host test fixture that builds one needs them, and `zs.fetch` renders
+a `receipt.verified` event from its new fields. The settle log's `fee_microalgos` key is now
+`network_fee`. A reader of the frame should read `network_fees` first and fall back to
+`algo_*`, since it may be talking to an older proxy.
+
 ### 2026-10-19 — dstack 0.5.12 and 0.6.1 guest images are trusted, 0.5.12 is scanned; nvidia-0.5.9 is not trusted (0.7.0)
 
 `attest.TrustedDstackOSImages()` (TS `trustedDstackOSImages`) adds `dstack-0.5.12`,

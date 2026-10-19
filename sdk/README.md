@@ -317,7 +317,11 @@ preferences: `X-Zs-Relay`, and `X-Zs-Require-TEE` and `X-Zs-Usage-Frame`, which 
 value turns on (`X-Zs-Require-TEE: false` requires a TEE). A whole reply reports its
 cost in `X-Zs-*` response headers. A stream's headers go out before its receipt, so with
 `X-Zs-Usage-Frame` set the stream carries the cost in an `event: zs.usage` frame instead. That
-frame is opt-in because its data is not an OpenAI chunk, and strict OpenAI clients fail on it. A
+frame is opt-in because its data is not an OpenAI chunk, and strict OpenAI clients fail on it.
+Network fees are reported in the rail's own coin: `X-Zs-Fees-Amount` in base units, with
+`X-Zs-Fees-Currency`, `X-Zs-Fees-Decimals` and `X-Zs-Fees-Usd-Rate`, and the frame's
+`network_fees` object. `X-Zs-Fees-Microalgos`, `X-Zs-Algo-Usd-Rate` and the frame's `algo_*`
+keys are still sent, but only when the fees are in ALGO. A
 failure the SDK reports itself is an OpenAI-shaped error body with `X-Should-Retry`, and
 `Retry-After` when there is a wait to report. An error the node sends keeps the node's status
 and body; the SDK sets those two headers and strips the node's `X-Zs-*` ones.

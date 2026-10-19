@@ -29,7 +29,7 @@ type emitter interface {
 	// reserved reports the ticket a node signed.
 	reserved(rt *ReservedTicket, op Operator)
 	// committed reports the escrow open; nothing is resent after it.
-	committed(ticketID, openTxID string, feesMicroAlgos uint64)
+	committed(ticketID, openTxID string, networkFees uint64)
 	// fail ends the request with e before any response has started.
 	fail(e *Error)
 	// reply delivers a complete response. header is the node's response
@@ -93,6 +93,7 @@ type usageReport struct {
 	openFees     uint64
 	settleFees   uint64
 	algoUSDPrice float64
+	unit         FeeUnit
 	feeBps       uint64
 	haveFee      bool
 	// check is how the receipt fared and what its submit did.
@@ -119,6 +120,7 @@ func (u *usageReport) events() []Event {
 			TxID:           c.settled.TxID,
 			FeesMicroAlgos: c.settled.FeesMicroAlgos,
 			Atomic:         c.settled.Kind == SettleAtomic,
+			NetworkFees:    c.settled.NetworkFees,
 		})
 	}
 	return evs
@@ -130,11 +132,17 @@ func (u *usageReport) verified() ReceiptVerified {
 		Ticket:               *u.ticket,
 		Target:               RefOf(u.op),
 		OwnerAddr:            u.op.OwnerAddr,
-		OpenFeesMicroAlgos:   u.openFees,
-		SettleFeesMicroAlgos: u.settleFees,
-		AlgoUSD:              u.algoUSDPrice,
+		OpenFeesMicroAlgos:   algoOnly(u.unit, u.openFees),
+		SettleFeesMicroAlgos: algoOnly(u.unit, u.settleFees),
+		AlgoUSD:              algoOnly(u.unit, u.algoUSDPrice),
 		FeeBps:               u.feeBps,
 		FeeBpsKnown:          u.haveFee,
+		OpenNetworkFees:      u.openFees,
+		SettleNetworkFees:    u.settleFees,
+		// The reserve's rate is ALGO/USD (ticket.ReserveResponse.AlgoUSDPrice),
+		// so it prices no other coin.
+		NativeUSD: algoOnly(u.unit, u.algoUSDPrice),
+		FeeUnit:   u.unit,
 	}
 }
 
@@ -167,6 +175,8 @@ type streamEmitter struct {
 	callerCtx context.Context
 	// dec decodes sealed frames into content events; nil for FramesOnly.
 	dec *decoder
+	// unit is the coin the deployment's network fees are paid in.
+	unit FeeUnit
 
 	stopped bool
 	// ended is set once the turn's one ending, Done or an error, is decided;
@@ -227,9 +237,9 @@ func (e *streamEmitter) reserved(rt *ReservedTicket, op Operator) {
 	})
 }
 
-func (e *streamEmitter) committed(ticketID, openTxID string, feesMicroAlgos uint64) {
+func (e *streamEmitter) committed(ticketID, openTxID string, networkFees uint64) {
 	e.paid = true
-	e.emit(PaymentCommitted{TicketID: ticketID, OpenTxID: openTxID, FeesMicroAlgos: feesMicroAlgos})
+	e.emit(PaymentCommitted{TicketID: ticketID, OpenTxID: openTxID, FeesMicroAlgos: algoOnly(e.unit, networkFees), NetworkFees: networkFees})
 }
 
 func (e *streamEmitter) fail(err *Error) { e.end(err) }

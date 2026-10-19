@@ -841,7 +841,9 @@
       "owner_addr": "OWNERADDR",
       "open_fees": 1000,
       "settle_fees": 2000,
-      "algo_usd": 0.2134,
+      "native_usd": 0.2134,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 1000,
       "fee_bps_known": true,
       "headers": {
@@ -850,8 +852,12 @@
         "x-zs-algo-usd-rate": "0.2134",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "1000",
+        "x-zs-fees-amount": "3000",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "3000",
         "x-zs-fees-usd": "$0.000640",
+        "x-zs-fees-usd-rate": "0.2134",
         "x-zs-inference-amount": "1000000",
         "x-zs-inference-amount-usd": "$1.000000",
         "x-zs-inference-currency": "USDC",
@@ -868,7 +874,7 @@
         "x-zs-total-debit-usd": "$1.100000"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDE=\",\"operator_id\":7,\"node_id\":2,\"operator_owner_addr\":\"OWNERADDR\",\"actual_input_count\":120,\"actual_output_count\":48,\"inference\":{\"amount\":1000000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1},\"max_price_amount\":1100000,\"algo_fees_microalgos\":3000,\"algo_fees_usd\":0.0006402000000000001,\"algo_usd_rate\":0.2134,\"fee\":{\"fee_bps\":1000,\"discount_bps\":0,\"platform_fee_microusdc\":100000,\"refund_microusdc\":0,\"total_debit_microusdc\":1100000,\"total_debit_usd\":1.1}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDE=\",\"operator_id\":7,\"node_id\":2,\"operator_owner_addr\":\"OWNERADDR\",\"actual_input_count\":120,\"actual_output_count\":48,\"inference\":{\"amount\":1000000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1},\"max_price_amount\":1100000,\"algo_fees_microalgos\":3000,\"algo_fees_usd\":0.0006402000000000001,\"algo_usd_rate\":0.2134,\"network_fees\":{\"amount\":3000,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":0.0006402000000000001,\"usd_rate\":0.2134},\"fee\":{\"fee_bps\":1000,\"discount_bps\":0,\"platform_fee_microusdc\":100000,\"refund_microusdc\":0,\"total_debit_microusdc\":1100000,\"total_debit_usd\":1.1}}"
     },
     {
       "name": "rate unknown",
@@ -883,12 +889,17 @@
       "owner_addr": "O",
       "open_fees": 0,
       "settle_fees": 0,
-      "algo_usd": 0,
+      "native_usd": 0,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "3",
         "x-zs-actual-output-count": "1",
+        "x-zs-fees-amount": "0",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "0",
         "x-zs-inference-amount": "500",
         "x-zs-inference-amount-usd": "$0.000500",
@@ -902,7 +913,7 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDI="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDI=\",\"operator_id\":1,\"node_id\":1,\"operator_owner_addr\":\"O\",\"actual_input_count\":3,\"actual_output_count\":1,\"inference\":{\"amount\":500,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.0005},\"max_price_amount\":9000,\"min_price_amount\":100,\"algo_fees_microalgos\":0}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDI=\",\"operator_id\":1,\"node_id\":1,\"operator_owner_addr\":\"O\",\"actual_input_count\":3,\"actual_output_count\":1,\"inference\":{\"amount\":500,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.0005},\"max_price_amount\":9000,\"min_price_amount\":100,\"algo_fees_microalgos\":0,\"network_fees\":{\"amount\":0,\"currency\":\"ALGO\",\"decimals\":6}}"
     },
     {
       "name": "nothing charged, ids unset",
@@ -917,7 +928,9 @@
       "owner_addr": "",
       "open_fees": 0,
       "settle_fees": 0,
-      "algo_usd": 0,
+      "native_usd": 0,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 250,
       "fee_bps_known": true,
       "headers": {
@@ -925,6 +938,9 @@
         "x-zs-actual-output-count": "0",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "250",
+        "x-zs-fees-amount": "0",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "0",
         "x-zs-inference-amount": "0",
         "x-zs-inference-currency": "USDC",
@@ -937,7 +953,7 @@
         "x-zs-total-debit-microusdc": "0"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDM=\",\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":0,\"currency\":\"USDC\",\"decimals\":6},\"max_price_amount\":5000,\"min_price_amount\":5000,\"algo_fees_microalgos\":0,\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":5000,\"total_debit_microusdc\":0}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDM=\",\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":0,\"currency\":\"USDC\",\"decimals\":6},\"max_price_amount\":5000,\"min_price_amount\":5000,\"algo_fees_microalgos\":0,\"network_fees\":{\"amount\":0,\"currency\":\"ALGO\",\"decimals\":6},\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":5000,\"total_debit_microusdc\":0}}"
     },
     {
       "name": "zero fee rate known",
@@ -952,7 +968,9 @@
       "owner_addr": "",
       "open_fees": 0,
       "settle_fees": 0,
-      "algo_usd": 1,
+      "native_usd": 1,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": true,
       "headers": {
@@ -961,8 +979,12 @@
         "x-zs-algo-usd-rate": "1",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "0",
+        "x-zs-fees-amount": "0",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "0",
         "x-zs-fees-usd": "$0.000000",
+        "x-zs-fees-usd-rate": "1",
         "x-zs-inference-amount": "200000",
         "x-zs-inference-amount-usd": "$0.200000",
         "x-zs-inference-currency": "USDC",
@@ -978,7 +1000,7 @@
         "x-zs-total-debit-usd": "$0.200000"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDQ=\",\"operator_id\":3,\"node_id\":9,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":200000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.2},\"max_price_amount\":500000,\"algo_fees_microalgos\":0,\"algo_usd_rate\":1,\"fee\":{\"fee_bps\":0,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":300000,\"total_debit_microusdc\":200000,\"total_debit_usd\":0.2}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDQ=\",\"operator_id\":3,\"node_id\":9,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":200000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.2},\"max_price_amount\":500000,\"algo_fees_microalgos\":0,\"algo_usd_rate\":1,\"network_fees\":{\"amount\":0,\"currency\":\"ALGO\",\"decimals\":6,\"usd_rate\":1},\"fee\":{\"fee_bps\":0,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":300000,\"total_debit_microusdc\":200000,\"total_debit_usd\":0.2}}"
     },
     {
       "name": "tiny rate",
@@ -993,7 +1015,9 @@
       "owner_addr": "",
       "open_fees": 5,
       "settle_fees": 0,
-      "algo_usd": 1.234e-7,
+      "native_usd": 1.234e-7,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 333,
       "fee_bps_known": true,
       "headers": {
@@ -1002,8 +1026,12 @@
         "x-zs-algo-usd-rate": "0.0000001234",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "333",
+        "x-zs-fees-amount": "5",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "5",
         "x-zs-fees-usd": "$0.000000",
+        "x-zs-fees-usd-rate": "0.0000001234",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
         "x-zs-inference-currency": "USDC",
@@ -1019,7 +1047,7 @@
         "x-zs-total-debit-usd": "$0.000001"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDU=\",\"operator_id\":4,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":10,\"algo_fees_microalgos\":5,\"algo_fees_usd\":6.170000000000001e-13,\"algo_usd_rate\":1.234e-7,\"fee\":{\"fee_bps\":333,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":9,\"total_debit_microusdc\":1,\"total_debit_usd\":0.000001}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDU=\",\"operator_id\":4,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":10,\"algo_fees_microalgos\":5,\"algo_fees_usd\":6.170000000000001e-13,\"algo_usd_rate\":1.234e-7,\"network_fees\":{\"amount\":5,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":6.170000000000001e-13,\"usd_rate\":1.234e-7},\"fee\":{\"fee_bps\":333,\"discount_bps\":0,\"platform_fee_microusdc\":0,\"refund_microusdc\":9,\"total_debit_microusdc\":1,\"total_debit_usd\":0.000001}}"
     },
     {
       "name": "rounding",
@@ -1034,7 +1062,9 @@
       "owner_addr": "OWNER12",
       "open_fees": 7,
       "settle_fees": 3,
-      "algo_usd": 0.123456789,
+      "native_usd": 0.123456789,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 250,
       "fee_bps_known": true,
       "headers": {
@@ -1043,8 +1073,12 @@
         "x-zs-algo-usd-rate": "0.123456789",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "250",
+        "x-zs-fees-amount": "10",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "10",
         "x-zs-fees-usd": "$0.000001",
+        "x-zs-fees-usd-rate": "0.123456789",
         "x-zs-inference-amount": "1234567",
         "x-zs-inference-amount-usd": "$1.234567",
         "x-zs-inference-currency": "USDC",
@@ -1061,7 +1095,7 @@
         "x-zs-total-debit-usd": "$1.265431"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDY=\",\"operator_id\":12,\"node_id\":3,\"operator_owner_addr\":\"OWNER12\",\"actual_input_count\":99999,\"actual_output_count\":77777,\"inference\":{\"amount\":1234567,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1.234567},\"max_price_amount\":2000000,\"min_price_amount\":1,\"algo_fees_microalgos\":10,\"algo_fees_usd\":0.00000123456789,\"algo_usd_rate\":0.123456789,\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":30864,\"refund_microusdc\":734569,\"total_debit_microusdc\":1265431,\"total_debit_usd\":1.265431}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDY=\",\"operator_id\":12,\"node_id\":3,\"operator_owner_addr\":\"OWNER12\",\"actual_input_count\":99999,\"actual_output_count\":77777,\"inference\":{\"amount\":1234567,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":1.234567},\"max_price_amount\":2000000,\"min_price_amount\":1,\"algo_fees_microalgos\":10,\"algo_fees_usd\":0.00000123456789,\"algo_usd_rate\":0.123456789,\"network_fees\":{\"amount\":10,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":0.00000123456789,\"usd_rate\":0.123456789},\"fee\":{\"fee_bps\":250,\"discount_bps\":0,\"platform_fee_microusdc\":30864,\"refund_microusdc\":734569,\"total_debit_microusdc\":1265431,\"total_debit_usd\":1.265431}}"
     },
     {
       "name": "large rate",
@@ -1076,7 +1110,9 @@
       "owner_addr": "",
       "open_fees": 1000000,
       "settle_fees": 0,
-      "algo_usd": 12345678.9,
+      "native_usd": 12345678.9,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 10000,
       "fee_bps_known": true,
       "headers": {
@@ -1085,8 +1121,12 @@
         "x-zs-algo-usd-rate": "12345678.9",
         "x-zs-discount-bps": "0",
         "x-zs-fee-bps": "10000",
+        "x-zs-fees-amount": "1000000",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "1000000",
         "x-zs-fees-usd": "$12345678.900000",
+        "x-zs-fees-usd-rate": "12345678.9",
         "x-zs-inference-amount": "999999999",
         "x-zs-inference-amount-usd": "$999.999999",
         "x-zs-inference-currency": "USDC",
@@ -1102,7 +1142,7 @@
         "x-zs-total-debit-usd": "$1999.999998"
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDc=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":999999999,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":999.999999},\"max_price_amount\":999999999,\"algo_fees_microalgos\":1000000,\"algo_fees_usd\":12345678.9,\"algo_usd_rate\":12345678.9,\"fee\":{\"fee_bps\":10000,\"discount_bps\":0,\"platform_fee_microusdc\":999999999,\"refund_microusdc\":0,\"total_debit_microusdc\":1999999998,\"total_debit_usd\":1999.999998}}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDc=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":999999999,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":999.999999},\"max_price_amount\":999999999,\"algo_fees_microalgos\":1000000,\"algo_fees_usd\":12345678.9,\"algo_usd_rate\":12345678.9,\"network_fees\":{\"amount\":1000000,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":12345678.9,\"usd_rate\":12345678.9},\"fee\":{\"fee_bps\":10000,\"discount_bps\":0,\"platform_fee_microusdc\":999999999,\"refund_microusdc\":0,\"total_debit_microusdc\":1999999998,\"total_debit_usd\":1999.999998}}"
     },
     {
       "name": "dollar tie down to even",
@@ -1117,15 +1157,21 @@
       "owner_addr": "",
       "open_fees": 15625,
       "settle_fees": 0,
-      "algo_usd": 0.5,
+      "native_usd": 0.5,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "0",
         "x-zs-actual-output-count": "0",
         "x-zs-algo-usd-rate": "0.5",
+        "x-zs-fees-amount": "15625",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "15625",
         "x-zs-fees-usd": "$0.007812",
+        "x-zs-fees-usd-rate": "0.5",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
         "x-zs-inference-currency": "USDC",
@@ -1137,7 +1183,7 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDg="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDg=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":15625,\"algo_fees_usd\":0.0078125,\"algo_usd_rate\":0.5}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDg=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":15625,\"algo_fees_usd\":0.0078125,\"algo_usd_rate\":0.5,\"network_fees\":{\"amount\":15625,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":0.0078125,\"usd_rate\":0.5}}"
     },
     {
       "name": "dollar tie up to even",
@@ -1152,15 +1198,21 @@
       "owner_addr": "",
       "open_fees": 46875,
       "settle_fees": 0,
-      "algo_usd": 0.5,
+      "native_usd": 0.5,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "0",
         "x-zs-actual-output-count": "0",
         "x-zs-algo-usd-rate": "0.5",
+        "x-zs-fees-amount": "46875",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "46875",
         "x-zs-fees-usd": "$0.023438",
+        "x-zs-fees-usd-rate": "0.5",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
         "x-zs-inference-currency": "USDC",
@@ -1172,7 +1224,7 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMDk="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDk=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":46875,\"algo_fees_usd\":0.0234375,\"algo_usd_rate\":0.5}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMDk=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":46875,\"algo_fees_usd\":0.0234375,\"algo_usd_rate\":0.5,\"network_fees\":{\"amount\":46875,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":0.0234375,\"usd_rate\":0.5}}"
     },
     {
       "name": "dollars past 1e21",
@@ -1187,15 +1239,21 @@
       "owner_addr": "",
       "open_fees": 3000000,
       "settle_fees": 0,
-      "algo_usd": 5.7885281e+21,
+      "native_usd": 5.7885281e+21,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "0",
         "x-zs-actual-output-count": "0",
         "x-zs-algo-usd-rate": "5788528100000000000000",
+        "x-zs-fees-amount": "3000000",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "3000000",
         "x-zs-fees-usd": "$17365584300000000606208.000000",
+        "x-zs-fees-usd-rate": "5788528100000000000000",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
         "x-zs-inference-currency": "USDC",
@@ -1207,7 +1265,7 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTA="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTA=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":3000000,\"algo_fees_usd\":1.73655843e+22,\"algo_usd_rate\":5.7885281e+21}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTA=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":3000000,\"algo_fees_usd\":1.73655843e+22,\"algo_usd_rate\":5.7885281e+21,\"network_fees\":{\"amount\":3000000,\"currency\":\"ALGO\",\"decimals\":6,\"amount_usd\":1.73655843e+22,\"usd_rate\":5.7885281e+21}}"
     },
     {
       "name": "operator without node",
@@ -1222,12 +1280,17 @@
       "owner_addr": "",
       "open_fees": 0,
       "settle_fees": 0,
-      "algo_usd": 0,
+      "native_usd": 0,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "0",
         "x-zs-actual-output-count": "0",
+        "x-zs-fees-amount": "0",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "0",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
@@ -1239,7 +1302,7 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTE="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTE=\",\"operator_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTE=\",\"operator_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0,\"network_fees\":{\"amount\":0,\"currency\":\"ALGO\",\"decimals\":6}}"
     },
     {
       "name": "node without operator",
@@ -1254,12 +1317,17 @@
       "owner_addr": "",
       "open_fees": 0,
       "settle_fees": 0,
-      "algo_usd": 0,
+      "native_usd": 0,
+      "fee_currency": "ALGO",
+      "fee_decimals": 6,
       "fee_bps": 0,
       "fee_bps_known": false,
       "headers": {
         "x-zs-actual-input-count": "0",
         "x-zs-actual-output-count": "0",
+        "x-zs-fees-amount": "0",
+        "x-zs-fees-currency": "ALGO",
+        "x-zs-fees-decimals": "6",
         "x-zs-fees-microalgos": "0",
         "x-zs-inference-amount": "1",
         "x-zs-inference-amount-usd": "$0.000001",
@@ -1271,7 +1339,89 @@
         "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTI="
       },
       "frame_event": "zs.usage",
-      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTI=\",\"node_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0}"
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTI=\",\"node_id\":5,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"algo_fees_microalgos\":0,\"network_fees\":{\"amount\":0,\"currency\":\"ALGO\",\"decimals\":6}}"
+    },
+    {
+      "name": "fees in SOL",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMTM=",
+      "amount_charged": 1000,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 2000,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 5000,
+      "settle_fees": 5000,
+      "native_usd": 150.25,
+      "fee_currency": "SOL",
+      "fee_decimals": 9,
+      "fee_bps": 1000,
+      "fee_bps_known": true,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-discount-bps": "0",
+        "x-zs-fee-bps": "1000",
+        "x-zs-fees-amount": "10000",
+        "x-zs-fees-currency": "SOL",
+        "x-zs-fees-decimals": "9",
+        "x-zs-fees-usd": "$0.001503",
+        "x-zs-fees-usd-rate": "150.25",
+        "x-zs-inference-amount": "1000",
+        "x-zs-inference-amount-usd": "$0.001000",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "2000",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-platform-fee-microusdc": "100",
+        "x-zs-refund-microusdc": "900",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTM=",
+        "x-zs-total-debit-microusdc": "1100",
+        "x-zs-total-debit-usd": "$0.001100"
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTM=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1000,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.001},\"max_price_amount\":2000,\"network_fees\":{\"amount\":10000,\"currency\":\"SOL\",\"decimals\":9,\"amount_usd\":0.0015025000000000001,\"usd_rate\":150.25},\"fee\":{\"fee_bps\":1000,\"discount_bps\":0,\"platform_fee_microusdc\":100,\"refund_microusdc\":900,\"total_debit_microusdc\":1100,\"total_debit_usd\":0.0011}}"
+    },
+    {
+      "name": "fees in SOL, rate unknown",
+      "ticket_id": "dGlja2V0LTAwMDAwMDAwMTQ=",
+      "amount_charged": 1,
+      "actual_input_count": 0,
+      "actual_output_count": 0,
+      "max_price": 1,
+      "min_price": 0,
+      "op": 1,
+      "node": 1,
+      "owner_addr": "",
+      "open_fees": 5000,
+      "settle_fees": 0,
+      "native_usd": 0,
+      "fee_currency": "SOL",
+      "fee_decimals": 9,
+      "fee_bps": 0,
+      "fee_bps_known": false,
+      "headers": {
+        "x-zs-actual-input-count": "0",
+        "x-zs-actual-output-count": "0",
+        "x-zs-fees-amount": "5000",
+        "x-zs-fees-currency": "SOL",
+        "x-zs-fees-decimals": "9",
+        "x-zs-inference-amount": "1",
+        "x-zs-inference-amount-usd": "$0.000001",
+        "x-zs-inference-currency": "USDC",
+        "x-zs-inference-decimals": "6",
+        "x-zs-max-price-amount": "1",
+        "x-zs-min-price-amount": "0",
+        "x-zs-node-id": "1",
+        "x-zs-operator-id": "1",
+        "x-zs-ticket-id": "dGlja2V0LTAwMDAwMDAwMTQ="
+      },
+      "frame_event": "zs.usage",
+      "frame_data": "{\"type\":\"zs.usage\",\"ticket_id\":\"dGlja2V0LTAwMDAwMDAwMTQ=\",\"operator_id\":1,\"node_id\":1,\"actual_input_count\":0,\"actual_output_count\":0,\"inference\":{\"amount\":1,\"currency\":\"USDC\",\"decimals\":6,\"amount_usd\":0.000001},\"max_price_amount\":1,\"network_fees\":{\"amount\":5000,\"currency\":\"SOL\",\"decimals\":9}}"
     }
   ]
 }

@@ -255,6 +255,17 @@ func TestDeployment_OnlyAlgorandOwnsUnnamedRows(t *testing.T) {
 	}
 }
 
+// Literal, as TS's feeUnitOf test: the decimals scale every fee's USD figure,
+// and a rail neither names must not borrow ALGO's units.
+func TestFeeUnitOf(t *testing.T) {
+	algo, sol := FeeUnit{Currency: "ALGO", Decimals: 6}, FeeUnit{Currency: "SOL", Decimals: 9}
+	for r, want := range map[ticket.Rail]FeeUnit{0: algo, ticket.RailAlgorand: algo, ticket.RailSolana: sol, 3: {}} {
+		if got := FeeUnitOf(r); got != want {
+			t.Errorf("FeeUnitOf(%d) = %+v, want %+v", r, got, want)
+		}
+	}
+}
+
 // deployment is written beside escrow_app_id, so an SDK from before it still
 // finds the row, and comes back from the file.
 func TestFileJournal_DeploymentRoundTrips(t *testing.T) {

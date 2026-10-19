@@ -45,7 +45,7 @@ import {
     frameSSE,
     pumpSSE,
 } from '../src/stream.js'
-import { TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
+import { ALGO_FEES, TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -1011,7 +1011,7 @@ describe('frameFactory', () => {
         const logger = recLogger()
         const responseAffinity = new IDAffinity(16, 60_000)
         const resolved: string[] = []
-        const deps: FrameDeps = { logger, responseAffinity, feeRate: () => 150, resolveRefund: (id) => resolved.push(id) }
+        const deps: FrameDeps = { logger, feeUnit: ALGO_FEES, responseAffinity, feeRate: () => 150, resolveRefund: (id) => resolved.push(id) }
         const gen: GenComplete = { value: false }
         return { f, frames, sealer, handle, call, logger, deps, gen, responseAffinity, resolved }
     }
@@ -1047,9 +1047,14 @@ describe('frameFactory', () => {
             // What the scripted ack reported paying.
             settleFees: 1000,
             algoUsdPrice: 0.2,
+            feeUnit: ALGO_FEES,
             feeBps: 150,
             haveFee: true,
-            check: { violation: '', excluded: false, settled: { ticketId: TICKET_ID, kind: 'atomic', txId: 'ACK', feesMicroAlgos: 1000 } },
+            check: {
+                violation: '',
+                excluded: false,
+                settled: { ticketId: TICKET_ID, kind: 'atomic', txId: 'ACK', feesMicroAlgos: 1000, networkFees: 1000 },
+            },
         })
         expect((await slot.done).settlement.txId).toBe('ACK')
         expect(s.resolved).toEqual([TICKET_ID])
@@ -1062,6 +1067,15 @@ describe('frameFactory', () => {
         const out = await fn(receiptFrame(s))
         expect(s.handle.acks[0]![1]).toBeNull()
         expect(out.usage).toMatchObject({ settleFees: 1000, check: { settled: { kind: 'payer_ack', feesMicroAlgos: 1000 } } })
+    })
+
+    it('reports fees in the unit the deps name', async () => {
+        const s = await setup()
+        const sol = { currency: 'SOL', decimals: 9 }
+        const fn = await frameFactory({ ...s.deps, feeUnit: sol }, s.call, s.gen)(keyed(s))
+        for (const pt of s.frames) await fn(zs(s, pt))
+        const out = await fn(receiptFrame(s))
+        expect(out.usage).toMatchObject({ feeUnit: sol, settleFees: 1000, check: { settled: { feesMicroAlgos: 0, networkFees: 1000 } } })
     })
 
     it('shows the idle watchdog each opened content frame, and nothing else', async () => {
@@ -1337,7 +1351,7 @@ describe('a streamed turn end to end', () => {
             em as never,
             { url: 'https://node.example.com/v1/chat/completions', body: new Uint8Array(), headers: {} },
             call,
-            frameFactory({ logger: deps.logger, feeRate: () => null }, call, gen),
+            frameFactory({ logger: deps.logger, feeUnit: ALGO_FEES, feeRate: () => null }, call, gen),
             async () => {
                 throw new Error('no fallback expected')
             },

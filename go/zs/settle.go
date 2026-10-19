@@ -38,10 +38,20 @@ const (
 
 // Settlement is a turn's payer-side escrow submit, as Stream.Wait reports it.
 type Settlement struct {
-	TicketID       string
-	Kind           SettleKind
-	TxID           string
+	TicketID string
+	Kind     SettleKind
+	TxID     string
+	// Deprecated: FeesMicroAlgos is NetworkFees on Algorand and 0 on any
+	// other rail.
 	FeesMicroAlgos uint64
+	// NetworkFees is the payer's fee for the submit, in base units of the
+	// deployment's FeeUnit.
+	NetworkFees uint64
+}
+
+// settlement is a submit's Settlement, its fee under both names.
+func (c *Client) settlement(kind SettleKind, txID string, fee uint64) Settlement {
+	return Settlement{Kind: kind, TxID: txID, FeesMicroAlgos: algoOnly(c.deployment.FeeUnit(), fee), NetworkFees: fee}
 }
 
 var errStreamNotRun = errors.New("zs: Wait called before the Stream's events were ranged over")

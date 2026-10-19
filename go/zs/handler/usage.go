@@ -23,14 +23,42 @@ func usageOperator(ev zs.ReceiptVerified) zs.Operator {
 
 // setUsageHeaders renders a verified receipt as the X-Zs-* usage headers.
 func setUsageHeaders(h http.Header, ev zs.ReceiptVerified) {
-	setReceiptUsageHeaders(h, &ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
-		ev.AlgoUSD, ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
+	setReceiptUsageHeaders(h, &ev.Receipt, &ev.Ticket, usageOperator(ev), feesOf(ev), ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
 }
 
 // usageFrame renders a verified receipt as the zs.usage stream frame.
 func usageFrame(ev zs.ReceiptVerified) zs.Frame {
-	return receiptUsageFrame(&ev.Receipt, &ev.Ticket, usageOperator(ev), ev.OpenFeesMicroAlgos, ev.SettleFeesMicroAlgos,
-		ev.AlgoUSD, ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
+	return receiptUsageFrame(&ev.Receipt, &ev.Ticket, usageOperator(ev), feesOf(ev), ev.FeeBps, retiredDiscountBps, ev.FeeBpsKnown)
+}
+
+// paidFees is what the payer paid the network for a turn: the open's and
+// the settle's fees in base units of unit, and the USD price of one coin of
+// it, 0 when unknown.
+type paidFees struct {
+	open, settle uint64
+	usdRate      float64
+	unit         zs.FeeUnit
+}
+
+func feesOf(ev zs.ReceiptVerified) paidFees {
+	return paidFees{open: ev.OpenNetworkFees, settle: ev.SettleNetworkFees, usdRate: ev.NativeUSD, unit: ev.FeeUnit}
+}
+
+func (f paidFees) total() uint64 { return f.open + f.settle }
+
+func (f paidFees) usd() float64 { return float64(f.total()) / pow10(f.unit.Decimals) * f.usdRate }
+
+// algo reports whether the fees are in ALGO. The names that say ALGO
+// (X-Zs-Fees-Microalgos, X-Zs-Algo-Usd-Rate, the frame's algo_* keys) are
+// sent only then, never holding another coin's units.
+func (f paidFees) algo() bool { return f.unit.Currency == "ALGO" }
+
+// algoRate is the ALGO/USD rate, 0 when the fees are not in ALGO.
+func (f paidFees) algoRate() float64 {
+	if !f.algo() {
+		return 0
+	}
+	return f.usdRate
 }
 
 // inferenceDenom returns the (currency, decimals) tuple the inference
@@ -56,16 +84,16 @@ func inferenceDenom(_ *ticket.Ticket) (currency string, decimals int) {
 //
 // Operator-paid fees (the gtxn[1] open over-fee and the gtxn[0]
 // settle over-fee that pool the rest of each group via Algorand fee
-// pooling) are deliberately excluded — reporting them as "ALGO fees"
-// would mislead the user about what they paid.
+// pooling) are deliberately excluded — reporting them as the payer's
+// fees would mislead the user about what they paid.
 //
 // Inference is denominated in USDC (the contract escrows USDC, see
-// SPEC.md §3.3a); network fees stay in ALGO regardless. The two USD
-// conversions are independent: inference USD comes straight from the
-// USDC amount (1 USDC ≈ $1), fee USD requires the ALGO/USD rate.
-func setReceiptUsageHeaders(h http.Header, r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) {
+// SPEC.md §3.3a); network fees are in the rail's native coin. The two
+// USD conversions are independent: inference USD comes straight from the
+// USDC amount (1 USDC ≈ $1), fee USD requires the coin's USD rate.
+func setReceiptUsageHeaders(h http.Header, r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, fees paidFees, feeBps, discountBps uint64, haveFee bool) {
 	currency, decimals := inferenceDenom(ticket)
-	totalFees := openFees + settleFees
+	totalFees := fees.total()
 
 	h.Set("X-Zs-Ticket-Id", r.TicketID)
 	if op.ID != 0 {
@@ -108,13 +136,22 @@ func setReceiptUsageHeaders(h http.Header, r *ticket.UsageReceipt, ticket *ticke
 	// no floor for this ticket — always emitted so clients can rely on
 	// the header's presence rather than detecting absence.
 	h.Set("X-Zs-Min-Price-Amount", strconv.FormatUint(ticket.MinPrice, 10))
-	h.Set("X-Zs-Fees-Microalgos", strconv.FormatUint(totalFees, 10))
-	if r.AmountCharged > 0 {
-		h.Set("X-Zs-Inference-Amount-Usd", fmt.Sprintf("$%.6f", inferenceUSD(r.AmountCharged, currency, decimals, algoUSDPrice)))
+	h.Set("X-Zs-Fees-Amount", strconv.FormatUint(totalFees, 10))
+	h.Set("X-Zs-Fees-Currency", fees.unit.Currency)
+	h.Set("X-Zs-Fees-Decimals", strconv.Itoa(fees.unit.Decimals))
+	if fees.algo() {
+		h.Set("X-Zs-Fees-Microalgos", strconv.FormatUint(totalFees, 10))
 	}
-	if algoUSDPrice > 0 {
-		h.Set("X-Zs-Fees-Usd", fmt.Sprintf("$%.6f", float64(totalFees)/1_000_000*algoUSDPrice))
-		h.Set("X-Zs-Algo-Usd-Rate", strconv.FormatFloat(algoUSDPrice, 'f', -1, 64))
+	if r.AmountCharged > 0 {
+		h.Set("X-Zs-Inference-Amount-Usd", fmt.Sprintf("$%.6f", inferenceUSD(r.AmountCharged, currency, decimals, fees.algoRate())))
+	}
+	if fees.usdRate > 0 {
+		rate := strconv.FormatFloat(fees.usdRate, 'f', -1, 64)
+		h.Set("X-Zs-Fees-Usd", fmt.Sprintf("$%.6f", fees.usd()))
+		h.Set("X-Zs-Fees-Usd-Rate", rate)
+		if fees.algo() {
+			h.Set("X-Zs-Algo-Usd-Rate", rate)
+		}
 	}
 	// Additive-fee breakdown from the open-time snapshot (only when readable).
 	// platform_fee is the payer's protocol fee on top of the operator's base;
@@ -207,15 +244,29 @@ type usageBody struct {
 	// per-request floor the operator was committed to (SPEC.md §3a
 	// "Minimum charge"). 0 when the floor was disabled at reserve.
 	// Omitted when zero so back-compat consumers don't see a new key.
-	MinPriceAmount     uint64  `json:"min_price_amount,omitempty"`
-	AlgoFeesMicroalgos uint64  `json:"algo_fees_microalgos"`
-	AlgoFeesUsd        float64 `json:"algo_fees_usd,omitempty"`
-	AlgoUsdRate        float64 `json:"algo_usd_rate,omitempty"`
+	MinPriceAmount uint64 `json:"min_price_amount,omitempty"`
+	// The algo_* keys are sent only when the fees are in ALGO; NetworkFees
+	// carries them on every rail.
+	AlgoFeesMicroalgos *uint64       `json:"algo_fees_microalgos,omitempty"`
+	AlgoFeesUsd        float64       `json:"algo_fees_usd,omitempty"`
+	AlgoUsdRate        float64       `json:"algo_usd_rate,omitempty"`
+	NetworkFees        networkFeeSum `json:"network_fees"`
 	// Fee is the additive-fee breakdown (platform fee, refund, total debit)
 	// the proxy derives from the operator-signed amount_charged and the ticket
 	// box's open-time fee snapshot. Omitted when the proxy couldn't read the
 	// snapshot. See feeBreakdown.
 	Fee *feeBreakdown `json:"fee,omitempty"`
+}
+
+// networkFeeSum is the payer's network fees for a turn in the rail's coin,
+// shaped as inferenceCost is. Not named fees, which would read as the
+// protocol-fee breakdown in fee.
+type networkFeeSum struct {
+	Amount    uint64  `json:"amount"`
+	Currency  string  `json:"currency"`
+	Decimals  int     `json:"decimals"`
+	AmountUsd float64 `json:"amount_usd,omitempty"`
+	UsdRate   float64 `json:"usd_rate,omitempty"`
 }
 
 // feeBreakdown is the additive-fee decomposition derived from the
@@ -268,9 +319,9 @@ func feeBreakdownFor(amountCharged, maxPrice, feeBps, discountBps uint64, haveFe
 const retiredDiscountBps uint64 = 0
 
 // receiptUsageFrame builds the synthetic SSE frame emitted after the
-// operator's signed receipt has been verified. openFees + settleFees
+// operator's signed receipt has been verified. fees.open + fees.settle
 // are the *payer's* shares of the open and settle groups (operator's
-// pool fees are excluded), summed into algo_fees_microalgos so the
+// pool fees are excluded), summed into network_fees.amount so the
 // client sees a single "what did the payer pay in network fees"
 // number. In the consensus-verified design both shares are 0 on the
 // atomic path; only the standalone settle fallback contributes.
@@ -280,9 +331,9 @@ const retiredDiscountBps uint64 = 0
 //
 // Marshal cannot fail for this shape; JSON errors here would indicate
 // a stdlib bug.
-func receiptUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, openFees, settleFees uint64, algoUSDPrice float64, feeBps, discountBps uint64, haveFee bool) zs.Frame {
+func receiptUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Operator, fees paidFees, feeBps, discountBps uint64, haveFee bool) zs.Frame {
 	currency, decimals := inferenceDenom(ticket)
-	totalFees := openFees + settleFees
+	totalFees := fees.total()
 	u := usageBody{
 		Type:              usageFrameEvent,
 		TicketID:          r.TicketID,
@@ -296,16 +347,23 @@ func receiptUsageFrame(r *ticket.UsageReceipt, ticket *ticket.Ticket, op zs.Oper
 			Currency: currency,
 			Decimals: decimals,
 		},
-		MaxPriceAmount:     ticket.MaxPrice,
-		MinPriceAmount:     ticket.MinPrice,
-		AlgoFeesMicroalgos: totalFees,
+		MaxPriceAmount: ticket.MaxPrice,
+		MinPriceAmount: ticket.MinPrice,
+		NetworkFees:    networkFeeSum{Amount: totalFees, Currency: fees.unit.Currency, Decimals: fees.unit.Decimals},
+	}
+	if fees.algo() {
+		u.AlgoFeesMicroalgos = &totalFees
 	}
 	if r.AmountCharged > 0 {
-		u.Inference.AmountUsd = inferenceUSD(r.AmountCharged, currency, decimals, algoUSDPrice)
+		u.Inference.AmountUsd = inferenceUSD(r.AmountCharged, currency, decimals, fees.algoRate())
 	}
-	if algoUSDPrice > 0 {
-		u.AlgoFeesUsd = float64(totalFees) / 1_000_000 * algoUSDPrice
-		u.AlgoUsdRate = algoUSDPrice
+	if fees.usdRate > 0 {
+		u.NetworkFees.AmountUsd = fees.usd()
+		u.NetworkFees.UsdRate = fees.usdRate
+		if fees.algo() {
+			u.AlgoFeesUsd = u.NetworkFees.AmountUsd
+			u.AlgoUsdRate = fees.usdRate
+		}
 	}
 	u.Fee = feeBreakdownFor(r.AmountCharged, ticket.MaxPrice, feeBps, discountBps, haveFee, currency, decimals)
 	payload, _ := json.Marshal(u)

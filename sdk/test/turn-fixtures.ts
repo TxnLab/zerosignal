@@ -15,6 +15,7 @@ import { type Ticket, type UsageReceipt, commitResponseKey, setBodyHashBytes, si
 import { bodyHashOfBody } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult } from '../src/ack.js'
+import { feeUnitOf } from '../src/network.js'
 import type { OpenHandle, SettleOutcome } from '../src/parts.js'
 import type { LogAttrs, Logger } from '../src/ports.js'
 import { testOperator } from './fixtures.js'
@@ -50,6 +51,9 @@ function keypair() {
 }
 
 export const TICKET_ID = 'dGlja2V0LXdhaXQtMDAwMDA='
+
+/** The fee unit of an Algorand deployment, which every turn fixture is. */
+export const ALGO_FEES = feeUnitOf('algorand')
 
 /**
  * A ticket and a receipt its operator signed over plaintext, Go's

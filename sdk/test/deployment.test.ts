@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 
 import { catalogStorageKey } from '../src/assemble.js'
 import { ZsError } from '../src/errors.js'
-import { type Network, type NetworkName, type Rail, ownsRecord, resolveNetwork } from '../src/network.js'
+import { type Network, type NetworkName, type Rail, feeUnitOf, ownsRecord, resolveNetwork } from '../src/network.js'
 
 interface Input {
     rail?: Rail
@@ -74,6 +74,14 @@ describe('deployment vectors', () => {
     it('claims an unnamed row by its app id only on Algorand', () => {
         const d = { ...resolveNetwork({ network: 'localnet', escrowAppId: 7n }), rail: 'solana' as Rail }
         expect(ownsRecord(d, { escrowAppId: 7n })).toBe(false)
+    })
+})
+
+describe('feeUnitOf', () => {
+    // Literal, as Go's TestFeeUnitOf: the decimals scale every fee's USD figure.
+    it('is ALGO in micro-units on Algorand and SOL in lamports on Solana', () => {
+        expect(feeUnitOf('algorand')).toEqual({ currency: 'ALGO', decimals: 6 })
+        expect(feeUnitOf('solana')).toEqual({ currency: 'SOL', decimals: 9 })
     })
 })
 

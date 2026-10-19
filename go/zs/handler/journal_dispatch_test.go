@@ -65,6 +65,12 @@ func TestDispatch_JournalsOpenThenReceipt(t *testing.T) {
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Result().StatusCode, w.Body.String())
 	}
+	// An Algorand turn still carries the names that say ALGO.
+	if h := w.Header(); h.Get("X-Zs-Fees-Currency") != "ALGO" || h.Get("X-Zs-Fees-Microalgos") == "" ||
+		h.Get("X-Zs-Fees-Microalgos") != h.Get("X-Zs-Fees-Amount") {
+		t.Errorf("fee headers currency %q µALGO %q amount %q, want ALGO with both amounts", h.Get("X-Zs-Fees-Currency"),
+			h.Get("X-Zs-Fees-Microalgos"), h.Get("X-Zs-Fees-Amount"))
+	}
 
 	journal.mu.Lock()
 	puts := journal.puts

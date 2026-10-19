@@ -14,6 +14,7 @@
 
 import type { Ticket as SignedTicket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
+import type { FeeUnit } from './network.js'
 import type { Attribution, Item, NodeRef, RelayHopReason, ToolState } from './types.js'
 
 /**
@@ -81,7 +82,10 @@ export interface PaymentCommitted {
     type: 'payment.committed'
     ticketId: string
     openTxId: string
+    /** @deprecated networkFees on Algorand, 0 on any other rail. */
     feesMicroAlgos: number
+    /** The payer's network fee for the open, in base units of the deployment's fee unit. */
+    networkFees: number
 }
 
 /**
@@ -216,12 +220,20 @@ export interface ReceiptVerified {
     ticket: SignedTicket
     target: NodeRef
     ownerAddr: string
+    /** @deprecated openNetworkFees on Algorand, 0 on any other rail. */
     openFeesMicroAlgos: number
+    /** @deprecated settleNetworkFees on Algorand, 0 on any other rail. */
     settleFeesMicroAlgos: number
-    /** The ALGO/USD rate the reserve priced at; 0 when unknown. */
+    /** @deprecated nativeUsd on Algorand, 0 on any other rail. */
     algoUsd: number
     feeBps: number
     feeBpsKnown: boolean
+    /** The payer's network fees, in base units of feeUnit. */
+    openNetworkFees: number
+    settleNetworkFees: number
+    /** The USD price of one feeUnit coin the reserve priced at; 0 when unknown. */
+    nativeUsd: number
+    feeUnit: FeeUnit
 }
 
 /**
@@ -242,8 +254,11 @@ export interface SettleSubmitted {
     type: 'settle.submitted'
     ticketId: string
     txId: string
+    /** @deprecated networkFees on Algorand, 0 on any other rail. */
     feesMicroAlgos: number
     atomic: boolean
+    /** The payer's fee for the settle, in base units of the deployment's fee unit. */
+    networkFees: number
 }
 
 /**

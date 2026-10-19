@@ -76,5 +76,8 @@ export interface Settlement {
     ticketId: string
     kind: SettleKind
     txId: string
+    /** @deprecated networkFees on Algorand, 0 on any other rail. */
     feesMicroAlgos: number
+    /** The payer's fee for the submit, in base units of the deployment's fee unit. */
+    networkFees: number
 }

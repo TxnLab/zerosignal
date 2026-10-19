@@ -342,7 +342,7 @@ describe('Client.stream', () => {
         ])
         expect(st.err).toBeUndefined()
         expect(h.sent).toHaveLength(1)
-        expect(await st.wait()).toEqual({ settlement: { ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 0 } })
+        expect(await st.wait()).toEqual({ settlement: { ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 0, networkFees: 0 } })
         expect(h.handle.acks).toHaveLength(1)
         // The watchdog took the ticket once escrow opened.
         expect(track).toHaveBeenCalledWith(h.handle, 2_000_000_000)
@@ -361,7 +361,7 @@ describe('Client.stream', () => {
         const resolve = vi.spyOn(h.p.refunds, 'resolve')
         const st = h.c.stream({ endpoint: CHAT, body: h.body })
         expect(await st.text()).toBe('hi')
-        expect(await st.wait()).toEqual({ settlement: { ticketId: TICKET_ID, kind: 'atomic', txId: 'ACK', feesMicroAlgos: 0 } })
+        expect(await st.wait()).toEqual({ settlement: { ticketId: TICKET_ID, kind: 'atomic', txId: 'ACK', feesMicroAlgos: 0, networkFees: 0 } })
         expect(h.handle.acks.map((a) => a[1])).toEqual([VALID_GROUP])
         expect(resolve).toHaveBeenCalledWith(TICKET_ID)
         await h.c.waitSettles()

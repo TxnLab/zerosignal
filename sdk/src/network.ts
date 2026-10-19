@@ -14,6 +14,20 @@ export type NetworkName = 'localnet' | 'testnet' | 'mainnet'
 export type Rail = 'algorand' | 'solana'
 
 /**
+ * The coin a rail's network fees are paid in. A fee amount is in its base
+ * units, decimals of them to the coin.
+ */
+export interface FeeUnit {
+    currency: string
+    decimals: number
+}
+
+/** feeUnitOf is rail's fee unit. */
+export function feeUnitOf(rail: Rail): FeeUnit {
+    return rail === 'solana' ? { currency: 'SOL', decimals: 9 } : { currency: 'ALGO', decimals: 6 }
+}
+
+/**
  * Network selects the chain and the escrow application. An empty Network is
  * mainnet, the production network. Naming a preset is enough; algodEndpoint
  * and algodToken override its algod. escrowAppId is embedded for testnet and
