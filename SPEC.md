@@ -2148,7 +2148,7 @@ An absent or empty `app_compose` **MUST NOT be reported as a compose check that 
 |---|---|---|
 | Node mints the preimage and self-verifies it against its own replay | **yes** | yes |
 | `VerifyComposeHash` — the digest gate that makes the document safe to read | **yes**, one per language | yes, on every verifier that reads a preimage |
-| `VerifyAppCompose` — manifest version, runner, `allowed_envs`, root-backdoor names, pre-launch digest, platform toggles, `features`, `storage_fs` | **yes** | **yes** — both the proxy and the browser client call it |
+| `VerifyAppCompose` — manifest version (2, or dstack 0.6's string `"3"`), runner, `allowed_envs`, root-backdoor names, pre-launch and `init_script` digests, platform toggles, `features`, `storage_fs`, `key_provider` and `key_provider_id` (Phala's KMS) | **yes** | **yes** — both the proxy and the browser client call it |
 | Preset production OS-image list, proxy and browser client | **yes** | yes |
 | `docker_compose_file` template match — release skeleton + published image | **yes** | **yes.** Both consumers ship `EnforceComposeSkeleton` on with the published `zs-node` release lists populated — the Go SDK's default verifier and the proxy's config defaults from `attest`, the browser client as a bundled constant |
 

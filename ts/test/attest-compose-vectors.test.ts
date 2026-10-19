@@ -37,6 +37,7 @@ import {
     EVENT_COMPOSE_HASH,
     composeSkeletonDigest,
     extractComposeSkeleton,
+    phalaKMSKeyProviderIds,
     phalaPreLaunchDigests,
     rootBackdoorEnvs,
     verifyAppCompose,
@@ -74,12 +75,15 @@ interface ComposeVectors {
     sidecar_compose: string
     sidecar_engine: string
     shared_policy: {
-        manifest_version: number
+        manifest_versions: number[]
         runner: string
         allowed_env_names: string[]
         allowed_env_suffixes: string[]
         enforce_env_allowlist: boolean
         pre_launch_script_digests: string[]
+        init_script_digests: string[]
+        key_provider: string
+        key_provider_ids: string[]
         enforce_compose_skeleton: boolean
         root_backdoor_envs: string[]
         allowed_root_backdoor_envs: string[]
@@ -146,6 +150,14 @@ function policyFor(name: string): ComposePolicy {
         }
         case 'storage':
             return { ...shared, storageFs: 'ext4' }
+        case 'init_blessed':
+            // sha256("echo hi"), upper-cased as Go's policy has it.
+            return {
+                ...shared,
+                initScriptDigests: [
+                    '56A79F3B115448072387C2480044BFA2CF8F90E4F5FDDD8C943B4E051B81F80B',
+                ],
+            }
         default:
             throw new Error(`unknown policy ${name}`)
     }
@@ -159,8 +171,12 @@ describe('compose golden vectors — the shared policy', () => {
     // turned only this side red and told you nothing about which side moved.
     it('matches Go field for field', () => {
         const p = zeroSignalComposePolicy()
-        expect(p.manifestVersion).toBe(V.shared_policy.manifest_version)
+        expect(p.manifestVersions).toEqual(V.shared_policy.manifest_versions)
         expect(p.runner).toBe(V.shared_policy.runner)
+        expect([...(p.initScriptDigests ?? [])]).toEqual(V.shared_policy.init_script_digests)
+        expect(p.keyProvider).toBe(V.shared_policy.key_provider)
+        expect([...phalaKMSKeyProviderIds()]).toEqual(V.shared_policy.key_provider_ids)
+        expect(p.keyProviderIds).toEqual(phalaKMSKeyProviderIds())
         expect([...zeroSignalSecretEnvNames()].sort()).toEqual(
             [...V.shared_policy.allowed_env_names].sort(),
         )

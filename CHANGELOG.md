@@ -31,6 +31,55 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-19 — dstack 0.5.12 and 0.6.1 guest images are trusted, 0.5.12 is scanned; nvidia-0.5.9 is not trusted (0.7.0)
+
+`attest.TrustedDstackOSImages()` (TS `trustedDstackOSImages`) adds `dstack-0.5.12`,
+`dstack-nvidia-0.5.12` and `dstack-0.6.1`, each checked against the vendor release, and drops
+`dstack-nvidia-0.5.9`. Phala no longer offers either 0.5.9 image. `dstack-0.5.9` stays because
+Phala's ACI gateway still runs it.
+
+**Consumer-visible.** A node on one of the new images now attests. A GPU node still on
+`dstack-nvidia-0.5.9` stops attesting, and payers stop routing to it as a TEE node, so redeploy
+it on `dstack-nvidia-0.5.12` before bumping a payer pin.
+
+`OSImagesWithoutSSHDaemon()` adds `dstack-0.5.12`, so an ACI upstream that moves from 0.5.9 to
+0.5.12 keeps its root-backdoor concession. The scan first verifies the rootfs against the
+measured dm-verity root hash, then lists it. `dstack-nvidia-0.5.12` and `dstack-0.6.1` are not
+scanned, so an upstream on either gets the strict rule. Re-running the scan on 0.5.9 corrected
+the list's godoc: both images' initramfs carry `getty`, `login` and `su`, and both rootfs carry
+`su` and `sulogin`. No getty is ever started (no getty unit, no `agetty`, initramfs `/init`
+only switches root), and `sulogin` is reachable only from boot-time failures that happen
+before `/etc` becomes writable, while root is still locked. The godoc also states two premises
+the scan cannot check: the kernel command line is the published one, and the upstream's own
+containers are not covered.
+
+**The compose policy reads dstack 0.6 documents.** A Phala `dstack-0.6.1` CVM writes
+`manifest_version` as the string `"3"` and adds `init_script`, `key_provider` and
+`key_provider_id`. Before this change Go refused such a document as malformed, and TS refused
+it on the version. Both now read `manifest_version` the way dstack 0.6 does, and
+`ComposePolicy.ManifestVersions` (TS `manifestVersions`) replaces `ManifestVersion`; both shipped
+policies accept 2 and 3. The new fields each get a rule:
+
+- `init_script` is a root boot hook like `pre_launch_script`. It is pinned by digest in
+  `InitScriptDigests` / `initScriptDigests`, which no shipped policy populates, so any non-empty
+  script is refused.
+- The key provider must be `kms`, worked out as dstack 0.6 does: `key_provider` when present,
+  else from `kms_enabled` and `local_key_provider_enabled`. Comparing only the optional field
+  would refuse `"key_provider":"none"` and accept the same keyless deployment written as
+  `"kms_enabled":false`.
+- `key_provider_id`, when present, must be Phala's KMS (`PhalaKMSKeyProviderIDs` /
+  `phalaKMSKeyProviderIds`); the 0.6 guest refuses keys from any other provider. A document
+  without the field is accepted, as every 0.5.x one is, so this does not establish which KMS a
+  node used. The replayed `key-provider` event records that and is not yet checked.
+
+New violation codes: `init_script`, `key_provider`, `key_provider_id`. TS now refuses a
+document whose modelled field has the wrong JSON type, as Go always has, where it used to read
+the zero value and could pass what Go refused. `compose_vectors.json` pins the parse and each
+rule in both languages, including the document a live `dstack-0.6.1` node published.
+
+**API change.** `ComposePolicy.ManifestVersion int` is now `ManifestVersions []int` (TS
+`manifestVersion` → `manifestVersions`). No consumer in this workspace sets it.
+
 ### 2026-10-19 — local state is named by deployment, not by app id (0.7.0)
 
 Journal rows, the saved catalog and a host's state files were scoped by the uint64 escrow app id,

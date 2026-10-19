@@ -98,10 +98,13 @@ export class ComposeError extends Error {
  * dstack's app-compose.json, the document hashed into RTMR3.
  *
  * Field set captured from a live Phala tdx.small CVM (dstack-0.5.9,
- * manifest_version 2). Unknown fields are a POLICY VIOLATION rather
- * than something to ignore — see `unknown_field`.
+ * manifest_version 2), plus the three keys a Phala dstack-0.6.1 CVM added
+ * (2026-10-19, manifest_version "3"): init_script, key_provider and
+ * key_provider_id. Unknown fields are a POLICY VIOLATION rather than
+ * something to ignore — see `unknown_field`.
  */
 export interface AppCompose {
+    /** Read as `manifestVersion` reads it; 0 when dstack would refuse the value. */
     manifest_version: number
     name: string
     runner: string
@@ -121,6 +124,11 @@ export interface AppCompose {
     public_tcbinfo: boolean
 
     storage_fs: string
+
+    /** `null` when the value is neither a script nor a list of scripts. */
+    init_script: string[] | null
+    key_provider: string
+    key_provider_id: string
 }
 
 /**
@@ -150,6 +158,9 @@ const KNOWN_APP_COMPOSE_FIELDS: readonly string[] = [
     'secure_time',
     'storage_fs',
     'tproxy_enabled',
+    'init_script',
+    'key_provider',
+    'key_provider_id',
 ]
 
 /**
@@ -164,6 +175,9 @@ export type ViolationCode =
     | 'root_backdoor_env'
     | 'env_not_allowed'
     | 'pre_launch_script'
+    | 'init_script'
+    | 'key_provider'
+    | 'key_provider_id'
     | 'toggle'
     | 'empty_docker_compose'
     | 'compose_skeleton'
@@ -264,6 +278,22 @@ export function phalaPreLaunchDigests(): readonly string[] {
 }
 
 /**
+ * The key_provider_id values of Phala Cloud's KMS: the DER-encoded P-256
+ * public key of its CA. Go's `PhalaKMSKeyProviderIDs`; the compose vectors
+ * pin the two together.
+ *
+ * Read off a dstack-0.6.1 CVM's app_compose on dstack-pha-prod5 (2026-10-19),
+ * and the same key is the `id` in key_provider_info of the 2026-08
+ * dstack-0.5.9 capture. A second Phala KMS would refuse nodes deployed against
+ * it with key_provider_id until it is added here, the fail-closed direction.
+ */
+export function phalaKMSKeyProviderIds(): readonly string[] {
+    return [
+        '3059301306072a8648ce3d020106082a8648ce3d030107034200048844eb42ccdf8c52fd4f174f362fcb9bbd19c45fd48f1edec2d8f1ca23536ec1a74021b4cee610c074f8294d431b2b7fee2c39e5333fdaf0a4522d43fb159d9f',
+    ]
+}
+
+/**
  * The exact environment variable names a ZeroSignal node deployment may declare
  * in the unmeasured channel, alongside the `*_MNEMONIC` suffix (see
  * `zeroSignalComposePolicy`).
@@ -335,7 +365,7 @@ export function zeroSignalSecretEnvNames(): readonly string[] {
  */
 export function zeroSignalComposePolicy(): ComposePolicy {
     return {
-        manifestVersion: 2,
+        manifestVersions: [2, 3],
         runner: 'docker-compose',
 
         allowedEnvNames: zeroSignalSecretEnvNames(),
@@ -345,6 +375,9 @@ export function zeroSignalComposePolicy(): ComposePolicy {
         enforceEnvAllowlist: true,
 
         preLaunchScriptDigests: phalaPreLaunchDigests(),
+
+        keyProvider: 'kms',
+        keyProviderIds: phalaKMSKeyProviderIds(),
 
         // Observed on the 2026-08 tdx.small capture. `kms` is the key
         // provider, `tproxy-net` the gateway — both are the platform's own
@@ -387,8 +420,12 @@ export interface ComposeToggles {
  * update on its own release cadence.
  */
 export interface ComposePolicy {
-    /** The version the document must declare. 0 or absent disables the check. */
-    manifestVersion?: number
+    /**
+     * The versions the document may declare. Empty or absent disables the
+     * check. A list because a CVM moved to a dstack 0.6 image declares "3"
+     * while one still on 0.5.x declares 2, and both are current.
+     */
+    manifestVersions?: readonly number[]
     /** The runner it must declare, e.g. 'docker-compose'. Empty disables the check. */
     runner?: string
     /**
@@ -446,6 +483,29 @@ export interface ComposePolicy {
      * legitimate during a migration and so had to be spellable.
      */
     preLaunchScriptDigests?: readonly string[]
+    /**
+     * `preLaunchScriptDigests` for dstack 0.6's init_script, which runs as root
+     * before the app's runner and takes up to several scripts. Same reading:
+     * an empty script is always accepted and an empty list permits nothing
+     * else.
+     */
+    initScriptDigests?: readonly string[]
+    /**
+     * Pins the provider the guest takes its keys from, worked out as dstack
+     * 0.6 does: key_provider when present, else from kms_enabled and
+     * local_key_provider_enabled. Empty disables the check.
+     */
+    keyProvider?: string
+    /**
+     * The key_provider_id values the document may carry, compared as hex. On
+     * dstack 0.6 the guest refuses keys from any provider whose id differs
+     * from a non-empty key_provider_id, so this names the KMS a measured
+     * deployment can take its keys from. A document with none is accepted, as
+     * every 0.5.x document is, so this binds only documents that carry the
+     * field and does not establish which KMS a node used. A non-empty id must
+     * be listed, and an empty list permits none.
+     */
+    keyProviderIds?: readonly string[]
     /**
      * The sha256 digests (lowercase hex) of published release compose
      * SKELETONS — see `extractComposeSkeleton`.
@@ -601,6 +661,32 @@ export function verifyAppCompose(
     return doc
 }
 
+/**
+ * The JSON type of each modelled field Go decodes into a typed struct field.
+ * manifest_version and init_script are absent: both are read leniently in
+ * both languages (`manifestVersion`, `initScripts`).
+ */
+const FIELD_TYPES: ReadonlyArray<readonly [string, 'string' | 'boolean' | 'string list']> = [
+    ['name', 'string'],
+    ['runner', 'string'],
+    ['docker_compose_file', 'string'],
+    ['pre_launch_script', 'string'],
+    ['storage_fs', 'string'],
+    ['key_provider', 'string'],
+    ['key_provider_id', 'string'],
+    ['allowed_envs', 'string list'],
+    ['features', 'string list'],
+    ['gateway_enabled', 'boolean'],
+    ['tproxy_enabled', 'boolean'],
+    ['kms_enabled', 'boolean'],
+    ['local_key_provider_enabled', 'boolean'],
+    ['no_instance_id', 'boolean'],
+    ['secure_time', 'boolean'],
+    ['public_logs', 'boolean'],
+    ['public_sysinfo', 'boolean'],
+    ['public_tcbinfo', 'boolean'],
+]
+
 function parseAppCompose(raw: string): { doc: AppCompose; unknown: string[] } {
     let parsed: unknown
     try {
@@ -622,10 +708,31 @@ function parseAppCompose(raw: string): { doc: AppCompose; unknown: string[] } {
         .filter((k) => !KNOWN_APP_COMPOSE_FIELDS.includes(k))
         .sort()
 
+    // Go decodes into typed fields and refuses the whole document when a
+    // modelled field has the wrong JSON type. Reading that field as its zero
+    // value here instead passed what Go refused (`"key_provider": 5`). null is
+    // the zero value in both.
+    for (const [k, want] of FIELD_TYPES) {
+        const v = obj[k]
+        if (v === undefined || v === null) continue
+        const ok =
+            want === 'string'
+                ? typeof v === 'string'
+                : want === 'boolean'
+                  ? typeof v === 'boolean'
+                  : Array.isArray(v) && v.every((x) => x === null || typeof x === 'string')
+        if (!ok) {
+            throw new ComposeError(
+                'app_compose_malformed',
+                `attest: app_compose is not a well-formed app-compose document: ${k} is not a ${want}`,
+            )
+        }
+    }
+
     // Absent fields take Go's zero value, so the two implementations
     // agree on a document that simply omits one.
     const doc: AppCompose = {
-        manifest_version: num(obj.manifest_version),
+        manifest_version: manifestVersion(obj.manifest_version),
         name: str(obj.name),
         runner: str(obj.runner),
         docker_compose_file: str(obj.docker_compose_file),
@@ -642,6 +749,9 @@ function parseAppCompose(raw: string): { doc: AppCompose; unknown: string[] } {
         public_sysinfo: bool(obj.public_sysinfo),
         public_tcbinfo: bool(obj.public_tcbinfo),
         storage_fs: str(obj.storage_fs),
+        init_script: initScripts(obj.init_script),
+        key_provider: str(obj.key_provider),
+        key_provider_id: str(obj.key_provider_id),
     }
     return { doc, unknown }
 }
@@ -660,8 +770,9 @@ function checkPolicy(
             `this dstack release carries a top-level field "${k}" that no rule here covers`,
         )
     }
-    if (p.manifestVersion && c.manifest_version !== p.manifestVersion) {
-        add('manifest_version', `want ${p.manifestVersion}, got ${c.manifest_version}`)
+    const versions = p.manifestVersions ?? []
+    if (versions.length > 0 && !versions.includes(c.manifest_version)) {
+        add('manifest_version', `want one of [${versions.join(' ')}], got ${c.manifest_version}`)
     }
     if (p.runner && c.runner !== p.runner) {
         add('runner', `want "${p.runner}", got "${c.runner}"`)
@@ -756,6 +867,29 @@ function checkPolicy(
                 `runs an unrecognized root boot hook (${c.pre_launch_script.length} bytes, sha256 ${got})`,
             )
         }
+    }
+
+    if (c.init_script === null) {
+        add('init_script', 'is neither a script nor a list of scripts')
+    }
+    for (const s of c.init_script ?? []) {
+        if (s === '') continue
+        const got = bytesToHex(sha256(new TextEncoder().encode(s)))
+        if (!containsFold(p.initScriptDigests ?? [], got)) {
+            add('init_script', `runs an unrecognized root boot hook (${s.length} bytes, sha256 ${got})`)
+        }
+    }
+
+    const provider = effectiveKeyProvider(c)
+    if (p.keyProvider && provider !== p.keyProvider) {
+        add('key_provider', `takes its keys from "${provider}", want "${p.keyProvider}"`)
+    }
+    const providerId = normalizeHex(c.key_provider_id)
+    if (providerId !== '' && !containsFold(p.keyProviderIds ?? [], providerId)) {
+        add(
+            'key_provider_id',
+            `pins key provider ${providerId}, which is not a KMS this policy trusts`,
+        )
     }
 
     // features and storage_fs were modelled and never read, which is the worst
@@ -1383,12 +1517,51 @@ function bytesToHex(b: Uint8Array): string {
 function str(v: unknown): string {
     return typeof v === 'string' ? v : ''
 }
-function num(v: unknown): number {
-    return typeof v === 'number' ? v : 0
+/**
+ * The provider dstack 0.6 takes keys from: key_provider when the document names
+ * one, else kms_enabled, else local_key_provider_enabled, else none. Go's
+ * `effectiveKeyProvider`, which says why the policy compares this rather than
+ * the optional field.
+ */
+function effectiveKeyProvider(c: AppCompose): string {
+    if (c.key_provider !== '') return c.key_provider
+    if (c.kms_enabled) return 'kms'
+    if (c.local_key_provider_enabled) return 'local'
+    return 'none'
+}
+
+/**
+ * manifest_version as dstack 0.6 reads it: a number only for the legacy 1 and
+ * 2, otherwise a string holding a canonical positive integer that fits in 32
+ * bits. Anything else is 0, which the policy reports. Go's `ManifestVersion`;
+ * the compose vectors pin the two together.
+ */
+function manifestVersion(v: unknown): number {
+    if (typeof v === 'string') {
+        if (!/^[1-9][0-9]*$/.test(v)) return 0
+        const n = Number(v)
+        return n <= 0xffffffff ? n : 0
+    }
+    return v === 1 || v === 2 ? v : 0
+}
+
+/**
+ * init_script as dstack 0.6 reads it: absent or null is none, a string is one
+ * script, a list of strings is that list. `null` for any other shape,
+ * including a null inside the list, so a shape dstack refuses is reported
+ * rather than read as none. Go's `initScripts`.
+ */
+function initScripts(v: unknown): string[] | null {
+    if (v === undefined || v === null) return []
+    if (typeof v === 'string') return [v]
+    if (Array.isArray(v) && v.every((x) => typeof x === 'string')) return v as string[]
+    return null
 }
 function bool(v: unknown): boolean {
     return v === true
 }
+// A null entry is '', as Go decodes it into a []string. Any other non-string
+// entry has already refused the document (FIELD_TYPES).
 function strArray(v: unknown): string[] {
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+    return Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : '')) : []
 }

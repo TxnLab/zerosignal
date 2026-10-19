@@ -30,89 +30,61 @@ package attest
 // verifies, and payers route elsewhere with nothing logged. Re-read it from
 // `phala os-images`, regenerate the TypeScript twin
 // (`go test ./attest -run TestTrustListTwinVectors -update-trust-lists`) and
-// the compose vectors, and update the one hand copy in the same change:
+// the compose vectors, and update the two hand copies in the same change: the
+// live test's assets table (which fails while it is missing an entry) and
 // node/internal/tee/dstackprobe.sh's ds_os_image_hash, which nothing pins.
+// Images before 0.6.0 are `Dstack-TEE/meta-dstack` releases; from 0.6.0 they
+// are `mkosi-os-v*` releases of `Dstack-TEE/dstack`, built by a different
+// backend, with the digest also listed in that release's image-hashes.txt.
+//
+// Removing an entry de-routes every node still on that image, and refuses any
+// ACI upstream on it too, since node's upstream attestation reads this list.
 //
 // Returns a fresh slice per call: it lands in config structs callers mutate,
 // and a shared backing array would let one embedder's append be observed by
 // the next.
 func TrustedDstackOSImages() []string {
 	return []string{
-		// dstack-0.5.9. The same digest pinned by
+		// What pins these in the DEFAULT suite is weaker than it looks:
+		// testdata/compose_vectors.json and the TypeScript twin are both
+		// generated from this list, so a changed digit goes red in
+		// TestComposeVectors and TestTrustListTwinVectors only as a
+		// DISAGREEMENT with a stale copy. Regenerating satisfies them, and
+		// a digit wrong here is wrong in every copy and invisible to both.
+		// TestLive_TrustedOSImages_MatchTheVendorRelease
+		// (`-tags osimageslive`) is the only check that the value is right.
+		// Run it when adding or changing an entry.
+		//
+		// Every entry below was confirmed against the vendor release:
+		// digest.txt is this exact string AND equals sha256(sha256sum.txt).
+		// The second equality is what makes the value mean something,
+		// because sha256sum.txt commits to ovmf.fd, bzImage,
+		// initramfs.cpio.gz and metadata.json, and metadata.json carries the
+		// dm-verity rootfs hash. So the one number dstack measures
+		// transitively fixes firmware, kernel, initramfs and rootfs.
+
+		// dstack-0.5.9 (meta-dstack v0.5.9, confirmed 2026-09-25). No
+		// longer offered by `phala os-images`, and kept for two reasons:
+		// Phala's ACI gateway (inference.phala.com) still replays this
+		// digest as of 2026-10-19, and it is in OSImagesWithoutSSHDaemon,
+		// which must stay a subset of this list. Drop it once the gateway and our own
+		// fleet have moved off it. The same digest is pinned by
 		// proto/testdata/attest_vectors.json and the dstack verifier's
-		// tests, so all of them move together or a test goes red.
+		// tests, which were captured on it.
 		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033",
 
-		// dstack-nvidia-0.5.9 — the GPU line's PRODUCTION image, read
-		// off `phala os-images` on 2026-09-02 (DEV column: no). Present
-		// because the CPU digest alone refused every node on a Phala
-		// GPU: not "ran on a dev image", but "ran on an image this build
-		// has never heard of" — the same refusal with a misleading
-		// cause.
-		//
-		// What pins this digest in the DEFAULT suite is weaker than it
-		// looks and worth knowing exactly (a live GPU capture now exists,
-		// but it is not in the corpus and no test reads it): it is
-		// carried in testdata/compose_vectors.json and the TypeScript
-		// twin, both generated from this list, so a changed digit goes
-		// red in TestComposeVectors and TestTrustListTwinVectors as a
-		// DISAGREEMENT with a stale copy, not as a wrong value.
-		// Regenerating satisfies them, so the red says "these differ",
-		// never "this one is wrong", and a digit wrong here is wrong in
-		// every copy and invisible to both.
-		//
-		// TestLive_TrustedOSImages_MatchTheVendorRelease is what closes
-		// that (`-tags osimageslive`, out of the default suite because it
-		// fetches from GitHub). Run it when adding or changing an entry.
-		//
-		// CONFIRMED AGAINST THE VENDOR 2026-09-25, which is the only
-		// check that can say the value is right rather than merely
-		// consistent between our own copies. Verified here, not taken on
-		// report: digest.txt inside dstack-nvidia-0.5.9.tar.gz on the
-		// Dstack-TEE/meta-dstack v0.5.9 release is this exact string,
-		// AND it equals sha256(sha256sum.txt) byte for byte.
-		//
-		// That second equality is what makes the value meaningful rather
-		// than just a published constant, because sha256sum.txt commits
-		// to ovmf.fd, bzImage, initramfs.cpio.gz and metadata.json — and
-		// metadata.json carries the dm-verity rootfs_hash. So the one
-		// number dstack measures transitively fixes the firmware, the
-		// kernel, the initramfs and every byte of the rootfs. ovmf.fd and
-		// bzImage were re-hashed here and match their listed entries.
-		//
-		// DONE 2026-09-25 ON THIS LINE TOO, so the paragraph that used
-		// to say "no GPU capture exists" is retired rather than left to
-		// rot. A GPU CVM serving two of Phala's models publishes its own
-		// quote at
-		// `https://qwen3-8-27b-uncensored.use1.phala.com/evidences/quote.json`,
-		// and it carries this exact digest as its `os-image-hash` — the
-		// first evidence that the value is in service and not merely
-		// published. RTMR0, RTMR1 and RTMR2 replay from its event log
-		// exactly, and
-		//
-		//	sha384(initramfs.cpio.gz) == that quote's RTMR2 initrd event
-		//
-		// so the DOWNLOADED artifact is the one that BOOTED — the check
-		// this comment used to say it could not make. The initramfs is
-		// byte-shared with the CPU image (sha256 4662c4f0…), so this pins
-		// the boot chain; the GPU rootfs is still pinned only
-		// transitively, through sha256sum.txt → metadata.json →
-		// dm-verity root hash. RTMR3 on that capture replays at no
-		// prefix — its quote and its event log are from different boots —
-		// which is why the binding above rests on RTMR2 and not on the
-		// os-image-hash EVENT. Written up as
-		// plans/future/tee/phala-revalidation-2026-09-25.md § 12.4; § 9.4
-		// is the same procedure on the CPU image.
-		//
-		// Re-checking the digest needs no 510MB download; both text files
-		// sit early in the tar, so a truncated stream is enough:
-		//
-		//	curl -sSL -H 'Range: bytes=0-31000000' \
-		//	  https://github.com/Dstack-TEE/meta-dstack/releases/download/v0.5.9/dstack-nvidia-0.5.9.tar.gz \
-		//	  | gunzip 2>/dev/null | tar -xf - -C <dir> 2>/dev/null; \
-		//	  cat <dir>/dstack-nvidia-0.5.9/digest.txt; \
-		//	  sha256sum <dir>/dstack-nvidia-0.5.9/sha256sum.txt
-		"806a352e16175d90568de97dff563f31f680239e6b90e9b5b2e9141d0955b0d9",
+		// dstack-0.5.12 (meta-dstack v0.5.12, confirmed 2026-10-19).
+		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd",
+
+		// dstack-nvidia-0.5.12, the GPU line (meta-dstack v0.5.12,
+		// confirmed 2026-10-19). It replaced dstack-nvidia-0.5.9, which was
+		// removed here: a GPU node still on that image is refused.
+		"91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829",
+
+		// dstack-0.6.1 (Dstack-TEE/dstack mkosi-os-v0.6.1, confirmed
+		// 2026-10-19; also the os_image_hash in that release's
+		// image-hashes.txt). CPU only: the release ships no nvidia image.
+		"ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6",
 	}
 }
 
@@ -128,32 +100,74 @@ func TrustedDstackOSImages() []string {
 // that cost. A new dstack release joins the list above as soon as its digest is
 // confirmed against the vendor; it joins THIS list only after the scan.
 //
-// dstack-0.5.9, scanned 2026-09-25. Absent from the squashfs rootfs (2081
-// distinct names recovered from the directory table) and from the initramfs (638
-// entries): sshd, ssh, openssh, dropbear, tinyssh, ssh-keygen, ssh-agent,
-// sshd_config, authorized_keys, host keys — and also agetty, getty, login and
-// sudo, so there is no console login path either. The only matches for "ssh"
-// anywhere are libssh.so.4, cryptsetup-ssh and libcryptsetup-token-ssh.so:
-// systemd-cryptenroll's SSH-token plugin for unlocking a LUKS volume via an
-// ssh-agent, which is a client library and not a daemon.
+// THE PROCEDURE, run identically on both entries on 2026-10-19:
 //
-// WHY A BYTE SCAN IS NOT THE PROCEDURE. The first attempt grepped the rootfs
-// image for those names and found zero hits — including for systemd, bash and
-// busybox, which are certainly present. squashfs keeps filenames in
-// zlib-compressed metadata blocks, so a raw scan reports a confident false
-// clean. The procedure is to parse the directory table and ASSERT THE CONTROL
-// NAMES PRESENT; ten were, which is the only reason the SSH result means
-// anything. Written up as § 9.2 and § 9.4 step 5 of
-// plans/future/tee/phala-revalidation-2026-09-25.md.
+//  1. Bind the rootfs to the digest. digest.txt == sha256(sha256sum.txt), every
+//     listed artifact re-hashes to its entry, and `veritysetup verify` of
+//     rootfs.img.verity against the dstack.rootfs_hash= and dstack.rootfs_size=
+//     values in metadata.json's cmdline passes — the same parameters the
+//     initramfs /init hands to
+//     `veritysetup open` at boot. A one-digit-wrong root hash was confirmed to
+//     fail, so the pass means something. Without this step the scan describes a
+//     file with the right name, not the bytes that boot.
+//  2. List the squashfs DIRECTORY TABLE (`unsquashfs -lls`) and the initramfs
+//     (`cpio -it`), and ASSERT THE CONTROL NAMES PRESENT (systemd, busybox,
+//     bash, docker, containerd, dstack-guest-agent, init, mount, modprobe, sh;
+//     all ten in the rootfs). A raw byte scan is not the procedure: squashfs
+//     keeps names in zlib-compressed metadata blocks, so grepping the image
+//     reports a confident false clean, which is what the first attempt did.
+//  3. No SSH server and nothing that reads authorized_keys: absent from both
+//     are sshd, ssh, openssh, dropbear, tinyssh, ssh-keygen, ssh-agent,
+//     sshd_config, authorized_keys and host keys. The only "ssh" names are
+//     libssh.so.4 (and its target libssh.so.4.9.6), cryptsetup-ssh and
+//     libcryptsetup-token-ssh.so, which are systemd-cryptenroll's SSH-token
+//     plugin, a client library.
+//  4. No console login is STARTED, which is narrower than "none is present".
+//     The initramfs carries busybox getty, shadow login, su and sulogin, and
+//     the rootfs carries su, sulogin and systemd-sulogin-shell.
+//     - getty/login: the initramfs /init only opens verity and switch_roots
+//     (under set -e, so a failure panics rather than dropping to a shell).
+//     The rootfs has no agetty, no getty@ / serial-getty@ unit and no
+//     systemd-getty-generator; multi-user.target's wants/getty.target is a
+//     dangling symlink. So console=ttyS0 produces no serial getty.
+//     - sulogin: its only starters are emergency.service and rescue.service.
+//     Every OnFailure=emergency.target is on a boot-time unit (initrd-*,
+//     local-fs.target, systemd-fsck-root), all of which settle before
+//     dstack-prepare.service — ordered after network-online — mounts the
+//     writable overlay on /etc. Until then root is locked (`*` in both
+//     images' /etc/shadow). That ordering is what makes DSTACK_ROOT_PASSWORD
+//     inert too, not the lock alone: the pre-launch script can set a
+//     password for the rest of that boot, but nothing reaches sulogin
+//     afterwards. The overlay's upper dir is tmpfs (/var/volatile), so a
+//     reboot restores the lock. kernel.sysrq = 16 (sync only), and
+//     ctrl-alt-del.target is reboot.target.
+//     The 2026-09-25 write-up of 0.5.9
+//     (plans/future/tee/phala-revalidation-2026-09-25.md § 9.2) said getty and
+//     login were absent; they were not, and that sentence is wrong.
 //
-// dstack-nvidia-0.5.9 IS NOT HERE, and its absence is a fact rather than an
-// oversight: it ships the identical initramfs (sha256 4662c4f0…, so that half
-// carries over) but a different, larger rootfs (497MB) which has not been
-// enumerated. A node on the GPU line therefore gets the STRICT root-backdoor
-// rule. That is the correct default and the honest one — add it once the scan is
-// run, not before.
+// TWO PREMISES THE SCAN CANNOT CHECK. First, the kernel command line is the
+// published one (metadata.json's cmdline). The rootfs ships
+// systemd-run-generator and systemd-debug-generator, so `systemd.run=` or
+// `systemd.unit=emergency.target` plus `SYSTEMD_SULOGIN_FORCE` on a host-chosen
+// cmdline would give root with every name above unchanged. The cmdline is
+// measured into RTMR2, and this package's verifier checks os-image-hash from
+// the RTMR3 replay but does not appraise RTMR0-2. Second, the scan covers the
+// IMAGE, not the upstream's own containers; see ComposePolicy
+// .RootBackdoorSafeOSImages for that half.
+//
+// dstack-0.5.9: rootfs 2310 inodes, initramfs 637 entries.
+// dstack-0.5.12: rootfs 2850 inodes, initramfs 637 entries; the login-relevant
+// set is identical to 0.5.9's.
+//
+// dstack-nvidia-0.5.12 AND dstack-0.6.1 ARE NOT HERE, and their absence is a
+// fact rather than an oversight: they are trusted, but their rootfs has not
+// been enumerated. The nvidia rootfs is a different, larger image, and 0.6.1 is
+// a different build (Debian/mkosi), so neither inherits a scan. An upstream on
+// either gets the STRICT root-backdoor rule. Add an image once its scan is run,
+// not before.
 func OSImagesWithoutSSHDaemon() []string {
 	return []string{
-		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033",
+		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033", // dstack-0.5.9
+		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd", // dstack-0.5.12
 	}
 }
