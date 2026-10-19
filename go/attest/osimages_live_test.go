@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,12 +26,14 @@ import (
 // TestLive_TrustedOSImages_MatchTheVendorRelease is the ONLY check that can say
 // these digests are right rather than merely consistent.
 //
-//	go test -tags osimageslive -run TestLive_TrustedOSImages ./attest/
+//	go test -tags osimageslive -timeout 60m -run TestLive_TrustedOSImages ./attest/
 //
-// Build-tagged because it fetches from GitHub. Deliberately NOT in the default
-// suite: these values move on Phala's schedule with no automation, so a vendor
-// outage or a retired release asset must not turn into a red build on work that
-// has nothing to do with them.
+// Build-tagged because it fetches from GitHub, and slow because some archives
+// put the rootfs ahead of the small files (up to ~500MB read per asset; about
+// two minutes for the whole list on 2026-10-19). Deliberately
+// NOT in the default suite: these values move on Phala's schedule with no
+// automation, so a vendor outage or a retired release asset must not turn into
+// a red build on work that has nothing to do with them.
 //
 // WHY IT EXISTS AS MORE THAN A FORMALITY. The digests are hand-kept in
 // osimages.go, node's dstackprobe.sh and this test's assets table;
@@ -43,29 +46,24 @@ import (
 // refuses every node on that guest image, silently, with nothing logged
 // operator-side, and it reads as a dev-image rejection rather than a typo.
 //
-// WHAT IT PROVES, AND THE ONE STEP IT CANNOT. It checks that each digest equals
-// the release's digest.txt AND equals sha256(sha256sum.txt) — the identity that
-// makes the value meaningful, since sha256sum.txt commits to ovmf.fd, bzImage,
-// initramfs.cpio.gz and metadata.json, the last carrying the dm-verity
-// rootfs_hash. So the measured number transitively fixes firmware, kernel,
-// initramfs and every byte of the rootfs.
+// WHAT IT PROVES. Each digest equals the release's digest.txt AND equals
+// sha256(sha256sum.txt) — the identity that makes the value meaningful, since
+// sha256sum.txt commits to ovmf.fd, bzImage, initramfs.cpio.gz and
+// metadata.json, the last carrying the dm-verity rootfs hash. So the measured
+// number transitively fixes firmware, kernel, initramfs and every byte of the
+// rootfs. And the asset's own metadata.json says `is_dev: false`, which is
+// what rules out a DEV image: a dev guest image verifies identically on every
+// other check here and in the whole attestation path while its hardening
+// guarantees do not hold. metadata.json is read from the same archive and its
+// hash is pinned by sha256sum.txt, which the digest is the hash of, so a
+// digest cannot pass both checks while naming a dev image — provided the
+// vendor sets is_dev truthfully in its dev builds, which this test trusts.
 //
-// TWO THINGS IT DOES NOT ESTABLISH, both needing the full ~510MB download
-// because their artifacts sit past the truncation. See
+// THE ONE STEP IT CANNOT PROVE: that the downloaded artifact is the one that
+// BOOTED. That is sha384(initramfs.cpio.gz) against the RTMR2 "Linux initrd"
+// event digest in a live attestation, so it needs a capture from the image in
+// question and can never be a unit test. See
 // plans/future/tee/phala-revalidation-2026-09-25.md § 9.4.
-//
-//   - That the downloaded artifact is the one that BOOTED. That is
-//     sha384(initramfs.cpio.gz) against the RTMR2 "Linux initrd" event digest in
-//     a live attestation, so it needs a capture from the line in question and
-//     can never be a unit test. Confirmed on the CPU line; open on the GPU line
-//     for want of a GPU capture.
-//   - That the image is a PRODUCTION one. `is_dev` lives in metadata.json, and
-//     coverage above proves only that the digest commits to that file, not what
-//     it says. A dev image verifies identically on every check here — which is
-//     the whole hazard `phala os-images`' DEV column exists to warn about, and
-//     the reason TrustedDstackOSImages' own godoc leads with it. Today that
-//     rests on the operator having read the column correctly at the time of
-//     adding.
 //
 // A failure here is not automatically our defect: read the error before
 // concluding anything. A retired asset, a renamed release, or a vendor
@@ -73,9 +71,11 @@ import (
 func TestLive_TrustedOSImages_MatchTheVendorRelease(t *testing.T) {
 	// The release asset each trusted digest comes from. A map keyed BY DIGEST so
 	// the coverage assertion below can be exact.
-	assets := map[string]string{
-		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033": "dstack-0.5.9",
-		"806a352e16175d90568de97dff563f31f680239e6b90e9b5b2e9141d0955b0d9": "dstack-nvidia-0.5.9",
+	assets := map[string]releaseAsset{
+		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033": metaDstack("v0.5.9", "dstack-0.5.9"),
+		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd": metaDstack("v0.5.12", "dstack-0.5.12"),
+		"91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829": metaDstack("v0.5.12", "dstack-nvidia-0.5.12"),
+		"ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6": mkosiOS("v0.6.1", "dstack-0.6.1"),
 	}
 
 	// EVERY TRUSTED DIGEST MUST BE NAMED HERE. Without this, adding an image to
@@ -94,9 +94,9 @@ func TestLive_TrustedOSImages_MatchTheVendorRelease(t *testing.T) {
 			len(assets), len(TrustedDstackOSImages()))
 	}
 
-	for digest, release := range assets {
-		t.Run(release, func(t *testing.T) {
-			files := mustFetchReleaseTextFiles(t, release)
+	for digest, asset := range assets {
+		t.Run(asset.name, func(t *testing.T) {
+			files := mustFetchReleaseTextFiles(t, asset)
 
 			got := strings.TrimSpace(files["digest.txt"])
 			if got != digest {
@@ -129,79 +129,54 @@ func TestLive_TrustedOSImages_MatchTheVendorRelease(t *testing.T) {
 						want, files["sha256sum.txt"])
 				}
 			}
+
+			// The metadata.json read here must be the one the digest commits
+			// to, or its is_dev says nothing about this image.
+			meta := sha256.Sum256([]byte(files["metadata.json"]))
+			if h := hex.EncodeToString(meta[:]); h != covered["metadata.json"] {
+				t.Fatalf("sha256(metadata.json) = %s, but sha256sum.txt lists %s — the "+
+					"is_dev read below would describe some other file", h, covered["metadata.json"])
+			}
+			// NO TRUSTED DIGEST MAY BE A DEV IMAGE'S. A *bool so an absent key
+			// is a failure rather than reading as false.
+			var md struct {
+				IsDev *bool `json:"is_dev"`
+			}
+			if err := json.Unmarshal([]byte(files["metadata.json"]), &md); err != nil {
+				t.Fatalf("metadata.json does not parse: %v\n%s", err, files["metadata.json"])
+			}
+			if md.IsDev == nil {
+				t.Fatalf("metadata.json carries no is_dev, so nothing here rules out a dev "+
+					"image:\n%s", files["metadata.json"])
+			}
+			if *md.IsDev {
+				t.Errorf("TRUSTED DIGEST %s IS A DEV IMAGE (%s).\nA dev guest image passes "+
+					"every other check identically and its hardening guarantees do not hold; "+
+					"remove it and take the production image's digest from `phala os-images` "+
+					"(DEV: no).", digest, asset.name)
+			}
 		})
 	}
-
-	// NO TRUSTED DIGEST MAY BE A DEV IMAGE'S.
-	//
-	// This is the check that stops the failure TrustedDstackOSImages' godoc leads
-	// with — a dev guest image verifies identically on every other check in this
-	// file and in the whole attestation path, while its hardening guarantees do
-	// not hold. Until now that rested on whoever added a digest having read
-	// `phala os-images`' DEV column correctly, which is a convention, not an
-	// assertion.
-	//
-	// It works because dstack publishes the dev variants as SEPARATE assets with
-	// their own digests, so metadata.json's `is_dev` — which sits past the
-	// truncation and would cost the full ~510MB — is not needed to answer the
-	// question.
-	//
-	// DERIVED, not a hardcoded list of dev digests. A static table has the same
-	// defect as the asset table above without the coverage check to catch it: add
-	// a guest image and its dev twin goes unlisted, so the new entry is the one
-	// thing the check cannot see. Deriving the twin's NAME from the asset we
-	// already trust means the set can never fall behind the allowlist.
-	//
-	// Compared against EVERY trusted digest rather than only its own twin,
-	// because the mistake being guarded against is a paste — and a paste puts the
-	// wrong value under whichever name was being edited at the time.
-	t.Run("no dev image is allowlisted", func(t *testing.T) {
-		trusted := TrustedDstackOSImages()
-		for _, release := range assets {
-			dev := devAssetName(t, release)
-			files, err := fetchReleaseTextFiles(dev)
-			if err != nil {
-				// Deliberately an error, not a skip. A release that genuinely
-				// ships no dev variant and a dev asset that was renamed look
-				// identical from here, and the second silently disables the one
-				// check standing between a pasted dev digest and a trusting
-				// fleet. Make someone decide.
-				t.Errorf("could not read the dev twin %s, so nothing here rules out a dev "+
-					"digest in the allowlist: %v\nIf this release truly publishes no dev "+
-					"variant, say so at devAssetName rather than leaving the check inert.",
-					dev, err)
-				continue
-			}
-			devDigest := strings.TrimSpace(files["digest.txt"])
-			if len(devDigest) != 64 {
-				t.Errorf("%s digest.txt is not a digest (%q)", dev, devDigest)
-				continue
-			}
-			for _, d := range trusted {
-				if d == devDigest {
-					t.Errorf("TRUSTED DIGEST %s IS THE DEV IMAGE %s.\nA dev guest image "+
-						"passes every other check identically and its hardening guarantees "+
-						"do not hold; remove it and take the production digest from the "+
-						"asset without -dev- in its name.", d, dev)
-				}
-			}
-			t.Logf("%s = %s (not allowlisted)", dev, devDigest)
-		}
-	})
 }
 
-// devAssetName is the dev twin of a production release asset.
-//
-// dstack names them by inserting `-dev` before the version:
-// dstack-0.5.9 → dstack-dev-0.5.9, dstack-nvidia-0.5.9 → dstack-nvidia-dev-0.5.9
-// (both confirmed against the v0.5.9 release, 2026-09-25).
-func devAssetName(t *testing.T, release string) string {
-	t.Helper()
-	i := strings.LastIndex(release, "-")
-	if i < 0 {
-		t.Fatalf("cannot derive the dev twin of %q: no version suffix to insert before", release)
-	}
-	return release[:i] + "-dev" + release[i:]
+// releaseAsset is one guest-image tarball and where the vendor publishes it.
+type releaseAsset struct {
+	name string // the tarball's base name, e.g. dstack-0.5.12
+	url  string
+}
+
+// metaDstack names an asset of a Dstack-TEE/meta-dstack release, where guest
+// images before 0.6.0 are published.
+func metaDstack(tag, name string) releaseAsset {
+	return releaseAsset{name: name, url: fmt.Sprintf(
+		"https://github.com/Dstack-TEE/meta-dstack/releases/download/%s/%s.tar.gz", tag, name)}
+}
+
+// mkosiOS names an asset of a `mkosi-os-*` release of Dstack-TEE/dstack, where
+// guest images are published from 0.6.0 on.
+func mkosiOS(version, name string) releaseAsset {
+	return releaseAsset{name: name, url: fmt.Sprintf(
+		"https://github.com/Dstack-TEE/dstack/releases/download/mkosi-os-%s/%s.tar.gz", version, name)}
 }
 
 // parseSHA256Manifest reads `<64 hex>  <name>` lines into name → hash.
@@ -234,20 +209,11 @@ func parseSHA256Manifest(t *testing.T, raw string) map[string]string {
 	return out
 }
 
-// osImagesRangeBytes is how much of the tarball is fetched.
-//
-// digest.txt and sha256sum.txt both sit early in the archive, so the full ~510MB
-// is unnecessary — but they are not adjacent (rootfs.img.verity and bzImage sit
-// between them), which is what sets the size. Measured 2026-09-25: both files
-// land inside the first 31MB on both releases. Raise it if a future release
-// reorders the archive; the test says plainly when that happens.
-const osImagesRangeBytes = 31_000_000
-
-// mustFetchReleaseTextFiles is fetchReleaseTextFiles for the production assets,
-// where a fetch failure means the test cannot run at all.
-func mustFetchReleaseTextFiles(t *testing.T, release string) map[string]string {
+// mustFetchReleaseTextFiles is fetchReleaseTextFiles where a fetch failure means
+// the test cannot run at all.
+func mustFetchReleaseTextFiles(t *testing.T, asset releaseAsset) map[string]string {
 	t.Helper()
-	files, err := fetchReleaseTextFiles(release)
+	files, err := fetchReleaseTextFiles(asset)
 	if err != nil {
 		t.Fatalf("%v\n\nA retired asset, a renamed release and a wrong constant all look "+
 			"identical from in here — check the release before changing any digest.", err)
@@ -255,58 +221,47 @@ func mustFetchReleaseTextFiles(t *testing.T, release string) map[string]string {
 	return files
 }
 
-// fetchReleaseTextFiles returns the small text files from a truncated fetch.
+// fetchReleaseTextFiles returns the small text files from the tarball, reading
+// only as far as the last of them.
 //
-// It reads a RANGE and therefore hits a corrupt-stream error partway through by
-// design. That error is tolerated only once both wanted files are in hand, and
-// reported otherwise — a truncation that swallowed the failure would report
-// "digest.txt = " and blame the constant.
-//
-// Returns an error rather than calling t.Fatal because one caller must survive a
-// missing asset to report it as "the dev check could not run", which is a
-// different finding from "this digest is wrong".
-func fetchReleaseTextFiles(release string) (map[string]string, error) {
-	url := fmt.Sprintf(
-		"https://github.com/Dstack-TEE/meta-dstack/releases/download/v0.5.9/%s.tar.gz", release)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+// No byte range is requested. Where the files sit moves between releases —
+// within the first 31MB on 0.5.9 and 0.6.1, after a 166MB rootfs on 0.5.12 and
+// a ~500MB one on the nvidia line — so any fixed cap goes stale on the next
+// image, and the failure it causes says nothing about the digest. The stream
+// is abandoned once all three files are in hand.
+func fetchReleaseTextFiles(asset releaseAsset) (map[string]string, error) {
+	// Per asset; four of them must fit the documented -timeout 60m.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", osImagesRangeBytes))
-
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w (network failure, not a wrong constant)", url, err)
+		return nil, fmt.Errorf("fetch %s: %w (network failure, not a wrong constant)", asset.url, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // read-only fetch
-	// 206 is the expected answer; 200 means the range was ignored, which still
-	// works because the reads below stop early.
-	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", asset.url, resp.Status)
 	}
 
 	zr, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("gzip %s: %w", release, err)
+		return nil, fmt.Errorf("gzip %s: %w", asset.name, err)
 	}
 
-	want := map[string]bool{"digest.txt": true, "sha256sum.txt": true}
+	want := map[string]bool{"digest.txt": true, "sha256sum.txt": true, "metadata.json": true}
 	out := make(map[string]string, len(want))
 	tr := tar.NewReader(zr)
 	for len(out) < len(want) {
 		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
-			// Truncation reaches us as EOF or as an unexpected-EOF/corrupt
-			// error, depending on where the cut landed. Either way it is only
-			// acceptable if we already have what we came for.
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-				strings.Contains(err.Error(), "unexpected EOF") {
-				break
-			}
-			return nil, fmt.Errorf("read %s: %w", release, err)
+			return nil, fmt.Errorf("read %s: %w", asset.name, err)
 		}
 		name := h.Name
 		if i := strings.LastIndex(name, "/"); i >= 0 {
@@ -315,21 +270,20 @@ func fetchReleaseTextFiles(release string) (map[string]string, error) {
 		if !want[name] {
 			continue
 		}
-		// Bounded: these are a 65-byte digest and a four-line checksum list. An
-		// unbounded ReadAll here would buy a 31MB allocation from a hostile or
-		// simply different archive.
+		// Bounded: these are a 65-byte digest, a short checksum list and a
+		// sub-kilobyte JSON document. An unbounded ReadAll here would buy an
+		// arbitrary allocation from a hostile or simply different archive.
 		b, err := io.ReadAll(io.LimitReader(tr, 1<<16))
 		if err != nil {
-			return nil, fmt.Errorf("read %s from %s: %w", name, release, err)
+			return nil, fmt.Errorf("read %s from %s: %w", name, asset.name, err)
 		}
 		out[name] = string(b)
 	}
 
 	for name := range want {
 		if _, ok := out[name]; !ok {
-			return nil, fmt.Errorf("%s carries no %s within the first %d bytes — if the "+
-				"archive was reordered, raise osImagesRangeBytes; this is NOT evidence "+
-				"about the digest", release, name, osImagesRangeBytes)
+			return nil, fmt.Errorf("%s carries no %s — the archive layout changed; this is "+
+				"NOT evidence about the digest", asset.name, name)
 		}
 	}
 	return out, nil

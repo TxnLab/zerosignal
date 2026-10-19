@@ -32,7 +32,9 @@
     "allowed_root_backdoor_envs": [],
     "trusted_os_images": [
       "bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033",
-      "806a352e16175d90568de97dff563f31f680239e6b90e9b5b2e9141d0955b0d9"
+      "8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd",
+      "91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829",
+      "ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6"
     ]
   },
   "skeletons": [

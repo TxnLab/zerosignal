@@ -31,6 +31,28 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-19 — dstack 0.5.12 and 0.6.1 guest images are trusted, 0.5.12 is scanned; nvidia-0.5.9 is not trusted (0.7.0)
+
+`attest.TrustedDstackOSImages()` (TS `trustedDstackOSImages`) adds `dstack-0.5.12`,
+`dstack-nvidia-0.5.12` and `dstack-0.6.1`, each checked against the vendor release, and drops
+`dstack-nvidia-0.5.9`. Phala no longer offers either 0.5.9 image. `dstack-0.5.9` stays because
+Phala's ACI gateway still runs it.
+
+**Consumer-visible.** A node on one of the new images now attests. A GPU node still on
+`dstack-nvidia-0.5.9` stops attesting, and payers stop routing to it as a TEE node, so redeploy
+it on `dstack-nvidia-0.5.12` before bumping a payer pin.
+
+`OSImagesWithoutSSHDaemon()` adds `dstack-0.5.12`, so an ACI upstream that moves from 0.5.9 to
+0.5.12 keeps its root-backdoor concession. The scan first verifies the rootfs against the
+measured dm-verity root hash, then lists it. `dstack-nvidia-0.5.12` and `dstack-0.6.1` are not
+scanned, so an upstream on either gets the strict rule. Re-running the scan on 0.5.9 corrected
+the list's godoc: both images' initramfs carry `getty`, `login` and `su`, and both rootfs carry
+`su` and `sulogin`. No getty is ever started (no getty unit, no `agetty`, initramfs `/init`
+only switches root), and `sulogin` is reachable only from boot-time failures that happen
+before `/etc` becomes writable, while root is still locked. The godoc also states two premises
+the scan cannot check: the kernel command line is the published one, and the upstream's own
+containers are not covered.
+
 ### 2026-10-19 — local state is named by deployment, not by app id (0.7.0)
 
 Journal rows, the saved catalog and a host's state files were scoped by the uint64 escrow app id,

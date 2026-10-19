@@ -184,6 +184,22 @@ func sealedOn(doc, osImage string) map[string]string {
 // safeImage is an image the scan cleared — see attest.OSImagesWithoutSSHDaemon.
 func safeImage() string { return OSImagesWithoutSSHDaemon()[0] }
 
+// unscannedTrustedImage is an image TrustedDstackOSImages names and the scan
+// has not cleared. Derived rather than written out because the gate under test
+// never consults the trusted list: a hand-kept digest that left it would make
+// "trusted but unscanned" indistinguishable from "an image nobody has heard
+// of", with every assertion still passing.
+func unscannedTrustedImage(t *testing.T) string {
+	t.Helper()
+	for _, img := range TrustedDstackOSImages() {
+		if !containsFold(OSImagesWithoutSSHDaemon(), img) {
+			return img
+		}
+	}
+	t.Fatal("every trusted image is also scanned, so no fixture can show trusted ≠ scanned")
+	return ""
+}
+
 // TestCapturedDocument_CarriesTheRootBackdoor is the detector's only
 // POSITIVE fixture, and that is why it is worth a test of its own.
 //
@@ -1506,12 +1522,11 @@ func TestRootBackdoorExemption_NeedsAKnownSafeImage(t *testing.T) {
 			safeL: OSImagesWithoutSSHDaemon(),
 		},
 		{
-			// TRUSTED IS NOT SCANNED. The GPU line's production image
-			// is in TrustedDstackOSImages and deliberately not in
-			// OSImagesWithoutSSHDaemon — its 497MB rootfs has never
+			// TRUSTED IS NOT SCANNED. An image in TrustedDstackOSImages
+			// and not in OSImagesWithoutSSHDaemon — its rootfs has never
 			// been enumerated. A node there gets the strict rule.
 			name:  "a trusted image that has not been scanned",
-			meas:  sealedOn(doc, "806a352e16175d90568de97dff563f31f680239e6b90e9b5b2e9141d0955b0d9"),
+			meas:  sealedOn(doc, unscannedTrustedImage(t)),
 			safeL: OSImagesWithoutSSHDaemon(),
 		},
 		{
@@ -1594,6 +1609,24 @@ func TestOSImagesWithoutSSHDaemon_IsASubsetOfTrusted(t *testing.T) {
 	}
 }
 
+// TestOSImagesWithoutSSHDaemon_IsTheScannedSet pins the list as a literal.
+//
+// Every other test reads the list it checks against, so adding an unscanned
+// image passes all of them while handing that image's upstreams the
+// root-backdoor concession. Changing this literal is the point at which a scan
+// record has to exist (see OSImagesWithoutSSHDaemon's godoc).
+func TestOSImagesWithoutSSHDaemon_IsTheScannedSet(t *testing.T) {
+	want := []string{
+		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033", // dstack-0.5.9, scanned 2026-09-25, re-run 2026-10-19
+		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd", // dstack-0.5.12, scanned 2026-10-19
+	}
+	if got := OSImagesWithoutSSHDaemon(); !slices.Equal(got, want) {
+		t.Fatalf("OSImagesWithoutSSHDaemon() = %v, want %v\nAn image joins this list only "+
+			"after its filesystem has been enumerated by the procedure in its godoc; record the "+
+			"scan in the godoc, then update this literal.", got, want)
+	}
+}
+
 // TestOSImagesWithoutSSHDaemon_FreshSlicePerCall, for the reason
 // TrustedDstackOSImages documents: these land in policy structs that callers
 // mutate, and ACIUpstreamComposePolicy puts this one there by default.
@@ -1633,7 +1666,7 @@ func composeWithEnvs(t *testing.T, envs []string) string {
 // message is the only thing that distinguishes the two, so it is the assertion.
 func TestRootBackdoorWithheld_TheMessageNamesTheImage(t *testing.T) {
 	doc := backdoorDoc()
-	unscanned := "806a352e16175d90568de97dff563f31f680239e6b90e9b5b2e9141d0955b0d9"
+	unscanned := unscannedTrustedImage(t)
 
 	for _, tc := range []struct {
 		name, osImage, wantImage string

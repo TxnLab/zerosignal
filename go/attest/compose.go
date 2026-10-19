@@ -318,9 +318,10 @@ type ComposePolicy struct {
 	//
 	// IT EXISTS BECAUSE THE CONCESSION AND ITS JUSTIFICATION LIVED IN
 	// DIFFERENT PLACES, and only one of them was checked. The concession is
-	// defensible today for exactly one reason: `dstack-0.5.9` contains no
-	// sshd, dropbear, tinyssh, getty or login — established 2026-09-25 by
-	// enumerating the squashfs directory table of the rootfs the measured
+	// defensible today because the scanned images contain no sshd, dropbear
+	// or tinyssh, and start no console login once a root key or password
+	// could exist (OSImagesWithoutSSHDaemon's godoc has the evidence and its
+	// premises) — established by enumerating the squashfs directory table of the rootfs the measured
 	// `os-image-hash` transitively pins (it is sha256(sha256sum.txt), which
 	// commits to metadata.json, which carries the dm-verity root hash). That
 	// is a property of an IMAGE. Without this field the concession was a
@@ -344,9 +345,9 @@ type ComposePolicy struct {
 	// to consume an authorized_keys file. The second does not follow from the
 	// first, so the two lists are separate even when their contents coincide,
 	// and a new dstack release joins TrustedDstackOSImages without joining
-	// this until the scan is run (plans/future/tee/phala-revalidation-2026-09-25.md
-	// § 9.4 step 5 is the procedure; assert the control names, or a broken
-	// enumeration reads as a clean pass).
+	// this until the scan is run (OSImagesWithoutSSHDaemon's godoc is the
+	// procedure; assert the control names, or a broken enumeration reads as a
+	// clean pass).
 	//
 	// DELIBERATELY NOT OPERATOR-CONFIGURABLE, and the asymmetry with
 	// AllowedRootBackdoorEnvs is the point. That one comes from an operator's
@@ -360,7 +361,11 @@ type ComposePolicy struct {
 	// WHAT IT STILL DOES NOT ESTABLISH: `/dstack/user_config`'s
 	// `ssh_authorized_keys` rides no measured field, so neither this nor an
 	// absent env name is evidence that no root key was provisioned. It is
-	// evidence that a declared channel has no consumer on this image.
+	// evidence that a declared channel has no consumer on this image. Nor does
+	// it cover the upstream's own `services:`: ACIUpstreamComposePolicy pins no
+	// skeleton or images, so a container that bind-mounts /root/.ssh and runs
+	// its own sshd on the host network would consume the key while this gate
+	// still reads the image as safe.
 	RootBackdoorSafeOSImages []string
 
 	// PreLaunchScriptDigests is the set of sha256 digests (lowercase hex) the
