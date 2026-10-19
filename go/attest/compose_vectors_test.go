@@ -109,12 +109,15 @@ type composeVectors struct {
 }
 
 type sharedPolicyVector struct {
-	ManifestVersion        int      `json:"manifest_version"`
+	ManifestVersions       []int    `json:"manifest_versions"`
 	Runner                 string   `json:"runner"`
 	AllowedEnvNames        []string `json:"allowed_env_names"`
 	AllowedEnvSuffixes     []string `json:"allowed_env_suffixes"`
 	EnforceEnvAllowlist    bool     `json:"enforce_env_allowlist"`
 	PreLaunchScriptDigests []string `json:"pre_launch_script_digests"`
+	InitScriptDigests      []string `json:"init_script_digests"`
+	KeyProvider            string   `json:"key_provider"`
+	KeyProviderIDs         []string `json:"key_provider_ids"`
 	EnforceComposeSkeleton bool     `json:"enforce_compose_skeleton"`
 	RootBackdoorEnvs       []string `json:"root_backdoor_envs"`
 
@@ -195,6 +198,11 @@ func composePolicies(t *testing.T) map[string]ComposePolicy {
 	storage := ZeroSignalComposePolicy()
 	storage.StorageFS = "ext4"
 
+	// Blesses one init script, upper-cased so the hex comparison is pinned
+	// too. No shipped policy lists one.
+	initBlessed := ZeroSignalComposePolicy()
+	initBlessed.InitScriptDigests = []string{strings.ToUpper(initBlessedDigest)}
+
 	return map[string]ComposePolicy{
 		"empty":            {},
 		"zerosignal":       ZeroSignalComposePolicy(),
@@ -203,7 +211,32 @@ func composePolicies(t *testing.T) map[string]ComposePolicy {
 		"closed":           closed,
 		"misconfigured":    misconfigured,
 		"storage":          storage,
+		"init_blessed":     initBlessed,
 	}
+}
+
+// initBlessedDigest is sha256("echo hi"), the script the init_blessed policy
+// permits. A literal so TypeScript builds the same policy without hashing.
+const initBlessedDigest = "56a79f3b115448072387c2480044bfa2cf8f90e4f5fddd8c943b4e051b81f80b"
+
+// captured061 is the app_compose a live Phala dstack-0.6.1 node published on
+// 2026-10-19, read from testdata. asDeployed keeps the DSTACK_AUTHORIZED_KEYS
+// entry its `phala deploy` appended; otherwise that one name is removed.
+func captured061(t *testing.T, asDeployed bool) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/app_compose_dstack061.json")
+	if err != nil {
+		t.Fatalf("read the 0.6.1 capture: %v", err)
+	}
+	doc := string(b)
+	if asDeployed {
+		return doc
+	}
+	const backdoor = `,"DSTACK_AUTHORIZED_KEYS"`
+	if strings.Count(doc, backdoor) != 1 {
+		t.Fatalf("the 0.6.1 capture no longer carries exactly one %s", backdoor)
+	}
+	return strings.Replace(doc, backdoor, "", 1)
 }
 
 // emptyIfNil renders a nil slice as `[]` rather than `null` in the vectors.
@@ -233,12 +266,15 @@ func buildComposeVectors(t *testing.T) composeVectors {
 		SidecarCompose: sidecarCompose(realImage, engineImage),
 		SidecarEngine:  engineImage,
 		SharedPolicy: sharedPolicyVector{
-			ManifestVersion:        ZeroSignalComposePolicy().ManifestVersion,
+			ManifestVersions:       ZeroSignalComposePolicy().ManifestVersions,
 			Runner:                 ZeroSignalComposePolicy().Runner,
 			AllowedEnvNames:        ZeroSignalSecretEnvNames(),
 			AllowedEnvSuffixes:     ZeroSignalComposePolicy().AllowedEnvSuffixes,
 			EnforceEnvAllowlist:    ZeroSignalComposePolicy().EnforceEnvAllowlist,
 			PreLaunchScriptDigests: PhalaPreLaunchDigests(),
+			InitScriptDigests:      emptyIfNil(ZeroSignalComposePolicy().InitScriptDigests),
+			KeyProvider:            ZeroSignalComposePolicy().KeyProvider,
+			KeyProviderIDs:         ZeroSignalComposePolicy().KeyProviderIDs,
 			EnforceComposeSkeleton: ZeroSignalComposePolicy().EnforceComposeSkeleton,
 			RootBackdoorEnvs:       RootBackdoorEnvs(),
 			// Read off the policy rather than written as []string{}, so
@@ -546,8 +582,15 @@ func skeletonErrorCode(err error) string {
 func buildDocumentVectors(t *testing.T, release string, policies map[string]ComposePolicy) []documentVector {
 	t.Helper()
 
+	// versioned is a document at a given manifest_version (raw JSON). It sets
+	// kms_enabled because every real document does, and the key-provider rule
+	// reads a document without it as keyless.
+	versioned := func(version, fields string) string {
+		return `{"manifest_version":` + version + `,"runner":"docker-compose","kms_enabled":true,` +
+			fields + `}`
+	}
 	doc := func(fields string) string {
-		return `{"manifest_version":2,"runner":"docker-compose",` + fields + `}`
+		return versioned("2", fields)
 	}
 	composeField := func(c string) string {
 		b, err := json.Marshal(c)
@@ -765,13 +808,173 @@ func buildDocumentVectors(t *testing.T, release string, policies map[string]Comp
 		{
 			"wrong_manifest_version",
 			"a document shaped for a different dstack generation",
-			`{"manifest_version":1,"runner":"docker-compose",` + composeField(release) + `}`,
+			versioned("1", composeField(release)),
+			"zerosignal",
+		},
+		{
+			"manifest_version_3_string",
+			"dstack 0.6 writes the version as a string, and \"3\" is current",
+			versioned(`"3"`, composeField(release)),
+			"zerosignal",
+		},
+		{
+			"manifest_version_2_string",
+			"dstack reads \"2\" as 2, so the two spellings must agree",
+			versioned(`"2"`, composeField(release)),
+			"zerosignal",
+		},
+		{
+			"manifest_version_3_number",
+			"dstack accepts a NUMBER only for 1 and 2 and refuses to boot on 3, so it " +
+				"reads as no version",
+			versioned("3", composeField(release)),
+			"zerosignal",
+		},
+		{
+			"manifest_version_noncanonical",
+			"a leading zero is not a canonical integer string; dstack refuses it",
+			versioned(`"03"`, composeField(release)),
+			"zerosignal",
+		},
+		{
+			"manifest_version_fraction",
+			"not an integer in either spelling",
+			versioned("2.5", composeField(release)),
+			"zerosignal",
+		},
+		{
+			"dstack_061_phala_shape",
+			"the three keys a Phala dstack-0.6.1 CVM added, as captured 2026-10-19: no " +
+				"init script, the KMS key provider, and Phala's KMS id",
+			`{"manifest_version":"3","runner":"docker-compose",` + composeField(release) +
+				`,"allowed_envs":["NODE_LLM_OPENAI_API_KEY"],"init_script":[],` +
+				`"key_provider":"kms","key_provider_id":"` + PhalaKMSKeyProviderIDs()[0] + `"}`,
+			"enforced",
+		},
+		{
+			"dstack_061_captured",
+			"the document a live Phala dstack-0.6.1 node published (2026-10-19), with the " +
+				"one env name its deploy should not have added removed. Pins the shape " +
+				"Phala actually emits, pre-launch script and toggles included.",
+			captured061(t, false),
+			// Not "enforced": that policy's skeleton list is this file's
+			// fixture release, and the capture runs a real one.
+			"zerosignal",
+		},
+		{
+			"dstack_061_captured_as_deployed",
+			"the same document as deployed: phala deploy without --no-dev-os appended " +
+				"DSTACK_AUTHORIZED_KEYS, and that is its one violation",
+			captured061(t, true),
+			"zerosignal",
+		},
+		{
+			"key_provider_omitted_kms_disabled",
+			"no key_provider and kms_enabled false: dstack 0.6 runs this keyless, the " +
+				"same deployment as key_provider none, and must get the same verdict",
+			`{"manifest_version":"3","runner":"docker-compose","kms_enabled":false,` +
+				composeField(release) + `}`,
+			"zerosignal",
+		},
+		{
+			"key_provider_none_overrides_toggle",
+			"an explicit key_provider wins over kms_enabled, as it does in dstack",
+			versioned(`"3"`, composeField(release)+`,"key_provider":"none"`),
+			"zerosignal",
+		},
+		{
+			"key_provider_under_empty_policy",
+			"a policy with no KeyProvider checks none",
+			doc(composeField(release) + `,"key_provider":"local"`),
+			"empty",
+		},
+		{
+			"init_script_blessed_digest",
+			"a script whose digest the policy lists passes, compared as hex like every " +
+				"digest list here",
+			doc(composeField(release) + `,"init_script":["","echo hi"]`),
+			"init_blessed",
+		},
+		{
+			"key_provider_id_spelled_differently",
+			"the id compares as hex, so a 0x prefix and upper case are the same KMS",
+			doc(composeField(release) + `,"key_provider_id":"0x` +
+				strings.ToUpper(PhalaKMSKeyProviderIDs()[0]) + `"`),
+			"zerosignal",
+		},
+		{
+			"key_provider_id_foreign",
+			"a KMS other than Phala's: the guest would take its keys from it and nowhere else",
+			doc(composeField(release) + `,"key_provider_id":"3059301306072a8648ce3d0201"`),
+			"zerosignal",
+		},
+		{
+			"key_provider_local",
+			"keys derived inside the CVM instead of from the KMS, spelled the 0.6 way",
+			doc(composeField(release) + `,"key_provider":"local"`),
+			"zerosignal",
+		},
+		{
+			"init_script_single_string",
+			"one root boot hook, in the single-string form dstack still accepts",
+			doc(composeField(release) + `,"init_script":"#!/bin/sh\necho hi\n"`),
+			"zerosignal",
+		},
+		{
+			"init_script_list",
+			"an empty entry runs nothing and is accepted; the other is a root boot hook",
+			doc(composeField(release) + `,"init_script":["","echo hi"]`),
+			"zerosignal",
+		},
+		{
+			"init_script_null_entry",
+			"dstack refuses a null inside the list; Go would otherwise decode it as an " +
+				"empty script and TypeScript would drop it, both reading as none",
+			doc(composeField(release) + `,"init_script":[null]`),
+			"zerosignal",
+		},
+		{
+			"key_provider_wrong_type",
+			"Go decodes modelled fields into typed struct fields and refuses a wrong " +
+				"type outright; TypeScript once read it as the zero value and passed",
+			doc(composeField(release) + `,"key_provider":5`),
+			"zerosignal",
+		},
+		{
+			"key_provider_id_wrong_type",
+			"the same, for the KMS id",
+			doc(composeField(release) + `,"key_provider_id":[48,89]`),
+			"zerosignal",
+		},
+		{
+			"pre_launch_script_wrong_type",
+			"the same split predates the 0.6 fields",
+			doc(composeField(release) + `,"pre_launch_script":5`),
+			"zerosignal",
+		},
+		{
+			"toggle_wrong_type",
+			"a boolean written as a string; the later key wins in both languages",
+			doc(composeField(release) + `,"kms_enabled":"true"`),
+			"zerosignal",
+		},
+		{
+			"allowed_envs_null_entry",
+			"Go decodes a null list entry as \"\", which is not a permitted name; " +
+				"dropping it instead would read the list as clean",
+			doc(composeField(release) + `,"allowed_envs":[null]`),
+			"zerosignal",
+		},
+		{
+			"init_script_wrong_type",
+			"neither a script nor a list",
+			doc(composeField(release) + `,"init_script":42`),
 			"zerosignal",
 		},
 		{
 			"wrong_runner",
 			"not docker-compose at all",
-			`{"manifest_version":2,"runner":"bare","` +
+			`{"manifest_version":2,"runner":"bare","kms_enabled":true,"` +
 				`docker_compose_file":"services: {}\n"}`,
 			"zerosignal",
 		},

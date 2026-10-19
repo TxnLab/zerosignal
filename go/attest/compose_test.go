@@ -735,7 +735,7 @@ func TestManifestAndRunner_ZeroValuesDisableTheCheck(t *testing.T) {
 		t.Fatalf("zero-valued pins were enforced: %v", err)
 	}
 
-	_, err := VerifyAppCompose(doc, sealed(doc), ComposePolicy{ManifestVersion: 3, Runner: "podman"})
+	_, err := VerifyAppCompose(doc, sealed(doc), ComposePolicy{ManifestVersions: []int{3}, Runner: "podman"})
 	var pe *ComposePolicyError
 	if !errors.As(err, &pe) {
 		t.Fatalf("mismatched pins did not fire: %v", err)
@@ -1651,6 +1651,7 @@ func composeWithEnvs(t *testing.T, envs []string) string {
 		"runner":                     "docker-compose",
 		"docker_compose_file":        "services:\n  zs-node:\n    image: x@sha256:00\n",
 		"allowed_envs":               envs,
+		"kms_enabled":                true,
 		"local_key_provider_enabled": false,
 	})
 }

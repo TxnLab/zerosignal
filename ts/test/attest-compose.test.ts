@@ -300,7 +300,7 @@ describe('app-compose policy', () => {
             '{"manifest_version":2,"runner":"docker-compose","docker_compose_file":"services: {}"}'
         expect(() => verifyAppCompose(doc, sealed(doc))).not.toThrow()
         const v = violationsOf(() =>
-            verifyAppCompose(doc, sealed(doc), { manifestVersion: 3, runner: 'podman' }),
+            verifyAppCompose(doc, sealed(doc), { manifestVersions: [3], runner: 'podman' }),
         )
         expect(hasCode(v, 'manifest_version')).toBe(true)
         expect(hasCode(v, 'runner')).toBe(true)
@@ -332,7 +332,7 @@ describe('Go parity on the captured document', () => {
     it('treats an absent field as its zero value, like Go', () => {
         const doc = '{"docker_compose_file":"services: {}"}'
         const v = violationsOf(() =>
-            verifyAppCompose(doc, sealed(doc), { manifestVersion: 2, runner: 'docker-compose' }),
+            verifyAppCompose(doc, sealed(doc), { manifestVersions: [2], runner: 'docker-compose' }),
         )
         expect(v.map((x) => x.code).sort()).toEqual(['manifest_version', 'runner'])
         expect(v.find((x) => x.code === 'manifest_version')?.detail).toContain('got 0')
@@ -731,6 +731,7 @@ function composeWithEnvs(envs: readonly string[]): string {
         runner: 'docker-compose',
         docker_compose_file: 'services:\n  zs-node:\n    image: x@sha256:00\n',
         allowed_envs: envs,
+        kms_enabled: true,
         local_key_provider_enabled: false,
     })
 }
@@ -846,7 +847,7 @@ describe('zeroSignalComposePolicy', () => {
     // reach different verdicts on identical evidence, silently.
     it('matches the Go policy’s pinned values', () => {
         const p = zeroSignalComposePolicy()
-        expect(p.manifestVersion).toBe(2)
+        expect(p.manifestVersions).toEqual([2, 3])
         expect(p.runner).toBe('docker-compose')
         expect(p.enforceEnvAllowlist).toBe(true)
         expect(p.allowedEnvSuffixes).toEqual(['_MNEMONIC'])

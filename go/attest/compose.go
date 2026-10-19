@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -69,16 +71,18 @@ var (
 // AppCompose is dstack's app-compose.json, the document hashed into RTMR3.
 //
 // Field set captured from a live Phala tdx.small CVM (dstack-0.5.9,
-// manifest_version 2). Unknown fields are a POLICY VIOLATION rather than
-// something to ignore — see ViolationUnknownField.
+// manifest_version 2), plus the three keys a Phala dstack-0.6.1 CVM added
+// (2026-10-19, manifest_version "3"): init_script, key_provider and
+// key_provider_id. Unknown fields are a POLICY VIOLATION rather than something
+// to ignore — see ViolationUnknownField.
 type AppCompose struct {
-	ManifestVersion int      `json:"manifest_version"`
-	Name            string   `json:"name"`
-	Runner          string   `json:"runner"`
-	DockerCompose   string   `json:"docker_compose_file"`
-	PreLaunchScript string   `json:"pre_launch_script"`
-	AllowedEnvs     []string `json:"allowed_envs"`
-	Features        []string `json:"features"`
+	ManifestVersion ManifestVersion `json:"manifest_version"`
+	Name            string          `json:"name"`
+	Runner          string          `json:"runner"`
+	DockerCompose   string          `json:"docker_compose_file"`
+	PreLaunchScript string          `json:"pre_launch_script"`
+	AllowedEnvs     []string        `json:"allowed_envs"`
+	Features        []string        `json:"features"`
 
 	GatewayEnabled  bool `json:"gateway_enabled"`
 	TProxyEnabled   bool `json:"tproxy_enabled"`
@@ -91,6 +95,111 @@ type AppCompose struct {
 	PublicTCBInfo   bool `json:"public_tcbinfo"`
 
 	StorageFS string `json:"storage_fs"`
+
+	// InitScript is kept raw because dstack 0.6 accepts a single script or a
+	// list of them under one key; initScripts reads it.
+	InitScript json.RawMessage `json:"init_script"`
+	// KeyProvider and KeyProviderID are dstack 0.6's explicit key-custody
+	// fields. The guest refuses to boot on keys from any provider whose id
+	// differs from a non-empty KeyProviderID (dstack-util
+	// verify_key_provider_id). An empty id pins nothing.
+	KeyProvider   string `json:"key_provider"`
+	KeyProviderID string `json:"key_provider_id"`
+}
+
+// effectiveKeyProvider is the provider dstack 0.6 takes keys from
+// (AppCompose::key_provider in dstack-types): key_provider when the document
+// names one, else kms_enabled, else local_key_provider_enabled, else none.
+//
+// The policy compares THIS rather than the field, because the field is
+// optional: comparing it only when present would refuse `"key_provider":
+// "none"` and accept the same deployment written as `"kms_enabled": false`.
+// 0.6 no longer reads `features: ["kms"]` as KMS, so neither does this, which
+// is stricter than a 0.5.x guest and costs nothing: every captured document
+// sets kms_enabled.
+func (c *AppCompose) effectiveKeyProvider() string {
+	switch {
+	case c.KeyProvider != "":
+		return c.KeyProvider
+	case c.KMSEnabled:
+		return "kms"
+	case c.LocalKeyProvide:
+		return "local"
+	default:
+		return "none"
+	}
+}
+
+// ManifestVersion is app-compose's manifest_version, read the way dstack 0.6
+// reads it: a JSON number for the legacy versions 1 and 2, otherwise a string
+// holding a canonical positive integer. dstack 0.6 writes "3" when an app moves
+// to a 0.6 image, so the field changed type under documents that otherwise kept
+// their shape.
+//
+// Any other value reads as 0 rather than failing the parse, and the policy then
+// reports it. dstack refuses to boot on such a document, so no quote carries
+// one; what matters is that Go and TypeScript agree on it, and TypeScript
+// cannot fail where Go would (JSON.parse reads 2.0 as 2). That makes it
+// differ from dstack in both directions, each only on documents that never
+// boot: it reads 2.0, 2e0 and 20e-1 as 2 where dstack refuses a non-integer
+// number, and it refuses whitespace around the string where dstack trims it.
+type ManifestVersion int
+
+func (m *ManifestVersion) UnmarshalJSON(b []byte) error {
+	*m = 0
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		if n, ok := canonicalUint32(s); ok {
+			*m = ManifestVersion(n)
+		}
+		return nil
+	}
+	var f float64
+	if json.Unmarshal(b, &f) == nil && (f == 1 || f == 2) {
+		*m = ManifestVersion(f)
+	}
+	return nil
+}
+
+// canonicalUint32 accepts what dstack's parse_manifest_version_string does: a
+// positive integer with no sign, no leading zero, and no other characters.
+func canonicalUint32(s string) (uint32, bool) {
+	if s == "" || s[0] == '0' {
+		return 0, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseUint(s, 10, 32)
+	return uint32(n), err == nil
+}
+
+// initScripts reads init_script as dstack 0.6 does: absent or null is none, a
+// string is one script, a list of strings is that list. ok is false for any
+// other shape, including a null inside the list (which Go would otherwise
+// decode as an empty string), so a shape dstack refuses is reported rather
+// than read as none.
+func initScripts(raw json.RawMessage) (scripts []string, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, true
+	}
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return []string{one}, true
+	}
+	var many []*string
+	if json.Unmarshal(raw, &many) != nil {
+		return nil, false
+	}
+	for _, s := range many {
+		if s == nil {
+			return nil, false
+		}
+		scripts = append(scripts, *s)
+	}
+	return scripts, true
 }
 
 // knownAppComposeFields is the exact top-level key set this package models.
@@ -116,6 +225,7 @@ var knownAppComposeFields = map[string]bool{
 	"pre_launch_script": true, "public_logs": true, "public_sysinfo": true,
 	"public_tcbinfo": true, "runner": true, "secure_time": true,
 	"storage_fs": true, "tproxy_enabled": true,
+	"init_script": true, "key_provider": true, "key_provider_id": true,
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +244,9 @@ const (
 	ViolationRootBackdoorEnv    ViolationCode = "root_backdoor_env"
 	ViolationEnvNotAllowed      ViolationCode = "env_not_allowed"
 	ViolationPreLaunchScript    ViolationCode = "pre_launch_script"
+	ViolationInitScript         ViolationCode = "init_script"
+	ViolationKeyProvider        ViolationCode = "key_provider"
+	ViolationKeyProviderID      ViolationCode = "key_provider_id"
 	ViolationToggle             ViolationCode = "toggle"
 	ViolationEmptyDockerCompose ViolationCode = "empty_docker_compose"
 	ViolationComposeSkeleton    ViolationCode = "compose_skeleton"
@@ -231,8 +344,11 @@ func (e *ComposePolicyError) Error() string {
 // own release cadence — the split `proto/go/selection` uses for the same
 // reason.
 type ComposePolicy struct {
-	// ManifestVersion the document must declare. Zero disables the check.
-	ManifestVersion int
+	// ManifestVersions are the versions the document may declare. Empty
+	// disables the check. A list rather than one value because a CVM moved to
+	// a dstack 0.6 image declares "3" while one still on 0.5.x declares 2, and
+	// both are current.
+	ManifestVersions []int
 
 	// Runner the document must declare, e.g. "docker-compose". Empty
 	// disables the check.
@@ -385,6 +501,32 @@ type ComposePolicy struct {
 	// unconstrained setting IS legitimate during a migration and so had to be
 	// spellable, and therefore had to be made explicit.
 	PreLaunchScriptDigests []string
+
+	// InitScriptDigests is PreLaunchScriptDigests for dstack 0.6's
+	// init_script, which runs as root before the app's runner just as the
+	// pre-launch script does, and takes up to several scripts. Same reading:
+	// an empty script is always accepted, and an empty list permits nothing
+	// else. No shipped policy lists one, because no observed document runs one.
+	InitScriptDigests []string
+
+	// KeyProvider pins the provider the guest takes its keys from ("kms",
+	// "local", "tpm" or "none"), worked out as dstack 0.6 does: key_provider
+	// when present, else from kms_enabled and local_key_provider_enabled (see
+	// effectiveKeyProvider). Empty disables the check.
+	KeyProvider string
+
+	// KeyProviderIDs are the key_provider_id values the document may carry,
+	// compared as hex. On dstack 0.6 the guest refuses keys from any provider
+	// whose id differs from a non-empty key_provider_id, so this list names
+	// the KMS a measured deployment can take its keys from.
+	//
+	// A document with no key_provider_id is accepted: every 0.5.x document is
+	// one. That guest pins no KMS and takes keys from whichever KMS the host
+	// configures, so this rule binds only the documents that carry the field;
+	// it does not establish which KMS a node actually used. A non-empty id
+	// must be on the list, and an empty list permits none, the
+	// PreLaunchScriptDigests reading.
+	KeyProviderIDs []string
 
 	// Toggles pins the document's boolean switches. A nil entry reports
 	// nothing, so a switch whose correct value is genuinely unsettled stays
@@ -580,6 +722,20 @@ func PhalaPreLaunchDigests() []string {
 	}
 }
 
+// PhalaKMSKeyProviderIDs are the key_provider_id values of Phala Cloud's KMS:
+// the DER-encoded P-256 public key of its CA.
+//
+// Read off a dstack-0.6.1 CVM's app_compose on dstack-pha-prod5 (2026-10-19).
+// The same key is the `id` in key_provider_info of the 2026-08 dstack-0.5.9
+// capture, so it has held across a guest-image generation. Phala running a
+// second KMS would refuse nodes deployed against it with key_provider_id
+// until it is added here, which is the fail-closed direction.
+func PhalaKMSKeyProviderIDs() []string {
+	return []string{
+		"3059301306072a8648ce3d020106082a8648ce3d030107034200048844eb42ccdf8c52fd4f174f362fcb9bbd19c45fd48f1edec2d8f1ca23536ec1a74021b4cee610c074f8294d431b2b7fee2c39e5333fdaf0a4522d43fb159d9f",
+	}
+}
+
 // ZeroSignalSecretEnvNames are the exact environment variable names a ZeroSignal
 // node deployment may declare in the unmeasured channel, alongside the
 // `*_MNEMONIC` suffix (see ZeroSignalComposePolicy).
@@ -653,8 +809,8 @@ func ZeroSignalSecretEnvNames() []string {
 func ZeroSignalComposePolicy() ComposePolicy {
 	no := false
 	return ComposePolicy{
-		ManifestVersion: 2,
-		Runner:          "docker-compose",
+		ManifestVersions: []int{2, 3},
+		Runner:           "docker-compose",
 
 		AllowedEnvNames:    ZeroSignalSecretEnvNames(),
 		AllowedEnvSuffixes: []string{"_MNEMONIC"},
@@ -663,6 +819,9 @@ func ZeroSignalComposePolicy() ComposePolicy {
 		EnforceEnvAllowlist: true,
 
 		PreLaunchScriptDigests: PhalaPreLaunchDigests(),
+
+		KeyProvider:    "kms",
+		KeyProviderIDs: PhalaKMSKeyProviderIDs(),
 
 		// Observed on the 2026-08 tdx.small capture. `kms` is the key
 		// provider, `tproxy-net` the gateway — both are the platform's
@@ -735,8 +894,8 @@ func ACIUpstreamPreLaunchDigests() []string {
 func ACIUpstreamComposePolicy(allowedBackdoorEnvs []string) ComposePolicy {
 	no := false
 	return ComposePolicy{
-		ManifestVersion: 2,
-		Runner:          "docker-compose",
+		ManifestVersions: []int{2, 3},
+		Runner:           "docker-compose",
 
 		// See the godoc: their names are theirs. The backdoor check is
 		// unconditional and is not switched off by this.
@@ -751,6 +910,14 @@ func ACIUpstreamComposePolicy(allowedBackdoorEnvs []string) ComposePolicy {
 		RootBackdoorSafeOSImages: OSImagesWithoutSSHDaemon(),
 
 		PreLaunchScriptDigests: ACIUpstreamPreLaunchDigests(),
+
+		// Not yet observed on an upstream: Phala's gateway is still on
+		// dstack-0.5.9, whose documents carry neither field. Pinned to
+		// Phala's KMS ahead of their move rather than left open, because the
+		// gateway is a Phala CVM and any other KMS would be a different
+		// key-custody story than the one appraised.
+		KeyProvider:    "kms",
+		KeyProviderIDs: PhalaKMSKeyProviderIDs(),
 
 		// MEASURED, not inherited from ZeroSignalComposePolicy: both
 		// documents captured 2026-09-24 — the gateway (repo_commit
@@ -1419,8 +1586,8 @@ func (p ComposePolicy) check(c *AppCompose, unknown []string) ([]Violation, []Ex
 	for _, k := range unknown {
 		add(ViolationUnknownField, "this dstack release carries a top-level field %q that no rule here covers", k)
 	}
-	if p.ManifestVersion != 0 && c.ManifestVersion != p.ManifestVersion {
-		add(ViolationManifestVersion, "want %d, got %d", p.ManifestVersion, c.ManifestVersion)
+	if len(p.ManifestVersions) > 0 && !slices.Contains(p.ManifestVersions, int(c.ManifestVersion)) {
+		add(ViolationManifestVersion, "want one of %v, got %d", p.ManifestVersions, c.ManifestVersion)
 	}
 	if p.Runner != "" && c.Runner != p.Runner {
 		add(ViolationRunner, "want %q, got %q", p.Runner, c.Runner)
@@ -1551,6 +1718,30 @@ func (p ComposePolicy) check(c *AppCompose, unknown []string) ([]Violation, []Ex
 				"runs an unrecognized root boot hook (%d bytes, sha256 %s)",
 				len(c.PreLaunchScript), got)
 		}
+	}
+
+	scripts, ok := initScripts(c.InitScript)
+	if !ok {
+		add(ViolationInitScript, "is neither a script nor a list of scripts")
+	}
+	for _, s := range scripts {
+		if s == "" {
+			continue
+		}
+		sum := sha256.Sum256([]byte(s))
+		got := hex.EncodeToString(sum[:])
+		if !containsFold(p.InitScriptDigests, got) {
+			add(ViolationInitScript,
+				"runs an unrecognized root boot hook (%d bytes, sha256 %s)", len(s), got)
+		}
+	}
+
+	if got := c.effectiveKeyProvider(); p.KeyProvider != "" && got != p.KeyProvider {
+		add(ViolationKeyProvider, "takes its keys from %q, want %q", got, p.KeyProvider)
+	}
+	if id := normalizeHex(c.KeyProviderID); id != "" && !containsFold(p.KeyProviderIDs, id) {
+		add(ViolationKeyProviderID,
+			"pins key provider %s, which is not a KMS this policy trusts", id)
 	}
 
 	// features and storage_fs were modelled and never read, which is the
