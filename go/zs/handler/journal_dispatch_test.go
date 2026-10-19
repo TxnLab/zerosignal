@@ -33,7 +33,7 @@ func (j *recordingJournal) Put(_ context.Context, rec zs.TicketRecord) error {
 
 func (j *recordingJournal) Delete(context.Context, string) error { return nil }
 
-func (j *recordingJournal) List(context.Context, string, uint64) ([]zs.TicketRecord, error) {
+func (j *recordingJournal) List(context.Context, string, zs.Deployment) ([]zs.TicketRecord, error) {
 	return nil, nil
 }
 
@@ -78,7 +78,7 @@ func TestDispatch_JournalsOpenThenReceipt(t *testing.T) {
 		t.Errorf("first Put: status %q settle %v, want an open ticket with no settle values", open.Status, open.Settle)
 	}
 	if open.TicketID == "" || open.TicketID != wallet.lastTID || open.OpenTxID != "TESTTX" ||
-		open.EscrowAppID != 1 || open.Payer != wallet.PayerAddr() || open.Target != zs.RefOf(cfg.ResolvedOperators[0]) ||
+		open.EscrowAppID != 1 || open.Deployment != "algorand-localnet-1" || open.Payer != wallet.PayerAddr() || open.Target != zs.RefOf(cfg.ResolvedOperators[0]) ||
 		open.MaxPrice == 0 || !open.ExpiresAt.After(open.CreatedAt) || open.ExpiresAt.After(open.CreatedAt.Add(time.Hour)) {
 		t.Errorf("open record = %+v", open)
 	}

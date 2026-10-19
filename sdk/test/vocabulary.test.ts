@@ -135,6 +135,7 @@ const ticketRecordFields = [
     'ticketId',
     'openTxId',
     'escrowAppId',
+    'deployment',
     'target',
     'payer',
     'maxPrice',

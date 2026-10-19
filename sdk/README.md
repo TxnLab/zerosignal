@@ -129,9 +129,11 @@ does: a `ChainOperatorSource` reading the escrow's operator and node boxes from 
 algod, and a `DiscoveryRegistry` that refreshes it. Once started it reads the chain and probes a
 bounded set of nodes every `refreshInterval`, and a read older than `maxCacheAge` refreshes
 first. A node it did not reach keeps its last-known models for `maxCarryAge`. The catalog is
-saved to `Config.storage` in the Go SDK's format, under `zs.catalog.<escrow app id>` since
+saved to `Config.storage` in the Go SDK's format, under `zs.catalog.<deployment key>` since
 operator and node ids repeat across networks, so after a restart the nodes the first probe
-does not reach keep their saved models. The registry, its source and the stores it builds run on
+does not reach keep their saved models. The deployment key is `resolveNetwork(network).key`,
+`<rail>-<network>-<escrow>` such as `algorand-mainnet-3628061142`; a catalog saved under the
+bare app id by an earlier SDK is read once and then deleted. The registry, its source and the stores it builds run on
 `Config.clock`; the Go SDK's run on the wall clock. The registry probes each node through a relay unless
 `privacy` is `direct`, dials with `Config.fetch`, verifies TEE evidence with `teeVerifier`, and
 applies the same staging gate as routing (`allowStaging`). `close()` stops it.
@@ -171,8 +173,10 @@ that target; a supplied one judges it by its own `targetReachable`.
 and never stopped: the host owns it. That suits a browser that keeps one fleet view while it
 builds a Client per account or per session. `buildDiscovery` builds the registry exactly as
 `create` would from the same `Config` (every `discovery` setting, `privacy`, `fetch`,
-`teeVerifier`, `allowStaging`, `storage` under `catalogStorageKey(escrowAppId)`, the logger and
-the clock), with the routing stores its probes record to. Pass those stores and the resolved
+`teeVerifier`, `allowStaging`, `storage` under `catalogStorageKey(network)` with the
+`legacyStorageKey` it had before, the logger and the clock), with the routing stores its probes
+record to. A host that builds its own `DiscoveryRegistry` instead passes both keys itself, or a
+catalog saved under the bare app id is never read again. Pass those stores and the resolved
 `teeVerifier` to each Client, since a Client with a supplied registry builds no routing store
 and would otherwise build a second verifier:
 
@@ -279,7 +283,9 @@ candidate was refused. The Go SDK has no counterpart.
 Open tickets are recorded in `Stores.journal`. When the Client runs the SDK's `Wallet` (built or
 passed in) and no journal is given, it keeps an in-memory one, so a ticket a crash leaves open
 is refunded only by hand; `journalDurable` says which you have. Each such Client needs its own
-journal: `create` throws for one another live Client already sweeps.
+journal: `create` throws for one another live Client already sweeps. A journal is scoped by
+deployment: `list(payer, network)` returns the rows `ownsRecord(network, row)` accepts, which
+are those naming `network.key`, and rows an earlier SDK wrote with only `escrowAppId`.
 
 To shut down, stop starting turns, `await zs.waitSettles(signal)` for the escrow submits still
 running, then `await zs.close()`. `feeRate()` is the protocol fee in basis points this payer

@@ -35,10 +35,14 @@ const (
 type TicketRecord struct {
 	TicketID string
 	OpenTxID string
-	// EscrowAppID scopes the record to one deployment: the same payer
-	// address is valid on every network, so a journal shared across them
-	// must never re-fire a testnet ticket against mainnet.
+	// Deployment (a Deployment.Key) scopes the record to one deployment: the
+	// same payer address is valid on every network, so a journal shared
+	// across them must never re-fire a testnet ticket against mainnet, nor
+	// forget one whose box mainnet does not have. EscrowAppID is written too on Algorand, where it was the scope before
+	// Deployment existed, so an older SDK reading the journal still finds its
+	// rows.
 	EscrowAppID uint64
+	Deployment  string
 	Target      NodeRef
 	Payer       string
 	MaxPrice    uint64
@@ -78,6 +82,6 @@ type TicketJournal interface {
 	// Delete removes a ticket that reached a terminal state. Deleting an
 	// unknown id is not an error.
 	Delete(ctx context.Context, ticketID string) error
-	// List returns the records for payer under escrowAppID only.
-	List(ctx context.Context, payer string, escrowAppID uint64) ([]TicketRecord, error)
+	// List returns the records for payer that d owns (Deployment.Owns) only.
+	List(ctx context.Context, payer string, d Deployment) ([]TicketRecord, error)
 }

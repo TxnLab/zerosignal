@@ -12,6 +12,7 @@ import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
 import { settleArgsOf } from './ack.js'
 import type { SpendGuard } from './config.js'
+import type { ResolvedNetwork } from './network.js'
 import { refOf } from './operator.js'
 import type { OpenHandle, TicketJournal } from './parts.js'
 import { type Clock, type Logger, discardLogger } from './ports.js'
@@ -86,7 +87,7 @@ export interface ReconcilerOptions {
     journal: TicketJournal
     chain: TicketChain
     payer: string
-    escrowAppId: bigint
+    deployment: ResolvedNetwork
     /** Whether the refund watchdog still drives a ticket, which the sweep then leaves alone. */
     watching: (ticketId: string) => boolean
     /**
@@ -122,7 +123,7 @@ export class Reconciler {
     readonly #journal: TicketJournal
     readonly #chain: TicketChain
     readonly #payer: string
-    readonly #appId: bigint
+    readonly #deployment: ResolvedNetwork
     readonly #watching: (ticketId: string) => boolean
     readonly #spend: SpendGuard | undefined
     readonly #log: Logger
@@ -136,7 +137,7 @@ export class Reconciler {
         this.#journal = o.journal
         this.#chain = o.chain
         this.#payer = o.payer
-        this.#appId = o.escrowAppId
+        this.#deployment = o.deployment
         this.#watching = o.watching
         this.#spend = o.spend
         this.#log = o.logger ?? discardLogger
@@ -180,7 +181,7 @@ export class Reconciler {
     async sweep(): Promise<void> {
         let recs: TicketRecord[]
         try {
-            recs = await this.#bounded(() => this.#journal.list(this.#payer, this.#appId))
+            recs = await this.#bounded(() => this.#journal.list(this.#payer, this.#deployment))
         } catch (err) {
             if (!this.#stopped()) this.#log.warn('ticket reconciler: journal read failed', { err: message(err) })
             return
@@ -323,7 +324,7 @@ export interface JournalDeps {
     journal: TicketJournal | undefined
     logger: Logger
     clock: Clock
-    escrowAppId: bigint
+    deployment: ResolvedNetwork
     /** The wallet's payer address. */
     payer: string
     /** Overrides JOURNAL_TIMEOUT_MS. */
@@ -344,7 +345,8 @@ export async function journalOpen(d: JournalDeps, h: OpenHandle, t: Ticket): Pro
     const rec: TicketRecord = {
         ticketId: t.ticket_id,
         openTxId: h.appCallTxId,
-        escrowAppId: d.escrowAppId,
+        escrowAppId: d.deployment.escrowAppId,
+        deployment: d.deployment.key,
         target: refOf(h.operator),
         payer: d.payer,
         maxPrice: BigInt(t.max_price),

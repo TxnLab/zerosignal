@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 import { settleArgsOf } from '../src/ack.js'
 import type { SpendGuard } from '../src/config.js'
+import { resolveNetwork } from '../src/network.js'
 import { type OpenHandle, type TicketJournal, memoryJournal } from '../src/parts.js'
 import type { Signer } from '../src/ports.js'
 import {
@@ -110,13 +111,17 @@ class FakeChain implements TicketChain {
     resettle = (rec: TicketRecord) => this.#record(`settle ${rec.ticketId}`)
 }
 
+// Owns the rows openRec writes, which name only app 7, as a row from before
+// rows named their deployment does.
+const app7 = resolveNetwork({ network: 'localnet', escrowAppId: 7n })
+
 function testReconciler(journal: TicketJournal, chain: TicketChain, watching: string[] = [], spend?: SpendGuard) {
     const log = recLogger()
     const r = new Reconciler({
         journal,
         chain,
         payer: 'PAYER',
-        escrowAppId: 7n,
+        deployment: app7,
         watching: (id) => watching.includes(id),
         spend,
         logger: log,
@@ -129,7 +134,7 @@ async function put(j: TicketJournal, ...recs: TicketRecord[]) {
     for (const r of recs) await j.put(r)
 }
 
-const ids = async (j: TicketJournal) => (await j.list('PAYER', 7n)).map((r) => r.ticketId)
+const ids = async (j: TicketJournal) => (await j.list('PAYER', app7)).map((r) => r.ticketId)
 
 /** Records each settle and release it hears. */
 function outcomeGuard(): SpendGuard & { calls: string[] } {
@@ -383,7 +388,7 @@ describe('Reconciler', () => {
             journal: j,
             chain,
             payer: 'PAYER',
-            escrowAppId: 7n,
+            deployment: app7,
             watching: () => {
                 closing = r.close()
                 return false
@@ -685,7 +690,7 @@ describe('journal writes', () => {
         journal,
         logger: recLogger(),
         clock: () => now,
-        escrowAppId: 7n,
+        deployment: app7,
         payer: 'PAYER',
     })
 
@@ -699,6 +704,7 @@ describe('journal writes', () => {
             ticketId: 'TKT',
             openTxId: 'OPENTX',
             escrowAppId: 7n,
+            deployment: 'algorand-localnet-7',
             target: { op: 3, node: 4 },
             payer: 'PAYER',
             maxPrice: 500n,
@@ -707,10 +713,10 @@ describe('journal writes', () => {
             createdAt: NOW,
             updatedAt: NOW,
         }
-        expect(await j.list('PAYER', 7n)).toEqual([opened])
+        expect(await j.list('PAYER', app7)).toEqual([opened])
         now = NOW + MIN
         await journalReceipt(d, h, receipt)
-        expect(await j.list('PAYER', 7n)).toEqual([
+        expect(await j.list('PAYER', app7)).toEqual([
             { ...opened, status: 'settle_pending', settle: settleArgsOf(receipt), updatedAt: NOW + MIN },
         ])
     })
@@ -718,7 +724,7 @@ describe('journal writes', () => {
     it('writes no receipt for a ticket it never journaled open', async () => {
         const j = memoryJournal()
         await journalReceipt(deps(j), handle(), receipt)
-        expect(await j.list('PAYER', 7n)).toEqual([])
+        expect(await j.list('PAYER', app7)).toEqual([])
     })
 
     it('writes nothing without a journal', async () => {
@@ -759,8 +765,8 @@ describe('journal writes', () => {
         const d = deps(j)
         const h = handle()
         await journalOpen(d, h, ticket)
-        expect(await j.list('PAYER', 7n)).toEqual([])
+        expect(await j.list('PAYER', app7)).toEqual([])
         await journalReceipt(d, h, receipt)
-        expect(await j.list('PAYER', 7n)).toMatchObject([{ ticketId: 'TKT', status: 'settle_pending', settle: settleArgsOf(receipt) }])
+        expect(await j.list('PAYER', app7)).toMatchObject([{ ticketId: 'TKT', status: 'settle_pending', settle: settleArgsOf(receipt) }])
     })
 })

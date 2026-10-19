@@ -72,7 +72,8 @@ const source = new ChainOperatorSource({
 const registry = new DiscoveryRegistry({
     source,
     storage: fileStorage(values.catalog),
-    storageKey: catalogStorageKey(net.escrowAppId),
+    storageKey: catalogStorageKey(net),
+    legacyStorageKey: catalogStorageKey(net.legacyKey),
     discovery,
 })
 

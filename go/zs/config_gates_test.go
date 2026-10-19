@@ -254,7 +254,7 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	// The built wallet gets a reconciler over the default journal, scoped to
 	// this payer and app, that leaves the watchdog's live tickets alone.
 	r := c.reconcile
-	if r == nil || c.journal == nil || r.journal != c.journal || r.payer != "PAYER" || r.appID != 1 {
+	if r == nil || c.journal == nil || r.journal != c.journal || r.payer != "PAYER" || r.deployment.EscrowAppID != 1 || r.deployment != c.Deployment() {
 		t.Fatalf("reconciler %+v over journal %v, want one over the client's journal for PAYER on app 1", r, c.journal)
 	}
 	if wc, ok := r.chain.(walletChain); !ok || wc.w != w {

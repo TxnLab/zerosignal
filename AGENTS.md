@@ -46,6 +46,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `zs/wallet.go` ack-settle | `sdk/src/ack.ts` | `ack_settle_vectors.json` |
 | `zs/wallet.go` deposit / MBR | `sdk/src/mbr.ts` | `deposit_plan_vectors.json` |
 | `zs/doctor.go` `DoctorChecks` | `sdk/src/doctor.ts` `doctorChecks` | `doctor_vectors.json` (ids, statuses and message text; the reads behind them are mirrored but unpinned, below) |
+| `zs/deployment.go` `ResolveNetwork`, `Deployment.Key` / `LegacyKey` / `Owns` | `sdk/src/network.ts` `resolveNetwork` (`key`, `legacyKey`), `ownsRecord` | `deployment_vectors.json` (the key names files and storage, so a change renames them; Go's journal merge and both catalog adoptions are tested per language) |
 | `go/escrow` group checks | `sdk/src/escrow/{open,settle}.ts` | `escrow_group_vectors.json` |
 | `zs/decode.go` | `sdk/src/decode.ts` | `stream_events_vectors.json` |
 | `zs/operator.go`, including the TEE routing rule `TEEStatus.Attested` (a pass that rested on both the OS-image and the compose-release check) | `sdk/src/operator.ts` (`isTeeAttested`) | `operator_vectors.json` |

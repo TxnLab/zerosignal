@@ -40,11 +40,16 @@ export interface TicketRecord {
     ticketId: string
     openTxId: string
     /**
-     * Scopes the record to one deployment: the payer's address is valid on
-     * every network, so a journal shared across them must never re-fire a
-     * testnet ticket against mainnet.
+     * deployment (a ResolvedNetwork.key) scopes the record to one deployment:
+     * the payer's address is valid on every network, so a journal shared
+     * across them must never re-fire a testnet ticket against mainnet, nor
+     * forget one whose box mainnet does not have.
+     * escrowAppId is written too on Algorand, where it was the scope before
+     * deployment existed, so an older SDK reading the journal still finds its
+     * rows. Absent on a row an older SDK wrote; see ownsRecord.
      */
     escrowAppId: bigint
+    deployment?: string
     target: NodeRef
     payer: string
     maxPrice: bigint

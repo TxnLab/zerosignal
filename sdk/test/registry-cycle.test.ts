@@ -314,6 +314,55 @@ describe('DiscoveryRegistry', () => {
             expect(decodeCatalog((await inner.get(CATALOG_STORAGE_KEY))!).map((op) => op.id)).toEqual([1])
         })
 
+        it('adopts a catalog saved under its earlier key, and deletes it once saved under the new one', async () => {
+            const saved = (models: string[]) =>
+                marshalCatalog([row(1, 1, { models, protoVersion: '9.11', reachableAsOf: T0 - 10 * MIN })])
+            const storage = memoryStorage()
+            await storage.set('zs.catalog.7', saved(['old']))
+            source.chain = [row(1)]
+            source.holdProbe = new Promise(() => {})
+            const reg = registry({ storage, storageKey: 'zs.catalog.new', legacyStorageKey: 'zs.catalog.7' })
+            await reg.ready
+            expect(reg.snapshot()!.operators.map((op) => op.models)).toEqual([['old']])
+            await settle()
+            expect(await storage.get('zs.catalog.new')).toBeDefined()
+            expect(await storage.get('zs.catalog.7')).toBeUndefined()
+        })
+
+        it('keeps the catalog under its earlier key while saves under the new one fail', async () => {
+            const inner = memoryStorage()
+            await inner.set('zs.catalog.7', marshalCatalog([row(1, 1, { models: ['old'], protoVersion: '9.11', reachableAsOf: T0 - 10 * MIN })]))
+            const storage: StorageAdapter = { ...inner, set: () => Promise.reject(new Error('quota exceeded')) }
+            source.chain = [row(1)]
+            source.answers.set('1/1', { models: ['m'] })
+            const reg = registry({ storage, storageKey: 'zs.catalog.new', legacyStorageKey: 'zs.catalog.7' })
+            await reg.allOperators()
+            expect(await inner.get('zs.catalog.7')).toBeDefined()
+        })
+
+        it('never deletes the catalog when the earlier key is the same key', async () => {
+            const storage = memoryStorage()
+            source.chain = [row(1)]
+            source.holdProbe = new Promise(() => {})
+            const reg = registry({ storage, storageKey: 'zs.catalog.new', legacyStorageKey: 'zs.catalog.new' })
+            await reg.ready
+            await settle()
+            expect(await storage.get('zs.catalog.new')).toBeDefined()
+        })
+
+        it('reads the earlier key only when the new one holds nothing', async () => {
+            const storage = memoryStorage()
+            const saved = (models: string[]) =>
+                marshalCatalog([row(1, 1, { models, protoVersion: '9.11', reachableAsOf: T0 - 10 * MIN })])
+            await storage.set('zs.catalog.7', saved(['old']))
+            await storage.set('zs.catalog.new', saved(['m']))
+            source.chain = [row(1)]
+            source.holdProbe = new Promise(() => {})
+            const reg = registry({ storage, storageKey: 'zs.catalog.new', legacyStorageKey: 'zs.catalog.7' })
+            await reg.ready
+            expect(reg.snapshot()!.operators.map((op) => op.models)).toEqual([['m']])
+        })
+
         it('serves the saved catalog alone when the chain read fails, and retries on a stale read', async () => {
             const storage = memoryStorage()
             const aged = row(2, 1, { models: ['old'], reachableAsOf: T0 - 2 * defaults.discovery.maxCarryAge })

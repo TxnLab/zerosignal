@@ -165,6 +165,7 @@ update-vectors:
 	cd go && $(GO) test ./zs         -run TestReserveSizingVectors  -update
 	cd go && $(GO) test ./zs         -run TestCatalogAggregateVectors -update
 	cd go && $(GO) test ./zs         -run TestDoctorVectors         -update
+	cd go && $(GO) test ./zs         -run TestDeploymentVectors     -update
 	cd go && $(GO) test ./zs/tee     -run TestVerdictVectors        -update
 	cd go && $(GO) test ./zs/handler -run TestRenderVectors         -update
 	cd go && $(GO) test ./zs/handler -run TestOpenAIModelVectors    -update

@@ -47,6 +47,8 @@ type Signer interface {
 // Nothing here reads a wallet's recorded network (wallet.Metadata.Network):
 // a caller holding a testnet wallet passes Testnet() itself.
 type Network struct {
+	// Rail zero is Algorand, the only rail New supports today.
+	Rail        ticket.Rail
 	Algod       algod.Config
 	EscrowAppID uint64
 }
@@ -95,6 +97,9 @@ type Discovery struct {
 	// to and New reads back, so a restart routes at once instead of
 	// rediscovering the fleet over several refresh cycles.
 	CatalogPath string
+	// CatalogLegacyPath is the name CatalogPath had before; New renames it to
+	// CatalogPath when only it exists.
+	CatalogLegacyPath string
 }
 
 // Stores are the stateful pieces a process may want to persist or share.
@@ -110,12 +115,15 @@ type Stores struct {
 	Journal TicketJournal
 	// JournalPath, instead of Journal, is a file New opens as the journal
 	// (OpenFileJournal) and Close closes, after the reconciler has let go of
-	// it. Name one file per escrow app, so a process on one network never
-	// locks out a process on another. Another Client in this process with
-	// the same file fails New. A file another process holds, or one that
-	// will not open, is left untouched and this Client journals in memory,
-	// with a warning logged; JournalDurable then reports false.
+	// it. Name one file per deployment (StateFile), so a process on one
+	// network never locks out a process on another. Another Client in this
+	// process with the same file fails New. A file another process holds, or
+	// one that will not open, is left untouched and this Client journals in
+	// memory, with a warning logged; JournalDurable then reports false.
 	JournalPath string
+	// JournalLegacyPaths are files the journal had other names in before;
+	// OpenFileJournal merges each into JournalPath and removes it.
+	JournalLegacyPaths []string
 
 	// CollateralDir is a state directory the TEE collateral cache persists
 	// to, so a restart during an Intel PCS outage still has collateral to
@@ -373,59 +381,36 @@ func orDefault[T int | uint64 | time.Duration](v, def T) T {
 	return v
 }
 
-// validate checks a defaulted Config and returns the resolved algod
-// connection and escrow app id, plus warnings for settings that work but
-// are probably mistakes.
-func (c Config) validate() (ac algod.Config, appID uint64, warnings []string, err error) {
+// validate checks a defaulted Config and returns its resolved deployment,
+// plus warnings for settings that work but are probably mistakes.
+func (c Config) validate() (d Deployment, warnings []string, err error) {
 	if c.Signer == nil {
-		return ac, 0, nil, configError("Signer is required")
+		return d, nil, configError("Signer is required")
 	}
 	addr := c.Signer.Address()
 	if addr == "" {
-		return ac, 0, nil, configError("Signer has no address")
+		return d, nil, configError("Signer has no address")
 	}
 	// Checked up front because the first transaction signature comes at
 	// escrow open, after a node has already spent a reservation on us.
 	if !c.Signer.HasAccount(addr) {
-		return ac, 0, nil, configError(fmt.Sprintf("Signer cannot sign for its own address %s", addr))
+		return d, nil, configError(fmt.Sprintf("Signer cannot sign for its own address %s", addr))
 	}
 	switch c.Privacy {
 	case PrivacyRelayRequired, PrivacyDirect:
 	default:
-		return ac, 0, nil, configError(fmt.Sprintf("unknown Privacy %q", c.Privacy))
+		return d, nil, configError(fmt.Sprintf("unknown Privacy %q", c.Privacy))
 	}
 	switch c.Affinity.Policy {
 	case AffinityPrefer, AffinityStrict, AffinityNone:
 	default:
-		return ac, 0, nil, configError(fmt.Sprintf("unknown Affinity.Policy %q", c.Affinity.Policy))
+		return d, nil, configError(fmt.Sprintf("unknown Affinity.Policy %q", c.Affinity.Policy))
 	}
 	if c.Stores.Journal != nil && c.Stores.JournalPath != "" {
-		return ac, 0, nil, configError("set Stores.Journal or Stores.JournalPath, not both")
+		return d, nil, configError("set Stores.Journal or Stores.JournalPath, not both")
 	}
-	ac = c.Network.Algod
-	if ac.Network == "" && ac.Endpoint == "" {
-		// Only a Network left wholly unset means mainnet. A token or an app id
-		// on its own was meant for some chain, and guessing mainnet for it
-		// would pay there.
-		if ac.Token != "" || c.Network.EscrowAppID != 0 {
-			return algod.Config{}, 0, nil, configError("Network.Algod.Network or Endpoint is required when Token or EscrowAppID is set")
-		}
-		ac.Network = string(algod.NetworkMainnet)
-	}
-	if err := ac.Resolve(); err != nil {
-		return algod.Config{}, 0, nil, configError(err.Error())
-	}
-	appID = c.Network.EscrowAppID
-	if appID == 0 {
-		appID = algod.EscrowAppID(string(ac.ResolvedNetwork))
-		if ac.EndpointOverrides() {
-			warnings = append(warnings, fmt.Sprintf(
-				"Network.Algod.Endpoint overrides the %s preset but the escrow app id is still that preset's (%d); set Network.EscrowAppID if the endpoint is another chain",
-				ac.ResolvedNetwork, appID))
-		}
-	}
-	if appID == 0 {
-		return algod.Config{}, 0, nil, configError("Network.EscrowAppID is required for this network")
+	if d, warnings, err = ResolveNetwork(c.Network); err != nil {
+		return Deployment{}, nil, err
 	}
 	if !c.RequireMaxOutput && c.MaxOutputCeiling != selection.DefaultMaxOutputCeiling {
 		warnings = append(warnings, fmt.Sprintf(
@@ -437,7 +422,7 @@ func (c Config) validate() (ac algod.Config, appID uint64, warnings []string, er
 			"RequireTEEModels %v have no route: TEE verification is off, so no node counts as attested",
 			c.RequireTEEModels))
 	}
-	return ac, appID, warnings, nil
+	return d, warnings, nil
 }
 
 func configError(msg string) *Error {

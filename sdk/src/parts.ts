@@ -22,6 +22,7 @@ import { type SettleAck, usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 import type { AckSettleResult } from './ack.js'
 import type { AffinityStore } from './affinity.js'
 import { decodeOpenGroup } from './escrow/open.js'
+import { type ResolvedNetwork, ownsRecord } from './network.js'
 import { type Operator, refOf, sealRecipientOf } from './operator.js'
 import type { Clock, Fetch } from './ports.js'
 import type { SettleArgs, TicketRecord } from './reconcile.js'
@@ -284,8 +285,8 @@ export interface TicketJournal {
     put(rec: TicketRecord): Promise<void>
     /** Removes a ticket that reached a terminal state; an unknown id is not an error. */
     delete(ticketId: string): Promise<void>
-    /** The records for payer under escrowAppId only, oldest first. */
-    list(payer: string, escrowAppId: bigint): Promise<TicketRecord[]>
+    /** The records for payer that deployment d owns (ownsRecord) only, oldest first. */
+    list(payer: string, d: ResolvedNetwork): Promise<TicketRecord[]>
 }
 
 function cloneRecord(r: TicketRecord): TicketRecord {
@@ -312,9 +313,9 @@ export function memoryJournal(): TicketJournal {
             recs.delete(ticketId)
             return Promise.resolve()
         },
-        list(payer, escrowAppId) {
+        list(payer, d) {
             const out = [...recs.values()]
-                .filter((r) => r.payer === payer && r.escrowAppId === escrowAppId)
+                .filter((r) => r.payer === payer && ownsRecord(d, r))
                 .map(cloneRecord)
             // Oldest first, so a sweep finishes the longest-stranded ticket first.
             out.sort((a, b) => {

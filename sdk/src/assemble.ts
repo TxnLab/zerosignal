@@ -30,6 +30,7 @@ import type algosdk from 'algosdk'
 
 import { retryingAlgod } from './algod-transport.js'
 import type { ResolvedConfig } from './config.js'
+import type { ResolvedNetwork } from './network.js'
 import { ChainOperatorSource } from './registry/chain.js'
 import { CATALOG_STORAGE_KEY } from './registry/persist.js'
 import { DiscoveryRegistry } from './registry/registry.js'
@@ -105,7 +106,8 @@ export function buildDiscovery(
     const registry = new DiscoveryRegistry({
         source,
         storage: cfg.storage,
-        storageKey: catalogStorageKey(cfg.network.escrowAppId),
+        storageKey: catalogStorageKey(cfg.network),
+        legacyStorageKey: cfg.network.legacyKey ? catalogStorageKey(cfg.network.legacyKey) : undefined,
         discovery: d,
         // The Client's own, or the discovery aggregates and the per-request
         // gate disagree about which nodes exist.
@@ -116,7 +118,10 @@ export function buildDiscovery(
     return { registry, source, stores }
 }
 
-/** catalogStorageKey is where a built registry saves its catalog for escrow app appId. */
-export function catalogStorageKey(appId: bigint): string {
-    return `${CATALOG_STORAGE_KEY}.${appId}`
+/**
+ * catalogStorageKey is where a built registry saves its catalog for a
+ * deployment: a ResolvedNetwork, or a key or legacy key of one.
+ */
+export function catalogStorageKey(d: ResolvedNetwork | string): string {
+    return `${CATALOG_STORAGE_KEY}.${typeof d === 'string' ? d : d.key}`
 }

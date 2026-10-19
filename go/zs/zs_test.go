@@ -23,6 +23,7 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // These strings are shared with the TypeScript SDK, persisted by journals,
@@ -333,10 +334,12 @@ func TestConfigValidate(t *testing.T) {
 		{name: "signer without its key", cfg: Config{Signer: otherSigner{signer}, Network: Testnet()}, wantErr: "cannot sign for its own address"},
 		{name: "unknown privacy", cfg: Config{Signer: signer, Network: Testnet(), Privacy: "off"}, wantErr: "unknown Privacy"},
 		{name: "unknown affinity", cfg: Config{Signer: signer, Network: Testnet(), Affinity: Affinity{Policy: "sticky"}}, wantErr: "unknown Affinity.Policy"},
+		{name: "solana not yet", cfg: Config{Signer: signer, Network: Network{Rail: ticket.RailSolana, Algod: Testnet().Algod}}, wantErr: "Rail solana is not supported"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ac, app, _, err := c.cfg.withDefaults().validate()
+			d, _, err := c.cfg.withDefaults().validate()
+			ac, app := d.Algod, d.EscrowAppID
 			if c.wantErr != "" {
 				var zerr *Error
 				if !errors.As(err, &zerr) || zerr.Kind != KindInvalidRequest || zerr.Code != "invalid_config" {
@@ -383,7 +386,7 @@ func TestConfigValidateWarnings(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, _, warnings, err := c.cfg.withDefaults().validate()
+			_, warnings, err := c.cfg.withDefaults().validate()
 			if err != nil {
 				t.Fatal(err)
 			}
