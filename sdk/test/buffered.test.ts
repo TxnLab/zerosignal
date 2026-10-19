@@ -27,6 +27,7 @@ import {
 import { IDAffinity } from '../src/affinity.js'
 import type { SpendGuard } from '../src/config.js'
 import { NodeReply, type ZsError } from '../src/errors.js'
+import { resolveNetwork } from '../src/network.js'
 import { type OpenHandle, ProtestReason, type Reserved, type SettleOutcome, memoryJournal } from '../src/parts.js'
 import {
     DISPUTE_EXCERPT_CAP,
@@ -487,7 +488,7 @@ describe('Settles', () => {
         const h = handleOf({ txid: 'G', outcomes: [...outcomes] })
         settles.confirmSettled(TICKET_ID, 'G', h)
         await settles.wait(AbortSignal.timeout(5000))
-        const has = (await journal.list('P', 1n)).length > 0
+        const has = (await journal.list('P', resolveNetwork({ network: 'localnet', escrowAppId: 1n }))).length > 0
         expect(has).toBe(noJournal ? true : wantRow)
         if (wantLooks === -1) {
             expect(h.looks.length).toBeGreaterThanOrEqual(2)
@@ -529,7 +530,7 @@ describe('Settles', () => {
         settles.confirmSettled(TICKET_ID, 'G', handleOf({ outcomes: [] }))
         life.abort()
         await settles.wait(AbortSignal.timeout(5000))
-        expect(await journal.list('P', 1n)).toHaveLength(1)
+        expect(await journal.list('P', resolveNetwork({ network: 'localnet', escrowAppId: 1n }))).toHaveLength(1)
     })
 
     it('ends a lookup in flight when the Client closes', async () => {

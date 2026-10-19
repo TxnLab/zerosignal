@@ -300,10 +300,11 @@ func Diagnose(ctx context.Context, cfg Config, address string) (DoctorReport, er
 	}
 	cfg.Signer = readOnlySigner(address)
 	cfg = cfg.withDefaults()
-	ac, appID, warnings, err := cfg.validate()
+	dep, warnings, err := cfg.validate()
 	if err != nil {
 		return DoctorReport{}, err
 	}
+	ac, appID := dep.Algod, dep.EscrowAppID
 	base := doctorBase(cfg, ac, appID, address)
 	var r DoctorReadings
 	chain, err := algod.NewClient(ac.ResolvedEndpoint, ac.ResolvedToken, algod.WithTransport(cfg.algodTransport()))

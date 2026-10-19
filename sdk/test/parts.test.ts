@@ -32,10 +32,10 @@ vi.mock('../src/verify.js', async (importOriginal) => ({
     verifyTicketSignature: (...args: unknown[]) => verifyTicketSignature(...args),
 }))
 
-const { NoEphemeralError, ProtestReason, TicketSignatureInvalidError, httpReserveClient, memoryJournal } = await import(
-    '../src/index.js'
-)
+const { NoEphemeralError, ProtestReason, TicketSignatureInvalidError, httpReserveClient, memoryJournal, resolveNetwork } =
+    await import('../src/index.js')
 type TicketRecord = import('../src/index.js').TicketRecord
+const app1 = resolveNetwork({ network: 'localnet', escrowAppId: 1n })
 
 const { testOperator } = await import('./fixtures.js')
 
@@ -63,17 +63,19 @@ describe('memoryJournal', () => {
         await j.put(record({ ticketId: 'a', createdAt: 20 }))
         await j.put(record({ ticketId: 'other-payer', payer: 'SOMEONE' }))
         await j.put(record({ ticketId: 'other-app', escrowAppId: 2n }))
-        expect((await j.list('PAYER', 1n)).map((r) => r.ticketId)).toEqual(['c', 'a', 'b'])
+        await j.put(record({ ticketId: 'named', deployment: app1.key, createdAt: 30 }))
+        await j.put(record({ ticketId: 'named-elsewhere', deployment: 'algorand-custom-1' }))
+        expect((await j.list('PAYER', app1)).map((r) => r.ticketId)).toEqual(['c', 'a', 'b', 'named'])
     })
 
     it('replaces by ticket id and deletes, an unknown id included', async () => {
         const j = memoryJournal()
         await j.put(record())
         await j.put(record({ status: 'settle_pending', updatedAt: 30 }))
-        expect(await j.list('PAYER', 1n)).toEqual([record({ status: 'settle_pending', updatedAt: 30 })])
+        expect(await j.list('PAYER', app1)).toEqual([record({ status: 'settle_pending', updatedAt: 30 })])
         await j.delete('t1')
         await j.delete('never')
-        expect(await j.list('PAYER', 1n)).toEqual([])
+        expect(await j.list('PAYER', app1)).toEqual([])
     })
 
     // Go's journal holds values: a caller editing a record it put or listed
@@ -98,13 +100,13 @@ describe('memoryJournal', () => {
         rec.status = 'settle_pending'
         rec.target.node = 9
         digest.fill(2)
-        const [listed] = await j.list('PAYER', 1n)
+        const [listed] = await j.list('PAYER', app1)
         expect(listed!.status).toBe('open')
         expect(listed!.target.node).toBe(2)
         expect(listed!.settle!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
         listed!.target.node = 9
         listed!.settle!.receiptDigest.fill(3)
-        const [again] = await j.list('PAYER', 1n)
+        const [again] = await j.list('PAYER', app1)
         expect(again!.target.node).toBe(2)
         expect(again!.settle!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
     })

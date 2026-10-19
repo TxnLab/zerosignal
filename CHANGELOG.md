@@ -31,6 +31,33 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-19 — local state is named by deployment, not by app id (0.7.0)
+
+Journal rows, the saved catalog and a host's state files were scoped by the uint64 escrow app id,
+which a Solana program id cannot be. Both SDKs now resolve a `Network` to a deployment key,
+`<rail>-<network>-<escrow>` such as `algorand-mainnet-3628061142` (Go `zs.ResolveNetwork` →
+`Deployment.Key`; TS `resolveNetwork(...).key`), pinned by `deployment_vectors.json`. A preset's
+app id takes that preset's name whatever the config named; any other takes the network the
+config names, or `custom` when it names only an endpoint. So testnet's app 42 and mainnet's app
+42 no longer share a journal, where a mainnet Client would forget the testnet row.
+
+- Journal rows gain `deployment`, and Algorand rows still carry `escrow_app_id`, so an older SDK
+  reading the journal finds them. A row without `deployment` belongs to the deployment with its
+  app id. The Go file journal stays at version 1.
+- `TicketJournal.List` / `list` take the deployment instead of the app id. A host's own journal
+  implementation filters with `Deployment.Owns` / `ownsRecord`.
+- Go `OpenFileJournal(path, legacy...)` merges and then removes journals under earlier names,
+  leaving one another process holds or one that will not read (`FileJournal.MergeSkipped`);
+  `Stores.JournalLegacyPaths` passes them through `New`. `Discovery.CatalogLegacyPath` renames
+  the saved catalog, and `StateFile(dir, prefix, d)` returns both names. TS
+  `catalogStorageKey` takes the resolved network (a `bigint` no longer compiles). A registry the
+  SDK builds reads `zs.catalog.<app id>` once when the new key holds nothing; a host building
+  its own `DiscoveryRegistry` passes `legacyStorageKey` for the same.
+- `Network.Rail` / `rail` exists; a rail other than Algorand is refused with `invalid_config`
+  until the Solana rail lands.
+
+Going back to an SDK before this release, rename the files back: their contents still read.
+
 ### 2026-10-13 — a no-fit message names the limit the filter failed (0.5.1)
 
 The per-operator lines of a `context_length_exceeded` message recomputed the miss from the

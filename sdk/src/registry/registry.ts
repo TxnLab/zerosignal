@@ -114,6 +114,11 @@ export interface DiscoveryRegistryOptions {
     storage?: StorageAdapter | undefined
     /** CATALOG_STORAGE_KEY when absent. */
     storageKey?: string | undefined
+    /**
+     * The key the catalog was saved under before: read when storageKey holds
+     * nothing, and deleted after the first save under storageKey.
+     */
+    legacyStorageKey?: string | undefined
     /** Config.discovery; each absent, zero or negative setting takes its default. */
     discovery?: Partial<Discovery> | undefined
     /** Config.allowStaging: lists staging nodes on the discovery aggregates. */
@@ -154,6 +159,8 @@ export class DiscoveryRegistry implements RegistryProvider {
     readonly #source: OperatorSource
     readonly #storage: StorageAdapter | undefined
     readonly #storageKey: string
+    // Cleared once a save under #storageKey lands and the legacy entry goes.
+    #legacyStorageKey: string | undefined
     readonly #log: Logger
     readonly #clock: Clock
     readonly #refreshInterval: number
@@ -193,6 +200,7 @@ export class DiscoveryRegistry implements RegistryProvider {
         this.#source = o.source
         this.#storage = o.storage
         this.#storageKey = o.storageKey || CATALOG_STORAGE_KEY
+        this.#legacyStorageKey = o.legacyStorageKey && o.legacyStorageKey !== this.#storageKey ? o.legacyStorageKey : undefined
         this.#log = quietLogger(o.logger ?? discardLogger)
         this.#clock = o.clock ?? Date.now
         this.#refreshInterval = timerMs(d.refreshInterval, dd.refreshInterval)
@@ -276,7 +284,14 @@ export class DiscoveryRegistry implements RegistryProvider {
         if (storage !== undefined) {
             try {
                 const ops = await withDeadline(STORAGE_TIMEOUT_MS, this.#lifetime.signal, (s) =>
-                    untilAborted(loadCatalog(storage, this.#storageKey), s),
+                    untilAborted(
+                        (async () => {
+                            const cur = await loadCatalog(storage, this.#storageKey)
+                            const legacy = this.#legacyStorageKey
+                            return cur !== undefined || legacy === undefined ? cur : loadCatalog(storage, legacy)
+                        })(),
+                        s,
+                    ),
                 )
                 if (ops !== undefined && ops.length > 0) {
                     saved = ops
@@ -462,6 +477,17 @@ export class DiscoveryRegistry implements RegistryProvider {
             return
         }
         this.#catalogText = text
+        const legacy = this.#legacyStorageKey
+        if (legacy !== undefined) {
+            // Only after the save: until then the legacy entry is the only
+            // catalog there is.
+            try {
+                await withDeadline(STORAGE_TIMEOUT_MS, undefined, (s) => untilAborted(storage.delete(legacy), s))
+                this.#legacyStorageKey = undefined
+            } catch (err) {
+                this.#log.warn('failed to delete the operator catalog saved under its earlier key', { err: message(err), key: legacy })
+            }
+        }
     }
 
     #publish(snap: Snapshot): void {

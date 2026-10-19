@@ -248,7 +248,7 @@ async function harness(o: HarnessOptions = {}) {
             writes.push('delete')
             return mem.delete(id)
         },
-        list: (payer, appId) => mem.list(payer, appId),
+        list: (payer, d) => mem.list(payer, d),
     }
     const nodeFetch: Fetch = async (url, init) => {
         urls.push(String(url))
@@ -309,7 +309,7 @@ async function harness(o: HarnessOptions = {}) {
         sent,
         urls,
         body,
-        escrowAppId: p.cfg.network.escrowAppId,
+        deployment: p.cfg.network,
         get upstreamAborted() {
             return upstreamAborted
         },
@@ -350,7 +350,7 @@ describe('Client.stream', () => {
         // A standalone ack doesn't finish the ticket, so its row stays,
         // carrying what the payer co-signed.
         expect(h.writes).toEqual(['put open', 'put settle_pending'])
-        const rows = await h.journal.list('PAYER', h.escrowAppId)
+        const rows = await h.journal.list('PAYER', h.deployment)
         expect(rows).toHaveLength(1)
         expect(rows[0]).toMatchObject({ ticketId: TICKET_ID, openTxId: 'APPCALL', status: 'settle_pending', payer: 'PAYER' })
         await h.c.close()
@@ -367,7 +367,7 @@ describe('Client.stream', () => {
         await h.c.waitSettles()
         expect(h.handle.looks).toEqual(['ACK'])
         expect(h.writes).toEqual(['put open', 'put settle_pending', 'delete'])
-        expect(await h.journal.list('PAYER', h.escrowAppId)).toEqual([])
+        expect(await h.journal.list('PAYER', h.deployment)).toEqual([])
         await h.c.close()
     })
 
@@ -383,7 +383,7 @@ describe('Client.stream', () => {
         await h.c.waitSettles()
         expect(Date.now() - started).toBeLessThan(5_000)
         expect(h.writes).toEqual(['put open', 'put settle_pending'])
-        expect(await h.journal.list('PAYER', h.escrowAppId)).toHaveLength(1)
+        expect(await h.journal.list('PAYER', h.deployment)).toHaveLength(1)
     })
 
     it('fails a turn the caller aborted before it ran, not as a retry', async () => {
@@ -700,7 +700,7 @@ describe('Client.stream’s wiring', () => {
         const h = await harness({ config: { clock: () => 1000 } })
         await h.c.stream({ endpoint: CHAT, body: h.body }).text()
         await h.c.waitSettles()
-        const [row] = await h.journal.list('PAYER', h.escrowAppId)
+        const [row] = await h.journal.list('PAYER', h.deployment)
         expect(row!.createdAt).toBeGreaterThanOrEqual(before)
         expect(row!.updatedAt).toBeGreaterThanOrEqual(row!.createdAt)
         await h.c.close()

@@ -20,7 +20,7 @@ import { open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { parseArgs } from 'node:util'
 
-import { Client, type NetworkName, type TicketJournal, type TicketRecord, consoleLogger } from '@txnlab/zerosignal'
+import { Client, type NetworkName, type TicketJournal, type TicketRecord, consoleLogger, ownsRecord } from '@txnlab/zerosignal'
 import { mnemonicSigner } from '@txnlab/zerosignal/accounts/mnemonic'
 
 const { values } = parseArgs({
@@ -101,10 +101,10 @@ async function fileJournal(path: string): Promise<{ journal: TicketJournal; rele
     const journal: TicketJournal = {
         put: (rec) => update((all) => void (all[rec.ticketId] = rec)),
         delete: (ticketId) => update((all) => void delete all[ticketId]),
-        list: async (payer, escrowAppId) => {
+        list: async (payer, d) => {
             await queue
             return Object.values(await load())
-                .filter((r) => r.payer === payer && r.escrowAppId === escrowAppId)
+                .filter((r) => r.payer === payer && ownsRecord(d, r))
                 .sort((a, b) => a.createdAt - b.createdAt)
         },
     }
@@ -127,7 +127,7 @@ try {
         logger: consoleLogger(),
     })
     const payer = zs.config.signer.address
-    const appId = zs.config.network.escrowAppId
+    const deployment = zs.config.network
 
     const stop = new AbortController()
     process.once('SIGINT', () => stop.abort())
@@ -137,7 +137,7 @@ try {
     let last = ''
     try {
         for (;;) {
-            const rows = await journal.list(payer, appId)
+            const rows = await journal.list(payer, deployment)
             const now = rows.map(describe).join('\n')
             if (now !== last) console.log(rows.length === 0 ? 'journal empty' : `${rows.length} open:\n${now}`)
             last = now

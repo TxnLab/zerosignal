@@ -1,0 +1,239 @@
+{
+  "resolve": [
+    {
+      "name": "zero network is mainnet",
+      "input": {},
+      "rail": "algorand",
+      "label": "mainnet",
+      "key": "algorand-mainnet-3628061142",
+      "legacy_key": "3628061142"
+    },
+    {
+      "name": "explicit rail is the zero rail",
+      "input": {
+        "rail": "algorand"
+      },
+      "rail": "algorand",
+      "label": "mainnet",
+      "key": "algorand-mainnet-3628061142",
+      "legacy_key": "3628061142"
+    },
+    {
+      "name": "testnet preset",
+      "input": {
+        "network": "testnet"
+      },
+      "rail": "algorand",
+      "label": "testnet",
+      "key": "algorand-testnet-765860477",
+      "legacy_key": "765860477"
+    },
+    {
+      "name": "names are case-insensitive",
+      "input": {
+        "network": "MainNet"
+      },
+      "rail": "algorand",
+      "label": "mainnet",
+      "key": "algorand-mainnet-3628061142",
+      "legacy_key": "3628061142"
+    },
+    {
+      "name": "mainnet's app by endpoint alone is mainnet",
+      "input": {
+        "endpoint": "https://algod.example/",
+        "escrow_app_id": 3628061142
+      },
+      "rail": "algorand",
+      "label": "mainnet",
+      "key": "algorand-mainnet-3628061142",
+      "legacy_key": "3628061142"
+    },
+    {
+      "name": "a preset's app id wins over the named network",
+      "input": {
+        "network": "localnet",
+        "escrow_app_id": 765860477
+      },
+      "rail": "algorand",
+      "label": "testnet",
+      "key": "algorand-testnet-765860477",
+      "legacy_key": "765860477"
+    },
+    {
+      "name": "another app on testnet keeps testnet",
+      "input": {
+        "network": "testnet",
+        "escrow_app_id": 42
+      },
+      "rail": "algorand",
+      "label": "testnet",
+      "key": "algorand-testnet-42",
+      "legacy_key": "42"
+    },
+    {
+      "name": "the same app id on mainnet is another deployment",
+      "input": {
+        "network": "mainnet",
+        "escrow_app_id": 42
+      },
+      "rail": "algorand",
+      "label": "mainnet",
+      "key": "algorand-mainnet-42",
+      "legacy_key": "42"
+    },
+    {
+      "name": "localnet with an app",
+      "input": {
+        "network": "localnet",
+        "escrow_app_id": 1001
+      },
+      "rail": "algorand",
+      "label": "localnet",
+      "key": "algorand-localnet-1001",
+      "legacy_key": "1001"
+    },
+    {
+      "name": "an endpoint with an app is custom",
+      "input": {
+        "endpoint": "http://localhost:4001",
+        "escrow_app_id": 1001
+      },
+      "rail": "algorand",
+      "label": "custom",
+      "key": "algorand-custom-1001",
+      "legacy_key": "1001"
+    },
+    {
+      "name": "localnet needs an app",
+      "input": {
+        "network": "localnet"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "an endpoint needs an app",
+      "input": {
+        "endpoint": "http://localhost:4001"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "an app id alone names no chain",
+      "input": {
+        "escrow_app_id": 7
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "a token alone names no chain",
+      "input": {
+        "token": "t"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "unknown network",
+      "input": {
+        "network": "devnet"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "solana is not supported yet",
+      "input": {
+        "rail": "solana",
+        "network": "testnet"
+      },
+      "error": "invalid_config"
+    }
+  ],
+  "scope": [
+    {
+      "name": "mainnet",
+      "input": {
+        "network": "mainnet"
+      },
+      "rows": [
+        {
+          "deployment": "algorand-mainnet-3628061142",
+          "escrow_app_id": 3628061142,
+          "owns": true
+        },
+        {
+          "deployment": "",
+          "escrow_app_id": 3628061142,
+          "owns": true
+        },
+        {
+          "deployment": "",
+          "escrow_app_id": 765860477,
+          "owns": false
+        },
+        {
+          "deployment": "",
+          "escrow_app_id": 0,
+          "owns": false
+        },
+        {
+          "deployment": "algorand-custom-3628061142",
+          "escrow_app_id": 3628061142,
+          "owns": false
+        },
+        {
+          "deployment": "algorand-mainnet-3628061142",
+          "escrow_app_id": 1,
+          "owns": true
+        },
+        {
+          "deployment": "solana-mainnet-ZsEscrow1111111111111111111111111111111111111",
+          "escrow_app_id": 0,
+          "owns": false
+        }
+      ]
+    },
+    {
+      "name": "testnet's app 42",
+      "input": {
+        "network": "testnet",
+        "escrow_app_id": 42
+      },
+      "rows": [
+        {
+          "deployment": "algorand-testnet-42",
+          "escrow_app_id": 42,
+          "owns": true
+        },
+        {
+          "deployment": "algorand-mainnet-42",
+          "escrow_app_id": 42,
+          "owns": false
+        }
+      ]
+    },
+    {
+      "name": "localnet",
+      "input": {
+        "network": "localnet",
+        "escrow_app_id": 1001
+      },
+      "rows": [
+        {
+          "deployment": "algorand-localnet-1001",
+          "escrow_app_id": 1001,
+          "owns": true
+        },
+        {
+          "deployment": "",
+          "escrow_app_id": 1001,
+          "owns": true
+        },
+        {
+          "deployment": "algorand-custom-1001",
+          "escrow_app_id": 1001,
+          "owns": false
+        }
+      ]
+    }
+  ]
+}

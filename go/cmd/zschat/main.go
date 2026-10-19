@@ -36,7 +36,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -132,12 +131,19 @@ func run(o options) error {
 	if appID == 0 {
 		return fmt.Errorf("%s has no preset escrow app: pass -app-id", network)
 	}
+	net := zs.Network{Algod: algod.Config{Network: network}, EscrowAppID: appID}
+	dep, _, err := zs.ResolveNetwork(net)
+	if err != nil {
+		return err
+	}
+	journal, legacyJournal := zs.StateFile(dir, "zschat-ticket-journal", dep)
 	client, err := zs.New(ctx, zs.Config{
 		Signer:  payer.Signer,
-		Network: zs.Network{Algod: algod.Config{Network: network}, EscrowAppID: appID},
+		Network: net,
 		Logger:  logger,
 		Stores: zs.Stores{
-			JournalPath: filepath.Join(dir, fmt.Sprintf("zschat-ticket-journal-%d.json", appID)),
+			JournalPath:        journal,
+			JournalLegacyPaths: []string{legacyJournal},
 		},
 	})
 	if err != nil {

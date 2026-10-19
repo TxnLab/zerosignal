@@ -248,9 +248,20 @@ describe('Client.create building the registry', () => {
         const ops = await registry.allOperators()
         expect(ops.map((o) => [o.id, o.nodeId, o.baseUrl, o.reachable, o.models])).toEqual(FLEET.map((r) => [r.op, r.node, host(r), true, ['m']]))
         // The catalog goes to Config.storage for the next start, under the
-        // escrow app, since node ids repeat across networks.
-        expect(await storage.get(`${CATALOG_STORAGE_KEY}.${APP}`)).toContain(host(T))
+        // deployment, since node ids repeat across networks.
+        expect(await storage.get(`${CATALOG_STORAGE_KEY}.algorand-testnet-${APP}`)).toContain(host(T))
         expect(await storage.get(CATALOG_STORAGE_KEY)).toBeUndefined()
+    })
+
+    // The registry's own test pins the legacy read; this pins that a built
+    // registry is handed the legacy key at all.
+    it('hands the registry the catalog key from before deployment keys', async () => {
+        const storage = memoryStorage()
+        await storage.set(`${CATALOG_STORAGE_KEY}.${APP}`, '{"version":1,"operators":[]}')
+        const { registry } = await clientOver(serve, { storage })
+        await registry.allOperators()
+        await vi.waitFor(async () => expect(await storage.get(`${CATALOG_STORAGE_KEY}.${APP}`)).toBeUndefined())
+        expect(await storage.get(`${CATALOG_STORAGE_KEY}.algorand-testnet-${APP}`)).toContain(host(T))
     })
 
     it('probes direct under privacy direct, and through a relay by default', async () => {
@@ -513,7 +524,7 @@ describe('Client.create building the registry', () => {
         const saved = memoryStorage()
         const warm = await clientOver(serve, { storage: saved })
         await warm.registry.allOperators()
-        expect(await saved.get(`${CATALOG_STORAGE_KEY}.${APP}`)).toBeDefined()
+        expect(await saved.get(`${CATALOG_STORAGE_KEY}.algorand-testnet-${APP}`)).toBeDefined()
 
         // A storage whose writes never land, over a chain read that never answers.
         const set = vi.fn(() => new Promise<void>(() => {}))

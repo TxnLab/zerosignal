@@ -165,6 +165,8 @@ type Client struct {
 	// production. See debug.go.
 	debugLogBodies bool
 
+	deployment Deployment
+
 	// stop ends the background work New started; nil when it started none.
 	stop func()
 	// ownJournal is the journal New opened from Stores.JournalPath, which
@@ -185,10 +187,11 @@ type Client struct {
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	callerLogger := cfg.Logger
 	cfg = cfg.withDefaults()
-	ac, appID, warnings, err := cfg.validate()
+	dep, warnings, err := cfg.validate()
 	if err != nil {
 		return nil, err
 	}
+	ac, appID := dep.Algod, dep.EscrowAppID
 	for _, w := range warnings {
 		cfg.Logger.Warn(w)
 	}
@@ -200,7 +203,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if err := tee.PersistCollateral(cfg.Stores.CollateralDir); err != nil {
 		cfg.Logger.Warn("Stores.CollateralDir is not used", slog.Any("err", err))
 	}
-	cfg.Network = Network{Algod: ac, EscrowAppID: appID}
+	cfg.Network = Network{Rail: dep.Rail, Algod: ac, EscrowAppID: appID}
+	if d := cfg.Discovery; d.CatalogPath != "" {
+		if err := AdoptLegacyFile(d.CatalogLegacyPath, d.CatalogPath); err != nil {
+			cfg.Logger.Warn("could not rename the saved operator catalog; discovery starts without it",
+				slog.String("from", d.CatalogLegacyPath), slog.String("to", d.CatalogPath), slog.Any("err", err))
+		}
+	}
 	parts, err := buildNetworkParts(ctx, cfg, ac, appID)
 	if err != nil {
 		return nil, err
@@ -255,13 +264,17 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 			stopParts()
 			return nil, configError("Stores.JournalPath is already open in another Client in this process: each Client needs its own journal file")
 		}
-		j, err := OpenFileJournal(st.JournalPath)
+		j, err := OpenFileJournal(st.JournalPath, st.JournalLegacyPaths...)
 		if err != nil {
 			releaseJournalPath(st.JournalPath)
 			cfg.Logger.Warn("ticket journal file is not used: a ticket this Client leaves open after a crash is refunded only by hand",
 				slog.String("path", st.JournalPath), slog.Any("err", err))
 		} else {
 			ownJournal, st.Journal = j, j
+			for _, s := range j.MergeSkipped() {
+				cfg.Logger.Warn("ticket journal under an earlier name is not merged yet; the next start tries again",
+					slog.String("path", s.Path), slog.Any("err", s.Err))
+			}
 		}
 	}
 	// Only the SDK's own wallet runs a reconciler, which is what deletes rows;
@@ -303,6 +316,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		retryBudget:      cfg.RetryBudget,
 		sweepDelayFn:     cfg.SweepDelay,
 		debugLogBodies:   cfg.DebugLogBodies,
+		deployment:       dep,
 		stop:             parts.stop,
 		ownJournal:       ownJournal,
 		durableJournal:   durableJournal,
@@ -318,7 +332,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		}
 	}
 	if sdkWallet != nil {
-		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), appID, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
+		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), dep, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
 		c.reconcile.remedy = cfg.Remedies.RecoverTicket
 		c.reconcile.release = release
 		// A memory journal dies with this Client, so its watchdog stays the
@@ -368,6 +382,9 @@ func (s *Client) Close() {
 // file Stores.JournalPath names. False is the in-memory default, after which
 // a ticket left open by a crash is refunded only by hand.
 func (s *Client) JournalDurable() bool { return s.durableJournal }
+
+// Deployment is the deployment the Client pays on.
+func (s *Client) Deployment() Deployment { return s.deployment }
 
 // Config is the Client's configuration with every default applied and the
 // parts New built filled in.

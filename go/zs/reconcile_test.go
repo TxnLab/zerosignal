@@ -176,8 +176,12 @@ func (f *fakeChain) seen() []string {
 	return slices.Clone(f.calls)
 }
 
+// journalDeployment owns the rows put writes, which name only app 7, as a row
+// from before rows named their deployment does.
+var journalDeployment = Deployment{Rail: ticket.RailAlgorand, Network: "custom", EscrowAppID: 7}
+
 func testReconciler(j TicketJournal, chain ticketChain, watching ...string) *reconciler {
-	r := newReconciler(j, chain, "PAYER", 7, func(id string) bool { return slices.Contains(watching, id) }, nil, discardLogger())
+	r := newReconciler(j, chain, "PAYER", journalDeployment, func(id string) bool { return slices.Contains(watching, id) }, nil, discardLogger())
 	r.now = func() time.Time { return reconcileNow }
 	return r
 }
@@ -199,7 +203,7 @@ func put(t *testing.T, j TicketJournal, recs ...TicketRecord) {
 
 func ids(t *testing.T, j TicketJournal) []string {
 	t.Helper()
-	recs, err := j.List(context.Background(), "PAYER", 7)
+	recs, err := j.List(context.Background(), "PAYER", journalDeployment)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +472,7 @@ func TestReconciler_PanickingListIsContained(t *testing.T) {
 
 type panicList struct{ *memJournal }
 
-func (panicList) List(context.Context, string, uint64) ([]TicketRecord, error) {
+func (panicList) List(context.Context, string, Deployment) ([]TicketRecord, error) {
 	panic("journal bug")
 }
 
@@ -536,7 +540,7 @@ func TestFileJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { j2.Close() })
-	recs, err := j2.List(context.Background(), "PAYER", 7)
+	recs, err := j2.List(context.Background(), "PAYER", journalDeployment)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +647,7 @@ func TestFileJournal_ReadsAndWritesTheV1Format(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	recs, err := j.List(context.Background(), "PAYER", 7)
+	recs, err := j.List(context.Background(), "PAYER", journalDeployment)
 	if err != nil || len(recs) != 1 {
 		t.Fatalf("List = %v, %v; want one record", recs, err)
 	}
@@ -716,7 +720,7 @@ func TestFileJournal_FailedWriteRollsBack(t *testing.T) {
 	if j.Put(context.Background(), changed) == nil || j.Put(context.Background(), added) == nil || j.Delete(context.Background(), "T") == nil {
 		t.Fatal("a write to a read-only directory succeeded")
 	}
-	recs, _ := j.List(context.Background(), "PAYER", 7)
+	recs, _ := j.List(context.Background(), "PAYER", journalDeployment)
 	if len(recs) != 1 || recs[0].TicketID != "T" || recs[0].Status != TicketOpen {
 		t.Errorf("in memory after failed writes: %+v, want only T, still open", recs)
 	}

@@ -149,13 +149,13 @@ type ticketChain interface {
 // left by an earlier run, and those whose refund watchdog gave up. Each
 // ticket has one driver at a time; a live ticket stays with the watchdog.
 type reconciler struct {
-	journal  TicketJournal
-	chain    ticketChain
-	payer    string
-	appID    uint64
-	watching func(ticketID string) bool
-	log      *slog.Logger
-	remedy   string // Remedies.RecoverTicket
+	journal    TicketJournal
+	chain      ticketChain
+	payer      string
+	deployment Deployment
+	watching   func(ticketID string) bool
+	log        *slog.Logger
+	remedy     string // Remedies.RecoverTicket
 	// release gives back the claim New took on journal, once closed.
 	release func()
 	// handOff is set when journal outlives the Client: Close then stops the
@@ -181,13 +181,13 @@ type reconciler struct {
 
 // spend is an argument rather than a field set later because start sweeps at
 // once, and that first sweep is the one that finds what a restart left behind.
-func newReconciler(journal TicketJournal, chain ticketChain, payer string, appID uint64, watching func(string) bool, spend SpendGuard, log *slog.Logger) *reconciler {
+func newReconciler(journal TicketJournal, chain ticketChain, payer string, d Deployment, watching func(string) bool, spend SpendGuard, log *slog.Logger) *reconciler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &reconciler{
 		journal:       journal,
 		chain:         chain,
 		payer:         payer,
-		appID:         appID,
+		deployment:    d,
 		watching:      watching,
 		spend:         spend,
 		log:           log,
@@ -283,7 +283,7 @@ func (r *reconciler) stopped() bool { return r.ctx.Err() != nil }
 func (r *reconciler) sweep() {
 	defer r.recoverHook()
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
-	recs, err := r.journal.List(ctx, r.payer, r.appID)
+	recs, err := r.journal.List(ctx, r.payer, r.deployment)
 	cancel()
 	if err != nil {
 		r.log.Warn("ticket reconciler: journal read failed", slog.Any("err", err))
@@ -406,7 +406,8 @@ func (s *Client) journalOpen(h *OpenHandle, t *ticket.Ticket) {
 	h.journaled = TicketRecord{
 		TicketID:    t.TicketID,
 		OpenTxID:    h.AppCallTxID,
-		EscrowAppID: s.cfg.Network.EscrowAppID,
+		EscrowAppID: s.deployment.EscrowAppID,
+		Deployment:  s.deployment.Key(),
 		Target:      RefOf(h.Operator),
 		Payer:       s.wallet.PayerAddr(),
 		MaxPrice:    t.MaxPrice,

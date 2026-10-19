@@ -222,7 +222,7 @@ export class Client {
                 journal,
                 chain,
                 payer: wallet.payerAddr(),
-                escrowAppId: cfg.network.escrowAppId,
+                deployment: cfg.network,
                 watching: (ticketId) => refunds.watching(ticketId),
                 spend: guard,
                 logger: cfg.logger,
@@ -394,7 +394,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         journal: p.journal,
         logger,
         clock: Date.now,
-        escrowAppId: cfg.network.escrowAppId,
+        deployment: cfg.network,
         payer: p.wallet.payerAddr(),
     }
     const responder: ResponderDeps = {

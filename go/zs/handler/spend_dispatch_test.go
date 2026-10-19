@@ -697,7 +697,7 @@ func (j *failingJournal) Put(context.Context, zs.TicketRecord) error {
 	return errors.New("disk full")
 }
 func (*failingJournal) Delete(context.Context, string) error { return nil }
-func (*failingJournal) List(context.Context, string, uint64) ([]zs.TicketRecord, error) {
+func (*failingJournal) List(context.Context, string, zs.Deployment) ([]zs.TicketRecord, error) {
 	return nil, nil
 }
 
