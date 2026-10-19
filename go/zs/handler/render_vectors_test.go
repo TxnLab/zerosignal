@@ -61,7 +61,9 @@ type renderUsageCase struct {
 	OwnerAddr         string  `json:"owner_addr"`
 	OpenFees          uint64  `json:"open_fees"`
 	SettleFees        uint64  `json:"settle_fees"`
-	AlgoUSD           float64 `json:"algo_usd"`
+	NativeUSD         float64 `json:"native_usd"`
+	FeeCurrency       string  `json:"fee_currency"`
+	FeeDecimals       int     `json:"fee_decimals"`
 	FeeBps            uint64  `json:"fee_bps"`
 	FeeBpsKnown       bool    `json:"fee_bps_known"`
 
@@ -126,49 +128,61 @@ func runRenderError(c renderErrorCase) renderErrorCase {
 }
 
 func renderUsageInputs() []renderUsageCase {
-	return []renderUsageCase{
+	cases := []renderUsageCase{
 		{Name: "full", TicketID: "dGlja2V0LTAwMDAwMDAwMDE=", AmountCharged: 1_000_000, ActualInputCount: 120, ActualOutputCount: 48,
 			MaxPrice: 1_100_000, Op: 7, Node: 2, OwnerAddr: "OWNERADDR", OpenFees: 1000, SettleFees: 2000,
-			AlgoUSD: 0.2134, FeeBps: 1000, FeeBpsKnown: true},
+			NativeUSD: 0.2134, FeeBps: 1000, FeeBpsKnown: true},
 		{Name: "rate unknown", TicketID: "dGlja2V0LTAwMDAwMDAwMDI=", AmountCharged: 500, ActualInputCount: 3, ActualOutputCount: 1,
 			MaxPrice: 9000, MinPrice: 100, Op: 1, Node: 1, OwnerAddr: "O"},
 		{Name: "nothing charged, ids unset", TicketID: "dGlja2V0LTAwMDAwMDAwMDM=", MaxPrice: 5000, MinPrice: 5000,
 			FeeBps: 250, FeeBpsKnown: true},
 		{Name: "zero fee rate known", TicketID: "dGlja2V0LTAwMDAwMDAwMDQ=", AmountCharged: 200_000, MaxPrice: 500_000,
-			Op: 3, Node: 9, FeeBps: 0, FeeBpsKnown: true, AlgoUSD: 1},
+			Op: 3, Node: 9, FeeBps: 0, FeeBpsKnown: true, NativeUSD: 1},
 		{Name: "tiny rate", TicketID: "dGlja2V0LTAwMDAwMDAwMDU=", AmountCharged: 1, MaxPrice: 10, Op: 4, Node: 1,
-			OpenFees: 5, AlgoUSD: 0.0000001234, FeeBps: 333, FeeBpsKnown: true},
+			OpenFees: 5, NativeUSD: 0.0000001234, FeeBps: 333, FeeBpsKnown: true},
 		{Name: "rounding", TicketID: "dGlja2V0LTAwMDAwMDAwMDY=", AmountCharged: 1_234_567, ActualInputCount: 99_999, ActualOutputCount: 77_777,
 			MaxPrice: 2_000_000, MinPrice: 1, Op: 12, Node: 3, OwnerAddr: "OWNER12", OpenFees: 7, SettleFees: 3,
-			AlgoUSD: 0.123456789, FeeBps: 250, FeeBpsKnown: true},
+			NativeUSD: 0.123456789, FeeBps: 250, FeeBpsKnown: true},
 		{Name: "large rate", TicketID: "dGlja2V0LTAwMDAwMDAwMDc=", AmountCharged: 999_999_999, MaxPrice: 999_999_999,
-			Op: 1, Node: 1, OpenFees: 1_000_000, AlgoUSD: 12345678.9, FeeBps: 10_000, FeeBpsKnown: true},
+			Op: 1, Node: 1, OpenFees: 1_000_000, NativeUSD: 12345678.9, FeeBps: 10_000, FeeBpsKnown: true},
 		// $%.6f rounds an exact half to even: 15625 µALGO at $0.50 is $0.0078125.
 		{Name: "dollar tie down to even", TicketID: "dGlja2V0LTAwMDAwMDAwMDg=", AmountCharged: 1, MaxPrice: 1, Op: 1, Node: 1,
-			OpenFees: 15_625, AlgoUSD: 0.5},
+			OpenFees: 15_625, NativeUSD: 0.5},
 		{Name: "dollar tie up to even", TicketID: "dGlja2V0LTAwMDAwMDAwMDk=", AmountCharged: 1, MaxPrice: 1, Op: 1, Node: 1,
-			OpenFees: 46_875, AlgoUSD: 0.5},
+			OpenFees: 46_875, NativeUSD: 0.5},
 		// Past 1e21 $%.6f still prints every digit.
 		{Name: "dollars past 1e21", TicketID: "dGlja2V0LTAwMDAwMDAwMTA=", AmountCharged: 1, MaxPrice: 1, Op: 1, Node: 1,
-			OpenFees: 3_000_000, AlgoUSD: 5.7885281e21},
+			OpenFees: 3_000_000, NativeUSD: 5.7885281e21},
 		// The operator and node ids are rendered each on its own.
 		{Name: "operator without node", TicketID: "dGlja2V0LTAwMDAwMDAwMTE=", AmountCharged: 1, MaxPrice: 1, Op: 5},
 		{Name: "node without operator", TicketID: "dGlja2V0LTAwMDAwMDAwMTI=", AmountCharged: 1, MaxPrice: 1, Node: 5},
+		// Fees in another coin carry none of the names that say ALGO.
+		{Name: "fees in SOL", TicketID: "dGlja2V0LTAwMDAwMDAwMTM=", AmountCharged: 1_000, MaxPrice: 2_000, Op: 1, Node: 1,
+			OpenFees: 5_000, SettleFees: 5_000, NativeUSD: 150.25, FeeCurrency: "SOL", FeeDecimals: 9, FeeBps: 1000, FeeBpsKnown: true},
+		{Name: "fees in SOL, rate unknown", TicketID: "dGlja2V0LTAwMDAwMDAwMTQ=", AmountCharged: 1, MaxPrice: 1, Op: 1, Node: 1,
+			OpenFees: 5_000, FeeCurrency: "SOL", FeeDecimals: 9},
 	}
+	for i := range cases {
+		if cases[i].FeeCurrency == "" {
+			cases[i].FeeCurrency, cases[i].FeeDecimals = "ALGO", 6
+		}
+	}
+	return cases
 }
 
 func runRenderUsage(c renderUsageCase) renderUsageCase {
 	ev := zs.ReceiptVerified{
 		Receipt: ticket.UsageReceipt{TicketID: c.TicketID, AmountCharged: c.AmountCharged,
 			ActualInputCount: c.ActualInputCount, ActualOutputCount: c.ActualOutputCount},
-		Ticket:               ticket.Ticket{MaxPrice: c.MaxPrice, MinPrice: c.MinPrice},
-		Target:               zs.NodeRef{Op: c.Op, Node: c.Node},
-		OwnerAddr:            c.OwnerAddr,
-		OpenFeesMicroAlgos:   c.OpenFees,
-		SettleFeesMicroAlgos: c.SettleFees,
-		AlgoUSD:              c.AlgoUSD,
-		FeeBps:               c.FeeBps,
-		FeeBpsKnown:          c.FeeBpsKnown,
+		Ticket:            ticket.Ticket{MaxPrice: c.MaxPrice, MinPrice: c.MinPrice},
+		Target:            zs.NodeRef{Op: c.Op, Node: c.Node},
+		OwnerAddr:         c.OwnerAddr,
+		OpenNetworkFees:   c.OpenFees,
+		SettleNetworkFees: c.SettleFees,
+		NativeUSD:         c.NativeUSD,
+		FeeUnit:           zs.FeeUnit{Currency: c.FeeCurrency, Decimals: c.FeeDecimals},
+		FeeBps:            c.FeeBps,
+		FeeBpsKnown:       c.FeeBpsKnown,
 	}
 	h := http.Header{}
 	setUsageHeaders(h, ev)

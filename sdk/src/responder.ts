@@ -29,6 +29,8 @@ import { newError } from './codes.js'
 import { NodeReply, ZsError } from './errors.js'
 import { decodeSettleGroup } from './escrow/settle.js'
 import type { Event } from './events.js'
+import { algoOnly } from './fees.js'
+import type { FeeUnit } from './network.js'
 import { goJSON } from './gojson.js'
 import { goDecodeRune, goDecodeUTF8, goQuote } from './gotext.js'
 import { openAIError } from './http.js'
@@ -50,6 +52,7 @@ export interface UsageReport {
     openFees: number
     settleFees: number
     algoUsdPrice: number
+    feeUnit: FeeUnit
     feeBps: number
     haveFee: boolean
     /** How the receipt fared and what its submit did. */
@@ -69,11 +72,16 @@ export function usageEvents(u: UsageReport): Event[] {
             ticket: u.ticket,
             target: refOf(u.op),
             ownerAddr: u.op.ownerAddr,
-            openFeesMicroAlgos: u.openFees,
-            settleFeesMicroAlgos: u.settleFees,
-            algoUsd: u.algoUsdPrice,
+            openFeesMicroAlgos: algoOnly(u.feeUnit, u.openFees),
+            settleFeesMicroAlgos: algoOnly(u.feeUnit, u.settleFees),
+            algoUsd: algoOnly(u.feeUnit, u.algoUsdPrice),
             feeBps: u.feeBps,
             feeBpsKnown: u.haveFee,
+            openNetworkFees: u.openFees,
+            settleNetworkFees: u.settleFees,
+            // The reserve's rate is ALGO/USD, so it prices no other coin.
+            nativeUsd: algoOnly(u.feeUnit, u.algoUsdPrice),
+            feeUnit: u.feeUnit,
         },
     ]
     if (c.excluded) evs.push({ type: 'node.excluded', node: refOf(u.op), reason: 'settle_group_rejected' })
@@ -84,6 +92,7 @@ export function usageEvents(u: UsageReport): Event[] {
             txId: c.settled.txId,
             feesMicroAlgos: c.settled.feesMicroAlgos,
             atomic: c.settled.kind === 'atomic',
+            networkFees: c.settled.networkFees,
         })
     }
     return evs
@@ -298,9 +307,10 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
                     openFees: handle.openFeesMicroalgos,
                     settleFees: 0,
                     algoUsdPrice: reserved.algoUsdPrice,
+                    feeUnit: deps.feeUnit,
                     feeBps: feeBps ?? 0,
                     haveFee: feeBps !== null,
-                    check: { violation, settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 }, excluded: false },
+                    check: { violation, settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 }, excluded: false },
                 }
             }
             em.reply(status, h, plaintext, usage)

@@ -39,6 +39,38 @@ func RailName(r ticket.Rail) string {
 	return fmt.Sprintf("rail%d", r)
 }
 
+// FeeUnit is the coin a rail's network fees are paid in. A fee amount is in
+// its base units, Decimals of them to the coin.
+type FeeUnit struct {
+	Currency string
+	Decimals int
+}
+
+// FeeUnitOf is rail r's fee unit. The zero rail is Algorand, as
+// Network.Rail's is; a rail neither names has none.
+func FeeUnitOf(r ticket.Rail) FeeUnit {
+	switch r {
+	case 0, ticket.RailAlgorand:
+		return FeeUnit{Currency: "ALGO", Decimals: 6}
+	case ticket.RailSolana:
+		return FeeUnit{Currency: "SOL", Decimals: 9}
+	}
+	return FeeUnit{}
+}
+
+// algoOnly is v for a field named for ALGO (µALGO fees, the ALGO/USD rate)
+// when fees are in ALGO, and 0 otherwise: those fields never carry another
+// coin's units.
+func algoOnly[T uint64 | float64](u FeeUnit, v T) T {
+	if u.Currency != "ALGO" {
+		return 0
+	}
+	return v
+}
+
+// FeeUnit is the coin the deployment's network fees are paid in.
+func (d Deployment) FeeUnit() FeeUnit { return FeeUnitOf(d.Rail) }
+
 // Escrow is the escrow's id on its rail, as text.
 func (d Deployment) Escrow() string { return strconv.FormatUint(d.EscrowAppID, 10) }
 

@@ -3275,7 +3275,7 @@ func (s *Client) buildNonStreamResponder(
 			// never blocks this path). ok==false degrades to no breakdown.
 			feeBps, haveFee := s.feeRateNow()
 			usage = &usageReport{receipt: receipt, ticket: ticket, op: op, openFees: openFees, settleFees: settleFees,
-				algoUSDPrice: algoUSDPrice, feeBps: feeBps, haveFee: haveFee, check: receiptCheck{violation: violation}}
+				algoUSDPrice: algoUSDPrice, unit: s.deployment.FeeUnit(), feeBps: feeBps, haveFee: haveFee, check: receiptCheck{violation: violation}}
 		}
 		em.reply(upstreamResp.StatusCode, upstreamResp.Header, plaintext, usage)
 		return nil
@@ -4110,7 +4110,7 @@ func (s *Client) checkReceipt(
 					slog.String("ticket_id", ticket.TicketID),
 					slog.String("txid", txid),
 					slog.Bool("atomic", settledAtomically),
-					slog.Uint64("fee_microalgos", fee))
+					slog.Uint64("network_fee", fee))
 				if settledAtomically {
 					// The 2-tx group finalized and deleted the ticket box —
 					// nothing left for the refund watchdog to recover. A
@@ -4121,7 +4121,7 @@ func (s *Client) checkReceipt(
 					s.refunds.Resolve(ticket.TicketID)
 					s.confirmSettled(ticket.TicketID, txid, handle)
 				}
-				return Settlement{Kind: kind, TxID: txid, FeesMicroAlgos: fee}, nil
+				return s.settlement(kind, txid, fee), nil
 			}
 		}), check
 	}
@@ -4173,7 +4173,7 @@ func (s *Client) checkReceipt(
 		// Frozen ticket: refundInactive reverts on FROZEN, so the refund
 		// watchdog has nothing to do — resolution is off-chain arbitration.
 		s.refunds.Resolve(ticket.TicketID)
-		return Settlement{Kind: SettleProtest, TxID: txid, FeesMicroAlgos: fee}, nil
+		return s.settlement(SettleProtest, txid, fee), nil
 	}), check
 }
 
@@ -4529,8 +4529,9 @@ func (s *Client) buildFrameFactory(
 					ticket:       tkt,
 					op:           op,
 					openFees:     openFees,
-					settleFees:   check.settled.FeesMicroAlgos,
+					settleFees:   check.settled.NetworkFees,
 					algoUSDPrice: algoUSDPrice,
+					unit:         s.deployment.FeeUnit(),
 					feeBps:       feeBps,
 					haveFee:      haveFee,
 					check:        check,

@@ -119,7 +119,7 @@ func (s *Stream) Events() iter.Seq2[Event, error] {
 				s.settle.finish(Settlement{}, nil)
 			}
 		}()
-		em := &streamEmitter{yield: yield, cancel: cancel, callerCtx: s.ctx}
+		em := &streamEmitter{yield: yield, cancel: cancel, callerCtx: s.ctx, unit: s.c.deployment.FeeUnit()}
 		if !s.req.FramesOnly {
 			em.dec = newDecoder(string(s.req.Endpoint))
 		}

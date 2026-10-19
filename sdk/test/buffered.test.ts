@@ -51,7 +51,7 @@ import { NodeExclusionStore } from '../src/routing/exclusion.js'
 import type { SealedCall } from '../src/sealed.js'
 import { Settles } from '../src/settles.js'
 import { testOperator } from './fixtures.js'
-import { TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
+import { ALGO_FEES, TICKET_ID, VALID_GROUP, fixture, handleOf, recLogger } from './turn-fixtures.js'
 
 // Every response key the responder unwraps, kept so a test can check it was
 // zeroed once the responder is done with it.
@@ -74,6 +74,7 @@ function depsOf(over: Partial<ReceiptCheckDeps> = {}) {
     const logger = recLogger()
     const deps: ReceiptCheckDeps = {
         logger,
+        feeUnit: ALGO_FEES,
         resolveRefund: (id) => resolved.push(id),
         confirmSettled: (id, tx) => confirmed.push([id, tx]),
         ...over,
@@ -112,13 +113,13 @@ describe('checkTurnReceipt', () => {
     // protest that froze it) stops the refund watchdog, and only a landed
     // atomic group is watched until it confirms.
     it.each([
-        ['atomic', { txid: 'GROUPTX' }, true, VALID_GROUP, { kind: 'atomic', txId: 'GROUPTX', feesMicroAlgos: 0 }, undefined, false, true],
-        ['payer ack without a group', { txid: 'ACKTX', fee: 1000 }, true, null, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000 }, undefined, true, false],
-        ['payer ack after a rejected group', { txid: 'ACKTX', fee: 1000, groupRejected: true }, true, VALID_GROUP, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000 }, undefined, true, false],
-        ['failed ack', { txid: 'IGNORED', fee: 7, err: ackErr }, true, VALID_GROUP, { kind: 'atomic', txId: '', feesMicroAlgos: 0 }, ackErr, true, false],
+        ['atomic', { txid: 'GROUPTX' }, true, VALID_GROUP, { kind: 'atomic', txId: 'GROUPTX', feesMicroAlgos: 0, networkFees: 0 }, undefined, false, true],
+        ['payer ack without a group', { txid: 'ACKTX', fee: 1000 }, true, null, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000, networkFees: 1000 }, undefined, true, false],
+        ['payer ack after a rejected group', { txid: 'ACKTX', fee: 1000, groupRejected: true }, true, VALID_GROUP, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000, networkFees: 1000 }, undefined, true, false],
+        ['failed ack', { txid: 'IGNORED', fee: 7, err: ackErr }, true, VALID_GROUP, { kind: 'atomic', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],
         // The payer signs the protest, so its fee is the payer's.
-        ['protest', { txid: 'PROTESTTX', fee: 3000 }, false, null, { kind: 'protest', txId: 'PROTESTTX', feesMicroAlgos: 3000 }, undefined, false, false],
-        ['failed protest', { txid: 'IGNORED', err: ackErr }, false, null, { kind: 'protest', txId: '', feesMicroAlgos: 0 }, ackErr, true, false],
+        ['protest', { txid: 'PROTESTTX', fee: 3000 }, false, null, { kind: 'protest', txId: 'PROTESTTX', feesMicroAlgos: 3000, networkFees: 3000 }, undefined, false, false],
+        ['failed protest', { txid: 'IGNORED', err: ackErr }, false, null, { kind: 'protest', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],
     ] as const)('%s finishes the slot with the submit', async (_name, script, matching, group, want, wantErr, watched, confirms) => {
         const f = await fixture()
         const { deps, resolved, confirmed } = depsOf()
@@ -153,7 +154,7 @@ describe('checkTurnReceipt', () => {
             expect(logger.logged.find((l) => l.msg === 'ack-settle submitted')).toEqual({
                 level,
                 msg: 'ack-settle submitted',
-                attrs: { ticket_id: TICKET_ID, txid: 'A', atomic: false, fee_microalgos: fee },
+                attrs: { ticket_id: TICKET_ID, txid: 'A', atomic: false, network_fee: fee },
             })
         }
     })
@@ -201,7 +202,7 @@ describe('checkTurnReceipt', () => {
         const boom = new Error('boom')
         const { submit } = await check(depsOf().deps, f, handleOf({ throws: boom }), { slot })
         await expect(submit!()).rejects.toBe(boom)
-        expect(await slot.done).toEqual({ settlement: { ticketId: TICKET_ID, kind: '', txId: '', feesMicroAlgos: 0 }, err: boom })
+        expect(await slot.done).toEqual({ settlement: { ticketId: TICKET_ID, kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 }, err: boom })
     })
 
     it('settles the charge with the spend guard, or releases it on a violation', async () => {
@@ -414,9 +415,10 @@ describe('usageEvents', () => {
         openFees: 3,
         settleFees: 5,
         algoUsdPrice: 0.25,
+        feeUnit: { currency: 'ALGO', decimals: 6 },
         feeBps: 0,
         haveFee: false,
-        check: { violation: '', settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 }, excluded: false, ...check },
+        check: { violation: '', settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 }, excluded: false, ...check },
     })
     const types = (u: UsageReport) => usageEvents(u).map((e) => (e.type === 'receipt.verified' ? { type: e.type } : e))
 
@@ -434,31 +436,49 @@ describe('usageEvents', () => {
                 algoUsd: 0.25,
                 feeBps: 0,
                 feeBpsKnown: false,
+                openNetworkFees: 3,
+                settleNetworkFees: 5,
+                nativeUsd: 0.25,
+                feeUnit: { currency: 'ALGO', decimals: 6 },
             },
         ])
         expect(usageEvents({ ...u, feeBps: 150, haveFee: true })[0]).toMatchObject({ feeBps: 150, feeBpsKnown: true })
     })
 
+    it('leaves the names that say ALGO at 0 when the fees are another coin', () => {
+        const u = { ...report({}), feeUnit: { currency: 'SOL', decimals: 9 } }
+        expect(usageEvents(u)[0]).toMatchObject({
+            openFeesMicroAlgos: 0,
+            settleFeesMicroAlgos: 0,
+            algoUsd: 0,
+            openNetworkFees: 3,
+            settleNetworkFees: 5,
+            // The reserve's rate is ALGO's.
+            nativeUsd: 0,
+            feeUnit: { currency: 'SOL', decimals: 9 },
+        })
+    })
+
     it.each([
         ['verified, nothing submitted', {}, [{ type: 'receipt.verified' }]],
-        ['verified, the submit failed', { settled: { ticketId: 'T', kind: 'atomic', txId: '', feesMicroAlgos: 0 } }, [{ type: 'receipt.verified' }]],
+        ['verified, the submit failed', { settled: { ticketId: 'T', kind: 'atomic', txId: '', feesMicroAlgos: 0, networkFees: 0 } }, [{ type: 'receipt.verified' }]],
         [
             'verified, settled atomically',
-            { settled: { ticketId: 'T', kind: 'atomic', txId: 'TX', feesMicroAlgos: 0 } },
-            [{ type: 'receipt.verified' }, { type: 'settle.submitted', ticketId: 'T', txId: 'TX', feesMicroAlgos: 0, atomic: true }],
+            { settled: { ticketId: 'T', kind: 'atomic', txId: 'TX', feesMicroAlgos: 0, networkFees: 0 } },
+            [{ type: 'receipt.verified' }, { type: 'settle.submitted', ticketId: 'T', txId: 'TX', feesMicroAlgos: 0, atomic: true, networkFees: 0 }],
         ],
         [
             'verified, a forged group, then a payer ack',
-            { excluded: true, settled: { ticketId: 'T', kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 1000 } },
+            { excluded: true, settled: { ticketId: 'T', kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 1000, networkFees: 1000 } },
             [
                 { type: 'receipt.verified' },
                 { type: 'node.excluded', node: { op: 7, node: 2 }, reason: 'settle_group_rejected' },
-                { type: 'settle.submitted', ticketId: 'T', txId: 'ACK', feesMicroAlgos: 1000, atomic: false },
+                { type: 'settle.submitted', ticketId: 'T', txId: 'ACK', feesMicroAlgos: 1000, atomic: false, networkFees: 1000 },
             ],
         ],
         [
             'body_hash, protested',
-            { violation: 'body_hash', settled: { ticketId: 'T', kind: 'protest', txId: 'PROTEST', feesMicroAlgos: 0 } },
+            { violation: 'body_hash', settled: { ticketId: 'T', kind: 'protest', txId: 'PROTEST', feesMicroAlgos: 0, networkFees: 0 } },
             [{ type: 'receipt.violated', violation: 'body_hash', protestTxId: 'PROTEST' }],
         ],
         ['body_hash, protest not yet run', { violation: 'body_hash' }, [{ type: 'receipt.violated', violation: 'body_hash', protestTxId: '' }]],
@@ -566,7 +586,7 @@ describe('Settles', () => {
         const blocked = new Promise<void>((r) => (release = r))
         settles.afterResponse('T2', async () => {
             await blocked
-            return { settlement: { ticketId: 'T2', kind: '', txId: '', feesMicroAlgos: 0 } }
+            return { settlement: { ticketId: 'T2', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } }
         })
         await expect(settles.wait(AbortSignal.timeout(20))).rejects.toThrow(/; tickets still settling: T2$/)
         release()
@@ -584,7 +604,7 @@ describe('Settles', () => {
                 await blocked
                 throw new Error('boom')
             })
-            return { settlement: { ticketId: 'A', kind: '', txId: '', feesMicroAlgos: 0 } }
+            return { settlement: { ticketId: 'A', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } }
         })
         let waited = false
         const w = settles.wait().then(() => (waited = true))
@@ -623,6 +643,7 @@ describe('bufferedResponder', () => {
         const responseAffinity = new IDAffinity(16, 60_000)
         const deps: ResponderDeps = {
             logger,
+            feeUnit: ALGO_FEES,
             toolAffinity,
             responseAffinity,
             feeRate: () => (o.feeRate === undefined ? 150 : o.feeRate),
@@ -688,6 +709,15 @@ describe('bufferedResponder', () => {
         expect(s.handle.acks[0]![1]).toBe(VALID_GROUP)
     })
 
+    it('reports usage in the unit the deps name', async () => {
+        const s = await setup()
+        const sol = { currency: 'SOL', decimals: 9 }
+        s.deps.feeUnit = sol
+        const { resp, body } = sealedResponse(s, { group: VALID_GROUP })
+        await bufferedResponder(s.deps, s.call)(s.em, resp, body)
+        expect(s.em.replies[0]![3]).toMatchObject({ feeUnit: sol, openFees: 2000 })
+    })
+
     it('hands the caller its response while the settle submit is held', async () => {
         const s = await setup()
         let release!: () => void
@@ -709,7 +739,7 @@ describe('bufferedResponder', () => {
         expect(waited).toBe(false)
         release()
         await w
-        expect((await slot.done).settlement).toEqual({ ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 0 })
+        expect((await slot.done).settlement).toEqual({ ticketId: TICKET_ID, kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 0, networkFees: 0 })
     })
 
     // Go unmarshals a null body as an empty response: no id, and a reply.

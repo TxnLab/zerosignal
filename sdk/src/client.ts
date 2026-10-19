@@ -29,6 +29,7 @@ import {
     isMemoryJournal,
     memoryJournal,
 } from './parts.js'
+import { feeUnitOf } from './network.js'
 import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
 import { guardRecords } from './spend-guard.js'
@@ -278,6 +279,7 @@ export class Client {
                 return dispatch(dispatchDepsOf(this, runSealedTurn), em, turn, sig)
             },
             request,
+            feeUnitOf(p.cfg.network.rail),
             signal,
             p.cfg.logger,
         )
@@ -408,6 +410,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         responseAffinity: p.pick.responseAffinity,
         feeRate,
         afterResponse: (ticketId, submit) => p.settles.afterResponse(ticketId, submit),
+        feeUnit: feeUnitOf(cfg.network.rail),
     }
     const deps: SealedDeps = {
         wallet: p.wallet,

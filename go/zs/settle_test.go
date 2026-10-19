@@ -123,14 +123,14 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 		{"atomic", &scriptedSettleHandle{txid: "GROUPTX"}, true, testSettleGroup,
 			Settlement{Kind: SettleAtomic, TxID: "GROUPTX"}, nil, false},
 		{"payer ack without a group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000}, true, "",
-			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000}, nil, true},
+			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000, NetworkFees: 1000}, nil, true},
 		{"payer ack after a rejected group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000, groupRejected: true}, true, testSettleGroup,
-			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000}, nil, true},
+			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000, NetworkFees: 1000}, nil, true},
 		{"failed ack", &scriptedSettleHandle{txid: "IGNORED", fee: 7, err: ackErr}, true, testSettleGroup,
 			Settlement{Kind: SettleAtomic}, ackErr, true},
 		// The payer signs the protest, so its fee is the payer's.
 		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, "",
-			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000}, nil, false},
+			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000, NetworkFees: 3000}, nil, false},
 		{"failed protest", &scriptedSettleHandle{txid: "IGNORED", err: ackErr}, false, "",
 			Settlement{Kind: SettleProtest}, ackErr, true},
 	}
@@ -171,6 +171,31 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 
 // The streaming responder reports the payer's settle fee in its usage frame;
 // runReceiptChecks is where it comes from.
+// On another rail a submit's fee is reported under NetworkFees alone, never
+// in the field named for µALGO.
+func TestCheckReceipt_FeesInAnotherCoin(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		matching bool
+	}{{"payer ack", true}, {"protest", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSettleFixture(t)
+			c := settleClient()
+			c.deployment = Deployment{Rail: ticket.RailSolana}
+			c.refunds.track(f.tkt.TicketID, time.Now().Add(time.Hour), nil, nil, nil)
+			t.Cleanup(func() { c.refunds.Resolve(f.tkt.TicketID) })
+			submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{txid: "TX", fee: 5000}, tc.matching, "")
+			if submit == nil {
+				t.Fatal("no submit")
+			}
+			r, err := submit()
+			if err != nil || r.NetworkFees != 5000 || r.FeesMicroAlgos != 0 {
+				t.Errorf("submit = %+v, %v; want 5000 under NetworkFees only", r, err)
+			}
+		})
+	}
+}
+
 func TestRunReceiptChecks_ReturnsTheSubmitsFee(t *testing.T) {
 	f := newSettleFixture(t)
 	check := settleClient().runReceiptChecks(withSettleSlot(context.Background(), newSettleSlot()),

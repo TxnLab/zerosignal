@@ -15,6 +15,8 @@ import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import type { SpendGuard } from './config.js'
 import { type Operator, refOf } from './operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from './parts.js'
+import { algoOnly } from './fees.js'
+import type { FeeUnit } from './network.js'
 import type { LogAttrs, Logger } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
@@ -120,6 +122,8 @@ export interface ReceiptCheckDeps {
     resolveRefund?(ticketId: string): void
     /** Watches an atomic settle until it lands, then drops the ticket's journal row. */
     confirmSettled?(ticketId: string, txId: string, handle: OpenHandle): void
+    /** The coin the deployment's network fees are paid in. */
+    feeUnit: FeeUnit
 }
 
 /** One receipt to check, and the turn it belongs to. */
@@ -251,14 +255,14 @@ export async function checkTurnReceipt(
                     ticket_id: ticketId,
                     txid: res.txid,
                     atomic: settledAtomically,
-                    fee_microalgos: res.feeMicroalgos,
+                    network_fee: res.feeMicroalgos,
                 })
                 if (settledAtomically) {
                     // The group deleted the ticket box: nothing left to refund.
                     deps.resolveRefund?.(ticketId)
                     deps.confirmSettled?.(ticketId, res.txid, handle)
                 }
-                return { settlement: { ticketId, kind, txId: res.txid, feesMicroAlgos: res.feeMicroalgos } }
+                return { settlement: settlementOf(deps, ticketId, kind, res.txid, res.feeMicroalgos) }
             }),
             check,
         }
@@ -305,7 +309,7 @@ export async function checkTurnReceipt(
             })
             // A frozen ticket can't be refunded; arbitration resolves it.
             deps.resolveRefund?.(ticketId)
-            return { settlement: { ticketId, kind: 'protest', txId: call.txId, feesMicroAlgos: call.feeMicroalgos } }
+            return { settlement: settlementOf(deps, ticketId, 'protest', call.txId, call.feeMicroalgos) }
         }),
         check,
     }
@@ -326,7 +330,12 @@ export function protestReasonFor(v: ReceiptViolation | ''): ProtestReasonCode {
 }
 
 function emptySettlement(ticketId: string): Settlement {
-    return { ticketId, kind: '', txId: '', feesMicroAlgos: 0 }
+    return { ticketId, kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 }
+}
+
+// A submit's Settlement, its fee under both names: Go's Client.settlement.
+function settlementOf(deps: ReceiptCheckDeps, ticketId: string, kind: SettleKind, txId: string, fee: number): Settlement {
+    return { ticketId, kind, txId, feesMicroAlgos: algoOnly(deps.feeUnit, fee), networkFees: fee }
 }
 
 // journal runs the hook, bounded, and never rejects, so a journal failure

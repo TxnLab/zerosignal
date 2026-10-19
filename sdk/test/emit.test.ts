@@ -16,6 +16,7 @@ import { StreamDecoder } from '../src/decode.js'
 import { type Delivery, StreamEmitter } from '../src/emit.js'
 import { NodeReply, ProviderError, ZsError } from '../src/errors.js'
 import type { Event } from '../src/events.js'
+import { type FeeUnit, feeUnitOf } from '../src/network.js'
 import type { Reserved } from '../src/parts.js'
 import { type SettleResult, SettleSlot } from '../src/receipt-check.js'
 import type { UsageReport } from '../src/responder.js'
@@ -23,7 +24,7 @@ import { MAX_NODE_RETRY_HINT_MS } from '../src/routing/verdict.js'
 import { type StreamFrame, emptyFrame, frameSSE } from '../src/stream.js'
 import { type Emitter, type Request, type TurnRunner, TurnStream } from '../src/turn.js'
 import { testOperator } from './fixtures.js'
-import { recLogger } from './turn-fixtures.js'
+import { ALGO_FEES, recLogger } from './turn-fixtures.js'
 
 const enc = new TextEncoder()
 const frameOf = (data: string, sealed = true, over: Partial<StreamFrame> = {}): StreamFrame => ({
@@ -41,7 +42,7 @@ const sentinelFrame = frameOf('[DONE]', false)
 const CHAT = '/v1/chat/completions'
 
 /** An emitter recording what it delivers; keepReading false makes the caller leave at once. */
-function recording(o: { dec?: boolean; caller?: AbortSignal } = {}) {
+function recording(o: { dec?: boolean; caller?: AbortSignal; feeUnit?: FeeUnit } = {}) {
     const events: Event[] = []
     const errors: ZsError[] = []
     let cancels = 0
@@ -55,6 +56,7 @@ function recording(o: { dec?: boolean; caller?: AbortSignal } = {}) {
         },
         o.caller,
         o.dec === false ? null : new StreamDecoder(CHAT),
+        o.feeUnit ?? ALGO_FEES,
     )
     return {
         em,
@@ -79,9 +81,10 @@ const usageOf = (): UsageReport =>
         openFees: 0,
         settleFees: 0,
         algoUsdPrice: 0,
+        feeUnit: { currency: 'ALGO', decimals: 6 },
         feeBps: 0,
         haveFee: false,
-        check: { violation: '', excluded: false, settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 } },
+        check: { violation: '', excluded: false, settled: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } },
     }) as unknown as UsageReport
 
 // Runs frames through a chat emitter, then ends the stream as the Stream does
@@ -181,9 +184,15 @@ describe('StreamEmitter', () => {
         expect(r.events).toEqual([
             { type: 'max_output.clamped', ceiling: 512 },
             { type: 'reserve.succeeded', ticketId: 'tid', target: { op: 3, node: 4 }, maxPrice: 9, expiresAt: new Date(2_000_000_000_000) },
-            { type: 'payment.committed', ticketId: 'tid', openTxId: 'OPEN', feesMicroAlgos: 2000 },
+            { type: 'payment.committed', ticketId: 'tid', openTxId: 'OPEN', feesMicroAlgos: 2000, networkFees: 2000 },
             { type: 'max_output.clamped', ceiling: 1 },
         ])
+    })
+
+    it('reports an open paid in another coin under networkFees alone', () => {
+        const r = recording({ feeUnit: feeUnitOf('solana') })
+        r.em.committed('tid', 'OPEN', 5000)
+        expect(r.events).toEqual([{ type: 'payment.committed', ticketId: 'tid', openTxId: 'OPEN', feesMicroAlgos: 0, networkFees: 5000 }])
     })
 
     // The turn's one ending is decided from the node's sealed frames once the
@@ -286,6 +295,7 @@ describe('StreamEmitter', () => {
             () => {},
             undefined,
             new StreamDecoder(CHAT),
+            ALGO_FEES,
         )
         em.reply(200, new Headers(), enc.encode('{"choices":[{"index":0,"message":{"content":"hi"},"finish_reason":"stop"}]}'), usageOf())
         expect(events.map((e) => e.type)).toEqual(['response.started'])
@@ -308,6 +318,7 @@ describe('StreamEmitter', () => {
             () => {},
             undefined,
             new StreamDecoder(CHAT),
+            ALGO_FEES,
         )
         em.reply(503, new Headers(), enc.encode(body), usage ? usageOf() : null)
         expect(events.at(-1)!.type).toBe(leaveOn)
@@ -455,7 +466,7 @@ function streamOf(run: (em: Emitter, slot: SettleSlot, signal: AbortSignal) => P
         signals.push(s)
         return run(em, slot, s)
     }
-    const st = new TurnStream(runner, req, signal)
+    const st = new TurnStream(runner, req, ALGO_FEES, signal)
     return {
         st,
         signals,
@@ -485,8 +496,8 @@ describe('SettleSlot', () => {
     // Only the first outcome counts, for result and done alike.
     it('keeps the first finish', async () => {
         const slot = new SettleSlot()
-        const a: SettleResult = { settlement: { ticketId: 'A', kind: 'atomic', txId: 'TA', feesMicroAlgos: 0 } }
-        const b: SettleResult = { settlement: { ticketId: 'B', kind: 'payer_ack', txId: 'TB', feesMicroAlgos: 0 } }
+        const a: SettleResult = { settlement: { ticketId: 'A', kind: 'atomic', txId: 'TA', feesMicroAlgos: 0, networkFees: 0 } }
+        const b: SettleResult = { settlement: { ticketId: 'B', kind: 'payer_ack', txId: 'TB', feesMicroAlgos: 0, networkFees: 0 } }
         expect(slot.result).toBeUndefined()
         slot.finish(a)
         slot.finish(b)
@@ -574,7 +585,7 @@ describe('Stream', () => {
         const out = await read(s.st.events())
         expect(out.err).toBe(boom)
         // The slot still finishes, so wait doesn't hang.
-        expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 } })
+        expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } })
     })
 
     // A loop that stops reading early is a caller who left: the turn is
@@ -637,6 +648,7 @@ describe('Stream', () => {
                 throw new Error('late boom')
             },
             REQ,
+            ALGO_FEES,
             undefined,
             logger,
         )
@@ -739,7 +751,7 @@ describe('Stream', () => {
     })
 
     describe('wait', () => {
-        const settled: SettleResult = { settlement: { ticketId: 'T', kind: 'atomic', txId: 'TX', feesMicroAlgos: 0 } }
+        const settled: SettleResult = { settlement: { ticketId: 'T', kind: 'atomic', txId: 'TX', feesMicroAlgos: 0, networkFees: 0 } }
 
         it('refuses before the events are read', async () => {
             const s = streamOf(finishedRun)
@@ -797,7 +809,7 @@ describe('Stream', () => {
                 em.fail(newError('no_operator', 'x'))
             })
             await read(s.st.events())
-            expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 } })
+            expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } })
         })
 
         it('lets go of the signal once it resolves', async () => {
@@ -835,7 +847,7 @@ describe('Stream', () => {
                     for await (const _ of s.st.events()) throw new Error('caller bug')
                 })(),
             ).rejects.toThrow('caller bug')
-            expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0 } })
+            expect(await s.st.wait()).toEqual({ settlement: { ticketId: '', kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 } })
         })
 
         it('waits on a submit the turn built', async () => {

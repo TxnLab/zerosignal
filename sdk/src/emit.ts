@@ -10,6 +10,8 @@ import { markRetryable, newError } from './codes.js'
 import type { StreamDecoder } from './decode.js'
 import { NodeReply, ZsError } from './errors.js'
 import type { Event } from './events.js'
+import { algoOnly } from './fees.js'
+import type { FeeUnit } from './network.js'
 import type { Operator } from './operator.js'
 import { refOf } from './operator.js'
 import type { Reserved } from './parts.js'
@@ -38,6 +40,8 @@ export class StreamEmitter implements Emitter {
     readonly #caller: AbortSignal | undefined
     // Decodes sealed frames into content events; null for framesOnly.
     readonly #dec: StreamDecoder | null
+    // The coin the deployment's network fees are paid in.
+    readonly #unit: FeeUnit
 
     #stopped = false
     // Set once the turn's one ending, done or an error, is decided; nothing
@@ -47,11 +51,18 @@ export class StreamEmitter implements Emitter {
     #paid = false
     #err: ZsError | undefined
 
-    constructor(deliver: (d: Delivery) => void, cancel: () => void, caller: AbortSignal | undefined, dec: StreamDecoder | null) {
+    constructor(
+        deliver: (d: Delivery) => void,
+        cancel: () => void,
+        caller: AbortSignal | undefined,
+        dec: StreamDecoder | null,
+        unit: FeeUnit,
+    ) {
         this.#deliver = deliver
         this.#cancel = cancel
         this.#caller = caller
         this.#dec = dec
+        this.#unit = unit
     }
 
     /** Whether the caller left or the turn's error was delivered. */
@@ -124,9 +135,15 @@ export class StreamEmitter implements Emitter {
         })
     }
 
-    committed(ticketId: string, openTxId: string, feesMicroAlgos: number): void {
+    committed(ticketId: string, openTxId: string, networkFees: number): void {
         this.#paid = true
-        this.#emit({ type: 'payment.committed', ticketId, openTxId, feesMicroAlgos })
+        this.#emit({
+            type: 'payment.committed',
+            ticketId,
+            openTxId,
+            feesMicroAlgos: algoOnly(this.#unit, networkFees),
+            networkFees,
+        })
     }
 
     fail(err: ZsError): void {

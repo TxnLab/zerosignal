@@ -57,7 +57,8 @@
     "payment.committed": [
       "ticketId",
       "openTxId",
-      "feesMicroAlgos"
+      "feesMicroAlgos",
+      "networkFees"
     ],
     "receipt.verified": [
       "receipt",
@@ -68,7 +69,11 @@
       "settleFeesMicroAlgos",
       "algoUsd",
       "feeBps",
-      "feeBpsKnown"
+      "feeBpsKnown",
+      "openNetworkFees",
+      "settleNetworkFees",
+      "nativeUsd",
+      "feeUnit"
     ],
     "receipt.violated": [
       "violation",
@@ -111,7 +116,8 @@
       "ticketId",
       "txId",
       "feesMicroAlgos",
-      "atomic"
+      "atomic",
+      "networkFees"
     ],
     "tool.status": [
       "itemId",
@@ -138,6 +144,10 @@
       "paid",
       "ticket",
       "err"
+    ],
+    "FeeUnit": [
+      "currency",
+      "decimals"
     ],
     "Item": [
       "id",
@@ -168,7 +178,8 @@
       "ticketId",
       "kind",
       "txId",
-      "feesMicroAlgos"
+      "feesMicroAlgos",
+      "networkFees"
     ],
     "Ticket": [
       "id",

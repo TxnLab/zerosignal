@@ -56,6 +56,10 @@ const receipt = (): ReceiptVerified =>
         algoUsd: 0,
         feeBps: 0,
         feeBpsKnown: false,
+        openNetworkFees: 0,
+        settleNetworkFees: 0,
+        nativeUsd: 0,
+        feeUnit: { currency: 'ALGO', decimals: 6 },
     }) as unknown as ReceiptVerified
 
 const opts = (o: Partial<ServeOptions> = {}): ServeOptions => ({ legacy: false, usageFrame: false, fundingHint: 'Or use the web app.', ...o })

@@ -51,7 +51,9 @@ interface UsageCase {
     owner_addr: string
     open_fees: number
     settle_fees: number
-    algo_usd: number
+    native_usd: number
+    fee_currency: string
+    fee_decimals: number
     fee_bps: number
     fee_bps_known: boolean
     headers: Record<string, string>
@@ -84,9 +86,10 @@ function receiptOf(c: UsageCase): ReceiptVerified {
         ticket: { max_price: c.max_price, min_price: c.min_price },
         target: { op: c.op, node: c.node },
         ownerAddr: c.owner_addr,
-        openFeesMicroAlgos: c.open_fees,
-        settleFeesMicroAlgos: c.settle_fees,
-        algoUsd: c.algo_usd,
+        openNetworkFees: c.open_fees,
+        settleNetworkFees: c.settle_fees,
+        nativeUsd: c.native_usd,
+        feeUnit: { currency: c.fee_currency, decimals: c.fee_decimals },
         feeBps: c.fee_bps,
         feeBpsKnown: c.fee_bps_known,
     } as unknown as ReceiptVerified

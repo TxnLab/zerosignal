@@ -20,6 +20,7 @@ import {
     type Endpoint,
     type Event,
     type EventType,
+    type FeeUnit,
     type Item,
     type Kind,
     type NodeRef,
@@ -75,7 +76,7 @@ const eventFields = {
     'reserve.started': ['target', 'relay', 'attempt'],
     'reserve.retrying': ['target', 'status', 'code', 'attribution', 'wait', 'attempt'],
     'reserve.succeeded': ['ticketId', 'target', 'maxPrice', 'expiresAt'],
-    'payment.committed': ['ticketId', 'openTxId', 'feesMicroAlgos'],
+    'payment.committed': ['ticketId', 'openTxId', 'feesMicroAlgos', 'networkFees'],
     'max_output.clamped': ['ceiling'],
     'response.started': ['status', 'header', 'streaming'],
     frame: ['event', 'id', 'data', 'comment', 'retry', 'sealed'],
@@ -99,9 +100,13 @@ const eventFields = {
         'algoUsd',
         'feeBps',
         'feeBpsKnown',
+        'openNetworkFees',
+        'settleNetworkFees',
+        'nativeUsd',
+        'feeUnit',
     ],
     'receipt.violated': ['violation', 'protestTxId'],
-    'settle.submitted': ['ticketId', 'txId', 'feesMicroAlgos', 'atomic'],
+    'settle.submitted': ['ticketId', 'txId', 'feesMicroAlgos', 'atomic', 'networkFees'],
     'node.excluded': ['node', 'reason'],
     done: ['finishReason', 'incompleteReason', 'empty'],
 } as const satisfies { [K in EventType]: readonly FieldsOf<EventOf<K>>[] }
@@ -127,7 +132,8 @@ const errorFields = [
 const nodeRefFields = ['op', 'node'] as const satisfies readonly (keyof NodeRef)[]
 const itemFields = ['id', 'type', 'raw'] as const satisfies readonly (keyof Item)[]
 const ticketFields = ['id', 'signed', 'target'] as const satisfies readonly (keyof Ticket)[]
-const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos'] as const satisfies readonly (keyof Settlement)[]
+const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos', 'networkFees'] as const satisfies readonly (keyof Settlement)[]
+const feeUnitFields = ['currency', 'decimals'] as const satisfies readonly (keyof FeeUnit)[]
 const providerErrorFields = ['code', 'message', 'status'] as const satisfies readonly (keyof ProviderError)[]
 // What ProviderError adds to Error, plus the message Go declares as a field.
 type ProviderErrorOwn = Exclude<keyof ProviderError, keyof Error> | 'message'
@@ -165,7 +171,8 @@ const recordsComplete: [
     Covers<ProviderErrorOwn, typeof providerErrorFields>,
     Covers<keyof TicketRecord, typeof ticketRecordFields>,
     Covers<keyof SettleArgs, typeof settleArgsFields>,
-] = [true, true, true, true, true, true, true, true]
+    Covers<keyof FeeUnit, typeof feeUnitFields>,
+] = [true, true, true, true, true, true, true, true, true]
 
 const privacies = ['relay_required', 'direct'] as const satisfies readonly Privacy[]
 const affinityPolicies = ['prefer', 'strict', 'none'] as const satisfies readonly AffinityPolicy[]
@@ -214,6 +221,7 @@ describe('vocabulary shared with the Go SDK', () => {
         expect(providerErrorFields).toEqual(vocab.records.ProviderError)
         expect(ticketRecordFields).toEqual(vocab.records.TicketRecord)
         expect(settleArgsFields).toEqual(vocab.records.SettleArgs)
+        expect(feeUnitFields).toEqual(vocab.records.FeeUnit)
     })
 
     it('spells every enum as Go does', () => {

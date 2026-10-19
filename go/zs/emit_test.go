@@ -109,6 +109,48 @@ func TestStreamEmitter_FailAfterCommitIsPaid(t *testing.T) {
 	}
 }
 
+// The fields named for µALGO hold the fees only when they are in ALGO; on
+// another rail the fees ride the network-fee fields alone.
+func TestFeeFields_NamedForALGOOnlyOnAlgorand(t *testing.T) {
+	for _, c := range []struct {
+		rail ticket.Rail
+		algo bool
+	}{{ticket.RailAlgorand, true}, {ticket.RailSolana, false}} {
+		unit := FeeUnitOf(c.rail)
+		algoOr0 := func(v uint64) uint64 {
+			if c.algo {
+				return v
+			}
+			return 0
+		}
+		var got []Event
+		em := &streamEmitter{yield: func(ev Event, _ error) bool { got = append(got, ev); return true }, cancel: func() {}, unit: unit}
+		em.committed("tid", "txid", 1000)
+		if pc := got[0].(PaymentCommitted); pc.NetworkFees != 1000 || pc.FeesMicroAlgos != algoOr0(1000) {
+			t.Errorf("%s: committed %+v", unit.Currency, pc)
+		}
+
+		settled := (&Client{deployment: Deployment{Rail: c.rail}}).settlement(SettleAtomic, "TX", 7)
+		if settled.NetworkFees != 7 || settled.FeesMicroAlgos != algoOr0(7) {
+			t.Errorf("%s: settlement %+v", unit.Currency, settled)
+		}
+		u := &usageReport{receipt: &ticket.UsageReceipt{}, ticket: &ticket.Ticket{TicketID: "tid"},
+			openFees: 3, settleFees: 5, algoUSDPrice: 0.25, unit: unit, check: receiptCheck{settled: settled}}
+		evs := u.events()
+		rv, ss := evs[0].(ReceiptVerified), evs[1].(SettleSubmitted)
+		// The reserve's rate is ALGO's, so it prices no other coin.
+		if rv.OpenNetworkFees != 3 || rv.SettleNetworkFees != 5 || (rv.NativeUSD == 0.25) != c.algo || rv.FeeUnit != unit {
+			t.Errorf("%s: verified network fees %+v", unit.Currency, rv)
+		}
+		if rv.OpenFeesMicroAlgos != algoOr0(3) || rv.SettleFeesMicroAlgos != algoOr0(5) || (rv.AlgoUSD == 0.25) != c.algo {
+			t.Errorf("%s: verified µALGO fields %d/%d at %v", unit.Currency, rv.OpenFeesMicroAlgos, rv.SettleFeesMicroAlgos, rv.AlgoUSD)
+		}
+		if ss.NetworkFees != 7 || ss.FeesMicroAlgos != algoOr0(7) {
+			t.Errorf("%s: settle submitted %+v", unit.Currency, ss)
+		}
+	}
+}
+
 // A node that reports a failure and then goes silent is cut by the idle
 // bound, but the turn ends in the node's failure, not in the cut.
 func TestStreamEmitter_TheNodesFailureBeatsTheCause(t *testing.T) {
@@ -657,6 +699,7 @@ func TestUsageReport_Event(t *testing.T) {
 		openFees:     3,
 		settleFees:   5,
 		algoUSDPrice: 0.25,
+		unit:         FeeUnitOf(ticket.RailAlgorand),
 	}
 	ev := u.verified()
 	if ev.FeeBpsKnown || ev.FeeBps != 0 {

@@ -93,9 +93,14 @@ type ReserveSucceeded struct {
 // may still be pending. Nothing is resent after it: a later failure ends in
 // settle, protest or refund.
 type PaymentCommitted struct {
-	TicketID       string
-	OpenTxID       string
+	TicketID string
+	OpenTxID string
+	// Deprecated: FeesMicroAlgos is NetworkFees on Algorand and 0 on any
+	// other rail; read NetworkFees.
 	FeesMicroAlgos uint64
+	// NetworkFees is the payer's network fee for the open, in base units of
+	// the deployment's FeeUnit.
+	NetworkFees uint64
 }
 
 // MaxOutputClamped fires before any reserve when the request asked for more
@@ -224,7 +229,7 @@ type Usage struct {
 
 // ReceiptVerified fires once, before done, when the node's signed receipt
 // checks out against the ticket and the content delivered. The fee fields are
-// the payer's own: what it paid in ALGO network fees for the open and, on a
+// the payer's own: what it paid in network fees for the open and, on a
 // stream, the settle, which a non-streaming reply reports as 0 because the
 // settle is submitted after the reply.
 type ReceiptVerified struct {
@@ -234,16 +239,27 @@ type ReceiptVerified struct {
 	Ticket ticket.Ticket
 	Target NodeRef
 	// OwnerAddr is the operator's owner account.
-	OwnerAddr            string
-	OpenFeesMicroAlgos   uint64
+	OwnerAddr string
+	// Deprecated: OpenFeesMicroAlgos is OpenNetworkFees on Algorand and 0 on
+	// any other rail.
+	OpenFeesMicroAlgos uint64
+	// Deprecated: SettleFeesMicroAlgos is SettleNetworkFees on Algorand and 0
+	// on any other rail.
 	SettleFeesMicroAlgos uint64
-	// AlgoUSD is the ALGO/USD rate the reserve priced at; 0 when unknown.
+	// Deprecated: AlgoUSD is NativeUSD on Algorand and 0 on any other rail.
 	AlgoUSD float64
 	// FeeBps is the protocol fee rate on top of the operator's charge, valid
 	// only when FeeBpsKnown: the rate is read from chain in the background and
 	// is unknown until that read first succeeds.
 	FeeBps      uint64
 	FeeBpsKnown bool
+	// OpenNetworkFees and SettleNetworkFees are in base units of FeeUnit.
+	OpenNetworkFees   uint64
+	SettleNetworkFees uint64
+	// NativeUSD is the USD price of one FeeUnit coin the reserve priced at; 0
+	// when unknown.
+	NativeUSD float64
+	FeeUnit   FeeUnit
 }
 
 // ReceiptViolated replaces ReceiptVerified when a check fails, and nothing
@@ -264,10 +280,15 @@ type ReceiptViolated struct {
 // those. Atomic is false when the SDK fell back to a standalone payer ack.
 // The SDK does not wait for confirmation.
 type SettleSubmitted struct {
-	TicketID       string
-	TxID           string
+	TicketID string
+	TxID     string
+	// Deprecated: FeesMicroAlgos is NetworkFees on Algorand and 0 on any
+	// other rail.
 	FeesMicroAlgos uint64
 	Atomic         bool
+	// NetworkFees is the payer's fee for the settle, in base units of the
+	// deployment's FeeUnit.
+	NetworkFees uint64
 }
 
 // NodeExcluded fires on a stream, before SettleSubmitted, when the node's
