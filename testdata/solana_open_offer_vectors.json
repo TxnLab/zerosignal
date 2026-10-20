@@ -830,6 +830,60 @@
       "verdict": "instructions.shape"
     },
     {
+      "name": "token_no_data",
+      "about": "a token instruction with no data before the transfer",
+      "source": "built",
+      "message_base64": "AgEIDgvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHsVbTULt7ylM3GOIdpXMQna5JzR/Whb/h3kfwayWvncHxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGp9UXGHvRZjXa1ARV/cLAwSTGjyFWdaXbustfCAAAAAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpG8zgR8QzDhcOZMNHGBl41zxQeQ8Jo55OZlHNMgBcNEgqZVRk8oNu+xxzQJOBvewynKdvunLe9RJYeaWCqlhhHk7TL2O/NfDu78sl8oouH73Ic64oNWcbDJRg9fEuRVaoVhWLndTrHO9j9AGEKhlCdYJu79imJZQC1LeD0MyvYK1CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQgUHAAUCYOoAAAcACQPoAwAAAAAAAAkAAAkEAgwEAQoMkNADAAAAAAAGCgcACw0FAwgGTOTcm0fHvTwtAQEBAQEBAQEBAQEBAQEBAdBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3kNADAAAAAACsPLFqAAAAAAAAAAA=",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "01010101010101010101010101010101",
+        "max_price": "250000",
+        "expires_at": "1790000300"
+      },
+      "verdict": "token.instruction"
+    },
+    {
+      "name": "open_short",
+      "about": "open without its last account",
+      "source": "built",
+      "message_base64": "AgEHDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHsVbTULt7ylM3GOIdpXMQna5JzR/Whb/h3kfwayWvncHxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQMGRm/lIRcy/+ytunLDm+e8jOW7xfcSayxDmzpAAAAABqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqFYVi53U6xzvY/QBhCoZQnWCbu/YpiWUAtS3g9DMr2CtQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIEBgAFAmDqAAAGAAkD6AMAAAAAAAAIBAILBAEKDJDQAwAAAAAABgkGAAoMBQMHTOTcm0fHvTwtAQEBAQEBAQEBAQEBAQEBAdBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3kNADAAAAAACsPLFqAAAAAAAAAAA=",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "01010101010101010101010101010101",
+        "max_price": "250000",
+        "expires_at": "1790000300"
+      },
+      "verdict": "open.accounts"
+    },
+    {
+      "name": "open_discriminator_only",
+      "about": "open's discriminator with no arguments",
+      "source": "built",
+      "message_base64": "AgEIDgvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHsVbTULt7ylM3GOIdpXMQna5JzR/Whb/h3kfwayWvncHxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGp9UXGHvRZjXa1ARV/cLAwSTGjyFWdaXbustfCAAAAAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpG8zgR8QzDhcOZMNHGBl41zxQeQ8Jo55OZlHNMgBcNEgqZVRk8oNu+xxzQJOBvewynKdvunLe9RJYeaWCqlhhHk7TL2O/NfDu78sl8oouH73Ic64oNWcbDJRg9fEuRVaoVhWLndTrHO9j9AGEKhlCdYJu79imJZQC1LeD0MyvYK1CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQgQHAAUCYOoAAAcACQPoAwAAAAAAAAkEAgwEAQoMkNADAAAAAAAGCgcACw0FAwgGCOTcm0fHvTwt",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "01010101010101010101010101010101",
+        "max_price": "250000",
+        "expires_at": "1790000300"
+      },
+      "verdict": "open.data"
+    },
+    {
       "name": "claim_beside",
       "about": "a claim of the payer's ticket after open",
       "source": "built",
@@ -1161,6 +1215,84 @@
         }
       },
       "verdict": "fold.accounts"
+    },
+    {
+      "name": "fold_short",
+      "about": "the folded settle without its last account",
+      "source": "built",
+      "message_base64": "AgEJEAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHh/RcEdCuXiZ6z9azFScK3rwNRobebYW98PJOq32MoSHKc50GizyqLDaYEH4vyt9tpQCuoiPFUaOZBMCFZIAITDGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9gret6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIFCAAFAsDUAQAIAAkD6AMAAAAAAAALDgAMBgUDAAINCQoLCwsPUNM7EabbHdmNkF8BAAAAAADqx6hwX5CqpwnJxtEzz/INSKFGsdLU0dJBDmiV66Xa3aQBAAC4CwAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAP7+CgQCDQUBCgyQ0AMAAAAAAAYLBwAMDgYECQdM5NybR8e9PC1gYGBgYGBgYGBgYGBgYGBg0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzeQ0AMAAAAAAPbis2oAAAAAAAAAAA==",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "60606060606060606060606060606060",
+        "max_price": "250000",
+        "expires_at": "1790173942",
+        "fold": {
+          "operator_id": "1",
+          "node_id": "1",
+          "ticket_id": "70707070707070707070707070707070",
+          "receipt": {
+            "ticket_id": "cHBwcHBwcHBwcHBwcHBwcA==",
+            "actual_input_count": 1200,
+            "actual_output_count": 600,
+            "amount_charged": 90000,
+            "ttft_ms": 420,
+            "decode_ms": 3000,
+            "body_hash": "abababababababababababababababababababababababababababababababab",
+            "input_usage_type": 1,
+            "output_usage_type": 1,
+            "aux_output_usage_type": 0,
+            "aux_output_count": 0,
+            "cached_input_count": 0,
+            "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+            "sig": ""
+          }
+        }
+      },
+      "verdict": "fold.accounts"
+    },
+    {
+      "name": "fold_discriminator_only",
+      "about": "settle_cooperative's discriminator with no claim",
+      "source": "built",
+      "message_base64": "AgEJEAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHh/RcEdCuXiZ6z9azFScK3rwNRobebYW98PJOq32MoSHKc50GizyqLDaYEH4vyt9tpQCuoiPFUaOZBMCFZIAITDGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9gret6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIFCAAFAsDUAQAIAAkD6AMAAAAAAAALDwAMBgUDAAINCQoLCwsPCwjTOxGm2x3ZjQoEAg0FAQoMkNADAAAAAAAGCwcADA4GBAkHTOTcm0fHvTwtYGBgYGBgYGBgYGBgYGBgYNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3kNADAAAAAAD24rNqAAAAAAAAAAA=",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "60606060606060606060606060606060",
+        "max_price": "250000",
+        "expires_at": "1790173942",
+        "fold": {
+          "operator_id": "1",
+          "node_id": "1",
+          "ticket_id": "70707070707070707070707070707070",
+          "receipt": {
+            "ticket_id": "cHBwcHBwcHBwcHBwcHBwcA==",
+            "actual_input_count": 1200,
+            "actual_output_count": 600,
+            "amount_charged": 90000,
+            "ttft_ms": 420,
+            "decode_ms": 3000,
+            "body_hash": "abababababababababababababababababababababababababababababababab",
+            "input_usage_type": 1,
+            "output_usage_type": 1,
+            "aux_output_usage_type": 0,
+            "aux_output_count": 0,
+            "cached_input_count": 0,
+            "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+            "sig": ""
+          }
+        }
+      },
+      "verdict": "fold.data"
     },
     {
       "name": "fold_receipt_at_u32_max",

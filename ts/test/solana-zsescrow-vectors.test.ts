@@ -17,7 +17,7 @@ import { base64, hex } from '@scure/base'
 import { describe, expect, it } from 'vitest'
 
 import type { Instruction } from '../src/solana/index.js'
-import { SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58 } from '../src/solana/index.js'
+import { SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, transferChecked } from '../src/solana/index.js'
 import {
     type ClaimFields,
     type Ending,
@@ -542,6 +542,14 @@ describe('solana_open_offer_vectors.json', () => {
         // Ahead of every refusal, so a caller's bad spec never reads as the node's bad offer.
         expect(() => verifyOpenOffer(d, new Uint8Array(), { ...spec, ticketId: spec.ticketId.subarray(1) })).toThrow(RangeError)
         expect(() => verifyOpenOffer(d, message, { ...spec, fold: { ...spec.fold!, ticketId: spec.fold!.ticketId.subarray(1) } })).toThrow(RangeError)
+    })
+    it('transferChecked refuses an amount or decimals its data cannot carry', () => {
+        const k = d.mint
+        expect(() => transferChecked(k, k, k, k, (1n << 64n) - 1n, 255)).not.toThrow()
+        expect(() => transferChecked(k, k, k, k, 1n << 64n, 6)).toThrow(RangeError)
+        expect(() => transferChecked(k, k, k, k, -1n, 6)).toThrow(RangeError)
+        expect(() => transferChecked(k, k, k, k, 1n, 256)).toThrow(RangeError)
+        expect(() => transferChecked(k, k, k, k, 1n, -1)).toThrow(RangeError)
     })
     it("matches the program's own fixture messages", () => {
         const tx = new Map((load('testdata/solana_tx_vectors.json').transactions as Json[]).map((t) => [t.name, t.message_base64]))

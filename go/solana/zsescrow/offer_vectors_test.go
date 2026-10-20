@@ -349,6 +349,14 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	built("transfer_twice", "two copies of the transfer before open", "instructions.shape", compile(node, cbLimit, cbPrice, transfer, transfer, openIx), spec)
 	built("transfer_after_open", "the transfer after open", "instructions.shape", compile(node, cbLimit, cbPrice, openIx, transfer), spec)
 	built("open_twice", "open, then open again", "instructions.shape", compile(node, cbLimit, cbPrice, transfer, openIx, openIx), spec)
+	built("token_no_data", "a token instruction with no data before the transfer", "token.instruction",
+		compile(node, cbLimit, cbPrice, solana.Instruction{ProgramID: solana.TokenProgramID}, transfer, openIx), spec)
+	shortOpen := openIx
+	shortOpen.Accounts = openIx.Accounts[:len(openIx.Accounts)-1]
+	built("open_short", "open without its last account", "open.accounts", compile(node, cbLimit, cbPrice, transfer, shortOpen), spec)
+	bareOpen := openIx
+	bareOpen.Data = openIx.Data[:8]
+	built("open_discriminator_only", "open's discriminator with no arguments", "open.data", compile(node, cbLimit, cbPrice, transfer, bareOpen), spec)
 	built("claim_beside", "a claim of the payer's ticket after open", "escrow.instruction",
 		compile(node, cbLimit, cbPrice, transfer, openIx, d.Claim(node, spec.OperatorID, spec.NodeID, spec.TicketID, zsescrow.ClaimFields{Amount: 1})), spec)
 
@@ -395,6 +403,13 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	short.Accounts = settle.Accounts[:5]
 	built("fold_five_accounts", "the folded settle cut off before its rent payer", "fold.accounts",
 		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], short, foldIxs[3], foldIxs[4]), foldSpec)
+	short.Accounts = settle.Accounts[:len(settle.Accounts)-1]
+	built("fold_short", "the folded settle without its last account", "fold.accounts",
+		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], short, foldIxs[3], foldIxs[4]), foldSpec)
+	bareSettle := settle
+	bareSettle.Data = settle.Data[:8]
+	built("fold_discriminator_only", "settle_cooperative's discriminator with no claim", "fold.data",
+		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], bareSettle, foldIxs[3], foldIxs[4]), foldSpec)
 	full := *foldSpec.Fold.Receipt
 	full.TtftMs, full.DecodeMs, full.AuxOutputCount = math.MaxUint32, math.MaxUint32, math.MaxUint32
 	fullClaim, err := zsescrow.ClaimFromReceipt(&full)
