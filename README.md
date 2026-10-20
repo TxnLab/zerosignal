@@ -95,6 +95,7 @@ The canonical implementation; it generates every golden vector.
 | `settle` | The settlement rules every payment rail shares: the ticket view, `Classify` (what call a live ticket allows now), and the protocol fee math (`NetFee`, `ComputeFeeBreakdown`). |
 | `escrow` | `ZeroSignalEscrow` ABI client (embedded ARC-56 JSON). `ComposeOpen` / `ComposeSettle` / `ComposeProtest`, `VerifyOpenAppCall` / `VerifyOpenGroup`, box decoders, operator-registry helpers. |
 | `solana` | The Solana rail's wire layer: keys and base58, program derived addresses, and the transaction message codec (legacy, and v0 without lookup tables), checked against the transactions the `zs_escrow` program's own tests build. Hand-rolled rather than `solana-go`, whose dependencies every consumer would build. `solana/idl` holds the program's IDL. |
+| `solana/zsescrow` | The `zs_escrow` program: its addresses, a builder per instruction (each deriving the program addresses from operator and node ids), and its account and event decoders. |
 | `algod` | Thin `Client` interface over the algod SDK, plus per-network presets (escrow app id, endpoints). |
 | `algo` | Adapts a keystore entry into a `TransactionSigner` for `AtomicTransactionComposer` groups. |
 | `keystore` | Signing-mnemonic loader: `<NAME>_MNEMONIC` env vars + `ZS_MNEMONIC_URLS` cloud-secret URLs (AWS/GCP/Azure). See [`go/keystore/README.md`](./go/keystore/README.md). |
