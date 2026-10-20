@@ -67,7 +67,8 @@ func TestClassify(t *testing.T) {
 		// Past D with an operator claim → settleLapsed only.
 		{"operator claim past deadline", StatusPendingSettle, PendingByOperator, after, VerdictLapse},
 
-		// Frozen outranks the clock — no method accepts it at any time.
+		// Frozen outranks the clock — no call open to either party accepts
+		// it at any time, and the admin's resolveFrozen has no deadline.
 		{"frozen before deadline", StatusFrozen, PendingNone, before, VerdictArbitrate},
 		{"frozen past deadline", StatusFrozen, PendingNone, after, VerdictArbitrate},
 		{"frozen with operator claim", StatusFrozen, PendingByOperator, after, VerdictArbitrate},

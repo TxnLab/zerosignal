@@ -4,6 +4,9 @@
   "constants": {
     "BASE_URL_MAX": "248",
     "BPS_DENOMINATOR": "10000",
+    "FREEZE_ORIGIN_NONE": "0",
+    "FREEZE_ORIGIN_PROTEST": "2",
+    "FREEZE_ORIGIN_SETTLE_MISMATCH": "1",
     "NODE_STATUS_ACTIVE": "1",
     "OPERATOR_STATUS_ACTIVE": "1",
     "OPERATOR_STATUS_EVICTED": "2",
@@ -144,7 +147,9 @@
           "pending_aux_output_count": "12092621769041062710",
           "fee_bps": "38882",
           "discount_bps": "41392",
-          "reserved_slots_hex": "0720206729e076d6d94247413a139f684dedc23b10d37fc2f45a081dbf759b5d"
+          "frozen_at": "513445984976533206",
+          "freeze_origin": "217",
+          "reserved_slots_hex": "4247413a139f684dedc23b10d37fc2f45a081dbf759b5d"
         }
       },
       {
@@ -174,7 +179,9 @@
           "pending_aux_output_count": "1246441336940803560",
           "fee_bps": "38073",
           "discount_bps": "35157",
-          "reserved_slots_hex": "c7fda165144503493d46defedafb8294b73133a16e396f2e333842361f23981f"
+          "frozen_at": "14410851838159291209",
+          "freeze_origin": "61",
+          "reserved_slots_hex": "46defedafb8294b73133a16e396f2e333842361f23981f"
         }
       },
       {
@@ -258,7 +265,9 @@
             "tokens_per_sec_ewma": "14070712354939598772"
           },
           "usdc_escrowed": "13563250612248537832",
-          "reserved_slots_hex": "0c90771feebcb5944ef30b2d0f68deffdc0e1f8ee46def2f",
+          "tickets_resolved_admin": "3216",
+          "total_resolved_usdc": "8583841909059112691",
+          "reserved_slots_hex": "0b2d0f68deffdc0e1f8ee46def2f",
           "latency_samples": "8616427936665837375"
         }
       },
@@ -335,7 +344,9 @@
             "tokens_per_sec_ewma": "8860432885473203698"
           },
           "usdc_escrowed": "6208645329633516689",
-          "reserved_slots_hex": "a4d2f64fb69040de4a53c75a41bd2df6724c45499bbf7f2c",
+          "tickets_resolved_admin": "42194",
+          "total_resolved_usdc": "17748605387170269779",
+          "reserved_slots_hex": "c75a41bd2df6724c45499bbf7f2c",
           "latency_samples": "606957765796406586"
         }
       },
@@ -422,7 +433,9 @@
           },
           "usdc_escrowed": "6588292977851307204",
           "staging": "194",
-          "reserved_slots_hex": "df6a23be97fe2aa6d1eb19fb3cd977bb7e062b89bd701162",
+          "tickets_resolved_admin": "57194",
+          "total_resolved_usdc": "2575663154795565547",
+          "reserved_slots_hex": "19fb3cd977bb7e062b89bd701162",
           "latency_samples": "16292701447165741508"
         }
       },
@@ -500,7 +513,9 @@
           },
           "usdc_escrowed": "2693491122687495781",
           "staging": "8",
-          "reserved_slots_hex": "f28c98e42aa5bf0d67e00ac487ed4a26b6b60be50ec04fb0",
+          "tickets_resolved_admin": "62092",
+          "total_resolved_usdc": "11016977479818373088",
+          "reserved_slots_hex": "0ac487ed4a26b6b60be50ec04fb0",
           "latency_samples": "1395481707399146864"
         }
       },
@@ -578,7 +593,9 @@
           },
           "usdc_escrowed": "12603962837984431612",
           "staging": "236",
-          "reserved_slots_hex": "57326cac5a253e2a2a0123616d3cb6d8950f3785ff629fda",
+          "tickets_resolved_admin": "22322",
+          "total_resolved_usdc": "7830732968093690369",
+          "reserved_slots_hex": "23616d3cb6d8950f3785ff629fda",
           "latency_samples": "8064362908825206197"
         }
       },
@@ -656,7 +673,9 @@
           },
           "usdc_escrowed": "14958846706534570122",
           "staging": "13",
-          "reserved_slots_hex": "ac4282768f9d0cb53f0ba8ddd4acf7c4b03111ba97a8fd2e",
+          "tickets_resolved_admin": "44098",
+          "total_resolved_usdc": "9400859176868331275",
+          "reserved_slots_hex": "a8ddd4acf7c4b03111ba97a8fd2e",
           "latency_samples": "17374699486608647431"
         }
       },
@@ -734,7 +753,9 @@
           },
           "usdc_escrowed": "9703654061385112016",
           "staging": "161",
-          "reserved_slots_hex": "253b67f4fb0b9ebed37daa1744a377a45dd3d0ed571ca02c",
+          "tickets_resolved_admin": "9531",
+          "total_resolved_usdc": "7490888107550495613",
+          "reserved_slots_hex": "aa1744a377a45dd3d0ed571ca02c",
           "latency_samples": "14366788600271997305"
         }
       },
@@ -812,7 +833,9 @@
           },
           "usdc_escrowed": "11301066129761643881",
           "staging": "102",
-          "reserved_slots_hex": "bd289cf23846ef31067358ee302ebf60d6f5d5916510f60a",
+          "tickets_resolved_admin": "48424",
+          "total_resolved_usdc": "11309163491592570483",
+          "reserved_slots_hex": "58ee302ebf60d6f5d5916510f60a",
           "latency_samples": "2498696392785749843"
         }
       },

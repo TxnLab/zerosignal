@@ -275,8 +275,10 @@ export class Reconciler {
 
     async #forget(rec: TicketRecord, box: TicketBox | null): Promise<void> {
         if (box !== null) {
-            // Frozen: no contract call accepts it, and the escrowed USDC and the
-            // MBR slot stay locked until arbitration. The reservation stays too.
+            // Frozen: only the admin's resolveFrozen can close it, so the
+            // escrowed USDC and the MBR slot stay locked until the arbiter acts,
+            // and nothing the payer can call applies. The spend reservation is
+            // left open: it outlives a resolveFrozen refund until it ages out.
             this.#log.warn('ticket reconciler: ticket is frozen; leaving it to arbitration', { ticket_id: rec.ticketId })
         } else if (rec.settle !== undefined) {
             // Closed, with a verified receipt. The request path settles before

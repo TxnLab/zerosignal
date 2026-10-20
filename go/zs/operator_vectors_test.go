@@ -759,6 +759,8 @@ func encodeOperatorBox(t *testing.T, op escrow.OperatorRecord) []byte {
 	b = binary.BigEndian.AppendUint64(b, op.LiveNodeCount)
 	b = encodeRecordMetrics(b, op.RecordMetrics)
 	b = binary.BigEndian.AppendUint64(b, op.UsdcEscrowed)
+	b = binary.BigEndian.AppendUint16(b, uint16(op.TicketsResolvedAdmin))
+	b = binary.BigEndian.AppendUint64(b, op.TotalResolvedUsdc)
 	b = append(b, op.ReservedSlots[:]...)
 	return binary.BigEndian.AppendUint64(b, op.LatencySamples)
 }
@@ -776,6 +778,8 @@ func encodeNodeBox(t *testing.T, n escrow.NodeRecord) []byte {
 	b = encodeRecordMetrics(b, n.RecordMetrics)
 	b = binary.BigEndian.AppendUint64(b, n.UsdcEscrowed)
 	b = append(b, byte(n.Staging))
+	b = binary.BigEndian.AppendUint16(b, uint16(n.TicketsResolvedAdmin))
+	b = binary.BigEndian.AppendUint64(b, n.TotalResolvedUsdc)
 	b = append(b, n.ReservedSlots[:]...)
 	return binary.BigEndian.AppendUint64(b, n.LatencySamples)
 }

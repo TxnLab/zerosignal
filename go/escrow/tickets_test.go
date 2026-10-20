@@ -19,7 +19,8 @@ import (
 // rather than silently dropping pending-state metadata. The byte
 // layout mirrors the field order in ZeroSignalEscrow.TicketRecord (and the
 // trailing pendingTtftMs + pendingDecodeMs + pendingInputTokens + pendingOutputTokens that finalize and
-// settleLapsed read, the feeBps + discountBps open-time fee snapshot, plus the reservedSlots[32] tail).
+// settleLapsed read, the feeBps + discountBps open-time fee snapshot, the frozenAt + freezeOrigin
+// provenance, plus the reservedSlots[23] tail).
 func TestParseTicketRecord_AllFields(t *testing.T) {
 	var payer, opOwner, nodeSigning types.Address
 	for i := range payer {
@@ -62,9 +63,11 @@ func TestParseTicketRecord_AllFields(t *testing.T) {
 	data = put64(data, 3)                     // pendingAuxOutputCount   220..228
 	data = put16(data, 1000)                  // feeBps (arc4.Uint16)    228..230
 	data = put16(data, 2000)                  // discountBps (arc4.Uint16) 230..232
+	data = put64(data, 1_700_004_000)         // frozenAt                232..240
+	data = append(data, byte(2))              // freezeOrigin (arc4.Uint8 = Protest) 240..241
 	// reserved padding — recognizable pattern that round-trips through the parser
-	reservedPattern := bytes.Repeat([]byte{0xC3}, 32)
-	data = append(data, reservedPattern...) // 232..264
+	reservedPattern := bytes.Repeat([]byte{0xC3}, 23)
+	data = append(data, reservedPattern...) // 241..264
 
 	if len(data) != ticketRecordSize {
 		t.Fatalf("built box image = %d bytes, want ticketRecordSize %d", len(data), ticketRecordSize)
@@ -111,6 +114,8 @@ func TestParseTicketRecord_AllFields(t *testing.T) {
 		{"PendingAuxOutputCount", rec.PendingAuxOutputCount, 3},
 		{"FeeBps", rec.FeeBps, 1000},
 		{"DiscountBps", rec.DiscountBps, 2000},
+		{"FrozenAt", rec.FrozenAt, 1_700_004_000},
+		{"FreezeOrigin", rec.FreezeOrigin, FreezeOriginProtest},
 	}
 	for _, c := range checks {
 		if c.got != c.want {

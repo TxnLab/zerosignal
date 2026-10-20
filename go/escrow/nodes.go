@@ -52,15 +52,19 @@ type NodeRecord struct {
 	// staging node still advertises on-chain but is meant to be held out of
 	// normal routing/selection. Given its own byte on this fresh deploy rather
 	// than carved out of the reserve, which was a full 32 bytes at that point
-	// (box +1 B vs the pre-staging layout, a one-time MBR delta). It sits
-	// immediately before the reserve, which LatencySamples has since shortened
-	// to 24 — see ReservedSlots below.
+	// (box +1 B vs the pre-staging layout, a one-time MBR delta). The dispute
+	// block below starts right after it.
 	Staging uint64
-	// ReservedSlots is NOT the last field. LatencySamples was carved from the
-	// TAIL END of the original 32-byte blob rather than its head, so the
-	// residual sits ahead of it — see the note on the contract's
-	// NodeRecord.reservedSlots for why. Read order below must match.
-	ReservedSlots [24]byte
+	// TicketsResolvedAdmin / TotalResolvedUsdc are the per-node twins of the
+	// operator rollup's: this node's frozen tickets the admin closed with
+	// resolveFrozen (a uint16 on chain that saturates at 65535), and the
+	// operator's awards from them in micro-USDC.
+	TicketsResolvedAdmin uint64
+	TotalResolvedUsdc    uint64
+	// ReservedSlots is NOT the last field: the dispute block was carved from
+	// the head of the original 32 bytes and LatencySamples from its tail end,
+	// so the 14-byte residual sits between them.
+	ReservedSlots [recordReservedLen]byte
 	// LatencySamples is the count of settlements folded into LatencyTotalMs.
 	// It bumps only inside the contract's outputUsageType==Tokens guard, so it
 	// is the exact denominator for this node's mean TTFT. Do NOT divide
@@ -89,7 +93,9 @@ type NodeRecord struct {
 //	tokensPerSecEwma          8
 //	usdcEscrowed              8
 //	staging uint8             1
-//	reservedSlots[24]        24
+//	ticketsResolvedAdmin u16  2
+//	totalResolvedUsdc         8
+//	reservedSlots[14]        14
 //	latencySamples            8
 //
 // encryptionPubKey (the legacy byte[62] anchor age recipient) was removed under
@@ -99,9 +105,9 @@ const nodeRecordSize = 1 + 32 + 1 + BaseURLMax + // 282 — identity/location ba
 	recordMetricsSize + // 432 — the block shared with OperatorRecord
 	8 + // 8  — usdcEscrowed
 	1 + // 1  — staging
-	recordTailSize // 32 — reservedSlots[24] (was 32 before the latencySamples carve) + latencySamples
-// Total: 282 + 432 + 8 + 1 + 32 = 755. The carve is size-neutral by
-// construction — if this total moves, the carve was done wrong and every
+	recordTailSize // 32 — the original 32-byte reserve, carved into the dispute block, a 14-byte residual and latencySamples
+// Total: 282 + 432 + 8 + 1 + 32 = 755. The carves are size-neutral by
+// construction — if this total moves, a carve was done wrong and every
 // deployed box will mis-decode.
 
 func parseNodeRecord(operatorID, nodeID uint64, data []byte) (*NodeRecord, error) {
@@ -139,7 +145,11 @@ func parseNodeRecord(operatorID, nodeID uint64, data []byte) (*NodeRecord, error
 	off += 8
 	rec.Staging = uint64(data[off]) // arc4.Uint8 — 1 byte
 	off++
-	parseRecordTail(data, off, &rec.ReservedSlots, &rec.LatencySamples)
+	tail := parseRecordTail(data, off)
+	rec.TicketsResolvedAdmin = tail.ticketsResolvedAdmin
+	rec.TotalResolvedUsdc = tail.totalResolvedUsdc
+	rec.ReservedSlots = tail.reservedSlots
+	rec.LatencySamples = tail.latencySamples
 	return rec, nil
 }
 

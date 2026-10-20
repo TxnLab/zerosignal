@@ -21,7 +21,7 @@ export const SettleStatus = {
     PendingPayer: 2,
     /** The operator has recorded a claim the payer has not matched. */
     PendingOperator: 3,
-    /** The sides disagreed, or the payer protested. Terminal: no call accepts it, and nothing on chain resolves it. */
+    /** The sides disagreed, or the payer protested. No call the payer or the node can make accepts it; only the rail's admin resolution closes it. */
     Frozen: 4,
 } as const
 
@@ -47,10 +47,12 @@ export interface TicketView {
 //                     full maxPrice to the payer.
 //   settleLapsed    — past the deadline carrying an operator claim; pays the
 //                     claim and refunds the rest.
-//   arbitrate       — frozen. No call accepts it at any time and there is no
-//                     unfreeze, so the escrow stays locked; any resolution is
-//                     off-chain. Don't present it as something that resolves
-//                     on its own.
+//   arbitrate       — frozen. No settle, protest or deadline call accepts it
+//                     at any time; the one exit is the rail's admin resolution
+//                     (resolveFrozen on Algorand, resolve_frozen on Solana),
+//                     which has no deadline. Until the admin acts the escrow
+//                     stays locked, so don't present it as something that
+//                     resolves on its own.
 //   unknown         — a state the rules don't recognize. Waiting never makes a
 //                     call legal here, so never render it as "too early".
 export type Verdict = 'wait' | 'refundInactive' | 'settleLapsed' | 'arbitrate' | 'unknown'
@@ -62,7 +64,8 @@ export type Verdict = 'wait' | 'refundInactive' | 'settleLapsed' | 'arbitrate' |
 export function classify(t: TicketView, now: Date): Verdict {
     // Recognize the state before consulting the clock, so a state no call
     // accepts can't come back as "wait", which would read as "legal at D".
-    // Frozen outranks the clock for the same reason.
+    // Frozen outranks the clock for the same reason: the admin's resolution is
+    // not time-gated, and nothing else ever accepts it.
     const pastDeadline = BigInt(now.getTime()) > t.deadline * 1000n
     switch (t.status) {
         case SettleStatus.Frozen:

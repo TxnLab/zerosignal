@@ -13,7 +13,8 @@
 // out of the wrong bytes rather than failing.
 //
 // uint64 fields are bigint. Fields the contract narrows to 1 or 2 bytes
-// (statuses, pending side, usage types, fee bps, staging) are number.
+// (statuses, pending side, usage types, fee bps, freeze origin, staging, the
+// resolved-ticket count) are number.
 
 import { encodeAlgorandAddress } from '../ticket/signing.js'
 import { BASE_URL_MAX, OUTPUT_UNITS_LEN, REVENUE_BUCKET_COUNT } from './constants.js'
@@ -46,7 +47,10 @@ export interface TicketRecord {
     operatorId: bigint
     nodeId: bigint
     operatorOwnerAddr: string // settlement payout destination
-    nodeSigningAddr: string // the serving node's hot key
+    // The serving node's key at open(). protest() verifies receipts under it;
+    // settle's operator half takes the node box's current key instead, and
+    // this one only once the node box is gone.
+    nodeSigningAddr: string
     maxPrice: bigint
     openedAt: bigint
     expiresAt: bigint
@@ -66,10 +70,30 @@ export interface TicketRecord {
     // life — the settle-time debit is a pure function of these.
     feeBps: number
     discountBps: number
+    // When and by which path (FREEZE_ORIGIN_*) the ticket froze; both 0
+    // unless it is frozen. An arbiter needs the origin, since nothing else on
+    // the box tells a protest from a settle mismatch.
+    frozenAt: bigint
+    freezeOrigin: number
     reservedSlots: Uint8Array
 }
 
-export interface OperatorRecord extends RecordMetrics {
+// The block both records end with, after usdcEscrowed (operator) or staging
+// (node).
+export interface RecordTail {
+    // Frozen tickets the admin closed with resolveFrozen. A uint16 on chain
+    // that saturates at 65535, so read it as "at least" at the ceiling.
+    ticketsResolvedAdmin: number
+    // The operator's awards from those resolutions, kept out of the revenue
+    // metrics because an award is not a sale.
+    totalResolvedUsdc: bigint
+    reservedSlots: Uint8Array
+    // The exact denominator for mean TTFT: bumped only on token-output settles,
+    // so dividing latencyTotalMs by the settle counts instead understates it.
+    latencySamples: bigint
+}
+
+export interface OperatorRecord extends RecordMetrics, RecordTail {
     id: bigint
     ownerAddr: string
     status: number
@@ -77,13 +101,9 @@ export interface OperatorRecord extends RecordMetrics {
     nextNodeId: bigint
     liveNodeCount: bigint
     usdcEscrowed: bigint
-    reservedSlots: Uint8Array
-    // The exact denominator for mean TTFT: bumped only on token-output settles,
-    // so dividing latencyTotalMs by the settle counts instead understates it.
-    latencySamples: bigint
 }
 
-export interface NodeRecord extends RecordMetrics {
+export interface NodeRecord extends RecordMetrics, RecordTail {
     // Not stored in the box: they come from the box key the caller read.
     operatorId: bigint
     nodeId: bigint
@@ -92,15 +112,15 @@ export interface NodeRecord extends RecordMetrics {
     baseUrl: string
     usdcEscrowed: bigint
     staging: number
-    reservedSlots: Uint8Array
-    latencySamples: bigint
 }
 
 const RECORD_METRICS_SIZE = 8 * 12 + 8 + 8 + 8 * REVENUE_BUCKET_COUNT + 8 + 8 * OUTPUT_UNITS_LEN + 8 // 432
-const RECORD_TAIL_SIZE = 24 + 8
+const RECORD_RESERVED_LEN = 14
+const RECORD_TAIL_SIZE = 2 + 8 + RECORD_RESERVED_LEN + 8 // 32
+const TICKET_RESERVED_LEN = 23
 
 export const TICKET_RECORD_SIZE =
-    32 + 8 + 8 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 8 + 1 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 2 + 2 + 32 // 264
+    32 + 8 + 8 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 8 + 1 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 2 + 2 + 8 + 1 + TICKET_RESERVED_LEN // 264
 export const OPERATOR_RECORD_SIZE = 32 + 1 + 8 + 8 + 8 + RECORD_METRICS_SIZE + 8 + RECORD_TAIL_SIZE // 529
 export const NODE_RECORD_SIZE = 1 + 32 + 1 + BASE_URL_MAX + RECORD_METRICS_SIZE + 8 + 1 + RECORD_TAIL_SIZE // 755
 
@@ -164,12 +184,17 @@ function readMetrics(r: Reader): RecordMetrics {
     }
 }
 
-// The residual reserve PRECEDES latencySamples: the carve took the tail end of
-// the original 32 bytes. Reading them the other way round yields a garbage
-// sample count with the box length unchanged.
-function readTail(r: Reader): { reservedSlots: Uint8Array; latencySamples: bigint } {
-    const reservedSlots = r.bytes(24)
-    return { reservedSlots, latencySamples: r.u64() }
+// The dispute block was carved from the head of the original 32-byte reserve
+// and latencySamples from its tail end, so the residual sits between them.
+// Reading any two in the wrong order yields garbage with the box length
+// unchanged.
+function readTail(r: Reader): RecordTail {
+    return {
+        ticketsResolvedAdmin: r.u16(),
+        totalResolvedUsdc: r.u64(),
+        reservedSlots: r.bytes(RECORD_RESERVED_LEN),
+        latencySamples: r.u64(),
+    }
 }
 
 // decodeTicketRecord parses a ticket box value. Trailing bytes past the known
@@ -202,7 +227,9 @@ export function decodeTicketRecord(data: Uint8Array): TicketRecord {
         pendingAuxOutputCount: r.u64(),
         feeBps: r.u16(),
         discountBps: r.u16(),
-        reservedSlots: r.bytes(32),
+        frozenAt: r.u64(),
+        freezeOrigin: r.u8(),
+        reservedSlots: r.bytes(TICKET_RESERVED_LEN),
     }
 }
 

@@ -61,6 +61,8 @@ describe('the ARC-56 assert table', () => {
             insufficientMbrDeposit: 'insufficient MBR deposit',
             insufficientMbrDepositFreeQuota: 'insufficient MBR deposit for free-quota box',
             payerHasNoMbrDeposit: 'payer has no MBR deposit',
+            protestAfterDeadline: 'protest after deadline',
+            receiptDigestMismatch: 'receiptDigest must match the pending claim',
         })
     })
 
@@ -83,6 +85,8 @@ describe('enrichSubmitError', () => {
             APPROVAL_ASSERT.ticketNotPendingSettle,
             APPROVAL_ASSERT.tooEarlyToLapseSettle,
             APPROVAL_ASSERT.onlyOperatorClaimsCanLapse,
+            APPROVAL_ASSERT.protestAfterDeadline,
+            APPROVAL_ASSERT.receiptDigestMismatch,
         ]) {
             const pc = pcsOf(assert)[0]!
             const cause = algodErr(pc)

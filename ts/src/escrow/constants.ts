@@ -20,6 +20,13 @@ export const PENDING_NONE = 0
 export const PENDING_BY_OPERATOR = 1
 export const PENDING_BY_PAYER = 2
 
+// Which path froze a ticket (TicketRecord.freezeOrigin); 0 unless frozen. The
+// box needs it because protest() keeps pendingBy, so a protest over an
+// operator claim otherwise reads the same as a settle mismatch.
+export const FREEZE_ORIGIN_NONE = 0
+export const FREEZE_ORIGIN_SETTLE_MISMATCH = 1
+export const FREEZE_ORIGIN_PROTEST = 2
+
 // EVICTED is a soft tombstone: in-flight tickets still settle, but discovery
 // hides the operator and open() reverts.
 export const OPERATOR_STATUS_ACTIVE = 1

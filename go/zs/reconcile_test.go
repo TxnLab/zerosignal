@@ -268,7 +268,7 @@ func TestReconciler_SubmitsTheVerdictsCall(t *testing.T) {
 	}
 }
 
-// A frozen ticket is arbitration's, and no call can touch it, so the sweep
+// A frozen ticket is the admin's, and no call the payer can make touches it, so the sweep
 // drops its row rather than re-reading the box every minute forever.
 func TestReconciler_FrozenBoxIsForgotten(t *testing.T) {
 	j := newMemJournal()

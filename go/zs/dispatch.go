@@ -4158,11 +4158,24 @@ func (s *Client) checkReceipt(
 	return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
 		txid, fee, perr := handle.Protest(settleCtx, receipt, excerpt, protestReasonForViolation(re.Violation))
 		if perr != nil {
-			s.log.Warn("protest failed",
-				slog.String("ticket_id", ticket.TicketID),
-				slog.String("reason", re.Violation.String()),
-				slog.Any("verification_err", err),
-				slog.Any("submit_err", perr))
+			// A turn that outlived expires_at + grace (a long stream, mostly)
+			// can no longer freeze the ticket, and no retry changes that. The
+			// same deadline bars settle, so the ticket goes to settleLapsed if
+			// the operator has a pending claim and to refundInactive if not;
+			// the refund watchdog stays armed and drives whichever applies.
+			// Logged apart from a submit fault so it doesn't read as one.
+			if errors.Is(perr, escrow.ErrProtestAfterDeadline) {
+				s.log.Warn("protest window closed; the ticket lapses on chain",
+					slog.String("ticket_id", ticket.TicketID),
+					slog.String("reason", re.Violation.String()),
+					slog.Any("verification_err", err))
+			} else {
+				s.log.Warn("protest failed",
+					slog.String("ticket_id", ticket.TicketID),
+					slog.String("reason", re.Violation.String()),
+					slog.Any("verification_err", err),
+					slog.Any("submit_err", perr))
+			}
 			return Settlement{Kind: SettleProtest}, perr
 		}
 		s.log.Warn("protest submitted",
@@ -4171,7 +4184,7 @@ func (s *Client) checkReceipt(
 			slog.String("reason", re.Violation.String()),
 			slog.Any("verification_err", err))
 		// Frozen ticket: refundInactive reverts on FROZEN, so the refund
-		// watchdog has nothing to do — resolution is off-chain arbitration.
+		// watchdog has nothing to do — only the admin's resolveFrozen closes it.
 		s.refunds.Resolve(ticket.TicketID)
 		return s.settlement(SettleProtest, txid, fee), nil
 	}), check

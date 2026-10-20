@@ -166,33 +166,39 @@ type ticketRecordVector struct {
 	PendingAuxOutputCount     string `json:"pending_aux_output_count"`
 	FeeBps                    string `json:"fee_bps"`
 	DiscountBps               string `json:"discount_bps"`
+	FrozenAt                  string `json:"frozen_at"`
+	FreezeOrigin              string `json:"freeze_origin"`
 	ReservedSlotsHex          string `json:"reserved_slots_hex"`
 }
 
 type operatorRecordVector struct {
-	ID               string        `json:"id"`
-	OwnerAddr        string        `json:"owner_addr"`
-	Status           string        `json:"status"`
-	NFDAppID         string        `json:"nfd_app_id"`
-	NextNodeID       string        `json:"next_node_id"`
-	LiveNodeCount    string        `json:"live_node_count"`
-	Metrics          metricsVector `json:"metrics"`
-	UsdcEscrowed     string        `json:"usdc_escrowed"`
-	ReservedSlotsHex string        `json:"reserved_slots_hex"`
-	LatencySamples   string        `json:"latency_samples"`
+	ID                   string        `json:"id"`
+	OwnerAddr            string        `json:"owner_addr"`
+	Status               string        `json:"status"`
+	NFDAppID             string        `json:"nfd_app_id"`
+	NextNodeID           string        `json:"next_node_id"`
+	LiveNodeCount        string        `json:"live_node_count"`
+	Metrics              metricsVector `json:"metrics"`
+	UsdcEscrowed         string        `json:"usdc_escrowed"`
+	TicketsResolvedAdmin string        `json:"tickets_resolved_admin"`
+	TotalResolvedUsdc    string        `json:"total_resolved_usdc"`
+	ReservedSlotsHex     string        `json:"reserved_slots_hex"`
+	LatencySamples       string        `json:"latency_samples"`
 }
 
 type nodeRecordVector struct {
-	OperatorID       string        `json:"operator_id"`
-	NodeID           string        `json:"node_id"`
-	Status           string        `json:"status"`
-	SigningAddr      string        `json:"signing_addr"`
-	BaseURL          string        `json:"base_url"`
-	Metrics          metricsVector `json:"metrics"`
-	UsdcEscrowed     string        `json:"usdc_escrowed"`
-	Staging          string        `json:"staging"`
-	ReservedSlotsHex string        `json:"reserved_slots_hex"`
-	LatencySamples   string        `json:"latency_samples"`
+	OperatorID           string        `json:"operator_id"`
+	NodeID               string        `json:"node_id"`
+	Status               string        `json:"status"`
+	SigningAddr          string        `json:"signing_addr"`
+	BaseURL              string        `json:"base_url"`
+	Metrics              metricsVector `json:"metrics"`
+	UsdcEscrowed         string        `json:"usdc_escrowed"`
+	Staging              string        `json:"staging"`
+	TicketsResolvedAdmin string        `json:"tickets_resolved_admin"`
+	TotalResolvedUsdc    string        `json:"total_resolved_usdc"`
+	ReservedSlotsHex     string        `json:"reserved_slots_hex"`
+	LatencySamples       string        `json:"latency_samples"`
 }
 
 // recordCase is one decode input. Exactly one of the record fields is set on
@@ -343,6 +349,7 @@ func ticketVector(r *TicketRecord) *ticketRecordVector {
 		PendingAuxOutputUsageType: u64(r.PendingAuxOutputUsageType),
 		PendingAuxOutputCount:     u64(r.PendingAuxOutputCount),
 		FeeBps:                    u64(r.FeeBps), DiscountBps: u64(r.DiscountBps),
+		FrozenAt: u64(r.FrozenAt), FreezeOrigin: u64(r.FreezeOrigin),
 		ReservedSlotsHex: hex.EncodeToString(r.ReservedSlots[:]),
 	}
 }
@@ -387,6 +394,7 @@ func buildRecordVectors(t *testing.T) recordVectors {
 				ID: u64(r.ID), OwnerAddr: r.OwnerAddr, Status: u64(r.Status), NFDAppID: u64(r.NFDAppID),
 				NextNodeID: u64(r.NextNodeID), LiveNodeCount: u64(r.LiveNodeCount),
 				Metrics: metricsOf(r.RecordMetrics), UsdcEscrowed: u64(r.UsdcEscrowed),
+				TicketsResolvedAdmin: u64(r.TicketsResolvedAdmin), TotalResolvedUsdc: u64(r.TotalResolvedUsdc),
 				ReservedSlotsHex: hex.EncodeToString(r.ReservedSlots[:]), LatencySamples: u64(r.LatencySamples),
 			}
 		}
@@ -438,6 +446,7 @@ func buildRecordVectors(t *testing.T) recordVectors {
 				OperatorID: u64(r.OperatorID), NodeID: u64(r.NodeID), Status: u64(r.Status),
 				SigningAddr: r.SigningAddr, BaseURL: r.BaseURL, Metrics: metricsOf(r.RecordMetrics),
 				UsdcEscrowed: u64(r.UsdcEscrowed), Staging: u64(r.Staging),
+				TicketsResolvedAdmin: u64(r.TicketsResolvedAdmin), TotalResolvedUsdc: u64(r.TotalResolvedUsdc),
 				ReservedSlotsHex: hex.EncodeToString(r.ReservedSlots[:]), LatencySamples: u64(r.LatencySamples),
 			}
 		}
@@ -585,22 +594,25 @@ func buildEscrowVectors(t *testing.T) escrowVectorsFile {
 // be wrong with every other case green. Keyed by the TS export name.
 func buildConstantVectors() map[string]string {
 	return map[string]string{
-		"STATUS_OPEN":             u64(StatusOpen),
-		"STATUS_SETTLED":          u64(StatusSettled),
-		"STATUS_REFUNDED":         u64(StatusRefunded),
-		"STATUS_FROZEN":           u64(StatusFrozen),
-		"STATUS_PENDING_SETTLE":   u64(StatusPendingSettle),
-		"PENDING_NONE":            u64(PendingNone),
-		"PENDING_BY_OPERATOR":     u64(PendingByOperator),
-		"PENDING_BY_PAYER":        u64(PendingByPayer),
-		"OPERATOR_STATUS_ACTIVE":  u64(OperatorStatusActive),
-		"OPERATOR_STATUS_EVICTED": u64(OperatorStatusEvicted),
-		"NODE_STATUS_ACTIVE":      u64(NodeStatusActive),
-		"BPS_DENOMINATOR":         u64(BpsDenominator),
-		"REVENUE_BUCKET_COUNT":    u64(RevenueBucketCount),
-		"OUTPUT_UNITS_LEN":        u64(OutputUnitsLen),
-		"SECONDS_PER_DAY":         u64(SecondsPerDay),
-		"BASE_URL_MAX":            u64(BaseURLMax),
+		"STATUS_OPEN":                   u64(StatusOpen),
+		"STATUS_SETTLED":                u64(StatusSettled),
+		"STATUS_REFUNDED":               u64(StatusRefunded),
+		"STATUS_FROZEN":                 u64(StatusFrozen),
+		"STATUS_PENDING_SETTLE":         u64(StatusPendingSettle),
+		"PENDING_NONE":                  u64(PendingNone),
+		"PENDING_BY_OPERATOR":           u64(PendingByOperator),
+		"PENDING_BY_PAYER":              u64(PendingByPayer),
+		"FREEZE_ORIGIN_NONE":            u64(FreezeOriginNone),
+		"FREEZE_ORIGIN_SETTLE_MISMATCH": u64(FreezeOriginSettleMismatch),
+		"FREEZE_ORIGIN_PROTEST":         u64(FreezeOriginProtest),
+		"OPERATOR_STATUS_ACTIVE":        u64(OperatorStatusActive),
+		"OPERATOR_STATUS_EVICTED":       u64(OperatorStatusEvicted),
+		"NODE_STATUS_ACTIVE":            u64(NodeStatusActive),
+		"BPS_DENOMINATOR":               u64(BpsDenominator),
+		"REVENUE_BUCKET_COUNT":          u64(RevenueBucketCount),
+		"OUTPUT_UNITS_LEN":              u64(OutputUnitsLen),
+		"SECONDS_PER_DAY":               u64(SecondsPerDay),
+		"BASE_URL_MAX":                  u64(BaseURLMax),
 	}
 }
 

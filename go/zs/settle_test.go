@@ -6,10 +6,12 @@
 package zs
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -164,6 +166,45 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 			}
 			if got := c.refunds.watching(f.tkt.TicketID); got != tc.watched {
 				t.Errorf("refund watchdog watching = %v, want %v", got, tc.watched)
+			}
+		})
+	}
+}
+
+// A protest refused for its deadline is the ticket lapsing on chain, not a
+// submit fault, so it logs apart from one. Either way the submit's error is
+// returned and the refund watchdog stays armed to drive the deadline path.
+func TestCheckReceipt_ProtestAfterDeadlineLogsApart(t *testing.T) {
+	late := fmt.Errorf("protest: %w", escrow.ErrProtestAfterDeadline)
+	other := errors.New("algod down")
+	for _, tc := range []struct {
+		name          string
+		err           error
+		want, notWant string
+	}{
+		{"after the deadline", late, "protest window closed", "protest failed"},
+		{"any other failure", other, "protest failed", "protest window closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSettleFixture(t)
+			c := settleClient()
+			var logs bytes.Buffer
+			c.log = slog.New(slog.NewTextHandler(&logs, nil))
+			c.refunds.track(f.tkt.TicketID, time.Now().Add(time.Hour), nil, nil, nil)
+			t.Cleanup(func() { c.refunds.Resolve(f.tkt.TicketID) })
+			submit := f.check(c, newSettleSlot(), &scriptedSettleHandle{err: tc.err}, false, "")
+			if submit == nil {
+				t.Fatal("no submit")
+			}
+			r, err := submit()
+			if r.Kind != SettleProtest || !errors.Is(err, tc.err) {
+				t.Errorf("submit = %+v, %v; want a protest settlement and %v", r, err, tc.err)
+			}
+			if got := logs.String(); !strings.Contains(got, tc.want) || strings.Contains(got, tc.notWant) {
+				t.Errorf("logs = %q; want %q and not %q", got, tc.want, tc.notWant)
+			}
+			if !c.refunds.watching(f.tkt.TicketID) {
+				t.Error("refund watchdog stopped watching a ticket the protest did not freeze")
 			}
 		})
 	}

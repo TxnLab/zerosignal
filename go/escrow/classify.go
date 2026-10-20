@@ -23,8 +23,10 @@ import (
 // testdata/escrow_vectors.json.
 //
 // On this contract a frozen ticket also keeps the payer's MBR slot
-// (openTickets, which gates closeDeposit), so closeDeposit can never succeed
-// for that payer either.
+// (openTickets, which gates closeDeposit), so that payer's closeDeposit
+// reverts until the admin's resolveFrozen deletes the box. The box records
+// when and by which path it froze (FrozenAt, FreezeOrigin), which is what an
+// arbiter reads; the verdict doesn't depend on either.
 type Verdict = settle.Verdict
 
 const (

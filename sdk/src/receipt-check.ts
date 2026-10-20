@@ -13,6 +13,8 @@
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
 import type { SpendGuard } from './config.js'
+import { findError } from './errors.js'
+import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
 import { type Operator, refOf } from './operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from './parts.js'
 import { algoOnly } from './fees.js'
@@ -293,12 +295,26 @@ export async function checkTurnReceipt(
             try {
                 call = await handle.protest(receipt, excerpt, protestReasonFor(violation), signal)
             } catch (perr) {
-                log.warn('protest failed', {
-                    ticket_id: ticketId,
-                    reason: violation,
-                    verification_err: errText(verifyErr),
-                    submit_err: errText(perr),
-                })
+                // A turn that outlived expires_at + grace can no longer freeze
+                // the ticket, and no retry changes that. The same deadline bars
+                // settle, so the ticket goes to settleLapsed if the operator has
+                // a pending claim and to refundInactive if not; the refund
+                // watchdog stays armed and drives whichever applies. Logged
+                // apart from a submit fault so it doesn't read as one.
+                if (findError(perr, ApprovalError)?.assert === APPROVAL_ASSERT.protestAfterDeadline) {
+                    log.warn('protest window closed; the ticket lapses on chain', {
+                        ticket_id: ticketId,
+                        reason: violation,
+                        verification_err: errText(verifyErr),
+                    })
+                } else {
+                    log.warn('protest failed', {
+                        ticket_id: ticketId,
+                        reason: violation,
+                        verification_err: errText(verifyErr),
+                        submit_err: errText(perr),
+                    })
+                }
                 return { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: perr }
             }
             log.warn('protest submitted', {

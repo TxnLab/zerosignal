@@ -168,7 +168,7 @@ note right of Proxy
   journaled, ~2 min grace, box still OPEN
   or holding a matching operator claim).
 end note
-Escrow -> Escrow: settle() — gtxn[0] (operator first-half)\n  asOperator=true  =>  require Txn.sender == t.nodeSigning\n  load TicketRecord; status must be OPEN\n  require amount_charged <= max_price\n  require latestTimestamp <= expires_at + grace\n  record (amount, digest, pendingBy = OPERATOR)\n  status -> STATUS_PENDING_SETTLE
+Escrow -> Escrow: settle() — gtxn[0] (operator first-half)\n  asOperator=true  =>  require Txn.sender == the node box's current signing key\n                       (t.nodeSigning once the node box is gone)\n  load TicketRecord; status must be OPEN\n  require amount_charged <= max_price\n  require latestTimestamp <= expires_at + grace\n  record (amount, digest, pendingBy = OPERATOR)\n  status -> STATUS_PENDING_SETTLE
 Escrow -> Escrow: settle() — gtxn[1] (payer ack)\n  asOperator=false =>  require Txn.sender == t.payer\n  require side != pendingBy (or args match exactly: idempotent no-op)\n  match (amount, digest) -> finalize:\n    inner-axfer payer USDC (max_price - charged - fee_paid)\n    inner-axfer operator_owner  USDC opPayout\n    inner-axfer treasury        USDC fee_paid    (skipped when 0)\n    write metrics to BOTH the (operatorId,nodeId) node box (per-node)\n      and the operatorId operator box (rollup)\n    openTickets-- (release the box-MBR slot back to the pool;\n                   NO inner ALGO refund)\n  delete TicketRecord box
 Escrow --> Operator: USDC inner-axfer (operator owner)
 Escrow --> Payer: USDC residual refund\n(box-MBR slot released to the payer's prepaid pool —\n recoverable later via withdrawMbr / closeDeposit)
@@ -235,10 +235,13 @@ note over Proxy
   Triggered when the proxy has cryptographic evidence
   of misbehavior (SPEC §3b): over-charge, commit_k
   mismatch, truncated stream with no refund, etc.
-  Legal whether the ticket is OPEN or PENDING_SETTLE;
-  silent disagreement via a mismatched second settle()
-  also freezes, but protest() carries the structured
-  dispute_excerpt for off-chain arbitration.
+  Legal while the ticket is OPEN or PENDING_SETTLE and
+  latestTimestamp <= expires_at + grace; on a
+  PENDING_SETTLE ticket the receipt digest must equal
+  the pending claim's. Silent disagreement via a
+  mismatched second settle() also freezes, but
+  protest() carries the structured dispute_excerpt
+  for the arbiter.
 
   protest() runs an in-contract ed25519verify_bare over
   the operator's receipt sig (open/settle do not — they
@@ -247,20 +250,21 @@ note over Proxy
 end note
 
 Proxy -> Escrow: protest(ticket_id, amount_charged,\n                   receipt_digest, receipt_sig,\n                   dispute_excerpt)\n  sender = t.payer,  fee = 4 * minTxnFee
-Escrow -> Escrow: protest()\n  require status in {OPEN, PENDING_SETTLE}\n  require Txn.sender == t.payer\n  ed25519verify_bare(receipt_digest, receipt_sig,\n                     t.nodeSigning.bytes)\n  require len(dispute_excerpt) <= max_dispute_excerpt_bytes\n  status -> STATUS_FROZEN\n  (no inner payments — awaits off-chain arbitration)
+Escrow -> Escrow: protest()\n  require status in {OPEN, PENDING_SETTLE}\n  require Txn.sender == t.payer\n  require len(dispute_excerpt) <= max_dispute_excerpt_bytes\n  require latestTimestamp <= expires_at + grace\n  ed25519verify_bare(receipt_digest, receipt_sig,\n                     t.nodeSigning.bytes)\n  if PENDING_SETTLE: require receipt_digest == t.pendingDigest\n  status -> STATUS_FROZEN, frozenAt = now, freezeOrigin = PROTEST\n  (no inner payments — awaits the admin's resolveFrozen)
 Escrow --> Proxy: ok
 note right of Escrow
   Frozen tickets exit the auto-paths: settle(),
-  settleLapsed(), and refundInactive() all reject
-  STATUS_FROZEN. Resolution flows through the
-  admin/arbiter path (out of scope for this diagram).
+  protest(), settleLapsed(), and refundInactive() all
+  reject STATUS_FROZEN. The admin's resolveFrozen()
+  splits the escrow and deletes the box (out of scope
+  for this diagram).
 end note
 
 note over Payer, Operator
   Terminal states per ticket: atomic match, watchdog standalone +
   later ack, settleLapsed, refundInactive (all delete the box and
   release its MBR slot to the prepaid pool), or STATUS_FROZEN (box
-  retained until off-chain arbitration resolves).
+  retained until the admin's resolveFrozen deletes it).
 end note
 
 @enduml

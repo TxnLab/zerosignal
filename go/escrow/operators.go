@@ -98,15 +98,22 @@ type OperatorRecord struct {
 	// the remainder. Mirrors `usdcEscrowed: uint64` in ZeroSignalEscrow.algo.ts.
 	UsdcEscrowed uint64
 
-	// ===== Reserved padding (24 raw bytes) =====
-	// Mirrors `reservedSlots: arc4.StaticBytes<24>`; carve typed fields out
-	// in lockstep with the contract field, keeping total length stable.
-	//
-	// NOT the last field: LatencySamples was carved from the TAIL END of the
-	// original 32 rather than its head, so the residual sits ahead of it. See
-	// the contract's OperatorRecord.reservedSlots for why. Read order below
-	// must match.
-	ReservedSlots [24]byte
+	// ===== Dispute resolution =====
+	// TicketsResolvedAdmin counts this operator's frozen tickets the admin
+	// closed with resolveFrozen, whatever the split. It is a uint16 on chain
+	// and saturates at 65535, so read it as "at least" at the ceiling.
+	// TotalResolvedUsdc sums the operator's awards from those resolutions
+	// (micro-USDC). An award is not a sale, so it is kept out of
+	// TotalRevenueGross, the revenue ring and the latency/throughput EWMAs.
+	TicketsResolvedAdmin uint64
+	TotalResolvedUsdc    uint64
+
+	// ===== Reserved padding (14 raw bytes) =====
+	// Mirrors `reservedSlots: arc4.StaticBytes<14>`. NOT the last field: the
+	// dispute block was carved from the head of the original 32 bytes and
+	// LatencySamples from its tail end, so the residual sits between them.
+	// Carve further fields from its head, in lockstep with the contract.
+	ReservedSlots [recordReservedLen]byte
 
 	// ===== Mean-TTFT denominator =====
 	// LatencySamples is the count of settlements folded into LatencyTotalMs,
@@ -133,15 +140,17 @@ type OperatorRecord struct {
 //	                          432
 //	-- operator USDC stake --
 //	usdcEscrowed                8
-//	-- reserved padding + mean-TTFT denominator (recordTailSize) --
-//	reservedSlots[24]          24
+//	-- dispute block + reserve + mean-TTFT denominator (recordTailSize) --
+//	ticketsResolvedAdmin uint16 2
+//	totalResolvedUsdc           8
+//	reservedSlots[14]          14
 //	latencySamples              8
 const operatorRecordSize = 32 + 1 + 8 + 8 + 8 + // 57 — owner + status + nfd + nextNodeId + liveNodeCount
 	recordMetricsSize + // 432 — the block shared with NodeRecord
 	8 + // 8  — usdcEscrowed
-	recordTailSize // 32 — reservedSlots[24] (was 32 before the latencySamples carve) + latencySamples
-// Total: 57 + 432 + 8 + 32 = 529. The carve is size-neutral by construction —
-// if this total moves, the carve was done wrong and every deployed box will
+	recordTailSize // 32 — the original 32-byte reserve, carved into the dispute block, a 14-byte residual and latencySamples
+// Total: 57 + 432 + 8 + 32 = 529. The carves are size-neutral by construction —
+// if this total moves, a carve was done wrong and every deployed box will
 // mis-decode.
 
 func parseOperatorRecord(id uint64, data []byte) (*OperatorRecord, error) {
@@ -168,7 +177,11 @@ func parseOperatorRecord(id uint64, data []byte) (*OperatorRecord, error) {
 	rec.RecordMetrics, off = parseRecordMetrics(data, off)
 	rec.UsdcEscrowed = binary.BigEndian.Uint64(data[off : off+8])
 	off += 8
-	parseRecordTail(data, off, &rec.ReservedSlots, &rec.LatencySamples)
+	tail := parseRecordTail(data, off)
+	rec.TicketsResolvedAdmin = tail.ticketsResolvedAdmin
+	rec.TotalResolvedUsdc = tail.totalResolvedUsdc
+	rec.ReservedSlots = tail.reservedSlots
+	rec.LatencySamples = tail.latencySamples
 	return rec, nil
 }
 

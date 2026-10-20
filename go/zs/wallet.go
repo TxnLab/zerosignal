@@ -635,6 +635,9 @@ func (h *OpenHandle) settleGroupSpec(receipt *ticket.UsageReceipt) (escrow.Settl
 	if err != nil {
 		return escrow.SettleGroupSpec{}, fmt.Errorf("decode payer addr: %w", err)
 	}
+	// The key routing saw, not the node box's current one the contract now
+	// accepts: a node that rotates mid-turn gets its group refused here, and
+	// the ticket finishes on its driver path, which is the safe direction.
 	opSigningAddr, err := types.DecodeAddress(h.Operator.SigningAddr)
 	if err != nil {
 		return escrow.SettleGroupSpec{}, fmt.Errorf("decode operator signing addr: %w", err)
@@ -962,13 +965,13 @@ func (w *Wallet) DepositShortfall(ctx context.Context, slots uint64) (shortfall 
 // localhost twin of the client, so the two must not disagree about how much
 // ALGO the same wallet needs.
 //
-// The trade this accepts: a ticket that never settles — FROZEN is terminal, so
-// its slot is gone for good — permanently costs one slot of the working set,
-// and nothing re-grows it. That is the honest reading. The pool is genuinely
-// smaller, `zs-proxy tickets` names the frozen ticket, and the fix is to raise
-// zs.concurrent_slots or resolve the ticket — not to have every proxy silently
-// inflate its deposit on every busy moment to keep a rare terminal case
-// invisible. `freeDepositSlots` (admission: "can I open one right now?") still
+// The trade this accepts: a FROZEN ticket holds its slot until the admin's
+// resolveFrozen deletes the box, so it costs one slot of the working set for
+// as long as it stays frozen, and nothing re-grows it. That is the honest
+// reading. The pool is genuinely smaller until the arbiter acts, the host can
+// name the frozen ticket, and the fix is to raise the concurrent-slot count or
+// get the ticket resolved — not to have every payer silently inflate its
+// deposit on every busy moment to hide a rare, arbiter-bound case. `freeDepositSlots` (admission: "can I open one right now?") still
 // answers on free-of-reserved; that is a different question from sizing.
 func DepositShortfall(slots, ticketMbr, freeQuotaMbr uint64, dep escrow.PayerDeposit) uint64 {
 	// freeQuotaMbr is the term this payer STILL owes — callers pass
