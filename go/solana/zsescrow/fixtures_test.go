@@ -122,7 +122,7 @@ func TestAccountFixtures(t *testing.T) {
 	d := zsescrow.Deployment{Program: f.ProgramID, Mint: f.Context.USDCMint}
 	sizes := map[string]int{
 		"Config": zsescrow.ConfigSize, "Operator": zsescrow.OperatorSize, "Node": zsescrow.NodeSize,
-		"Ticket": zsescrow.TicketSize, "SignerIndex": zsescrow.SignerIndexSize, "RefundOwed": zsescrow.RefundOwedSize,
+		"Ticket": zsescrow.TicketSize, "RefundOwed": zsescrow.RefundOwedSize,
 		"TokenAccount": zsescrow.TokenAccountSize,
 	}
 	seen := map[string]bool{}
@@ -143,8 +143,6 @@ func TestAccountFixtures(t *testing.T) {
 				got, err = zsescrow.DecodeNode(data)
 			case "Ticket":
 				got, err = zsescrow.DecodeTicket(data)
-			case "SignerIndex":
-				got, err = zsescrow.DecodeSignerIndex(data)
 			case "RefundOwed":
 				got, err = zsescrow.DecodeRefundOwed(data)
 			case "TokenAccount":
@@ -175,9 +173,6 @@ func TestAccountFixtures(t *testing.T) {
 			case *zsescrow.Ticket:
 				id, _ := hex.DecodeString(a.SeedsHex[2])
 				want = d.Ticket(v.Node, [16]byte(id))
-			case *zsescrow.SignerIndex:
-				signing, _ := hex.DecodeString(a.SeedsHex[1])
-				want = d.SignerIndex(solana.PublicKey(signing))
 			case *zsescrow.RefundOwed:
 				want = d.RefundOwed(v.Payer)
 			case *zsescrow.TokenAccount:
@@ -411,11 +406,10 @@ func TestInstructionFixtures(t *testing.T) {
 				ix = d.CreateOperator(acct["owner"], acct["owner_usdc"], operatorID())
 			case "create_node":
 				op, n := nodeIDs()
-				ix = d.CreateNode(acct["owner"], acct["owner_usdc"], op, n, acct["signing"], args.str("base_url"))
+				ix = d.CreateNode(acct["owner"], acct["owner_usdc"], op, n, args.key("signing"), args.str("base_url"))
 			case "update_node":
 				op, n := nodeIDs()
-				old := find("old signer index", func(k solana.PublicKey) bool { return d.SignerIndex(k) == acct["old_signer_index"] })
-				ix = d.UpdateNode(acct["owner"], op, n, old, acct["new_signing"], args.str("base_url"))
+				ix = d.UpdateNode(acct["owner"], op, n, args.key("signing"), args.str("base_url"))
 			case "update_node_url":
 				op, n := nodeIDs()
 				ix = d.UpdateNodeURL(acct["authority"], op, n, args.str("base_url"))
@@ -426,8 +420,7 @@ func TestInstructionFixtures(t *testing.T) {
 				ix = d.UpdateOperator(acct["owner"], operatorID(), args.key("new_owner"), args.key("name_ref"))
 			case "unregister_node":
 				op, n := nodeIDs()
-				signing := find("signer index", func(k solana.PublicKey) bool { return d.SignerIndex(k) == acct["signer_index"] })
-				ix = d.UnregisterNode(acct["owner"], acct["owner_usdc"], op, n, signing, acct["treasury_usdc"])
+				ix = d.UnregisterNode(acct["owner"], acct["owner_usdc"], op, n, acct["treasury_usdc"])
 			case "unregister_operator":
 				ix = d.UnregisterOperator(acct["owner"], acct["owner_usdc"], operatorID())
 			case "admin_unregister_operator":

@@ -226,9 +226,10 @@ export class Deployment extends Addresses {
         )
     }
 
-    /** Adds node nextNodeId, the operator's next_node_id, and escrows the node stake from ownerUsdc. The signing key signs too, proving the owner holds it. */
+    /** Adds node nextNodeId, the operator's next_node_id, with signing as its key. The owner alone signs, as on Algorand: the node holds the key. It escrows the node stake from ownerUsdc unless the operator has no live node, whose stake the operator stake covers. */
     createNode(owner: PublicKey, ownerUsdc: PublicKey, operatorId: bigint, nextNodeId: bigint, signing: PublicKey, baseUrl: string): Instruction {
         const w = new Writer()
+        w.key(signing)
         w.vec(utf8(baseUrl))
         const d = this
         const node = d.node(operatorId, nextNodeId)
@@ -240,8 +241,6 @@ export class Deployment extends Addresses {
             writable(d.operator(operatorId)),
             writable(node),
             writable(d.vault(node)),
-            signer(signing),
-            writable(d.signerIndex(signing)),
             writable(ownerUsdc),
             writable(d.stakeVault()),
             readonly(d.mint),
@@ -250,22 +249,13 @@ export class Deployment extends Addresses {
         )
     }
 
-    /** Rotates the node's signing key, and sets its URL. */
-    updateNode(owner: PublicKey, operatorId: bigint, nodeId: bigint, oldSigning: PublicKey, newSigning: PublicKey, baseUrl: string): Instruction {
+    /** Moves the node to signing as its key, and sets its URL. The owner alone signs. No config: rotation isn't pause-gated, so a leaked key can be replaced during a registry pause. */
+    updateNode(owner: PublicKey, operatorId: bigint, nodeId: bigint, signing: PublicKey, baseUrl: string): Instruction {
         const w = new Writer()
+        w.key(signing)
         w.vec(utf8(baseUrl))
         const d = this
-        return this.ix(
-            'update_node',
-            w.done(),
-            payer(owner),
-            readonly(d.operator(operatorId)),
-            writable(d.node(operatorId, nodeId)),
-            writable(d.signerIndex(oldSigning)),
-            signer(newSigning),
-            writable(d.signerIndex(newSigning)),
-            readonly(SYSTEM_PROGRAM_ID),
-        )
+        return this.ix('update_node', w.done(), signer(owner), readonly(d.operator(operatorId)), writable(d.node(operatorId, nodeId)))
     }
 
     /** Signed by the owner or by the node's signing key. */
@@ -298,7 +288,7 @@ export class Deployment extends Addresses {
     }
 
     /** Removes a node with no live tickets, refunding its stake and payout to ownerUsdc and its unswept fee to treasuryUsdc. */
-    unregisterNode(owner: PublicKey, ownerUsdc: PublicKey, operatorId: bigint, nodeId: bigint, signing: PublicKey, treasuryUsdc: PublicKey): Instruction {
+    unregisterNode(owner: PublicKey, ownerUsdc: PublicKey, operatorId: bigint, nodeId: bigint, treasuryUsdc: PublicKey): Instruction {
         const d = this
         const node = d.node(operatorId, nodeId)
         return this.ix(
@@ -309,7 +299,6 @@ export class Deployment extends Addresses {
             writable(d.operator(operatorId)),
             writable(node),
             writable(d.vault(node)),
-            writable(d.signerIndex(signing)),
             writable(ownerUsdc),
             writable(treasuryUsdc),
             writable(d.stakeVault()),

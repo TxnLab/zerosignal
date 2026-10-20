@@ -23,7 +23,6 @@ export const VAULT_SEED = 'vault'
 export const STAKE_VAULT_SEED = 'stake'
 export const OWED_VAULT_SEED = 'owed_vault'
 export const REFUND_OWED_SEED = 'owed'
-export const SIGNER_SEED = 'signer'
 export const TICKET_SEED = 't'
 export const EVENT_AUTHORITY_SEED = '__event_authority'
 
@@ -94,10 +93,6 @@ export class Addresses {
     /** The node's USDC token account, which holds its tickets' escrow and is its own authority. */
     vault(node: PublicKey): PublicKey {
         return this.pda(utf8(VAULT_SEED), publicKeyBytes(node))[0]
-    }
-    /** Records which node holds a signing key. */
-    signerIndex(signing: PublicKey): PublicKey {
-        return this.pda(utf8(SIGNER_SEED), publicKeyBytes(signing))[0]
     }
     /** The node's ticket with this 16-byte wire ticket id. */
     ticket(node: PublicKey, ticketId: Uint8Array): PublicKey {
