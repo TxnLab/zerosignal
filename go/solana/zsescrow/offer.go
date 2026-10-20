@@ -8,9 +8,7 @@ package zsescrow
 import (
 	"bytes"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -75,27 +73,29 @@ type FoldSpec struct {
 	// payer's signature as the ack of any of its tickets the settle names.
 	TicketID [16]byte
 	Receipt  *ticket.UsageReceipt
+	// Treasury is the Config's treasury, whose USDC account the folded
+	// settle may pass for a refund the payer's account can't take. Zero
+	// accepts only a fold that passes none. Its account is accepted writable
+	// too, so the payer's signature can ack a settle that forfeits the
+	// refund: the program forfeits a refund the payer's account can't take on
+	// every ending, so refusing the fold changes only which settle does it.
+	Treasury solana.PublicKey
 }
 
 // ClaimFromReceipt is the claim a payer acks for a receipt: the values the
-// node signed, and the digest of the receipt's canonical bytes. A receipt
-// whose timings or aux count overflow the claim's u32 fields has no claim
-// the program can carry, so no settle of it can be the payer's ack.
-func ClaimFromReceipt(r *ticket.UsageReceipt) (ClaimFields, error) {
-	if r.TtftMs > math.MaxUint32 || r.DecodeMs > math.MaxUint32 || r.AuxOutputCount > math.MaxUint32 {
-		return ClaimFields{}, errors.New("zsescrow: receipt timings or aux count exceed a claim's u32 fields")
-	}
+// node signed, and the digest of the receipt's canonical bytes.
+func ClaimFromReceipt(r *ticket.UsageReceipt) ClaimFields {
 	return ClaimFields{
 		Amount:          r.AmountCharged,
 		ReceiptDigest:   ticket.ReceiptSigDigest(r),
-		TTFTMs:          uint32(r.TtftMs),
-		DecodeMs:        uint32(r.DecodeMs),
+		TTFTMs:          r.TtftMs,
+		DecodeMs:        r.DecodeMs,
 		InputUnits:      r.ActualInputCount,
 		OutputUnits:     r.ActualOutputCount,
 		OutputUsageType: uint8(r.OutputUsageType),
 		AuxUsageType:    uint8(r.AuxOutputUsageType),
-		AuxCount:        uint32(r.AuxOutputCount),
-	}, nil
+		AuxCount:        r.AuxOutputCount,
+	}
 }
 
 // The compute-budget instructions an offer may carry, by tag, with their
@@ -223,10 +223,7 @@ func verifyFold(d Deployment, ix solana.Instruction, spec OpenOfferSpec) error {
 	if want := base64.StdEncoding.EncodeToString(f.TicketID[:]); f.Receipt.TicketID != want {
 		return offerReject("fold.receipt", "the receipt names ticket %q, not the payer's %q", f.Receipt.TicketID, want)
 	}
-	claim, err := ClaimFromReceipt(f.Receipt)
-	if err != nil {
-		return offerReject("fold.receipt", "%v", err)
-	}
+	claim := ClaimFromReceipt(f.Receipt)
 	// The rent payer is whoever funded the ticket, which the program checks
 	// against the ticket itself, so the offer's own is taken. Each fallback
 	// shape is one the program may be handed for the same settle.
@@ -235,8 +232,12 @@ func verifyFold(d Deployment, ix solana.Instruction, spec OpenOfferSpec) error {
 		return offerReject("fold.accounts", "settle_cooperative names %d accounts", len(ix.Accounts))
 	}
 	e := Ending{Submitter: spec.NodeSigning, OperatorID: f.OperatorID, NodeID: f.NodeID, TicketID: f.TicketID,
-		RentPayer: ix.Accounts[rentPayerAt].PublicKey, Payer: spec.Payer}
-	for _, fb := range []RefundFallback{NoFallback, FallbackReadonly} {
+		RentPayer: ix.Accounts[rentPayerAt].PublicKey, Payer: spec.Payer, Treasury: f.Treasury}
+	fallbacks := []RefundFallback{NoFallback}
+	if !f.Treasury.IsZero() {
+		fallbacks = append(fallbacks, FallbackReadonly)
+	}
+	for _, fb := range fallbacks {
 		e.Fallback = fb
 		want := d.SettleCooperative(e, claim)
 		if sameKeys(ix.Accounts, want.Accounts) {

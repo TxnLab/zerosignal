@@ -8,8 +8,8 @@ package zsescrow_test
 // Cross-impl parity for what the program's fixtures can't show, because the
 // program never writes it: accounts and events the decoders must refuse or
 // read a particular way, instructions that only look like events, ticket
-// deadlines at their edges, and a settle built with the read-only refund
-// fallback. Generates / verifies proto/testdata/solana_zsescrow_vectors.json,
+// deadlines at their edges, and a settle built with the read-only treasury
+// account and without it. Generates / verifies proto/testdata/solana_zsescrow_vectors.json,
 // which proto/ts replays, so the two payers refuse the same data.
 //
 // To regenerate after an intentional change:
@@ -137,9 +137,16 @@ func loadFixtureFiles(t *testing.T) fixtureFiles {
 	for _, x := range e.Events {
 		f.events[x.Case] = b64(t, x.Inner.Data)
 	}
+	// The program's refund forfeited to the treasury: the settle the
+	// read-only and absent shapes are built against.
 	for _, c := range ix.Instructions {
-		if c.Case == "refund_inactive_refund_owed" {
-			f.settle = c
+		if c.Instruction != "refund_inactive" {
+			continue
+		}
+		for _, a := range c.Accounts {
+			if a.Name == "treasury_usdc" && a.IsWritable && f.settle.Case == "" {
+				f.settle = c
+			}
 		}
 	}
 	return f
@@ -163,8 +170,6 @@ func decodeAs(typ string, data []byte) (any, error) {
 		return zsescrow.DecodeNode(data)
 	case "Ticket":
 		return zsescrow.DecodeTicket(data)
-	case "RefundOwed":
-		return zsescrow.DecodeRefundOwed(data)
 	case "TokenAccount":
 		return zsescrow.DecodeTokenAccount(data)
 	}
@@ -174,15 +179,15 @@ func decodeAs(typ string, data []byte) (any, error) {
 // The offsets of the fields the cases change, read off the program's
 // layouts: the 8-byte discriminator, then the fields in order.
 const (
-	configPauseOpenAt = 8 + 5
-	nodeBaseURLLenAt  = 8 + 5
-	nodeBaseURLAt     = 8 + 8 + 3*32
-	ticketStatusAt    = 8 + 1
-	tokenDelegateAt   = 32 + 32 + 8
-	tokenStateAt      = tokenDelegateAt + 4 + 32
-	tokenIsNativeAt   = tokenStateAt + 1
-	tokenDelegatedAt  = tokenIsNativeAt + 4 + 8
-	tokenCloseAuthAt  = tokenDelegatedAt + 8
+	configPausedAt   = 8 + 5
+	nodeBaseURLLenAt = 8 + 5
+	nodeBaseURLAt    = 8 + 8 + 3*32
+	ticketStatusAt   = 8 + 1
+	tokenDelegateAt  = 32 + 32 + 8
+	tokenStateAt     = tokenDelegateAt + 4 + 32
+	tokenIsNativeAt  = tokenStateAt + 1
+	tokenDelegatedAt = tokenIsNativeAt + 4 + 8
+	tokenCloseAuthAt = tokenDelegatedAt + 8
 )
 
 func buildZsVectors(t *testing.T) zsVectors {
@@ -219,8 +224,8 @@ func buildZsVectors(t *testing.T) zsVectors {
 	refuse("config_version_2", "Config", "a later program's version", b)
 	refuse("config_short", "Config", "one byte short", config[:len(config)-1])
 	b = bytes.Clone(config)
-	b[configPauseOpenAt] = 2
-	refuse("config_pause_open_2", "Config", "a bool of 2", b)
+	b[configPausedAt] = 2
+	refuse("config_paused_2", "Config", "a bool of 2", b)
 	b = bytes.Clone(config)
 	b[0] ^= 1
 	refuse("config_wrong_discriminator", "Config", "the first discriminator byte flipped", b)
@@ -285,7 +290,7 @@ func buildZsVectors(t *testing.T) zsVectors {
 	refuseEvent("wrong_tag", "the event tag's first byte flipped", b)
 	b = bytes.Clone(settled)
 	b[len(b)-1] = 2
-	refuseEvent("settled_refund_owed_2", "a bool of 2", b)
+	refuseEvent("settled_refund_forfeited_2", "a bool of 2", b)
 	refuseEvent("settled_trailing_byte", "one byte after the fields", append(bytes.Clone(settled), 0))
 	refuseEvent("settled_short", "the last byte cut", settled[:len(settled)-1])
 	refuseEvent("tag_only", "the tag and nothing else", append([]byte{}, zsescrow.EventIxTag[:]...))
@@ -295,6 +300,16 @@ func buildZsVectors(t *testing.T) zsVectors {
 	b = bytes.Clone(evicted)
 	b[reasonAt+4] = 0xff
 	refuseEvent("evicted_reason_not_utf8", "a reason that is not UTF-8", b)
+	// TicketResolved's reason follows the ticket and node keys and a u16
+	// share; it decodes through its own call, so it needs its own row.
+	resolved := f.events["resolved"]
+	resolvedReasonAt := 16 + 32 + 32 + 2
+	if len(resolved) <= resolvedReasonAt+4 {
+		t.Fatalf("resolved event fixture has no reason byte to corrupt (%d bytes)", len(resolved))
+	}
+	b = bytes.Clone(resolved)
+	b[resolvedReasonAt+4] = 0xff
+	refuseEvent("resolved_reason_not_utf8", "a resolution reason that is not UTF-8", b)
 	b = bytes.Clone(evicted)
 	binary.LittleEndian.PutUint32(b[reasonAt:], 1<<20)
 	refuseEvent("evicted_reason_past_end", "a reason length past the data", b)
@@ -349,15 +364,15 @@ func buildZsVectors(t *testing.T) zsVectors {
 		name, builder, about string
 		fallback             zsescrow.RefundFallback
 	}{
-		{"refund_inactive_readonly_fallback", "refund_inactive", "the RefundOwed and owed vault passed read-only, as a submitter may always", zsescrow.FallbackReadonly},
-		{"refund_inactive_no_fallback", "refund_inactive", "neither passed: the program id in each slot", zsescrow.NoFallback},
+		{"refund_inactive_readonly_fallback", "refund_inactive", "the treasury's USDC account passed read-only, as a submitter may always", zsescrow.FallbackReadonly},
+		{"refund_inactive_no_fallback", "refund_inactive", "the treasury's USDC account left out: the program id in its slot", zsescrow.NoFallback},
 	} {
 		e.Fallback = c.fallback
 		ix := d.RefundInactive(e)
 		bc := buildCase{Name: c.name, About: c.about, Builder: c.builder, Data: base64.StdEncoding.EncodeToString(ix.Data), Ending: map[string]string{
 			"submitter": e.Submitter.String(), "operator_id": strconv.FormatUint(e.OperatorID, 10), "node_id": strconv.FormatUint(e.NodeID, 10),
 			"ticket_id": hex.EncodeToString(e.TicketID[:]), "rent_payer": e.RentPayer.String(), "payer": e.Payer.String(),
-			"fallback": [...]string{"none", "readonly", "writable"}[c.fallback],
+			"treasury": e.Treasury.String(), "fallback": [...]string{"none", "readonly", "writable"}[c.fallback],
 		}}
 		for _, m := range ix.Accounts {
 			bc.Metas = append(bc.Metas, buildMeta{m.PublicKey.String(), m.IsSigner, m.IsWritable})
@@ -380,8 +395,11 @@ func keys(m map[string][]byte) []string {
 	return out
 }
 
-// settleEnding is the ending the refund_inactive_refund_owed fixture sent.
+// settleEnding is the ending the program's forfeited refund_inactive sent.
 func settleEnding(t *testing.T, d zsescrow.Deployment, f fixtureFiles) zsescrow.Ending {
+	if f.settle.Case == "" {
+		t.Fatal("no refund_inactive fixture passes the treasury's USDC account writable")
+	}
 	acct := map[string]solana.PublicKey{}
 	for _, a := range f.settle.Accounts {
 		acct[a.Name] = a.Pubkey
@@ -403,8 +421,11 @@ func settleEnding(t *testing.T, d zsescrow.Deployment, f fixtureFiles) zsescrow.
 		if d.TokenAccount(k) == acct["payer_ata"] {
 			e.Payer = k
 		}
+		if d.TokenAccount(k) == acct["treasury_usdc"] {
+			e.Treasury = k
+		}
 	}
-	if e.OperatorID == 0 || e.Payer.IsZero() {
+	if e.OperatorID == 0 || e.Payer.IsZero() || e.Treasury.IsZero() {
 		t.Fatal("the settle fixture's ending is not derivable")
 	}
 	return e
@@ -475,18 +496,21 @@ func TestZsEscrowVectorsMeanWhatTheySay(t *testing.T) {
 	}
 
 	// The read-only fallback is the writable fixture's instruction with the
-	// two accounts demoted, and no fallback the program id in all three.
+	// treasury's account demoted, and no fallback the program id in its slot.
 	f := loadFixtureFiles(t)
 	for _, c := range v.Builds {
 		if !bytes.Equal(b64(t, c.Data), b64(t, f.settle.Data)) {
 			t.Errorf("%s: data differs from the fixture's", c.Name)
 		}
+		if len(c.Metas) != len(f.settle.Accounts) {
+			t.Fatalf("%s: %d accounts, the fixture %d", c.Name, len(c.Metas), len(f.settle.Accounts))
+		}
 		for i, a := range f.settle.Accounts {
 			want := buildMeta{a.Pubkey.String(), a.IsSigner, a.IsWritable}
 			switch {
-			case c.Builder == "refund_inactive" && c.Ending["fallback"] == "readonly" && (a.Name == "refund_owed" || a.Name == "owed_vault"):
+			case c.Ending["fallback"] == "readonly" && a.Name == "treasury_usdc":
 				want.IsWritable = false
-			case c.Ending["fallback"] == "none" && (a.Name == "refund_owed" || a.Name == "owed_vault" || a.Name == "system_program"):
+			case c.Ending["fallback"] == "none" && a.Name == "treasury_usdc":
 				want = buildMeta{f.program.String(), false, false}
 			}
 			if c.Metas[i] != want {

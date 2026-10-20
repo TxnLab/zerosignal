@@ -58,15 +58,18 @@ type TicketSettled struct {
 	Amount  uint64           `json:"amount"`
 	Fee     uint64           `json:"fee"`
 	Refund  uint64           `json:"refund"`
-	// RefundOwed: the refund went to the payer's RefundOwed, not its token
-	// account.
-	RefundOwed bool `json:"refund_owed"`
+	// RefundForfeited: the payer's token account couldn't take the refund,
+	// so it went to the treasury, as Algorand's payOrForfeit sends it.
+	RefundForfeited bool `json:"refund_forfeited"`
 }
 
+// TicketClaimed is a first half of a settle: the node's claim, or the
+// payer's (ByPayer).
 type TicketClaimed struct {
-	Ticket solana.PublicKey `json:"ticket"`
-	Node   solana.PublicKey `json:"node"`
-	Amount uint64           `json:"amount"`
+	Ticket  solana.PublicKey `json:"ticket"`
+	Node    solana.PublicKey `json:"node"`
+	Amount  uint64           `json:"amount"`
+	ByPayer bool             `json:"by_payer"`
 }
 
 type TicketProtested struct {
@@ -76,6 +79,26 @@ type TicketProtested struct {
 	// Amount is what the protested receipt charged, read from the bytes the
 	// node signed.
 	Amount uint64 `json:"amount"`
+}
+
+// TicketDisputed is a second half that differed from the first, which froze
+// the ticket.
+type TicketDisputed struct {
+	Ticket solana.PublicKey `json:"ticket"`
+	Node   solana.PublicKey `json:"node"`
+	// Claimed is what the first half charged; Amount is what the second
+	// half charged.
+	Claimed uint64 `json:"claimed"`
+	Amount  uint64 `json:"amount"`
+}
+
+// TicketResolved is the admin's split of a frozen ticket, beside the
+// TicketSettled that pays it, with the admin's stated reason.
+type TicketResolved struct {
+	Ticket           solana.PublicKey `json:"ticket"`
+	Node             solana.PublicKey `json:"node"`
+	OperatorShareBps uint16           `json:"operator_share_bps"`
+	Reason           string           `json:"reason"`
 }
 
 type OperatorEvicted struct {
@@ -99,8 +122,9 @@ func (d Deployment) IsEventInstruction(programID solana.PublicKey, accounts []so
 
 // ParseEvent decodes an event self-invocation's data. It returns
 // ErrNotEvent for the data of an instruction that is not an event, and
-// otherwise one of TicketSettled, TicketClaimed, TicketProtested or
-// OperatorEvicted. Check IsEventInstruction first.
+// otherwise one of TicketSettled, TicketClaimed, TicketProtested,
+// TicketDisputed, TicketResolved or OperatorEvicted. Check
+// IsEventInstruction first.
 func ParseEvent(data []byte) (any, error) {
 	if len(data) < 16 || [8]byte(data[:8]) != EventIxTag {
 		return nil, ErrNotEvent
@@ -109,18 +133,28 @@ func ParseEvent(data []byte) (any, error) {
 	var ev any
 	switch [8]byte(data[8:16]) {
 	case discriminator("event", "TicketSettled"):
-		ev = TicketSettled{Ticket: r.key(), Node: r.key(), Outcome: SettleOutcome(r.u8()), Amount: r.u64(), Fee: r.u64(), Refund: r.u64(), RefundOwed: r.bool()}
+		ev = TicketSettled{Ticket: r.key(), Node: r.key(), Outcome: SettleOutcome(r.u8()), Amount: r.u64(), Fee: r.u64(), Refund: r.u64(), RefundForfeited: r.bool()}
 	case discriminator("event", "TicketClaimed"):
-		ev = TicketClaimed{Ticket: r.key(), Node: r.key(), Amount: r.u64()}
+		ev = TicketClaimed{Ticket: r.key(), Node: r.key(), Amount: r.u64(), ByPayer: r.bool()}
 	case discriminator("event", "TicketProtested"):
 		ev = TicketProtested{Ticket: r.key(), Node: r.key(), Reason: r.u8(), Amount: r.u64()}
+	case discriminator("event", "TicketDisputed"):
+		ev = TicketDisputed{Ticket: r.key(), Node: r.key(), Claimed: r.u64(), Amount: r.u64()}
+	case discriminator("event", "TicketResolved"):
+		e := TicketResolved{Ticket: r.key(), Node: r.key(), OperatorShareBps: r.u16()}
+		reason, err := utf8String(r)
+		if err != nil {
+			return nil, err
+		}
+		e.Reason = reason
+		ev = e
 	case discriminator("event", "OperatorEvicted"):
 		e := OperatorEvicted{OperatorID: r.u64(), Slashed: r.u64()}
-		reason := r.vec()
-		if r.err == nil && !utf8.Valid(reason) {
-			return nil, fmt.Errorf("%w: reason is not UTF-8", ErrDecode)
+		reason, err := utf8String(r)
+		if err != nil {
+			return nil, err
 		}
-		e.Reason = string(reason)
+		e.Reason = reason
 		ev = e
 	default:
 		return nil, fmt.Errorf("%w: discriminator %x", ErrNotEvent, data[8:16])
@@ -132,4 +166,15 @@ func ParseEvent(data []byte) (any, error) {
 		return nil, fmt.Errorf("%w: %d trailing bytes", ErrDecode, len(data)-r.off)
 	}
 	return ev, nil
+}
+
+// utf8String reads a Borsh String. The program writes Rust Strings, so
+// anything but UTF-8 is not its event; refusing it keeps Go and TS from
+// reading two different reasons.
+func utf8String(r *reader) (string, error) {
+	b := r.vec()
+	if r.err == nil && !utf8.Valid(b) {
+		return "", fmt.Errorf("%w: reason is not UTF-8", ErrDecode)
+	}
+	return string(b), nil
 }

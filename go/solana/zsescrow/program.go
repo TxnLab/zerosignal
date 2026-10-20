@@ -30,8 +30,6 @@ const (
 	NodeSeed           = "node"
 	VaultSeed          = "vault"
 	StakeVaultSeed     = "stake"
-	OwedVaultSeed      = "owed_vault"
-	RefundOwedSeed     = "owed"
 	TicketSeed         = "t"
 	EventAuthoritySeed = "__event_authority"
 )
@@ -64,7 +62,6 @@ func u64le(v uint64) []byte { return binary.LittleEndian.AppendUint64(nil, v) }
 
 func (d Deployment) Config() solana.PublicKey     { k, _ := d.pda([]byte(ConfigSeed)); return k }
 func (d Deployment) StakeVault() solana.PublicKey { k, _ := d.pda([]byte(StakeVaultSeed)); return k }
-func (d Deployment) OwedVault() solana.PublicKey  { k, _ := d.pda([]byte(OwedVaultSeed)); return k }
 
 // EventAuthority signs the program's self-invocations that carry events.
 func (d Deployment) EventAuthority() solana.PublicKey {
@@ -98,13 +95,6 @@ func (d Deployment) Ticket(node solana.PublicKey, ticketID [16]byte) solana.Publ
 	return k
 }
 
-// RefundOwed holds what settles owe the payer but could not pay its token
-// account.
-func (d Deployment) RefundOwed(payer solana.PublicKey) solana.PublicKey {
-	k, _ := d.pda([]byte(RefundOwedSeed), payer[:])
-	return k
-}
-
 // TokenAccount is owner's associated USDC account.
 func (d Deployment) TokenAccount(owner solana.PublicKey) solana.PublicKey {
 	k, _, err := solana.AssociatedTokenAddress(owner, d.Mint)
@@ -114,12 +104,11 @@ func (d Deployment) TokenAccount(owner solana.PublicKey) solana.PublicKey {
 	return k
 }
 
-// RefundBumps are the bumps of the payer's token account and RefundOwed. A
-// settle carries them so the program derives each address once instead of
-// searching, a search whose length the payer could grind its key to stretch.
+// RefundBumps is the bump of the payer's token account. A settle carries it
+// so the program derives the address once instead of searching, a search
+// whose length the payer could grind its key to stretch.
 type RefundBumps struct {
-	PayerATA   uint8 `json:"payer_ata"`
-	RefundOwed uint8 `json:"refund_owed"`
+	PayerATA uint8 `json:"payer_ata"`
 }
 
 func (d Deployment) RefundBumps(payer solana.PublicKey) RefundBumps {
@@ -127,8 +116,7 @@ func (d Deployment) RefundBumps(payer solana.PublicKey) RefundBumps {
 	if err != nil {
 		panic("zsescrow: " + err.Error())
 	}
-	_, owed := d.pda([]byte(RefundOwedSeed), payer[:])
-	return RefundBumps{PayerATA: ata, RefundOwed: owed}
+	return RefundBumps{PayerATA: ata}
 }
 
 // discriminator is Anchor's: the first 8 bytes of sha256 of a namespaced name.

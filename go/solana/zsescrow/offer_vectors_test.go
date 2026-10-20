@@ -24,7 +24,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -42,6 +41,7 @@ type offerFold struct {
 	NodeID     string          `json:"node_id"`
 	TicketID   string          `json:"ticket_id"`
 	Receipt    json.RawMessage `json:"receipt"`
+	Treasury   string          `json:"treasury"`
 }
 
 type offerSpec struct {
@@ -127,6 +127,7 @@ type offerWorld struct {
 	decimals  uint8
 	blockhash solana.Hash
 	attacker  solana.PublicKey
+	treasury  solana.PublicKey
 	byName    map[string]txFixture
 	order     []string
 }
@@ -142,7 +143,7 @@ func loadOfferWorld(t *testing.T) offerWorld {
 	}
 	readFixture(t, "solana_tx_vectors.json", &f)
 	w := offerWorld{d: zsescrow.Deployment{Program: f.ProgramID, Mint: f.Context.USDCMint}, decimals: f.Context.Decimals,
-		attacker: f.Context.Keys["attacker"].Pubkey, byName: map[string]txFixture{}}
+		attacker: f.Context.Keys["attacker"].Pubkey, treasury: f.Context.Treasury, byName: map[string]txFixture{}}
 	for _, x := range f.Transactions {
 		if strings.HasPrefix(x.Name, "open") {
 			w.byName[x.Name] = x
@@ -185,7 +186,7 @@ func (w offerWorld) specFor(t *testing.T, base txFixture, receiptFrom *txFixture
 		if err := json.Unmarshal(receiptFrom.Receipt, &r); err != nil {
 			t.Fatal(err)
 		}
-		s.Fold = &zsescrow.FoldSpec{OperatorID: s.OperatorID, NodeID: s.NodeID, TicketID: [16]byte(mustB64(t, r.TicketID)), Receipt: &r}
+		s.Fold = &zsescrow.FoldSpec{OperatorID: s.OperatorID, NodeID: s.NodeID, TicketID: [16]byte(mustB64(t, r.TicketID)), Receipt: &r, Treasury: w.treasury}
 	}
 	return s
 }
@@ -202,7 +203,7 @@ func specJSON(t *testing.T, s zsescrow.OpenOfferSpec) offerSpec {
 			t.Fatal(err)
 		}
 		j.Fold = &offerFold{OperatorID: strconv.FormatUint(s.Fold.OperatorID, 10), NodeID: strconv.FormatUint(s.Fold.NodeID, 10),
-			TicketID: hex.EncodeToString(s.Fold.TicketID[:]), Receipt: r}
+			TicketID: hex.EncodeToString(s.Fold.TicketID[:]), Receipt: r, Treasury: s.Fold.Treasury.String()}
 	}
 	return j
 }
@@ -358,28 +359,39 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	bareOpen.Data = openIx.Data[:8]
 	built("open_discriminator_only", "open's discriminator with no arguments", "open.data", compile(node, cbLimit, cbPrice, transfer, bareOpen), spec)
 	built("claim_beside", "a claim of the payer's ticket after open", "escrow.instruction",
-		compile(node, cbLimit, cbPrice, transfer, openIx, d.Claim(node, spec.OperatorID, spec.NodeID, spec.TicketID, zsescrow.ClaimFields{Amount: 1})), spec)
+		compile(node, cbLimit, cbPrice, transfer, openIx, d.Claim(zsescrow.Ending{Submitter: node, OperatorID: spec.OperatorID, NodeID: spec.NodeID,
+			TicketID: spec.TicketID, RentPayer: node, Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
+	// An ack is the payer's half, so beside open the payer's signature would
+	// answer a claim of the node's choosing.
+	built("ack_beside", "the payer's ack of a claim, after open", "escrow.instruction",
+		compile(node, cbLimit, cbPrice, transfer, openIx, d.Ack(zsescrow.Ending{Submitter: spec.Payer, OperatorID: spec.OperatorID, NodeID: spec.NodeID,
+			TicketID: spec.TicketID, RentPayer: node, Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
 
 	foldSpec := w.specFor(t, fold, &fold)
 	foldIxs := fold.instructions(t)
 	settle := foldIxs[2]
 	built("fold_without_a_ticket", "the folded offer judged by a payer with no ticket to settle", "fold.unexpected",
 		b64(t, fold.Message), w.specFor(t, fold, nil))
-	claim, err := zsescrow.ClaimFromReceipt(foldSpec.Fold.Receipt)
-	if err != nil {
-		t.Fatal(err)
-	}
+	claim := zsescrow.ClaimFromReceipt(foldSpec.Fold.Receipt)
 	ending := zsescrow.Ending{Submitter: foldSpec.NodeSigning, OperatorID: foldSpec.OperatorID, NodeID: foldSpec.NodeID,
-		TicketID: foldSpec.Fold.TicketID, RentPayer: settle.Accounts[5].PublicKey, Payer: foldSpec.Payer}
-	for _, c := range []struct {
-		name string
-		fb   zsescrow.RefundFallback
-	}{{"fold_readonly_fallback", zsescrow.FallbackReadonly}, {"fold_writable_fallback", zsescrow.FallbackWritable}} {
+		TicketID: foldSpec.Fold.TicketID, RentPayer: settle.Accounts[5].PublicKey, Payer: foldSpec.Payer, Treasury: foldSpec.Fold.Treasury}
+	withTreasury := func(fb zsescrow.RefundFallback, treasury solana.PublicKey) []byte {
 		e := ending
-		e.Fallback = c.fb
-		ix := append(append([]solana.Instruction{}, foldIxs[:2]...), d.SettleCooperative(e, claim), foldIxs[3], foldIxs[4])
-		built(c.name, "the folded settle passing the RefundOwed fallback, which the program decides whether to use", "ok", compile(foldSpec.NodeSigning, ix...), foldSpec)
+		e.Fallback, e.Treasury = fb, treasury
+		return compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], d.SettleCooperative(e, claim), foldIxs[3], foldIxs[4])
 	}
+	built("fold_readonly_fallback", "the folded settle passing the treasury's USDC account read-only, which the program uses only for a refund the payer's account can't take", "ok",
+		withTreasury(zsescrow.FallbackReadonly, w.treasury), foldSpec)
+	built("fold_writable_fallback", "the folded settle passing the treasury's USDC account writable, accepted: the program forfeits a refund the payer's account can't take on every ending", "ok",
+		withTreasury(zsescrow.FallbackWritable, w.treasury), foldSpec)
+	built("fold_treasury_of_another", "the folded settle passing another key's USDC account where the treasury's goes", "fold.accounts",
+		withTreasury(zsescrow.FallbackReadonly, w.attacker), foldSpec)
+	noTreasury := *foldSpec.Fold
+	noTreasury.Treasury = solana.PublicKey{}
+	built("fold_treasury_unknown", "the folded settle passing the treasury's USDC account, judged by a payer that names no treasury", "fold.accounts",
+		withTreasury(zsescrow.FallbackReadonly, w.treasury), func() zsescrow.OpenOfferSpec { s := foldSpec; s.Fold = &noTreasury; return s }())
+	built("fold_default_key_fallback", "the folded settle passing the default key's USDC account as the refund fallback, judged by a payer that names no treasury", "fold.accounts",
+		withTreasury(zsescrow.FallbackReadonly, solana.PublicKey{}), func() zsescrow.OpenOfferSpec { s := foldSpec; s.Fold = &noTreasury; return s }())
 	built("fold_after_transfer", "the folded settle between the transfer and open", "instructions.shape",
 		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], foldIxs[3], settle, foldIxs[4]), foldSpec)
 	withFold := func(f func(*zsescrow.FoldSpec)) zsescrow.OpenOfferSpec {
@@ -410,27 +422,28 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	bareSettle.Data = settle.Data[:8]
 	built("fold_discriminator_only", "settle_cooperative's discriminator with no claim", "fold.data",
 		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], bareSettle, foldIxs[3], foldIxs[4]), foldSpec)
-	full := *foldSpec.Fold.Receipt
-	full.TtftMs, full.DecodeMs, full.AuxOutputCount = math.MaxUint32, math.MaxUint32, math.MaxUint32
-	fullClaim, err := zsescrow.ClaimFromReceipt(&full)
-	if err != nil {
-		t.Fatal(err)
-	}
-	built("fold_receipt_at_u32_max", "the payer's receipt has ttft, decode and aux count each the largest a claim's u32 carries", "ok",
-		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], d.SettleCooperative(ending, fullClaim), foldIxs[3], foldIxs[4]),
-		withFold(func(f *zsescrow.FoldSpec) { f.Receipt = &full }))
+	// Past 2^32 but within what a JS number holds exactly, so TS replays the
+	// receipt from JSON unchanged.
+	wide := *foldSpec.Fold.Receipt
+	wide.TtftMs, wide.DecodeMs, wide.AuxOutputCount = 1<<32, 1<<33, 1<<34
+	built("fold_receipt_past_u32", "the payer's receipt has ttft, decode and aux count each past a u32, which a claim's u64 fields carry", "ok",
+		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], d.SettleCooperative(ending, zsescrow.ClaimFromReceipt(&wide)), foldIxs[3], foldIxs[4]),
+		withFold(func(f *zsescrow.FoldSpec) { f.Receipt = &wide }))
+	// The u32 truncation of each: a claim the program would have carried
+	// before its fields widened, which no longer matches the receipt.
 	for _, c := range []struct {
 		name, field string
-		set         func(r *ticket.UsageReceipt)
+		set         func(c *zsescrow.ClaimFields)
 	}{
-		{"fold_receipt_ttft_overflows", "ttft", func(r *ticket.UsageReceipt) { r.TtftMs = 1 << 32 }},
-		{"fold_receipt_decode_overflows", "decode time", func(r *ticket.UsageReceipt) { r.DecodeMs = 1 << 32 }},
-		{"fold_receipt_aux_overflows", "aux count", func(r *ticket.UsageReceipt) { r.AuxOutputCount = 1 << 32 }},
+		{"fold_claim_ttft_truncated", "ttft", func(c *zsescrow.ClaimFields) { c.TTFTMs = uint64(uint32(c.TTFTMs)) }},
+		{"fold_claim_decode_truncated", "decode time", func(c *zsescrow.ClaimFields) { c.DecodeMs = uint64(uint32(c.DecodeMs)) }},
+		{"fold_claim_aux_truncated", "aux count", func(c *zsescrow.ClaimFields) { c.AuxCount = uint64(uint32(c.AuxCount)) }},
 	} {
-		over := *foldSpec.Fold.Receipt
-		c.set(&over)
-		built(c.name, "the payer's receipt has a "+c.field+" no claim's u32 can carry", "fold.receipt", b64(t, fold.Message),
-			withFold(func(f *zsescrow.FoldSpec) { f.Receipt = &over }))
+		cut := zsescrow.ClaimFromReceipt(&wide)
+		c.set(&cut)
+		built(c.name, "the folded claim carries the receipt's "+c.field+" cut to a u32", "fold.data",
+			compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], d.SettleCooperative(ending, cut), foldIxs[3], foldIxs[4]),
+			withFold(func(f *zsescrow.FoldSpec) { f.Receipt = &wide }))
 	}
 	return v
 }
@@ -513,20 +526,17 @@ func TestOpenOfferVectorsMeanWhatTheySay(t *testing.T) {
 			t.Errorf("%s: the receipt's canonical bytes are not the fixture's", name)
 		}
 		if name == "open_fold_settle" {
-			claim, err := zsescrow.ClaimFromReceipt(&r)
-			if err != nil {
-				t.Fatal(err)
-			}
+			claim := zsescrow.ClaimFromReceipt(&r)
 			var c struct {
 				Amount          uint64 `json:"amount,string"`
 				ReceiptDigest   string `json:"receipt_digest"`
-				TTFTMs          uint32 `json:"ttft_ms"`
-				DecodeMs        uint32 `json:"decode_ms"`
+				TTFTMs          uint64 `json:"ttft_ms,string"`
+				DecodeMs        uint64 `json:"decode_ms,string"`
 				InputUnits      uint64 `json:"input_units,string"`
 				OutputUnits     uint64 `json:"output_units,string"`
 				OutputUsageType uint8  `json:"output_usage_type"`
 				AuxUsageType    uint8  `json:"aux_usage_type"`
-				AuxCount        uint32 `json:"aux_count"`
+				AuxCount        uint64 `json:"aux_count,string"`
 			}
 			if err := json.Unmarshal(f.ClaimFields, &c); err != nil {
 				t.Fatal(err)

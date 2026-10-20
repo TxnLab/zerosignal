@@ -47,45 +47,6 @@
       "args": []
     },
     {
-      "name": "accept_arbiter",
-      "discriminator": [
-        245,
-        151,
-        183,
-        50,
-        245,
-        136,
-        54,
-        2
-      ],
-      "accounts": [
-        {
-          "name": "new_arbiter",
-          "signer": true
-        },
-        {
-          "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "ack",
       "discriminator": [
         227,
@@ -100,10 +61,6 @@
       "accounts": [
         {
           "name": "submitter",
-          "docs": [
-            "Writable because it funds a RefundOwed when the settle creates one."
-          ],
-          "writable": true,
           "signer": true
         },
         {
@@ -163,17 +120,18 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "refund_owed",
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
           "optional": true
-        },
-        {
-          "name": "owed_vault",
-          "optional": true
-        },
-        {
-          "name": "system_program",
-          "optional": true,
-          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -293,56 +251,8 @@
       ],
       "accounts": [
         {
-          "name": "node_signer",
+          "name": "submitter",
           "signer": true
-        },
-        {
-          "name": "node",
-          "relations": [
-            "ticket"
-          ]
-        },
-        {
-          "name": "ticket",
-          "writable": true
-        },
-        {
-          "name": "event_authority"
-        },
-        {
-          "name": "program"
-        }
-      ],
-      "args": [
-        {
-          "name": "fields",
-          "type": {
-            "defined": {
-              "name": "ClaimFields"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "claim_refund_owed",
-      "discriminator": [
-        79,
-        219,
-        192,
-        79,
-        118,
-        81,
-        93,
-        214
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "signer": true,
-          "relations": [
-            "refund_owed"
-          ]
         },
         {
           "name": "config",
@@ -363,44 +273,29 @@
           }
         },
         {
-          "name": "refund_owed",
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
           "writable": true
         },
         {
           "name": "rent_payer",
-          "writable": true,
-          "relations": [
-            "refund_owed"
-          ]
-        },
-        {
-          "name": "owed_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  119,
-                  101,
-                  100,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "payer_ata",
           "docs": [
-            "every refund, though the payer signs, so a payer's refunds all land",
-            "in the one account its wallet and the SDKs watch."
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
           ],
           "writable": true
         },
@@ -408,39 +303,52 @@
           "name": "usdc_mint"
         },
         {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "close_refund_owed",
-      "discriminator": [
-        90,
-        118,
-        166,
-        220,
-        153,
-        240,
-        85,
-        231
-      ],
-      "accounts": [
-        {
-          "name": "rent_payer",
-          "writable": true,
-          "signer": true,
-          "relations": [
-            "refund_owed"
-          ]
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
         },
         {
-          "name": "refund_owed",
-          "writable": true
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
+          "optional": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "fields",
+          "type": {
+            "defined": {
+              "name": "ClaimFields"
+            }
+          }
+        },
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "create_node",
@@ -915,33 +823,20 @@
           }
         },
         {
-          "name": "owed_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  119,
-                  101,
-                  100,
-                  95,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              }
-            ]
-          }
-        },
-        {
           "name": "usdc_mint"
         },
         {
-          "name": "treasury"
+          "name": "treasury",
+          "docs": [
+            "forfeited refunds."
+          ]
+        },
+        {
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which must be live and unfrozen, as",
+            "Algorand's setTreasury requires the treasury to hold unfrozen USDC."
+          ]
         },
         {
           "name": "token_program",
@@ -1117,53 +1012,6 @@
       ]
     },
     {
-      "name": "propose_arbiter",
-      "discriminator": [
-        6,
-        244,
-        39,
-        34,
-        254,
-        166,
-        166,
-        100
-      ],
-      "accounts": [
-        {
-          "name": "arbiter",
-          "signer": true,
-          "relations": [
-            "config"
-          ]
-        },
-        {
-          "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "args": [
-        {
-          "name": "new_arbiter",
-          "type": "pubkey"
-        }
-      ]
-    },
-    {
       "name": "protest",
       "discriminator": [
         16,
@@ -1243,6 +1091,16 @@
         {
           "name": "reason",
           "type": "u8"
+        },
+        {
+          "name": "pending",
+          "type": {
+            "option": {
+              "defined": {
+                "name": "ClaimFields"
+              }
+            }
+          }
         }
       ]
     },
@@ -1261,10 +1119,6 @@
       "accounts": [
         {
           "name": "submitter",
-          "docs": [
-            "Writable because it funds a RefundOwed when the settle creates one."
-          ],
-          "writable": true,
           "signer": true
         },
         {
@@ -1324,17 +1178,18 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "refund_owed",
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
           "optional": true
-        },
-        {
-          "name": "owed_vault",
-          "optional": true
-        },
-        {
-          "name": "system_program",
-          "optional": true,
-          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -1414,10 +1269,6 @@
       "accounts": [
         {
           "name": "submitter",
-          "docs": [
-            "Writable because it funds a RefundOwed when the settle creates one."
-          ],
-          "writable": true,
           "signer": true
         },
         {
@@ -1477,17 +1328,18 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "refund_owed",
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
           "optional": true
-        },
-        {
-          "name": "owed_vault",
-          "optional": true
-        },
-        {
-          "name": "system_program",
-          "optional": true,
-          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -1498,8 +1350,12 @@
       ],
       "args": [
         {
-          "name": "node_amount",
-          "type": "u64"
+          "name": "operator_share_bps",
+          "type": "u16"
+        },
+        {
+          "name": "reason",
+          "type": "string"
         },
         {
           "name": "bumps",
@@ -1554,6 +1410,14 @@
           "name": "treasury",
           "docs": [
             "who owns the account it names."
+          ],
+          "optional": true
+        },
+        {
+          "name": "treasury_usdc",
+          "docs": [
+            "The new treasury's USDC ATA, required when `args.treasury` is set,",
+            "which must be live and unfrozen."
           ],
           "optional": true
         }
@@ -1634,10 +1498,6 @@
       "accounts": [
         {
           "name": "submitter",
-          "docs": [
-            "Writable because it funds a RefundOwed when the settle creates one."
-          ],
-          "writable": true,
           "signer": true
         },
         {
@@ -1697,17 +1557,18 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "refund_owed",
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
           "optional": true
-        },
-        {
-          "name": "owed_vault",
-          "optional": true
-        },
-        {
-          "name": "system_program",
-          "optional": true,
-          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -1750,10 +1611,6 @@
       "accounts": [
         {
           "name": "submitter",
-          "docs": [
-            "Writable because it funds a RefundOwed when the settle creates one."
-          ],
-          "writable": true,
           "signer": true
         },
         {
@@ -1813,17 +1670,18 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "refund_owed",
+          "name": "treasury_usdc",
+          "docs": [
+            "The treasury's USDC ATA, which takes a refund the payer's ATA can't.",
+            "Optional, so the common settle carries no extra key, and never",
+            "required writable here: it is one account for the whole protocol, and",
+            "a write lock on it in every settle would serialize them all. The",
+            "submitter reads the payer's ATA first and marks it writable only when",
+            "the ATA can't take the refund; it may always pass it read-only, and",
+            "resend it writable on TreasuryAccountNotWritable if the ATA changed in",
+            "between."
+          ],
           "optional": true
-        },
-        {
-          "name": "owed_vault",
-          "optional": true
-        },
-        {
-          "name": "system_program",
-          "optional": true,
-          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -2087,6 +1945,24 @@
           ]
         },
         {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "operator"
         },
         {
@@ -2317,19 +2193,6 @@
       ]
     },
     {
-      "name": "RefundOwed",
-      "discriminator": [
-        113,
-        86,
-        113,
-        57,
-        29,
-        130,
-        249,
-        147
-      ]
-    },
-    {
       "name": "Ticket",
       "discriminator": [
         41,
@@ -2371,6 +2234,19 @@
       ]
     },
     {
+      "name": "TicketDisputed",
+      "discriminator": [
+        219,
+        185,
+        130,
+        60,
+        90,
+        13,
+        110,
+        11
+      ]
+    },
+    {
       "name": "TicketProtested",
       "discriminator": [
         140,
@@ -2381,6 +2257,19 @@
         173,
         167,
         108
+      ]
+    },
+    {
+      "name": "TicketResolved",
+      "discriminator": [
+        137,
+        12,
+        78,
+        127,
+        254,
+        80,
+        58,
+        98
       ]
     },
     {
@@ -2400,8 +2289,8 @@
   "errors": [
     {
       "code": 6000,
-      "name": "OpenPaused",
-      "msg": "Opening tickets is paused"
+      "name": "Paused",
+      "msg": "The protocol is paused: no opens or registry changes"
     },
     {
       "code": 6001,
@@ -2495,8 +2384,8 @@
     },
     {
       "code": 6019,
-      "name": "ClaimWindowClosed",
-      "msg": "Claims close at expires_at; grace is the payer's window to answer"
+      "name": "SameSideMismatch",
+      "msg": "This side already posted its half, with other fields"
     },
     {
       "code": 6020,
@@ -2510,185 +2399,167 @@
     },
     {
       "code": 6022,
-      "name": "RegistryPaused",
-      "msg": "Registration is paused"
-    },
-    {
-      "code": 6023,
       "name": "OperatorInactive",
       "msg": "Operator is not active"
     },
     {
-      "code": 6024,
+      "code": 6023,
       "name": "WrongOperator",
       "msg": "Node does not belong to this operator"
     },
     {
-      "code": 6025,
+      "code": 6024,
       "name": "NotOperatorOwner",
       "msg": "Signer is not the operator's owner"
     },
     {
-      "code": 6026,
+      "code": 6025,
       "name": "BaseUrlTooLong",
       "msg": "Base URL exceeds the maximum length"
     },
     {
-      "code": 6027,
+      "code": 6026,
       "name": "WrongPayerAccount",
       "msg": "The refund account is not the payer's associated token account"
     },
     {
+      "code": 6027,
+      "name": "TreasuryAccountMissing",
+      "msg": "The payer's token account cannot take the refund; pass the treasury's USDC account to forfeit it to"
+    },
+    {
       "code": 6028,
-      "name": "RefundOwedMissing",
-      "msg": "The payer's token account cannot take the refund; pass the RefundOwed, owed-vault and system program accounts"
+      "name": "TreasuryAccountNotWritable",
+      "msg": "The payer's token account cannot take the refund; resend with the treasury's USDC account writable"
     },
     {
       "code": 6029,
-      "name": "RefundOwedNotWritable",
-      "msg": "The payer's token account cannot take the refund; resend with the RefundOwed and owed-vault accounts writable"
-    },
-    {
-      "code": 6030,
-      "name": "WrongRefundOwed",
-      "msg": "Wrong RefundOwed account for this payer"
-    },
-    {
-      "code": 6031,
-      "name": "WrongOwedVault",
-      "msg": "Wrong owed vault"
-    },
-    {
-      "code": 6032,
-      "name": "NotRentPayer",
-      "msg": "Signer is not the account's rent payer"
-    },
-    {
-      "code": 6033,
-      "name": "RefundStillOwed",
-      "msg": "A refund is still owed on this account"
-    },
-    {
-      "code": 6034,
       "name": "NotAdmin",
       "msg": "Signer is not the config admin"
     },
     {
-      "code": 6035,
+      "code": 6030,
       "name": "NotOwnerOrSigner",
       "msg": "Signer is neither the operator's owner nor the node's signing key"
     },
     {
-      "code": 6036,
+      "code": 6031,
       "name": "OperatorNotEvicted",
       "msg": "Operator is not evicted"
     },
     {
-      "code": 6037,
+      "code": 6032,
       "name": "OperatorHasNodes",
       "msg": "Operator still has nodes; unregister them first"
     },
     {
-      "code": 6038,
+      "code": 6033,
       "name": "NodeHasLiveTickets",
       "msg": "Node still has live tickets"
     },
     {
-      "code": 6039,
+      "code": 6034,
       "name": "NameNotOwned",
       "msg": "Name account is not a name-service record the signer owns"
     },
     {
-      "code": 6040,
+      "code": 6035,
       "name": "SlashOverMax",
       "msg": "slash_bps exceeds 100%"
     },
     {
-      "code": 6041,
+      "code": 6036,
       "name": "BadTreasury",
       "msg": "Treasury must be a passed account outside this program and its vaults"
     },
     {
-      "code": 6042,
+      "code": 6037,
       "name": "NoPendingAdmin",
       "msg": "No admin transfer is pending"
     },
     {
-      "code": 6043,
+      "code": 6038,
       "name": "NotPendingAdmin",
       "msg": "Signer is not the pending admin"
     },
     {
-      "code": 6044,
+      "code": 6039,
       "name": "ReasonTooLong",
-      "msg": "Eviction reason exceeds 1024 bytes"
+      "msg": "Reason exceeds 1024 bytes"
     },
     {
-      "code": 6045,
+      "code": 6040,
       "name": "UsageTypeOutOfRange",
       "msg": "A claim's usage type is outside the output-units vector"
     },
     {
-      "code": 6046,
+      "code": 6041,
       "name": "NotPayer",
       "msg": "Signer is not the ticket's payer"
     },
     {
-      "code": 6047,
+      "code": 6042,
       "name": "ProtestReasonRequired",
       "msg": "A protest must name a reason"
     },
     {
-      "code": 6048,
+      "code": 6043,
       "name": "ReceiptMalformed",
       "msg": "The receipt is not a well-formed deployment-bound usage receipt"
     },
     {
-      "code": 6049,
+      "code": 6044,
       "name": "ReceiptNotForTicket",
       "msg": "The receipt names another ticket or deployment"
     },
     {
-      "code": 6050,
+      "code": 6045,
       "name": "BadReceiptSignature",
       "msg": "The instruction before protest is not a well-formed Ed25519 verification of the node's receipt"
     },
     {
-      "code": 6051,
-      "name": "NotArbiter",
-      "msg": "Signer is not the config arbiter"
-    },
-    {
-      "code": 6052,
+      "code": 6046,
       "name": "NothingToPay",
-      "msg": "Nothing is accrued or owed here"
+      "msg": "Nothing is accrued here"
     },
     {
-      "code": 6053,
+      "code": 6047,
       "name": "WrongDestination",
       "msg": "The destination is not the recipient's associated token account"
     },
     {
-      "code": 6054,
-      "name": "NoPendingArbiter",
-      "msg": "No arbiter transfer is pending"
+      "code": 6048,
+      "name": "ShareOverMax",
+      "msg": "operator_share_bps exceeds 100%"
     },
     {
-      "code": 6055,
-      "name": "NotPendingArbiter",
-      "msg": "Signer is not the pending arbiter"
+      "code": 6049,
+      "name": "TreasuryCannotReceive",
+      "msg": "The treasury's USDC ATA must be passed, initialized, unfrozen, of the config mint and owned by the treasury"
     },
     {
-      "code": 6056,
-      "name": "NoArbiter",
-      "msg": "An arbiter is required"
+      "code": 6050,
+      "name": "TreasuryAccountUninitialized",
+      "msg": "The treasury's USDC ATA does not exist; create it (CreateIdempotent) and resend"
+    },
+    {
+      "code": 6051,
+      "name": "PendingClaimRequired",
+      "msg": "The ticket has a pending half; pass its claim fields"
+    },
+    {
+      "code": 6052,
+      "name": "ReceiptNotPending",
+      "msg": "The receipt is not the one the pending half names"
     }
   ],
   "types": [
     {
       "name": "ClaimFields",
       "docs": [
-        "What the node claims for a ticket; the payer's ack signs its hash."
+        "What the node claims for a ticket; the payer's ack signs its hash. Every",
+        "count is a u64, as Algorand's settle arguments and the receipt's fields",
+        "are, so any receipt a node signs folds into a claim."
       ],
       "type": {
         "kind": "struct",
@@ -2708,11 +2579,11 @@
           },
           {
             "name": "ttft_ms",
-            "type": "u32"
+            "type": "u64"
           },
           {
             "name": "decode_ms",
-            "type": "u32"
+            "type": "u64"
           },
           {
             "name": "input_units",
@@ -2732,7 +2603,7 @@
           },
           {
             "name": "aux_count",
-            "type": "u32"
+            "type": "u64"
           }
         ]
       }
@@ -2755,7 +2626,15 @@
             "type": "u8"
           },
           {
-            "name": "owed_vault_bump",
+            "name": "_retired_owed_vault_bump",
+            "docs": [
+              "Retired with the owed vault: an undeliverable refund now goes to the",
+              "treasury, as on Algorand. Retired fields keep their bytes so every",
+              "later offset stays put on the clusters that already hold a Config.",
+              "Those Configs still hold the old values (devnet and testnet have this",
+              "bump and an arbiter set), so set_config zeroes every retired field",
+              "and a field later carved from them starts from zero."
+            ],
             "type": "u8"
           },
           {
@@ -2763,16 +2642,19 @@
             "type": "u8"
           },
           {
-            "name": "pause_open",
+            "name": "paused",
+            "docs": [
+              "Algorand's `paused`: stops `open` and every registry write (creating",
+              "and updating operators and nodes, a node's URL and staging). It never",
+              "gates settles, unregisters or the admin's levers, so a pause never",
+              "strands escrow or stake."
+            ],
             "type": "bool"
           },
           {
-            "name": "pause_registry",
+            "name": "_retired_pause_registry",
             "docs": [
-              "Gates creating operators and nodes and the owner's or node's updates,",
-              "except the two that pull a node whose hot key leaked: key rotation and",
-              "the owner's staging flag. It never gates settles, unregisters or the",
-              "admin's levers, so a registry pause never strands escrow or stake."
+              "Retired: one flag gates what Algorand's one flag gates."
             ],
             "type": "bool"
           },
@@ -2818,15 +2700,15 @@
           },
           {
             "name": "admin",
+            "docs": [
+              "Also resolves frozen tickets, as Algorand's admin does."
+            ],
             "type": "pubkey"
           },
           {
-            "name": "arbiter",
+            "name": "_retired_arbiter",
             "docs": [
-              "Splits frozen tickets; kept apart from admin so the two can be",
-              "different multisigs. Set at initialize and never default; only the",
-              "arbiter names its successor, so a compromised admin can't seat itself",
-              "and award disputed escrow."
+              "Retired with the separate arbiter seat."
             ],
             "type": "pubkey"
           },
@@ -2874,11 +2756,9 @@
             "type": "u32"
           },
           {
-            "name": "pending_arbiter",
+            "name": "_retired_pending_arbiter",
             "docs": [
-              "As pending_admin, for the arbiter seat. Appended, which grew Config,",
-              "only because no Config existed on any cluster yet; once one does, a",
-              "new field must come from the reserve, sized to hold two keys."
+              "Retired with the separate arbiter seat."
             ],
             "type": "pubkey"
           },
@@ -2907,10 +2787,6 @@
                 32
               ]
             }
-          },
-          {
-            "name": "arbiter",
-            "type": "pubkey"
           },
           {
             "name": "fee_bps",
@@ -3157,11 +3033,38 @@
             "type": "u64"
           },
           {
+            "name": "frozen_dispute_count",
+            "docs": [
+              "Tickets frozen by differing settle halves, whichever side posted",
+              "first, and Σ the amount the pending half named: Algorand's ticketsFrozenDispute and",
+              "totalFrozenDisputeUsdc. Carved from the head of the reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "frozen_dispute_total",
+            "type": "u64"
+          },
+          {
+            "name": "resolved_count",
+            "docs": [
+              "Frozen tickets the admin's resolve_frozen ended, whatever the split,",
+              "and Σ the node's award (before the fee): Algorand's",
+              "ticketsResolvedAdmin and totalResolvedUsdc. Carved from the head of",
+              "the reserve."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "resolved_total",
+            "type": "u64"
+          },
+          {
             "name": "_reserve",
             "type": {
               "array": [
                 "u8",
-                48
+                16
               ]
             }
           }
@@ -3286,10 +3189,10 @@
     {
       "name": "RefundBumps",
       "docs": [
-        "Bumps of the payer's ATA and RefundOwed, computed off chain by whoever",
-        "submits a settle. The program then derives each address once instead of",
-        "searching for it, and a search's length depends on the payer's key, which",
-        "the payer can grind to push a node's settle past its compute limit."
+        "The bump of the payer's ATA, computed off chain by whoever submits a",
+        "settle. The program then derives the address once instead of searching",
+        "for it, and a search's length depends on the payer's key, which the payer",
+        "can grind to push a node's settle past its compute limit."
       ],
       "type": {
         "kind": "struct",
@@ -3297,60 +3200,6 @@
           {
             "name": "payer_ata",
             "type": "u8"
-          },
-          {
-            "name": "refund_owed",
-            "docs": [
-              "Read only when the settle creates the payer's RefundOwed; an existing",
-              "record's own bump is used otherwise."
-            ],
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RefundOwed",
-      "docs": [
-        "A payer's refunds that settles could not push to its token account (closed",
-        "or frozen). The USDC itself is in the owed vault."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          },
-          {
-            "name": "payer",
-            "type": "pubkey"
-          },
-          {
-            "name": "rent_payer",
-            "docs": [
-              "Whoever's settle created this account. Closing it returns the rent",
-              "there; were it the payer, a payer could keep its token account closed",
-              "and collect the rent of every RefundOwed a settle creates for it."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "_reserve",
-            "type": {
-              "array": [
-                "u8",
-                16
-              ]
-            }
           }
         ]
       }
@@ -3360,20 +3209,13 @@
       "docs": [
         "Each field left `None` keeps its current value. Stakes apply to later",
         "registrations only, and fee and grace to later opens: a ticket keeps the",
-        "fee_bps and grace it opened with, and a stake is refunded as paid. The",
-        "arbiter is not here: it moves only by propose_arbiter and accept_arbiter."
+        "fee_bps and grace it opened with, and a stake is refunded as paid."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "pause_open",
-            "type": {
-              "option": "bool"
-            }
-          },
-          {
-            "name": "pause_registry",
+            "name": "paused",
             "type": {
               "option": "bool"
             }
@@ -3523,10 +3365,10 @@
             "docs": [
               "The node's signing key at open, which signs this ticket's receipt.",
               "Settles check the node's current key instead, so a rotation retires a",
-              "leaked one. A protest must check the receipt against this snapshot, as",
-              "Algorand's protest checks its ticket's nodeSigning: against the",
-              "current key, a rotation would void every protest of a receipt the old",
-              "key signed."
+              "leaked one at once (both rails, decided 2026-10-20). A protest must",
+              "check the receipt against this snapshot, as Algorand's protest checks",
+              "its ticket's nodeSigning: against the current key, a rotation would",
+              "void every protest of a receipt the old key signed."
             ],
             "type": "pubkey"
           },
@@ -3541,7 +3383,8 @@
           {
             "name": "claim_hash",
             "docs": [
-              "sha256 of the claim fields; settle_lapsed callers resupply them."
+              "sha256 of the first half's claim fields; the other side's half, and",
+              "settle_lapsed, resupply them."
             ],
             "type": {
               "array": [
@@ -3549,6 +3392,19 @@
                 32
               ]
             }
+          },
+          {
+            "name": "frozen_at",
+            "docs": [
+              "When the ticket froze, and which path froze it (FREEZE_ORIGIN_*):",
+              "Algorand's frozenAt and freezeOrigin, for whoever resolves it. Zero",
+              "unless Frozen. Carved from the head of the reserve."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "freeze_origin",
+            "type": "u8"
           },
           {
             "name": "_reserve",
@@ -3561,7 +3417,7 @@
             "type": {
               "array": [
                 "u8",
-                16
+                7
               ]
             }
           }
@@ -3571,7 +3427,7 @@
     {
       "name": "TicketClaimed",
       "docs": [
-        "Carries no payer and no model; the ticket address names the claim."
+        "A first half: the node's claim, or the payer's."
       ],
       "type": {
         "kind": "struct",
@@ -3586,6 +3442,43 @@
           },
           {
             "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "by_payer",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketDisputed",
+      "docs": [
+        "A second half that differed from the first, which froze the ticket."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimed",
+            "docs": [
+              "What the first half charged."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "What the second half charged."
+            ],
             "type": "u64"
           }
         ]
@@ -3618,6 +3511,34 @@
               "signed; on Algorand the payer asserts it beside the digest."
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketResolved",
+      "docs": [
+        "The admin's split of a frozen ticket, with its stated cause, as Algorand",
+        "keeps the reason as resolveFrozen's argument and on its payouts' notes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "operator_share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "reason",
+            "type": "string"
           }
         ]
       }
@@ -3661,9 +3582,9 @@
             "type": "u64"
           },
           {
-            "name": "refund_owed",
+            "name": "refund_forfeited",
             "docs": [
-              "The refund went to the payer's RefundOwed, not its token account."
+              "The payer's ATA couldn't take the refund, so it went to the treasury."
             ],
             "type": "bool"
           }
@@ -3674,7 +3595,8 @@
       "name": "TicketStatus",
       "docs": [
         "One enum rather than a status plus a separate \"pending by\" field, so an",
-        "open ticket cannot also name a claimant."
+        "open ticket cannot also name a claimant. Variants are appended, never",
+        "reordered: the account stores the index."
       ],
       "type": {
         "kind": "enum",
@@ -3687,6 +3609,9 @@
           },
           {
             "name": "Frozen"
+          },
+          {
+            "name": "PendingByPayer"
           }
         ]
       }
@@ -3707,21 +3632,6 @@
       "name": "OPERATOR_SEED",
       "type": "bytes",
       "value": "[111, 112]"
-    },
-    {
-      "name": "OWED_VAULT_SEED",
-      "docs": [
-        "Refunds that could not be pushed to the payer at settle time move here,",
-        "out of the node's vault, so the node can still sweep and unregister while",
-        "the payer has not claimed. Like the stake vault, it is its own authority."
-      ],
-      "type": "bytes",
-      "value": "[111, 119, 101, 100, 95, 118, 97, 117, 108, 116]"
-    },
-    {
-      "name": "REFUND_OWED_SEED",
-      "type": "bytes",
-      "value": "[111, 119, 101, 100]"
     },
     {
       "name": "STAKE_VAULT_SEED",

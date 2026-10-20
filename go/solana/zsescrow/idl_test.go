@@ -58,15 +58,15 @@ func TestIDLDiscriminators(t *testing.T) {
 			t.Errorf("account %s: %x, IDL %x", e.Name, got, e.Discriminator)
 		}
 	}
-	if len(idl.Accounts) != 5 {
-		t.Errorf("the IDL has %d account types; the decoders read 5", len(idl.Accounts))
+	if len(idl.Accounts) != 4 {
+		t.Errorf("the IDL has %d account types; the decoders read 4", len(idl.Accounts))
 	}
 	for _, e := range idl.Events {
 		if got := zsescrow.Discriminator("event", e.Name); string(got[:]) != string(e.Discriminator) {
 			t.Errorf("event %s: %x, IDL %x", e.Name, got, e.Discriminator)
 		}
 	}
-	if len(idl.Events) != 4 {
-		t.Errorf("the IDL has %d events; ParseEvent reads 4", len(idl.Events))
+	if len(idl.Events) != 6 {
+		t.Errorf("the IDL has %d events; ParseEvent reads 6", len(idl.Events))
 	}
 }

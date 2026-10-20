@@ -40,37 +40,41 @@ func accountReader(name string, data []byte, size int) (*reader, error) {
 }
 
 const (
-	ConfigSize     = 349
-	OperatorSize   = 171
-	NodeSize       = 880
-	TicketSize     = 233
-	RefundOwedSize = 98
+	ConfigSize   = 349
+	OperatorSize = 171
+	NodeSize     = 880
+	TicketSize   = 233
 )
 
+// Config's Retired fields are the program's: retired with the owed vault,
+// the separate registry pause and the arbiter seat, but kept in the layout so
+// every later offset stays put on the clusters that already hold a Config.
+// A Config initialized before their retirement holds values there until the
+// admin's next set_config, which zeroes them; nothing reads them.
 type Config struct {
-	Version           uint8            `json:"version"`
-	Bump              uint8            `json:"bump"`
-	StakeVaultBump    uint8            `json:"stake_vault_bump"`
-	OwedVaultBump     uint8            `json:"owed_vault_bump"`
-	USDCDecimals      uint8            `json:"usdc_decimals"`
-	PauseOpen         bool             `json:"pause_open"`
-	PauseRegistry     bool             `json:"pause_registry"`
-	FeeBps            uint16           `json:"fee_bps"`
-	MaxGrace          uint32           `json:"max_grace"`
-	DefaultGrace      uint32           `json:"default_grace"`
-	MaxTicketLifetime int64            `json:"max_ticket_lifetime"`
-	OperatorStake     uint64           `json:"operator_stake"`
-	NodeStake         uint64           `json:"node_stake"`
-	NextOperatorID    uint64           `json:"next_operator_id"`
-	Admin             solana.PublicKey `json:"admin"`
-	Arbiter           solana.PublicKey `json:"arbiter"`
-	USDCMint          solana.PublicKey `json:"usdc_mint"`
-	Treasury          solana.PublicKey `json:"treasury"`
-	GenesisHash       solana.Hash      `json:"genesis_hash"`
-	PendingAdmin      solana.PublicKey `json:"pending_admin"`
-	MinGrace          uint32           `json:"min_grace"`
-	PendingArbiter    solana.PublicKey `json:"pending_arbiter"`
-	Reserve           [64]byte         `json:"_reserve"`
+	Version               uint8            `json:"version"`
+	Bump                  uint8            `json:"bump"`
+	StakeVaultBump        uint8            `json:"stake_vault_bump"`
+	RetiredOwedVaultBump  uint8            `json:"_retired_owed_vault_bump"`
+	USDCDecimals          uint8            `json:"usdc_decimals"`
+	Paused                bool             `json:"paused"`
+	RetiredPauseRegistry  bool             `json:"_retired_pause_registry"`
+	FeeBps                uint16           `json:"fee_bps"`
+	MaxGrace              uint32           `json:"max_grace"`
+	DefaultGrace          uint32           `json:"default_grace"`
+	MaxTicketLifetime     int64            `json:"max_ticket_lifetime"`
+	OperatorStake         uint64           `json:"operator_stake"`
+	NodeStake             uint64           `json:"node_stake"`
+	NextOperatorID        uint64           `json:"next_operator_id"`
+	Admin                 solana.PublicKey `json:"admin"`
+	RetiredArbiter        solana.PublicKey `json:"_retired_arbiter"`
+	USDCMint              solana.PublicKey `json:"usdc_mint"`
+	Treasury              solana.PublicKey `json:"treasury"`
+	GenesisHash           solana.Hash      `json:"genesis_hash"`
+	PendingAdmin          solana.PublicKey `json:"pending_admin"`
+	MinGrace              uint32           `json:"min_grace"`
+	RetiredPendingArbiter solana.PublicKey `json:"_retired_pending_arbiter"`
+	Reserve               [64]byte         `json:"_reserve"`
 }
 
 func DecodeConfig(data []byte) (*Config, error) {
@@ -79,16 +83,16 @@ func DecodeConfig(data []byte) (*Config, error) {
 		return nil, err
 	}
 	c := &Config{
-		Version: r.u8(), Bump: r.u8(), StakeVaultBump: r.u8(), OwedVaultBump: r.u8(), USDCDecimals: r.u8(),
-		PauseOpen: r.bool(), PauseRegistry: r.bool(),
+		Version: r.u8(), Bump: r.u8(), StakeVaultBump: r.u8(), RetiredOwedVaultBump: r.u8(), USDCDecimals: r.u8(),
+		Paused: r.bool(), RetiredPauseRegistry: r.bool(),
 		FeeBps: r.u16(), MaxGrace: r.u32(), DefaultGrace: r.u32(), MaxTicketLifetime: r.i64(),
 		OperatorStake: r.u64(), NodeStake: r.u64(), NextOperatorID: r.u64(),
-		Admin: r.key(), Arbiter: r.key(), USDCMint: r.key(), Treasury: r.key(),
+		Admin: r.key(), RetiredArbiter: r.key(), USDCMint: r.key(), Treasury: r.key(),
 	}
 	r.array(c.GenesisHash[:])
 	c.PendingAdmin = r.key()
 	c.MinGrace = r.u32()
-	c.PendingArbiter = r.key()
+	c.RetiredPendingArbiter = r.key()
 	r.array(c.Reserve[:])
 	return c, r.err
 }
@@ -186,7 +190,17 @@ type Node struct {
 	RingRevenue     [RingDays]uint64       `json:"ring_revenue"`
 	ProtestedCount  uint64                 `json:"protested_count"`
 	ProtestedTotal  uint64                 `json:"protested_total"`
-	Reserve         [48]byte               `json:"_reserve"`
+	// FrozenDisputeCount and FrozenDisputeTotal are Algorand's
+	// ticketsFrozenDispute and totalFrozenDisputeUsdc: the tickets whose two
+	// settle halves differed, and Σ what each first half charged.
+	FrozenDisputeCount uint64 `json:"frozen_dispute_count"`
+	FrozenDisputeTotal uint64 `json:"frozen_dispute_total"`
+	// ResolvedCount and ResolvedTotal are Algorand's ticketsResolvedAdmin and
+	// totalResolvedUsdc: the frozen tickets the admin resolved, and Σ the
+	// node's award before its fee.
+	ResolvedCount uint64   `json:"resolved_count"`
+	ResolvedTotal uint64   `json:"resolved_total"`
+	Reserve       [16]byte `json:"_reserve"`
 }
 
 func DecodeNode(data []byte) (*Node, error) {
@@ -221,20 +235,28 @@ func DecodeNode(data []byte) (*Node, error) {
 		n.RingRevenue[i] = r.u64()
 	}
 	n.ProtestedCount, n.ProtestedTotal = r.u64(), r.u64()
+	n.FrozenDisputeCount, n.FrozenDisputeTotal = r.u64(), r.u64()
+	n.ResolvedCount, n.ResolvedTotal = r.u64(), r.u64()
 	r.array(n.Reserve[:])
 	return n, r.err
 }
 
 // TicketStatus keeps an unknown variant's byte rather than failing, as
-// OperatorStatus does.
+// OperatorStatus does. The program appends variants and never reorders them,
+// so a value's meaning never changes under a reader.
 type TicketStatus uint8
 
 const (
 	TicketOpen TicketStatus = iota
-	// TicketPendingByOperator: the node filed a claim the payer has not acked.
+	// TicketPendingByOperator: the node posted the first half; it lapses to
+	// the node at the deadline unless the payer answers.
 	TicketPendingByOperator
-	// TicketFrozen: the payer protested; only the arbiter ends it.
+	// TicketFrozen: the two halves differed, or the payer protested; only
+	// the admin's resolve_frozen ends it.
 	TicketFrozen
+	// TicketPendingByPayer: the payer posted the first half; refund_inactive
+	// refunds it in full at the deadline unless the node answers.
+	TicketPendingByPayer
 )
 
 func (s TicketStatus) String() string {
@@ -245,9 +267,18 @@ func (s TicketStatus) String() string {
 		return "PendingByOperator"
 	case TicketFrozen:
 		return "Frozen"
+	case TicketPendingByPayer:
+		return "PendingByPayer"
 	}
 	return "TicketStatus(" + strconv.Itoa(int(s)) + ")"
 }
+
+// Which path froze a ticket, as Algorand's freezeOrigin. Zero unless the
+// ticket is Frozen.
+const (
+	FreezeOriginSettleMismatch uint8 = 1
+	FreezeOriginProtest        uint8 = 2
+)
 
 type Ticket struct {
 	Version       uint8            `json:"version"`
@@ -266,12 +297,18 @@ type Ticket struct {
 	// receipt; a protest checks the receipt against it, not the current key.
 	NodeSigning solana.PublicKey `json:"node_signing"`
 	RentPayer   solana.PublicKey `json:"rent_payer"`
-	ClaimHash   [32]byte         `json:"claim_hash"`
-	Reserve     [16]byte         `json:"_reserve"`
+	// ClaimHash is the first half's; the other side's half, and
+	// settle_lapsed, resupply its fields.
+	ClaimHash [32]byte `json:"claim_hash"`
+	// FrozenAt and FreezeOrigin (FreezeOrigin*) are Algorand's frozenAt and
+	// freezeOrigin, for whoever resolves the ticket.
+	FrozenAt     int64   `json:"frozen_at"`
+	FreezeOrigin uint8   `json:"freeze_origin"`
+	Reserve      [7]byte `json:"_reserve"`
 }
 
-// Deadline is the last moment a cooperative settle is accepted; settle_lapsed
-// and refund_inactive open after it.
+// Deadline is the last moment either half, a cooperative settle or a protest
+// is accepted; settle_lapsed and refund_inactive open after it.
 func (t *Ticket) Deadline() int64 {
 	d := t.ExpiresAt + int64(t.Grace)
 	if d < t.ExpiresAt {
@@ -291,27 +328,9 @@ func DecodeTicket(data []byte) (*Ticket, error) {
 		Payer: r.key(), Node: r.key(), NodeSigning: r.key(), RentPayer: r.key(),
 	}
 	r.array(t.ClaimHash[:])
+	t.FrozenAt, t.FreezeOrigin = r.i64(), r.u8()
 	r.array(t.Reserve[:])
 	return t, r.err
-}
-
-type RefundOwed struct {
-	Version   uint8            `json:"version"`
-	Bump      uint8            `json:"bump"`
-	Amount    uint64           `json:"amount"`
-	Payer     solana.PublicKey `json:"payer"`
-	RentPayer solana.PublicKey `json:"rent_payer"`
-	Reserve   [16]byte         `json:"_reserve"`
-}
-
-func DecodeRefundOwed(data []byte) (*RefundOwed, error) {
-	r, err := accountReader("RefundOwed", data, RefundOwedSize)
-	if err != nil {
-		return nil, err
-	}
-	o := &RefundOwed{Version: r.u8(), Bump: r.u8(), Amount: r.u64(), Payer: r.key(), RentPayer: r.key()}
-	r.array(o.Reserve[:])
-	return o, r.err
 }
 
 // TokenAccountSize is an SPL token account's length.

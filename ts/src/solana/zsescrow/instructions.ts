@@ -9,22 +9,23 @@
 // order (the IDL's); an optional account the caller leaves out is the program
 // id, read-only, which is how Anchor reads None.
 
+import { sha256 } from '@noble/hashes/sha2.js'
+
 import { BPF_LOADER_UPGRADEABLE_PROGRAM_ID, SYSTEM_PROGRAM_ID, SYSVAR_INSTRUCTIONS_ID, TOKEN_PROGRAM_ID, type Hash, type PublicKey, decodeBase58, publicKeyBytes } from '../key.js'
 import type { AccountMeta, Instruction } from '../message.js'
 import { findProgramAddress } from '../pda.js'
 import { utf8 } from '../../util/bytes.js'
 import { Writer } from './borsh.js'
-import { Addresses, discriminator } from './program.js'
+import { Addresses, discriminator, u64le } from './program.js'
 
 const writable = (k: PublicKey): AccountMeta => ({ publicKey: k, isSigner: false, isWritable: true })
 const readonly = (k: PublicKey): AccountMeta => ({ publicKey: k, isSigner: false, isWritable: false })
 const signer = (k: PublicKey): AccountMeta => ({ publicKey: k, isSigner: true, isWritable: false })
 const payer = (k: PublicKey): AccountMeta => ({ publicKey: k, isSigner: true, isWritable: true })
 
-/** The terms initialize sets. arbiter must not be the default key, and only the arbiter can name its successor. */
+/** The terms initialize sets. */
 export interface InitializeArgs {
     genesisHash: Hash
-    arbiter: PublicKey
     feeBps: number
     maxGrace: number
     defaultGrace: number
@@ -34,10 +35,13 @@ export interface InitializeArgs {
     nodeStake: bigint
 }
 
-/** Changes the fields that are set and leaves the rest. */
+/**
+ * Changes the fields that are set and leaves the rest. paused stops open and
+ * every registry write, as Algorand's paused does; settles, unregisters and
+ * the admin's levers run through a pause.
+ */
 export interface SetConfigArgs {
-    pauseOpen?: boolean | null
-    pauseRegistry?: boolean | null
+    paused?: boolean | null
     feeBps?: number | null
     maxGrace?: number | null
     defaultGrace?: number | null
@@ -72,38 +76,68 @@ export interface OpenArgs {
 export interface ClaimFields {
     amount: bigint
     receiptDigest: Uint8Array
-    ttftMs: number
-    decodeMs: number
+    ttftMs: bigint
+    decodeMs: bigint
     inputUnits: bigint
     outputUnits: bigint
     outputUsageType: number
     auxUsageType: number
-    auxCount: number
+    auxCount: bigint
 }
 
 function putClaim(w: Writer, f: ClaimFields): void {
     w.u64(f.amount)
     w.fixed(f.receiptDigest, 32)
-    w.u32(f.ttftMs)
-    w.u32(f.decodeMs)
+    w.u64(f.ttftMs)
+    w.u64(f.decodeMs)
     w.u64(f.inputUnits)
     w.u64(f.outputUnits)
     w.u8(f.outputUsageType)
     w.u8(f.auxUsageType)
-    w.u32(f.auxCount)
+    w.u64(f.auxCount)
+}
+
+// The domain tags of the claim hash and the payer's ack digest, the program's
+// CLAIM_TAG and ACK_TAG.
+const CLAIM_TAG = utf8('zs-claim-v3\0')
+const ACK_TAG = utf8('zs-settle-ack-v3\0')
+
+function concat(...parts: Uint8Array[]): Uint8Array {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+    let at = 0
+    for (const p of parts) {
+        out.set(p, at)
+        at += p.length
+    }
+    return out
+}
+
+/** The hash a ticket stores for the first half's fields, and the one the other half and settle_lapsed must match. */
+export function claimHash(f: ClaimFields): Uint8Array {
+    const w = new Writer()
+    putClaim(w, f)
+    return sha256(concat(CLAIM_TAG, w.done()))
 }
 
 /**
- * How a settle passes the payer's RefundOwed and the owed vault, which it
- * needs only when the payer's token account can't take the refund. 'none'
- * leaves them out (the common settle); 'readonly' may always be passed, and
- * the program refuses with RefundOwedNotWritable if it needs them; 'writable'
- * is for a payer whose token account is closed or frozen.
+ * How a settle passes the treasury's USDC account, which takes the refund
+ * only when the payer's token account can't (closed, never created, or
+ * frozen): the refund is forfeited there, as Algorand's payOrForfeit forfeits
+ * it. 'none' leaves it out (the common settle); 'readonly' may always be
+ * passed, and the program refuses with TreasuryAccountNotWritable if it needs
+ * it; 'writable' is for a payer whose token account can't take the refund,
+ * and only then, since the account is one for the whole protocol and a write
+ * lock on it in every settle would serialize them all.
  */
 export type RefundFallback = 'none' | 'readonly' | 'writable'
 
 /** Names the ticket a settle ends and who submits it. */
 export interface Ending {
+    /**
+     * Signs: the node's current signing key for claim (and for a
+     * settleCooperative of an open ticket), the payer for ack, the admin for
+     * resolveFrozen, anyone for settleLapsed and refundInactive.
+     */
     submitter: PublicKey
     operatorId: bigint
     nodeId: bigint
@@ -112,6 +146,13 @@ export interface Ending {
     rentPayer: PublicKey
     /** The ticket's payer, whose token account takes the refund. */
     payer: PublicKey
+    /**
+     * The Config's treasury, read only when fallback passes its USDC account;
+     * set_config can move it, so it comes from the Config, not a constant.
+     * Absent there, it names the default key's account, which the program
+     * refuses as the forfeit's destination.
+     */
+    treasury?: PublicKey
     fallback?: RefundFallback
 }
 
@@ -137,11 +178,13 @@ export class Deployment extends Addresses {
         return findProgramAddress([publicKeyBytes(this.program)], BPF_LOADER_UPGRADEABLE_PROGRAM_ID)[0]
     }
 
-    /** Must be signed by the program's upgrade authority, which becomes the admin. */
+    /**
+     * Must be signed by the program's upgrade authority, which becomes the admin. The treasury's USDC account must
+     * already exist, unfrozen: the program refuses a treasury that couldn't take a fee (TreasuryCannotReceive).
+     */
     initialize(admin: PublicKey, treasury: PublicKey, a: InitializeArgs): Instruction {
         const w = new Writer()
         w.fixed(decodeBase58(a.genesisHash, 32), 32)
-        w.key(a.arbiter)
         w.u16(a.feeBps)
         w.u32(a.maxGrace)
         w.u32(a.defaultGrace)
@@ -157,20 +200,22 @@ export class Deployment extends Addresses {
             readonly(this.programData()),
             writable(d.config()),
             writable(d.stakeVault()),
-            writable(d.owedVault()),
             readonly(d.mint),
             readonly(treasury),
+            readonly(d.tokenAccount(treasury)),
             readonly(TOKEN_PROGRAM_ID),
             readonly(SYSTEM_PROGRAM_ID),
         )
     }
 
-    /** Passes the new treasury as an account too: the program checks it is not one of its own. */
+    /**
+     * Passes the new treasury as an account too, so the program can check it is not one of its own, and the
+     * treasury's USDC account, which the program requires to exist unfrozen, as Algorand's setTreasury does.
+     */
     setConfig(admin: PublicKey, a: SetConfigArgs): Instruction {
         if (a.treasury === SYSTEM_PROGRAM_ID) throw new ZeroTreasuryError()
         const w = new Writer()
-        w.option(a.pauseOpen, (v) => w.bool(v))
-        w.option(a.pauseRegistry, (v) => w.bool(v))
+        w.option(a.paused, (v) => w.bool(v))
         w.option(a.feeBps, (v) => w.u16(v))
         w.option(a.maxGrace, (v) => w.u32(v))
         w.option(a.defaultGrace, (v) => w.u32(v))
@@ -179,7 +224,8 @@ export class Deployment extends Addresses {
         w.option(a.operatorStake, (v) => w.u64(v))
         w.option(a.nodeStake, (v) => w.u64(v))
         w.option(a.treasury, (v) => w.key(v))
-        return this.ix('set_config', w.done(), signer(admin), writable(this.config()), this.optional(a.treasury))
+        const treasuryUsdc = a.treasury == null ? null : this.tokenAccount(a.treasury)
+        return this.ix('set_config', w.done(), signer(admin), writable(this.config()), this.optional(a.treasury), this.optional(treasuryUsdc))
     }
 
     proposeAdmin(admin: PublicKey, next: PublicKey): Instruction {
@@ -192,22 +238,12 @@ export class Deployment extends Addresses {
         return this.ix('accept_admin', new Uint8Array(), signer(next), writable(this.config()))
     }
 
-    proposeArbiter(arbiter: PublicKey, next: PublicKey): Instruction {
-        const w = new Writer()
-        w.key(next)
-        return this.ix('propose_arbiter', w.done(), signer(arbiter), writable(this.config()))
-    }
-
-    acceptArbiter(next: PublicKey): Instruction {
-        return this.ix('accept_arbiter', new Uint8Array(), signer(next), writable(this.config()))
-    }
-
     // The program takes any USDC account the owner (or the treasury) holds
     // where it pays a stake in or out, so a frozen or closed associated
     // account can't block a registration, an unregister or an eviction. Those
     // builders take the account; tokenAccount(owner) is the usual one.
-    // Payouts, fee sweeps and RefundOwed claims go only to the associated
-    // account, which their builders derive.
+    // Payouts, fee sweeps, refunds and forfeited refunds go only to the
+    // associated account, which their builders derive.
 
     /** Registers the owner as operator nextOperatorId, the Config's next_operator_id, and escrows the operator stake from ownerUsdc. */
     createOperator(owner: PublicKey, ownerUsdc: PublicKey, nextOperatorId: bigint): Instruction {
@@ -249,13 +285,13 @@ export class Deployment extends Addresses {
         )
     }
 
-    /** Moves the node to signing as its key, and sets its URL. The owner alone signs. No config: rotation isn't pause-gated, so a leaked key can be replaced during a registry pause. */
+    /** Moves the node to signing as its key, and sets its URL. The owner alone signs. It is pause-gated, as Algorand's updateNode is, so a key can't be rotated while the protocol is paused. */
     updateNode(owner: PublicKey, operatorId: bigint, nodeId: bigint, signing: PublicKey, baseUrl: string): Instruction {
         const w = new Writer()
         w.key(signing)
         w.vec(utf8(baseUrl))
         const d = this
-        return this.ix('update_node', w.done(), signer(owner), readonly(d.operator(operatorId)), writable(d.node(operatorId, nodeId)))
+        return this.ix('update_node', w.done(), signer(owner), readonly(d.config()), readonly(d.operator(operatorId)), writable(d.node(operatorId, nodeId)))
     }
 
     /** Signed by the owner or by the node's signing key. */
@@ -387,24 +423,31 @@ export class Deployment extends Addresses {
         )
     }
 
-    /** Records the node's claim on a ticket the payer has not acked; it lapses to the node at the deadline unless the payer answers. */
-    claim(nodeSigner: PublicKey, operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, f: ClaimFields): Instruction {
-        const w = new Writer()
-        putClaim(w, f)
-        const node = this.node(operatorId, nodeId)
-        return this.ix('claim', w.done(), signer(nodeSigner), readonly(node), writable(this.ticket(node, ticketId)), ...this.eventCpi())
+    /**
+     * What the payer signs off chain to accept a claim, for the Ed25519
+     * precompile instruction before a settleCooperative. It binds the cluster,
+     * the program, the ticket and its open_seq: a closed ticket's address can
+     * be opened again with the same id, and only open_seq tells the two apart,
+     * so an ack never replays against the reopened ticket.
+     */
+    ackDigest(genesis: Hash, ticket: PublicKey, openSeq: bigint, claimHash: Uint8Array): Uint8Array {
+        if (claimHash.length !== 32) throw new RangeError(`zsescrow: a claim hash of ${claimHash.length} bytes`)
+        return sha256(concat(ACK_TAG, decodeBase58(genesis, 32), publicKeyBytes(this.program), publicKeyBytes(ticket), u64le(openSeq), claimHash))
     }
 
     private ending(name: string, e: Ending, args: (w: Writer) => void): Instruction {
         const d = this
         const w = new Writer()
         args(w)
-        const b = d.refundBumps(e.payer)
-        w.u8(b.payerAta)
-        w.u8(b.refundOwed)
+        w.u8(d.refundBumps(e.payer).payerAta)
         const node = d.node(e.operatorId, e.nodeId)
-        const accounts = [
-            payer(e.submitter),
+        const fallback = e.fallback ?? 'none'
+        const treasuryUsdc =
+            fallback === 'none' ? readonly(d.program) : { publicKey: d.tokenAccount(e.treasury ?? SYSTEM_PROGRAM_ID), isSigner: false, isWritable: fallback === 'writable' }
+        return this.ix(
+            name,
+            w.done(),
+            signer(e.submitter),
             readonly(d.config()),
             writable(node),
             writable(d.vault(node)),
@@ -414,19 +457,20 @@ export class Deployment extends Addresses {
             readonly(d.mint),
             readonly(SYSVAR_INSTRUCTIONS_ID),
             readonly(TOKEN_PROGRAM_ID),
-        ]
-        const fallback = e.fallback ?? 'none'
-        if (fallback === 'none') {
-            accounts.push(readonly(d.program), readonly(d.program), readonly(d.program))
-        } else {
-            const isWritable = fallback === 'writable'
-            accounts.push(
-                { publicKey: d.refundOwed(e.payer), isSigner: false, isWritable },
-                { publicKey: d.owedVault(), isSigner: false, isWritable },
-                readonly(SYSTEM_PROGRAM_ID),
-            )
-        }
-        return this.ix(name, w.done(), ...accounts, ...this.eventCpi())
+            treasuryUsdc,
+            ...this.eventCpi(),
+        )
+    }
+
+    /**
+     * The node's half of a settle, signed by its current signing key. On an
+     * open ticket it is the first half, which lapses to the node at the
+     * deadline unless the payer answers; on the payer's first half it is the
+     * second, which settles if the fields match and freezes the ticket if
+     * not. Reposting the same fields is a no-op; other fields are refused.
+     */
+    claim(e: Ending, f: ClaimFields): Instruction {
+        return this.ending('claim', e, (w) => putClaim(w, f))
     }
 
     /** Settles on the payer's ack: an Ed25519 precompile instruction over the ack digest, or the payer's own signature on the transaction. */
@@ -434,32 +478,56 @@ export class Deployment extends Addresses {
         return this.ending('settle_cooperative', e, (w) => putClaim(w, f))
     }
 
-    /** The payer's answer to a claim: the payer signs the transaction. */
+    /** The payer's half of a settle, signed by the payer, with claim's rules from the other side: on an open ticket the first half, which refundInactive refunds in full at the deadline unless the node answers. */
     ack(e: Ending, f: ClaimFields): Instruction {
         return this.ending('ack', e, (w) => putClaim(w, f))
     }
 
-    /** Pays a claim the payer did not answer by the deadline; the claim fields are resupplied and checked against the stored hash. */
+    /** Pays a node's claim the payer did not answer by the deadline; the claim fields are resupplied and checked against the stored hash. */
     settleLapsed(e: Ending, f: ClaimFields): Instruction {
         return this.ending('settle_lapsed', e, (w) => putClaim(w, f))
     }
 
-    /** Refunds an open ticket nobody claimed by the deadline. */
+    /** Refunds the whole escrow of a ticket the node never claimed, or whose payer-posted first half the node never answered, after the deadline. */
     refundInactive(e: Ending): Instruction {
         return this.ending('refund_inactive', e, () => {})
     }
 
-    /** The arbiter's split of a protested ticket: nodeAmount to the node, the rest back to the payer. */
-    resolveFrozen(e: Ending, nodeAmount: bigint): Instruction {
-        return this.ending('resolve_frozen', e, (w) => w.u64(nodeAmount))
+    /**
+     * The admin's split of a frozen ticket: the node is awarded
+     * operatorShareBps of the pre-fee ceiling, the protocol its fee on that,
+     * and the rest returns to the payer. reason is the admin's stated basis,
+     * at most 1024 bytes, kept in the TicketResolved event.
+     */
+    resolveFrozen(e: Ending, operatorShareBps: number, reason: string): Instruction {
+        return this.ending('resolve_frozen', e, (w) => {
+            w.u16(operatorShareBps)
+            w.vec(utf8(reason))
+        })
     }
 
-    /** Freezes a ticket on the node's receipt, which the payer proves the node signed with an Ed25519 precompile instruction beside it. */
-    protest(payerKey: PublicKey, operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, receipt: Uint8Array, reason: number): Instruction {
+    /**
+     * Freezes a ticket on the node's receipt, which the payer proves the node signed with an Ed25519 precompile
+     * instruction beside it. On a ticket with a pending half, `pending` must be that half's claim fields, and the
+     * receipt the one whose digest they carry, as Algorand requires the protested digest to equal the pending one;
+     * the program ignores it on an open ticket. The ticket keeps only the fields' hash: a payer has its own half's
+     * fields, and the node's from the node's claim instruction, which are claimFromReceipt(receipt) only when the
+     * node claimed exactly its receipt.
+     */
+    protest(
+        payerKey: PublicKey,
+        operatorId: bigint,
+        nodeId: bigint,
+        ticketId: Uint8Array,
+        receipt: Uint8Array,
+        reason: number,
+        pending: ClaimFields | null,
+    ): Instruction {
         const w = new Writer()
         w.fixed(ticketId, 16)
         w.vec(receipt)
         w.u8(reason)
+        w.option(pending, (f) => putClaim(w, f))
         const d = this
         const node = d.node(operatorId, nodeId)
         return this.ix(
@@ -472,28 +540,6 @@ export class Deployment extends Addresses {
             readonly(SYSVAR_INSTRUCTIONS_ID),
             ...this.eventCpi(),
         )
-    }
-
-    /** Pays the payer what settles could not, once its token account can take it, and returns the record's rent to whoever funded it. */
-    claimRefundOwed(payerKey: PublicKey, rentPayer: PublicKey): Instruction {
-        const d = this
-        return this.ix(
-            'claim_refund_owed',
-            new Uint8Array(),
-            signer(payerKey),
-            readonly(d.config()),
-            writable(d.refundOwed(payerKey)),
-            writable(rentPayer),
-            writable(d.owedVault()),
-            writable(d.tokenAccount(payerKey)),
-            readonly(d.mint),
-            readonly(TOKEN_PROGRAM_ID),
-        )
-    }
-
-    /** Closes a RefundOwed with nothing owed, for its rent. */
-    closeRefundOwed(rentPayer: PublicKey, payerKey: PublicKey): Instruction {
-        return this.ix('close_refund_owed', new Uint8Array(), payer(rentPayer), writable(this.refundOwed(payerKey)))
     }
 
     /** Sends the node's accrued payout to the operator owner's USDC account. Anyone may submit it. */

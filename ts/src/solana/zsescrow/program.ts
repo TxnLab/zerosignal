@@ -21,8 +21,6 @@ export const OPERATOR_SEED = 'op'
 export const NODE_SEED = 'node'
 export const VAULT_SEED = 'vault'
 export const STAKE_VAULT_SEED = 'stake'
-export const OWED_VAULT_SEED = 'owed_vault'
-export const REFUND_OWED_SEED = 'owed'
 export const TICKET_SEED = 't'
 export const EVENT_AUTHORITY_SEED = '__event_authority'
 
@@ -45,13 +43,12 @@ export function discriminator(namespace: string, name: string): Uint8Array {
 }
 
 /**
- * Bumps of the payer's token account and RefundOwed. A settle carries them so
- * the program derives each address once instead of searching, a search whose
- * length the payer could grind its key to stretch.
+ * The bump of the payer's token account. A settle carries it so the program
+ * derives the address once instead of searching, a search whose length the
+ * payer could grind its key to stretch.
  */
 export interface RefundBumps {
     payerAta: number
-    refundOwed: number
 }
 
 /**
@@ -75,9 +72,6 @@ export class Addresses {
     stakeVault(): PublicKey {
         return this.pda(utf8(STAKE_VAULT_SEED))[0]
     }
-    owedVault(): PublicKey {
-        return this.pda(utf8(OWED_VAULT_SEED))[0]
-    }
     /** Signs the program's self-invocations that carry events. */
     eventAuthority(): PublicKey {
         return this.pda(utf8(EVENT_AUTHORITY_SEED))[0]
@@ -99,18 +93,11 @@ export class Addresses {
         if (ticketId.length !== 16) throw new RangeError(`zsescrow: a ticket id of ${ticketId.length} bytes`)
         return this.pda(utf8(TICKET_SEED), publicKeyBytes(node), ticketId)[0]
     }
-    /** Holds what settles owe the payer but could not pay its token account. */
-    refundOwed(payer: PublicKey): PublicKey {
-        return this.pda(utf8(REFUND_OWED_SEED), publicKeyBytes(payer))[0]
-    }
     /** owner's associated USDC account. */
     tokenAccount(owner: PublicKey): PublicKey {
         return associatedTokenAddress(owner, this.mint)[0]
     }
     refundBumps(payer: PublicKey): RefundBumps {
-        return {
-            payerAta: associatedTokenAddress(payer, this.mint)[1],
-            refundOwed: this.pda(utf8(REFUND_OWED_SEED), publicKeyBytes(payer))[1],
-        }
+        return { payerAta: associatedTokenAddress(payer, this.mint)[1] }
     }
 }
