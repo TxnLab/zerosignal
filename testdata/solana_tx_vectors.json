@@ -68,6 +68,114 @@
   "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
   "transactions": [
     {
+      "about": "the associated token program's CreateIdempotent of another owner's USDC account",
+      "account_keys": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "pubkey": "EtaENFHmW4WN5UTzHzzTd1sDZvTqnAcDzzvFLHvsUagR"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "pubkey": "11111111111111111111111111111111"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "pubkey": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        }
+      ],
+      "address_table_lookups": [],
+      "built_instructions": [
+        {
+          "accounts": [
+            {
+              "is_signer": true,
+              "is_writable": true,
+              "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+            },
+            {
+              "is_signer": false,
+              "is_writable": true,
+              "pubkey": "EtaENFHmW4WN5UTzHzzTd1sDZvTqnAcDzzvFLHvsUagR"
+            },
+            {
+              "is_signer": false,
+              "is_writable": false,
+              "pubkey": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d"
+            },
+            {
+              "is_signer": false,
+              "is_writable": false,
+              "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+            },
+            {
+              "is_signer": false,
+              "is_writable": false,
+              "pubkey": "11111111111111111111111111111111"
+            },
+            {
+              "is_signer": false,
+              "is_writable": false,
+              "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            }
+          ],
+          "data_base64": "AQ==",
+          "program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        }
+      ],
+      "fee_payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+      "header": {
+        "num_readonly_signed_accounts": 0,
+        "num_readonly_unsigned_accounts": 5,
+        "num_required_signatures": 1
+      },
+      "instructions": [
+        {
+          "accounts": [
+            0,
+            1,
+            5,
+            4,
+            2,
+            3
+          ],
+          "data_base64": "AQ==",
+          "program_id_index": 6
+        }
+      ],
+      "message_base64": "AQAFB9BKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3zl4gBoDatVEy5Wev6zsRtMMgCamfaRpxyYphWYr864oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWoyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIBBgYAAQUEAgMBAQ==",
+      "name": "create_ata_idempotent",
+      "program": "ok",
+      "recent_blockhash": "5TeWSsjg2gbxCyWVniXeCmwM7UtHTCK7svzJr5xYJzHf",
+      "signatures": [
+        "2RG95pRbJja7S8Si7gXmni3jszdgDq1HjcV4mjwwFpszM98mPUN6L2KvE5AsMqEppxU9Zn23kv84BHiWYTUoDtYz"
+      ],
+      "version": "legacy",
+      "wire_base64": "AUbwVCgi5UeElwdWfV5DmrZZpwVjU621mO5MrMHVmA4C04tDz4S3R98yChQkMcYLKsXzpa0J0yaE+akDevstjwsBAAUH0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzfOXiAGgNq1UTLlZ6/rOxG0wyAJqZ9pGnHJimFZivzrigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKlO0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqFpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpajJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FlCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQgEGBgABBQQCAwEB"
+    },
+    {
       "about": "the open offer: compute budget, the payer's TransferChecked into the node's vault, open with grace 0",
       "account_keys": [
         {

@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest'
 import {
     type Instruction,
     compileMessage,
+    createAssociatedTokenAccountIdempotent,
     createProgramAddress,
     decodeBase58,
     encodeBase58,
@@ -34,7 +35,10 @@ import {
     parsePublicKey,
     parseTransaction,
     publicKeyBytes,
+    setComputeUnitLimit,
+    setComputeUnitPrice,
     signTransaction,
+    transferChecked,
     verifySignatures,
     verifyStrict,
 } from '../src/solana/index.js'
@@ -146,7 +150,7 @@ describe('solana_account_vectors.json PDAs', () => {
 
 describe('solana_codec_vectors.json', () => {
     it('is the schema this test expects', () => {
-        expect(codec.version).toBe(3)
+        expect(codec.version).toBe(4)
         for (const s of [
             'base58',
             'base58_refused',
@@ -159,6 +163,7 @@ describe('solana_codec_vectors.json', () => {
             'on_curve',
             'signatures',
             'compile',
+            'builders',
         ]) {
             expect(codec[s].length, s).toBeGreaterThan(0)
         }
@@ -237,6 +242,35 @@ describe('solana_codec_vectors.json', () => {
             expect(base64.encode(encodeMessage(compileMessage(c.fee_payer, c.recent_blockhash, ixs, c.version)))).toBe(c.message_base64)
         })
     }
+
+    const builders: Record<string, (a: Record<string, string>) => Instruction> = {
+        set_compute_unit_limit: (a) => setComputeUnitLimit(Number(a.units)),
+        set_compute_unit_price: (a) => setComputeUnitPrice(BigInt(a.micro_lamports!)),
+        transfer_checked: (a) => transferChecked(a.source!, a.mint!, a.destination!, a.authority!, BigInt(a.amount!), Number(a.decimals)),
+        create_associated_token_account_idempotent: (a) => createAssociatedTokenAccountIdempotent(a.payer!, a.owner!, a.mint!),
+    }
+    it('covers every builder', () => {
+        expect(new Set((codec.builders as Json[]).map((c) => c.builder))).toEqual(new Set(Object.keys(builders)))
+    })
+    for (const c of codec.builders as Json[]) {
+        it(`builds ${c.builder}(${Object.values(c.args).join(', ')}) as Go does`, () => {
+            const ix = builders[c.builder]!(c.args)
+            expect({
+                program_id: ix.programId,
+                accounts: ix.accounts.map((a) => ({ pubkey: a.publicKey, is_signer: a.isSigner, is_writable: a.isWritable })),
+                data_base64: base64.encode(ix.data),
+            }).toEqual(c.instruction)
+        })
+    }
+    it('refuses compute-budget values their data cannot carry', () => {
+        expect(() => setComputeUnitLimit(0xffffffff)).not.toThrow()
+        expect(() => setComputeUnitLimit(0x100000000)).toThrow(RangeError)
+        expect(() => setComputeUnitLimit(-1)).toThrow(RangeError)
+        expect(() => setComputeUnitLimit(1.5)).toThrow(RangeError)
+        expect(() => setComputeUnitPrice((1n << 64n) - 1n)).not.toThrow()
+        expect(() => setComputeUnitPrice(1n << 64n)).toThrow(RangeError)
+        expect(() => setComputeUnitPrice(-1n)).toThrow(RangeError)
+    })
 
     it('derives program addresses as Go does', () => {
         for (const c of codec.create_program_address as Json[]) {

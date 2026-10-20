@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SPL Token's TransferChecked. Mirrors proto/go/solana/token.go.
+// SPL Token's TransferChecked, and the associated token program's
+// CreateIdempotent. Mirrors proto/go/solana/token.go.
 
-import { TOKEN_PROGRAM_ID, type PublicKey } from './key.js'
+import { ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from './key.js'
 import type { Instruction } from './message.js'
+import { associatedTokenAddress } from './pda.js'
 
 /** SPL Token's TransferChecked tag, the first data byte. */
 export const TOKEN_TRANSFER_CHECKED = 12
@@ -33,5 +35,32 @@ export function transferChecked(source: PublicKey, mint: PublicKey, destination:
             { publicKey: authority, isSigner: true, isWritable: false },
         ],
         data,
+    }
+}
+
+/** The associated token program's CreateIdempotent tag, its only data byte. */
+export const ASSOCIATED_TOKEN_CREATE_IDEMPOTENT = 1
+
+/**
+ * Creates owner's associated token account for mint under the classic token
+ * program, paid for by payer, and succeeds without change when it already
+ * exists for owner, so a transaction can carry it ahead of a payout without
+ * first reading the chain. It fails, and with it the whole transaction, when
+ * owner has moved that account's ownership to another key, which the classic
+ * program allows.
+ */
+export function createAssociatedTokenAccountIdempotent(payer: PublicKey, owner: PublicKey, mint: PublicKey): Instruction {
+    const [ata] = associatedTokenAddress(owner, mint)
+    return {
+        programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+        accounts: [
+            { publicKey: payer, isSigner: true, isWritable: true },
+            { publicKey: ata, isSigner: false, isWritable: true },
+            { publicKey: owner, isSigner: false, isWritable: false },
+            { publicKey: mint, isSigner: false, isWritable: false },
+            { publicKey: SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+            { publicKey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        ],
+        data: Uint8Array.of(ASSOCIATED_TOKEN_CREATE_IDEMPOTENT),
     }
 }

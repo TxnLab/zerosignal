@@ -21,6 +21,7 @@ import { base64 } from '@scure/base'
 
 import { type UsageReceipt, receiptSigDigest } from '../../ticket/receipt.js'
 import { equalBytes } from '../../util/bytes.js'
+import { COMPUTE_BUDGET_SET_COMPUTE_UNIT_LIMIT, COMPUTE_BUDGET_SET_COMPUTE_UNIT_PRICE } from '../computebudget.js'
 import { COMPUTE_BUDGET_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from '../key.js'
 import { type AccountMeta, type Instruction, isWritable, parseMessage } from '../message.js'
 import { TOKEN_TRANSFER_CHECKED, transferChecked } from '../token.js'
@@ -97,8 +98,8 @@ export function claimFromReceipt(r: UsageReceipt): ClaimFields {
 // length. The fee payer pays for both; the others size heap and loaded data,
 // which an offer never needs.
 const OFFER_COMPUTE_BUDGET = new Map([
-    [2, 5],
-    [3, 9],
+    [COMPUTE_BUDGET_SET_COMPUTE_UNIT_LIMIT, 5],
+    [COMPUTE_BUDGET_SET_COMPUTE_UNIT_PRICE, 9],
 ])
 
 const OPEN = discriminator('global', 'open')
