@@ -21,7 +21,9 @@ import { SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58 } from 
 import {
     type ClaimFields,
     type Ending,
+    type OpenOfferSpec,
     type RefundFallback,
+    OfferRejectedError,
     CONFIG_SIZE,
     Deployment,
     EVENT_IX_TAG,
@@ -51,7 +53,9 @@ import {
     ticketDeadline,
     ticketStatusName,
     tokenAccountStateName,
+    verifyOpenOffer,
 } from '../src/solana/zsescrow/index.js'
+import { parseReceiptJSON } from '../src/ticket/receipt.js'
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -457,6 +461,91 @@ describe('solana_zsescrow_vectors.json', () => {
     it('refuses a zero treasury', () => {
         expect(vectors.set_config_refused.map((c: Json) => c.treasury)).toEqual([SYSTEM_PROGRAM_ID])
         for (const c of vectors.set_config_refused as Json[]) expect(() => d.setConfig(d.program, { treasury: c.treasury })).toThrow(ZeroTreasuryError)
+    })
+})
+
+// The open-offer verdicts, pinned by the Go-generated
+// solana_open_offer_vectors.json: every open offer the program wrote, and the
+// ones Go built for checks the program's shapes don't reach.
+describe('solana_open_offer_vectors.json', () => {
+    const offers = load('testdata/solana_open_offer_vectors.json')
+    const d = new Deployment(offers.program_id, offers.usdc_mint)
+    const specOf = (s: Json): OpenOfferSpec => ({
+        nodeSigning: s.node_signing,
+        operatorId: BigInt(s.operator_id),
+        nodeId: BigInt(s.node_id),
+        payer: s.payer,
+        payerUsdc: s.payer_usdc,
+        decimals: s.decimals,
+        ticketId: hex.decode(s.ticket_id),
+        maxPrice: BigInt(s.max_price),
+        expiresAt: BigInt(s.expires_at),
+        ...(s.fold
+            ? {
+                  fold: {
+                      operatorId: BigInt(s.fold.operator_id),
+                      nodeId: BigInt(s.fold.node_id),
+                      ticketId: hex.decode(s.fold.ticket_id),
+                      receipt: s.fold.receipt === null ? (undefined as never) : parseReceiptJSON(new TextEncoder().encode(JSON.stringify(s.fold.receipt))),
+                  },
+              }
+            : {}),
+    })
+    it('covers both sources and every check that refuses', () => {
+        expect(new Set((offers.cases as Json[]).map((c) => c.source))).toEqual(new Set(['fixture', 'built']))
+        expect((offers.cases as Json[]).filter((c) => c.verdict === 'ok').length).toBeGreaterThan(2)
+        expect(new Set((offers.cases as Json[]).map((c) => c.verdict))).toEqual(
+            new Set([
+                'ok',
+                'message.parse',
+                'message.lookups',
+                'header.signers',
+                'header.feePayer',
+                'header.payer',
+                'header.payerWritable',
+                'computeBudget.order',
+                'computeBudget.instruction',
+                'computeBudget.duplicate',
+                'token.instruction',
+                'escrow.instruction',
+                'instruction.program',
+                'instructions.shape',
+                'transfer.accounts',
+                'transfer.data',
+                'open.accounts',
+                'open.data',
+                'fold.unexpected',
+                'fold.receipt',
+                'fold.accounts',
+                'fold.data',
+            ]),
+        )
+    })
+    for (const c of offers.cases as Json[]) {
+        it(`${c.source} ${c.name}: ${c.verdict}`, () => {
+            let verdict = 'ok'
+            try {
+                verifyOpenOffer(d, base64.decode(c.message_base64), specOf(c.spec))
+            } catch (err) {
+                if (!(err instanceof OfferRejectedError)) throw err
+                verdict = err.field
+            }
+            expect(verdict, c.about).toBe(c.verdict)
+        })
+    }
+    it('throws a RangeError for a spec ticket id not 16 bytes', () => {
+        const c = (offers.cases as Json[]).find((c) => c.name === 'open_fold_settle')!
+        const message = base64.decode(c.message_base64)
+        const spec = specOf(c.spec)
+        expect(() => verifyOpenOffer(d, message, spec)).not.toThrow()
+        expect(() => verifyOpenOffer(d, message, { ...spec, ticketId: spec.ticketId.subarray(1) })).toThrow(RangeError)
+        // Ahead of every refusal, so a caller's bad spec never reads as the node's bad offer.
+        expect(() => verifyOpenOffer(d, new Uint8Array(), { ...spec, ticketId: spec.ticketId.subarray(1) })).toThrow(RangeError)
+        expect(() => verifyOpenOffer(d, message, { ...spec, fold: { ...spec.fold!, ticketId: spec.fold!.ticketId.subarray(1) } })).toThrow(RangeError)
+    })
+    it("matches the program's own fixture messages", () => {
+        const tx = new Map((load('testdata/solana_tx_vectors.json').transactions as Json[]).map((t) => [t.name, t.message_base64]))
+        for (const c of (offers.cases as Json[]).filter((c) => c.source === 'fixture')) expect(c.message_base64, c.name).toBe(tx.get(c.name))
     })
 })
 
