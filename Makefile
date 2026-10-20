@@ -143,6 +143,8 @@ update-vectors:
 	cd go && $(GO) test ./settle     -run TestSettleVectors         -update
 	cd go && $(GO) test ./escrow     -run TestEscrowVectors         -update
 	cd go && $(GO) test ./escrow     -run TestGroupVectors          -update
+	cd go && $(GO) test ./solana     -run TestCodecVectors          -update
+	cd go && $(GO) test ./solana/zsescrow -run TestZsEscrowVectors  -update
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update
 	cd go && $(GO) test ./zs         -run TestRetryVectors          -update
 	cd go && $(GO) test ./zs         -run TestReconcileVectors      -update

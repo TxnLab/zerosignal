@@ -1,0 +1,582 @@
+{
+  "about": "Accounts read back from LiteSVM after the flows in tests/fixtures.rs. Every address is the program PDA of seeds_hex with bump. decoded is the program's own deserialization; enum fields carry the variant name, whose index is the byte in the data.",
+  "accounts": [
+    {
+      "address": "3rVjuc7SGmuoEH39tXujSZxTrSQKitiLifUCfvgfTS7o",
+      "bump": 252,
+      "data_base64": "mwyq4B76zIIB/Pz/BgAA9AFYAgAAeAAAABAOAAAAAAAAgLLmDgAAAABAeH0BAAAAAAEAAAAAAAAAQ6cucUQBdi32a2jCbfvfJoKq7J8kdOykYT5CSg+6/Txmvn4zLHpFMzK9nQp/fbBV9cXvGgatpm2Ys5+2gQxHOk7TL2O/NfDu78sl8oouH73Ic64oNWcbDJRg9fEuRVaoBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "data_len": 349,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "admin": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+        "arbiter": "7v54NWdBtkjuAFJrLGsS2SXnuk8nKam81mZJeeYxVFi9",
+        "bump": 252,
+        "default_grace": 120,
+        "fee_bps": 500,
+        "genesis_hash": "0707070707070707070707070707070707070707070707070707070707070707",
+        "max_grace": 600,
+        "max_ticket_lifetime": "3600",
+        "min_grace": 90,
+        "next_operator_id": "1",
+        "node_stake": "25000000",
+        "operator_stake": "250000000",
+        "owed_vault_bump": 255,
+        "pause_open": false,
+        "pause_registry": false,
+        "pending_admin": "11111111111111111111111111111111",
+        "pending_arbiter": "11111111111111111111111111111111",
+        "stake_vault_bump": 252,
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+        "usdc_decimals": 6,
+        "usdc_mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+        "version": 1
+      },
+      "lamports": "2423160",
+      "name": "config_initialized",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "636f6e666967"
+      ],
+      "type": "Config"
+    },
+    {
+      "address": "6BsaA2kaQDGRYD68CjaJLauajXR7pjb2AW1LQ1wTC6gs",
+      "bump": 255,
+      "data_base64": "2x+8kUWLzHUBAf8CAAAAAAAAAAEAAAAAAAAAAAAAAAAAAABAOmkNAAAAAJGiigt0OBWTpNlGlXkgiSavyK2CyIObdkQ1m566mks6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "data_len": 171,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "bump": 255,
+        "id": "2",
+        "live_node_count": "0",
+        "name_ref": "11111111111111111111111111111111",
+        "next_node_id": "1",
+        "owner": "AoVsGaj8MSJ6xwKxfFxo9iZWH3enC8RRTXKH2fx2F8os",
+        "stake": "225000000",
+        "status": "Evicted",
+        "version": 1
+      },
+      "lamports": "1518920",
+      "name": "operator_evicted",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "6f70",
+        "0200000000000000"
+      ],
+      "type": "Operator"
+    },
+    {
+      "address": "3rVjuc7SGmuoEH39tXujSZxTrSQKitiLifUCfvgfTS7o",
+      "bump": 252,
+      "data_base64": "mwyq4B76zIIB/Pz/BgAA9AFYAgAAeAAAABAOAAAAAAAAgLLmDgAAAABAeH0BAAAAAAQAAAAAAAAAQ6cucUQBdi32a2jCbfvfJoKq7J8kdOykYT5CSg+6/Txmvn4zLHpFMzK9nQp/fbBV9cXvGgatpm2Ys5+2gQxHOk7TL2O/NfDu78sl8oouH73Ic64oNWcbDJRg9fEuRVaoBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB9VCB9oZSXfc9Grb/sK8LnW1LVqKQhhP7f3AACTw4+jaWgAAAFEcNKGiy1Id8WuyRrjejnmXziNcfnayKj11A6JIGd2KAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "data_len": 349,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "admin": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+        "arbiter": "7v54NWdBtkjuAFJrLGsS2SXnuk8nKam81mZJeeYxVFi9",
+        "bump": 252,
+        "default_grace": 120,
+        "fee_bps": 500,
+        "genesis_hash": "0707070707070707070707070707070707070707070707070707070707070707",
+        "max_grace": 600,
+        "max_ticket_lifetime": "3600",
+        "min_grace": 90,
+        "next_operator_id": "4",
+        "node_stake": "25000000",
+        "operator_stake": "250000000",
+        "owed_vault_bump": 255,
+        "pause_open": false,
+        "pause_registry": false,
+        "pending_admin": "FMUEmtxhU46GzhKF4FW9MLJdQWiLgjiXP9TYRWSrqTpV",
+        "pending_arbiter": "6TcyBfPdBt1kjsvDZLzmBFnuMaLWiTaAt4RjUr9VA5YD",
+        "stake_vault_bump": 252,
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+        "usdc_decimals": 6,
+        "usdc_mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+        "version": 1
+      },
+      "lamports": "2423160",
+      "name": "config_pending_seats",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "636f6e666967"
+      ],
+      "type": "Config"
+    },
+    {
+      "address": "6o37n5UrX3mAbyGgS9qEpekVt9Qsmv4fsJDo1FrSn6nG",
+      "bump": 255,
+      "data_base64": "2x+8kUWLzHUBAP8BAAAAAAAAAAMAAAAAAAAAAgAAAAAAAADAKmQQAAAAAAtROtm0kkAVygkC7QeQRNOsXb7CMG8GlIwQ2o62458tiEuIV/TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "data_len": 171,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "bump": 255,
+        "id": "1",
+        "live_node_count": "2",
+        "name_ref": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+        "next_node_id": "3",
+        "owner": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "stake": "275000000",
+        "status": "Active",
+        "version": 1
+      },
+      "lamports": "1518920",
+      "name": "operator_named",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "6f70",
+        "0100000000000000"
+      ],
+      "type": "Operator"
+    },
+    {
+      "address": "EHQ4j6CtFMDzq53BtdeNmBJxF1SUiD8Brbb9HKmgSzCn",
+      "bump": 255,
+      "data_base64": "KeQYpU5a68gBAP/0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMC+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 233,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000",
+        "bump": 255,
+        "claim_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "expires_at": "1790000300",
+        "fee_bps": 500,
+        "grace": 120,
+        "max_price": "250000",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "open_seq": "0",
+        "opened_at": "1790000000",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "pending_amount": "0",
+        "rent_payer": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "status": "Open",
+        "version": 1
+      },
+      "lamports": "1833880",
+      "name": "ticket_open",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "74",
+        "ff2502c2cdd0098290907b79183dc96eb57bc1ca8f8529b4e1a81a58a62bfab9",
+        "01010101010101010101010101010101"
+      ],
+      "type": "Ticket"
+    },
+    {
+      "address": "2rvFdosqnbzmWPUM5uDJcfnLDkzc42KtLihJe8xeEaLZ",
+      "bump": 255,
+      "data_base64": "KeQYpU5a68gBAf/0AXgAAAABAAAAAAAAAJDQAwAAAAAAwNQBAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMC+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMwsiy1+sSy6LLUeqOwK1uY+c0oTI/FyyCdLmXKHh+W/bgAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 233,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000",
+        "bump": 255,
+        "claim_hash": "2c8b2d7eb12cba2cb51ea8ec0ad6e63e734a1323f172c8274b99728787e5bf6e",
+        "expires_at": "1790000300",
+        "fee_bps": 500,
+        "grace": 120,
+        "max_price": "250000",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "open_seq": "1",
+        "opened_at": "1790000000",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "pending_amount": "120000",
+        "rent_payer": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "status": "PendingByOperator",
+        "version": 1
+      },
+      "lamports": "1833880",
+      "name": "ticket_pending",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "74",
+        "ff2502c2cdd0098290907b79183dc96eb57bc1ca8f8529b4e1a81a58a62bfab9",
+        "02020202020202020202020202020202"
+      ],
+      "type": "Ticket"
+    },
+    {
+      "address": "2i8g3diPaESdumvkGCcyg3ex3vQ7ia8WiEU9ZBqAK946",
+      "bump": 254,
+      "data_base64": "KeQYpU5a68gBAv70AXgAAAACAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMC+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 233,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000",
+        "bump": 254,
+        "claim_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "expires_at": "1790000300",
+        "fee_bps": 500,
+        "grace": 120,
+        "max_price": "250000",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "open_seq": "2",
+        "opened_at": "1790000000",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "pending_amount": "0",
+        "rent_payer": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "status": "Frozen",
+        "version": 1
+      },
+      "lamports": "1833880",
+      "name": "ticket_frozen",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "74",
+        "ff2502c2cdd0098290907b79183dc96eb57bc1ca8f8529b4e1a81a58a62bfab9",
+        "03030303030303030303030303030303"
+      ],
+      "type": "Ticket"
+    },
+    {
+      "address": "A9VwgBCg2D8qn92qbtbLYCx1ikdqM64wB9ksJCuFYRP8",
+      "bump": 254,
+      "data_base64": "cVZxOR2C+ZMB/pDQAwAAAAAAIEBA42TBDyvsnB/lAKHNTCR8idZQoB7X6CyrqGeHfCEL7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzAAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 98,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000",
+        "amount": "250000",
+        "bump": 254,
+        "payer": "3Atsbq9N5EaCc9YWmqD2rUVedX4pqDe7hyk6JSyWRTrG",
+        "rent_payer": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "version": 1
+      },
+      "lamports": "1148080",
+      "name": "refund_owed",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "6f776564",
+        "204040e364c10f2bec9c1fe500a1cd4c247c89d650a01ed7e82caba867877c21"
+      ],
+      "type": "RefundOwed"
+    },
+    {
+      "address": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+      "bump": 254,
+      "data_base64": "0DUBAzF6tDEBAQD+/xoAAAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h1WFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9grWh0dHBzOi8vbm9kZS0xLmV4YW1wbGUubmV0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAkEEGAAAAAAAUUAAAAAAAAAAAAAAAAAAABwAAAAAAAADK4bNqAAAAAAMAAAAAAAAAAQAAAAAAAAACAAAAAAAAACChBwAAAAAA7AQAAAAAAAADAAAAAAAAAKQBAAAAAAAAyAAAAAAAAAAwVwUAAAAAADwPAAAAAAAAAAAAAAAAAAAIBwAAAAAAAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAO9QAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGBbAwAAAAAAgDgBAAAAAABQwwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAACQXwEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "data_len": 880,
+      "decoded": {
+        "_pad0": "0000",
+        "_reserve": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "accrued_fee": "20500",
+        "accrued_payout": "410000",
+        "base_url": "https://node-1.example.net",
+        "base_url_len": 26,
+        "bump": 254,
+        "decode_tps_ewma": "200",
+        "input_units_total": "3900",
+        "lapsed_count": "1",
+        "last_activity_at": "1790173642",
+        "latency_samples": "3",
+        "latency_total_ms": "1260",
+        "live_tickets": "0",
+        "node_id": "1",
+        "opens_total": "7",
+        "operator": "6o37n5UrX3mAbyGgS9qEpekVt9Qsmv4fsJDo1FrSn6nG",
+        "operator_id": "1",
+        "output_units": [
+          "0",
+          "1800",
+          "7",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "protested_count": "1",
+        "protested_total": "90000",
+        "refunded_count": "2",
+        "refunded_total": "500000",
+        "revenue_total": "350000",
+        "ring_day": "20719",
+        "ring_revenue": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "220000",
+          "80000",
+          "50000",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "settled_count": "3",
+        "signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "staging": 0,
+        "stake": "0",
+        "status": 1,
+        "ttft_ewma_ms": "420",
+        "vault": "ELJZoLaH667BbaHW8M7NXxUbmcnjVfRJSSLz1Sk9V11W",
+        "vault_bump": 255,
+        "version": 1
+      },
+      "lamports": "5120640",
+      "name": "node_with_metrics",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "6e6f6465",
+        "0100000000000000",
+        "0100000000000000"
+      ],
+      "type": "Node"
+    },
+    {
+      "address": "CVNk7CF5hp8Wx2LRZXUD1G6WEHgQiQjZxgnvqPYy2LsW",
+      "bump": 255,
+      "data_base64": "XJ+m/XRga+4B//8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAA==",
+      "data_len": 58,
+      "decoded": {
+        "_reserve": "00000000000000000000000000000000",
+        "bump": 255,
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "version": 1
+      },
+      "lamports": "944880",
+      "name": "signer_index",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "7369676e6572",
+        "0beef5a9e679e6a3e134fe27837bff32c7cb5f5d44ea09bcb0e542bad6a4c0cc"
+      ],
+      "type": "SignerIndex"
+    },
+    {
+      "address": "ELJZoLaH667BbaHW8M7NXxUbmcnjVfRJSSLz1Sk9V11W",
+      "bump": 255,
+      "data_base64": "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqj/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uaSRBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "data_len": 165,
+      "decoded": {
+        "amount": "430500",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+        "owner": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "state": "Initialized"
+      },
+      "lamports": "1488440",
+      "name": "node_vault",
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "seeds_hex": [
+        "7661756c74",
+        "ff2502c2cdd0098290907b79183dc96eb57bc1ca8f8529b4e1a81a58a62bfab9"
+      ],
+      "type": "TokenAccount"
+    },
+    {
+      "address": "BUiPcNnbVsmb9Fwx5hQVzDhqM1EXbt5Xz8jHbNdBUSWg",
+      "bump": 252,
+      "data_base64": "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqibrlnJuZy7fulcnQge9/2bR3eh6eUvZuD/KHZNXlle1cAqZBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "data_len": 165,
+      "decoded": {
+        "amount": "275000000",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+        "owner": "BUiPcNnbVsmb9Fwx5hQVzDhqM1EXbt5Xz8jHbNdBUSWg",
+        "state": "Initialized"
+      },
+      "lamports": "1488440",
+      "name": "stake_vault",
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "seeds_hex": [
+        "7374616b65"
+      ],
+      "type": "TokenAccount"
+    },
+    {
+      "address": "Eh9gy6HMDTnR1xjDmR5bGUCymedvp6DMbv7Yw7Wo9zRu",
+      "bump": 255,
+      "data_base64": "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjLcPy4YLX+CglWCEqhHagj0IAOFFJLu6m8iIhjjfbraAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "data_len": 165,
+      "decoded": {
+        "amount": "0",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+        "owner": "Eh9gy6HMDTnR1xjDmR5bGUCymedvp6DMbv7Yw7Wo9zRu",
+        "state": "Initialized"
+      },
+      "lamports": "1488440",
+      "name": "owed_vault",
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "seeds_hex": [
+        "6f7765645f7661756c74"
+      ],
+      "type": "TokenAccount"
+    },
+    {
+      "address": "45Mmjvw64yU98qJc1FCLGr28c5AcNRNN9JA9dA1K62z7",
+      "bump": 255,
+      "data_base64": "0DUBAzF6tDEBAQH//hYAAFycbfJhycuEBHV3aq782US0BTKPqyj5s6le9ASQ096EYO7bmc+8x6NfgYLx1ensEucsIdx4Zf6yytWjrWAU64hWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9grWh0dHBzOi8vbjIuZXhhbXBsZS5uZXQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAACAAAAAAAAAEB4fQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      "data_len": 880,
+      "decoded": {
+        "_pad0": "0000",
+        "_reserve": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "accrued_fee": "0",
+        "accrued_payout": "0",
+        "base_url": "https://n2.example.net",
+        "base_url_len": 22,
+        "bump": 255,
+        "decode_tps_ewma": "0",
+        "input_units_total": "0",
+        "lapsed_count": "0",
+        "last_activity_at": "0",
+        "latency_samples": "0",
+        "latency_total_ms": "0",
+        "live_tickets": "0",
+        "node_id": "2",
+        "opens_total": "0",
+        "operator": "6o37n5UrX3mAbyGgS9qEpekVt9Qsmv4fsJDo1FrSn6nG",
+        "operator_id": "1",
+        "output_units": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "protested_count": "0",
+        "protested_total": "0",
+        "refunded_count": "0",
+        "refunded_total": "0",
+        "revenue_total": "0",
+        "ring_day": "0",
+        "ring_revenue": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "settled_count": "0",
+        "signing": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
+        "staging": 1,
+        "stake": "25000000",
+        "status": 1,
+        "ttft_ewma_ms": "0",
+        "vault": "7XPPPfdZviRGPgDiVSQ3yXM6LqTEMmJz4pH7Xiz9EY8o",
+        "vault_bump": 254,
+        "version": 1
+      },
+      "lamports": "5120640",
+      "name": "node_staging_rotated",
+      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "seeds_hex": [
+        "6e6f6465",
+        "0100000000000000",
+        "0200000000000000"
+      ],
+      "type": "Node"
+    }
+  ],
+  "context": {
+    "genesis_hash": "0707070707070707070707070707070707070707070707070707070707070707",
+    "keys": {
+      "admin": {
+        "pubkey": "5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf",
+        "seed": 10
+      },
+      "admin_next": {
+        "pubkey": "FMUEmtxhU46GzhKF4FW9MLJdQWiLgjiXP9TYRWSrqTpV",
+        "seed": 21
+      },
+      "arbiter": {
+        "pubkey": "7v54NWdBtkjuAFJrLGsS2SXnuk8nKam81mZJeeYxVFi9",
+        "seed": 11
+      },
+      "arbiter_next": {
+        "pubkey": "6TcyBfPdBt1kjsvDZLzmBFnuMaLWiTaAt4RjUr9VA5YD",
+        "seed": 22
+      },
+      "attacker": {
+        "pubkey": "3BuW9SR5tG6VFK4MmkQQ3Ak8ny1K1Vv5Uz7is8Aa5pwG",
+        "seed": 20
+      },
+      "drained_payer": {
+        "pubkey": "7vJDrxN46rmZXKAuVyv2ZRCNRMyRn3d25B5P2pkFcvrn",
+        "seed": 19
+      },
+      "node1_signing": {
+        "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "seed": 14
+      },
+      "node2_signing": {
+        "pubkey": "FezWPm3UEFa4nbF76D45V3gg9eZzhSxfw3tUES1Gr3o1",
+        "seed": 15
+      },
+      "node2_signing_rotated": {
+        "pubkey": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
+        "seed": 16
+      },
+      "owner": {
+        "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v",
+        "seed": 12
+      },
+      "owner2": {
+        "pubkey": "AoVsGaj8MSJ6xwKxfFxo9iZWH3enC8RRTXKH2fx2F8os",
+        "seed": 13
+      },
+      "payer": {
+        "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "seed": 17
+      },
+      "payer2": {
+        "pubkey": "3Atsbq9N5EaCc9YWmqD2rUVedX4pqDe7hyk6JSyWRTrG",
+        "seed": 18
+      }
+    },
+    "keys_about": "every key's secret is 32 bytes of its seed (Keypair::new_from_array([seed; 32])), so a test can re-sign as it",
+    "recent_blockhash": "5TeWSsjg2gbxCyWVniXeCmwM7UtHTCK7svzJr5xYJzHf",
+    "start_unix_timestamp": "1790000000",
+    "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "usdc_decimals": 6,
+    "usdc_mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+  },
+  "encoding": "u64 and i64 are decimal strings, smaller integers JSON numbers; keys and signatures are base58; account data, instruction data, transactions and events are base64; every other byte field is hex. The exception is receipt_value, a copy of proto's receipt_v3.value shape: its integers are JSON numbers and its ticket_id and deployment base64",
+  "generator": "contracts-solana: make fixtures (programs/zs-escrow/tests/fixtures.rs); copied to proto's testdata/ by make sync-proto-fixtures",
+  "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+}

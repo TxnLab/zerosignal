@@ -80,6 +80,14 @@
             "types": "./dist/settle/index.d.ts",
             "import": "./dist/settle/index.js"
         },
+        "./solana": {
+            "types": "./dist/solana/index.d.ts",
+            "import": "./dist/solana/index.js"
+        },
+        "./solana/zsescrow": {
+            "types": "./dist/solana/zsescrow/index.d.ts",
+            "import": "./dist/solana/zsescrow/index.js"
+        },
         "./tools": {
             "types": "./dist/tools/index.d.ts",
             "import": "./dist/tools/index.js"

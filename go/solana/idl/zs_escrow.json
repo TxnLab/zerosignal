@@ -1,0 +1,3885 @@
+{
+  "address": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+  "metadata": {
+    "name": "zs_escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "accept_arbiter",
+      "discriminator": [
+        245,
+        151,
+        183,
+        50,
+        245,
+        136,
+        54,
+        2
+      ],
+      "accounts": [
+        {
+          "name": "new_arbiter",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "ack",
+      "discriminator": [
+        227,
+        136,
+        23,
+        119,
+        174,
+        79,
+        201,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "docs": [
+            "Writable because it funds a RefundOwed when the settle creates one."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "refund_owed",
+          "optional": true
+        },
+        {
+          "name": "owed_vault",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "optional": true,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "fields",
+          "type": {
+            "defined": {
+              "name": "ClaimFields"
+            }
+          }
+        },
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "admin_unregister_operator",
+      "discriminator": [
+        142,
+        9,
+        213,
+        214,
+        113,
+        42,
+        206,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim",
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "node_signer",
+          "signer": true
+        },
+        {
+          "name": "node",
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "fields",
+          "type": {
+            "defined": {
+              "name": "ClaimFields"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "claim_refund_owed",
+      "discriminator": [
+        79,
+        219,
+        192,
+        79,
+        118,
+        81,
+        93,
+        214
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "signer": true,
+          "relations": [
+            "refund_owed"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "refund_owed",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "relations": [
+            "refund_owed"
+          ]
+        },
+        {
+          "name": "owed_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "every refund, though the payer signs, so a payer's refunds all land",
+            "in the one account its wallet and the SDKs watch."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_refund_owed",
+      "discriminator": [
+        90,
+        118,
+        166,
+        220,
+        153,
+        240,
+        85,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "rent_payer",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "refund_owed"
+          ]
+        },
+        {
+          "name": "refund_owed",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_node",
+      "discriminator": [
+        20,
+        183,
+        134,
+        233,
+        51,
+        51,
+        115,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "operator"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  111,
+                  100,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "operator.id",
+                "account": "Operator"
+              },
+              {
+                "kind": "account",
+                "path": "operator.next_node_id",
+                "account": "Operator"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Authority is the node PDA, not the signing key, so it survives key",
+            "rotation."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "node"
+              }
+            ]
+          }
+        },
+        {
+          "name": "signing",
+          "docs": [
+            "Must sign: the key's index is unique, so registering a key nobody has",
+            "to prove they hold would let anyone squat another operator's key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "signer_index",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "signing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "authority over it and its mint to match the stake vault's."
+          ],
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "base_url",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "create_operator",
+      "discriminator": [
+        145,
+        40,
+        238,
+        75,
+        181,
+        252,
+        59,
+        11
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.next_operator_id",
+                "account": "Config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "authority over it and its mint to match the stake vault's."
+          ],
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "evict",
+      "discriminator": [
+        56,
+        13,
+        174,
+        235,
+        133,
+        159,
+        37,
+        162
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "treasury_usdc",
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "slash_bps",
+          "type": "u16"
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program_data",
+          "docs": [
+            "Only the upgrade authority may initialize: otherwise whoever lands the",
+            "first initialize after deploy chooses the admin, mint and fee."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  27,
+                  204,
+                  224,
+                  71,
+                  196,
+                  51,
+                  14,
+                  23,
+                  14,
+                  100,
+                  195,
+                  71,
+                  24,
+                  25,
+                  120,
+                  215,
+                  60,
+                  80,
+                  121,
+                  15,
+                  9,
+                  163,
+                  158,
+                  78,
+                  102,
+                  81,
+                  205,
+                  50,
+                  0,
+                  92,
+                  52,
+                  72
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                2,
+                168,
+                246,
+                145,
+                78,
+                136,
+                161,
+                176,
+                226,
+                16,
+                21,
+                62,
+                247,
+                99,
+                174,
+                43,
+                0,
+                194,
+                185,
+                61,
+                22,
+                193,
+                36,
+                210,
+                192,
+                83,
+                122,
+                16,
+                4,
+                128,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owed_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  119,
+                  101,
+                  100,
+                  95,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "treasury"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "InitializeArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "discriminator": [
+        228,
+        220,
+        155,
+        71,
+        199,
+        189,
+        60,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "node_signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Read so that evicting an operator stops every one of its nodes at",
+            "once; a per-node flag would take one write per node."
+          ]
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "node"
+              },
+              {
+                "kind": "arg",
+                "path": "ticket_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "ticket_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "type": "pubkey"
+        },
+        {
+          "name": "max_price",
+          "type": "u64"
+        },
+        {
+          "name": "expires_at",
+          "type": "i64"
+        },
+        {
+          "name": "grace",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "propose_arbiter",
+      "discriminator": [
+        6,
+        244,
+        39,
+        34,
+        254,
+        166,
+        166,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "arbiter",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_arbiter",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "protest",
+      "discriminator": [
+        16,
+        134,
+        185,
+        122,
+        228,
+        138,
+        207,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "signer": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "docs": [
+            "Writable for the protest counters."
+          ],
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "ticket_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "type": "bytes"
+        },
+        {
+          "name": "reason",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "refund_inactive",
+      "discriminator": [
+        3,
+        31,
+        159,
+        104,
+        33,
+        33,
+        141,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "docs": [
+            "Writable because it funds a RefundOwed when the settle creates one."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "refund_owed",
+          "optional": true
+        },
+        {
+          "name": "owed_vault",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "optional": true,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reinstate",
+      "discriminator": [
+        168,
+        199,
+        183,
+        135,
+        124,
+        114,
+        176,
+        240
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "resolve_frozen",
+      "discriminator": [
+        175,
+        214,
+        170,
+        239,
+        56,
+        146,
+        240,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "docs": [
+            "Writable because it funds a RefundOwed when the settle creates one."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "refund_owed",
+          "optional": true
+        },
+        {
+          "name": "owed_vault",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "optional": true,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "node_amount",
+          "type": "u64"
+        },
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_config",
+      "discriminator": [
+        108,
+        158,
+        154,
+        175,
+        212,
+        98,
+        52,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "docs": [
+            "who owns the account it names."
+          ],
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SetConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_node_staging",
+      "discriminator": [
+        9,
+        205,
+        76,
+        21,
+        67,
+        60,
+        181,
+        228
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator"
+        },
+        {
+          "name": "node",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "staging",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "settle_cooperative",
+      "discriminator": [
+        211,
+        59,
+        17,
+        166,
+        219,
+        29,
+        217,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "docs": [
+            "Writable because it funds a RefundOwed when the settle creates one."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "refund_owed",
+          "optional": true
+        },
+        {
+          "name": "owed_vault",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "optional": true,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "fields",
+          "type": {
+            "defined": {
+              "name": "ClaimFields"
+            }
+          }
+        },
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle_lapsed",
+      "discriminator": [
+        173,
+        176,
+        70,
+        20,
+        112,
+        244,
+        71,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "submitter",
+          "docs": [
+            "Writable because it funds a RefundOwed when the settle creates one."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "relations": [
+            "ticket"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "ticket",
+          "writable": true
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "payer_ata",
+          "docs": [
+            "settle; finalize requires the payer's ATA and decides whether it can",
+            "take the refund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "refund_owed",
+          "optional": true
+        },
+        {
+          "name": "owed_vault",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "optional": true,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "fields",
+          "type": {
+            "defined": {
+              "name": "ClaimFields"
+            }
+          }
+        },
+        {
+          "name": "bumps",
+          "type": {
+            "defined": {
+              "name": "RefundBumps"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "sweep_fees",
+      "discriminator": [
+        175,
+        225,
+        98,
+        71,
+        118,
+        66,
+        34,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "treasury_usdc",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unregister_node",
+      "discriminator": [
+        201,
+        6,
+        66,
+        24,
+        223,
+        155,
+        213,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "operator"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "signer_index",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "treasury_usdc",
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unregister_operator",
+      "discriminator": [
+        31,
+        82,
+        227,
+        146,
+        227,
+        175,
+        158,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "operator"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "writable": true
+        },
+        {
+          "name": "stake_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_node",
+      "discriminator": [
+        13,
+        65,
+        246,
+        102,
+        101,
+        91,
+        98,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "operator"
+          ]
+        },
+        {
+          "name": "operator"
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "old_signer_index",
+          "docs": [
+            "The index of the node's current key: create_node and this instruction",
+            "keep exactly one index per node, so naming the node identifies it."
+          ],
+          "writable": true
+        },
+        {
+          "name": "new_signing",
+          "docs": [
+            "Signs for the reason create_node's `signing` does. Rotating to the",
+            "current key, or to any key another node holds, fails at the index's",
+            "init because that index already exists."
+          ],
+          "signer": true
+        },
+        {
+          "name": "new_signer_index",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "new_signing"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "base_url",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "update_node_url",
+      "discriminator": [
+        206,
+        161,
+        22,
+        70,
+        4,
+        124,
+        174,
+        213
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator"
+        },
+        {
+          "name": "node",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "base_url",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "update_operator",
+      "discriminator": [
+        183,
+        158,
+        123,
+        149,
+        124,
+        150,
+        45,
+        226
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "operator"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "writable": true
+        },
+        {
+          "name": "name_account",
+          "docs": [
+            "record and the signer owns it."
+          ],
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_owner",
+          "type": "pubkey"
+        },
+        {
+          "name": "name_ref",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_payout",
+      "discriminator": [
+        114,
+        146,
+        48,
+        240,
+        49,
+        57,
+        108,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator"
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "owner_usdc",
+          "docs": [
+            "and it creates one of this mint for this owner."
+          ],
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Node",
+      "discriminator": [
+        208,
+        53,
+        1,
+        3,
+        49,
+        122,
+        180,
+        49
+      ]
+    },
+    {
+      "name": "Operator",
+      "discriminator": [
+        219,
+        31,
+        188,
+        145,
+        69,
+        139,
+        204,
+        117
+      ]
+    },
+    {
+      "name": "RefundOwed",
+      "discriminator": [
+        113,
+        86,
+        113,
+        57,
+        29,
+        130,
+        249,
+        147
+      ]
+    },
+    {
+      "name": "SignerIndex",
+      "discriminator": [
+        92,
+        159,
+        166,
+        253,
+        116,
+        96,
+        107,
+        238
+      ]
+    },
+    {
+      "name": "Ticket",
+      "discriminator": [
+        41,
+        228,
+        24,
+        165,
+        78,
+        90,
+        235,
+        200
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "OperatorEvicted",
+      "discriminator": [
+        104,
+        76,
+        44,
+        105,
+        205,
+        229,
+        70,
+        212
+      ]
+    },
+    {
+      "name": "TicketClaimed",
+      "discriminator": [
+        182,
+        233,
+        151,
+        84,
+        251,
+        36,
+        232,
+        88
+      ]
+    },
+    {
+      "name": "TicketProtested",
+      "discriminator": [
+        140,
+        165,
+        146,
+        223,
+        161,
+        173,
+        167,
+        108
+      ]
+    },
+    {
+      "name": "TicketSettled",
+      "discriminator": [
+        72,
+        40,
+        13,
+        3,
+        184,
+        159,
+        190,
+        211
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "OpenPaused",
+      "msg": "Opening tickets is paused"
+    },
+    {
+      "code": 6001,
+      "name": "NodeInactive",
+      "msg": "Node is not active"
+    },
+    {
+      "code": 6002,
+      "name": "WrongNodeSigner",
+      "msg": "Signer is not the node's signing key"
+    },
+    {
+      "code": 6003,
+      "name": "BadExpiry",
+      "msg": "expires_at is in the past or beyond the maximum ticket lifetime"
+    },
+    {
+      "code": 6004,
+      "name": "BadGrace",
+      "msg": "grace is outside the configured minimum and maximum"
+    },
+    {
+      "code": 6005,
+      "name": "ZeroPrice",
+      "msg": "max_price must be positive"
+    },
+    {
+      "code": 6006,
+      "name": "MissingTransfer",
+      "msg": "The instruction before open is not the escrow TransferChecked"
+    },
+    {
+      "code": 6007,
+      "name": "TransferMismatch",
+      "msg": "The escrow transfer does not match the ticket"
+    },
+    {
+      "code": 6008,
+      "name": "MultipleOpens",
+      "msg": "A transaction may carry only one open"
+    },
+    {
+      "code": 6009,
+      "name": "WrongNode",
+      "msg": "Ticket does not belong to this node"
+    },
+    {
+      "code": 6010,
+      "name": "BadTicketState",
+      "msg": "Ticket is not in a state that allows this"
+    },
+    {
+      "code": 6011,
+      "name": "PastDeadline",
+      "msg": "The settle window has closed"
+    },
+    {
+      "code": 6012,
+      "name": "BeforeDeadline",
+      "msg": "The settle window has not closed yet"
+    },
+    {
+      "code": 6013,
+      "name": "OverCharge",
+      "msg": "Charge plus protocol fee exceeds max_price"
+    },
+    {
+      "code": 6014,
+      "name": "ClaimMismatch",
+      "msg": "Claim fields do not match the pending claim"
+    },
+    {
+      "code": 6015,
+      "name": "BadAck",
+      "msg": "The instruction before settle is not a well-formed Ed25519 verification of the payer's ack"
+    },
+    {
+      "code": 6016,
+      "name": "WrongVault",
+      "msg": "Wrong vault account"
+    },
+    {
+      "code": 6017,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6018,
+      "name": "NotTopLevel",
+      "msg": "Must be a top-level instruction, not a CPI"
+    },
+    {
+      "code": 6019,
+      "name": "ClaimWindowClosed",
+      "msg": "Claims close at expires_at; grace is the payer's window to answer"
+    },
+    {
+      "code": 6020,
+      "name": "BadConfig",
+      "msg": "Config bound out of range"
+    },
+    {
+      "code": 6021,
+      "name": "NotUpgradeAuthority",
+      "msg": "Signer is not the program's upgrade authority"
+    },
+    {
+      "code": 6022,
+      "name": "RegistryPaused",
+      "msg": "Registration is paused"
+    },
+    {
+      "code": 6023,
+      "name": "OperatorInactive",
+      "msg": "Operator is not active"
+    },
+    {
+      "code": 6024,
+      "name": "WrongOperator",
+      "msg": "Node does not belong to this operator"
+    },
+    {
+      "code": 6025,
+      "name": "NotOperatorOwner",
+      "msg": "Signer is not the operator's owner"
+    },
+    {
+      "code": 6026,
+      "name": "BaseUrlTooLong",
+      "msg": "Base URL exceeds the maximum length"
+    },
+    {
+      "code": 6027,
+      "name": "WrongPayerAccount",
+      "msg": "The refund account is not the payer's associated token account"
+    },
+    {
+      "code": 6028,
+      "name": "RefundOwedMissing",
+      "msg": "The payer's token account cannot take the refund; pass the RefundOwed, owed-vault and system program accounts"
+    },
+    {
+      "code": 6029,
+      "name": "RefundOwedNotWritable",
+      "msg": "The payer's token account cannot take the refund; resend with the RefundOwed and owed-vault accounts writable"
+    },
+    {
+      "code": 6030,
+      "name": "WrongRefundOwed",
+      "msg": "Wrong RefundOwed account for this payer"
+    },
+    {
+      "code": 6031,
+      "name": "WrongOwedVault",
+      "msg": "Wrong owed vault"
+    },
+    {
+      "code": 6032,
+      "name": "NotRentPayer",
+      "msg": "Signer is not the account's rent payer"
+    },
+    {
+      "code": 6033,
+      "name": "RefundStillOwed",
+      "msg": "A refund is still owed on this account"
+    },
+    {
+      "code": 6034,
+      "name": "NotAdmin",
+      "msg": "Signer is not the config admin"
+    },
+    {
+      "code": 6035,
+      "name": "NotOwnerOrSigner",
+      "msg": "Signer is neither the operator's owner nor the node's signing key"
+    },
+    {
+      "code": 6036,
+      "name": "OperatorNotEvicted",
+      "msg": "Operator is not evicted"
+    },
+    {
+      "code": 6037,
+      "name": "OperatorHasNodes",
+      "msg": "Operator still has nodes; unregister them first"
+    },
+    {
+      "code": 6038,
+      "name": "NodeHasLiveTickets",
+      "msg": "Node still has live tickets"
+    },
+    {
+      "code": 6039,
+      "name": "WrongSignerIndex",
+      "msg": "Signer index does not belong to this node"
+    },
+    {
+      "code": 6040,
+      "name": "NameNotOwned",
+      "msg": "Name account is not a name-service record the signer owns"
+    },
+    {
+      "code": 6041,
+      "name": "SlashOverMax",
+      "msg": "slash_bps exceeds 100%"
+    },
+    {
+      "code": 6042,
+      "name": "BadTreasury",
+      "msg": "Treasury must be a passed account outside this program and its vaults"
+    },
+    {
+      "code": 6043,
+      "name": "NoPendingAdmin",
+      "msg": "No admin transfer is pending"
+    },
+    {
+      "code": 6044,
+      "name": "NotPendingAdmin",
+      "msg": "Signer is not the pending admin"
+    },
+    {
+      "code": 6045,
+      "name": "ReasonTooLong",
+      "msg": "Eviction reason exceeds 1024 bytes"
+    },
+    {
+      "code": 6046,
+      "name": "UsageTypeOutOfRange",
+      "msg": "A claim's usage type is outside the output-units vector"
+    },
+    {
+      "code": 6047,
+      "name": "NotPayer",
+      "msg": "Signer is not the ticket's payer"
+    },
+    {
+      "code": 6048,
+      "name": "ProtestReasonRequired",
+      "msg": "A protest must name a reason"
+    },
+    {
+      "code": 6049,
+      "name": "ReceiptMalformed",
+      "msg": "The receipt is not a well-formed deployment-bound usage receipt"
+    },
+    {
+      "code": 6050,
+      "name": "ReceiptNotForTicket",
+      "msg": "The receipt names another ticket or deployment"
+    },
+    {
+      "code": 6051,
+      "name": "BadReceiptSignature",
+      "msg": "The instruction before protest is not a well-formed Ed25519 verification of the node's receipt"
+    },
+    {
+      "code": 6052,
+      "name": "NotArbiter",
+      "msg": "Signer is not the config arbiter"
+    },
+    {
+      "code": 6053,
+      "name": "NothingToPay",
+      "msg": "Nothing is accrued or owed here"
+    },
+    {
+      "code": 6054,
+      "name": "WrongDestination",
+      "msg": "The destination is not the recipient's associated token account"
+    },
+    {
+      "code": 6055,
+      "name": "NoPendingArbiter",
+      "msg": "No arbiter transfer is pending"
+    },
+    {
+      "code": 6056,
+      "name": "NotPendingArbiter",
+      "msg": "Signer is not the pending arbiter"
+    },
+    {
+      "code": 6057,
+      "name": "NoArbiter",
+      "msg": "An arbiter is required"
+    }
+  ],
+  "types": [
+    {
+      "name": "ClaimFields",
+      "docs": [
+        "What the node claims for a ticket; the payer's ack signs its hash."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "receipt_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "ttft_ms",
+            "type": "u32"
+          },
+          {
+            "name": "decode_ms",
+            "type": "u32"
+          },
+          {
+            "name": "input_units",
+            "type": "u64"
+          },
+          {
+            "name": "output_units",
+            "type": "u64"
+          },
+          {
+            "name": "output_usage_type",
+            "type": "u8"
+          },
+          {
+            "name": "aux_usage_type",
+            "type": "u8"
+          },
+          {
+            "name": "aux_count",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "stake_vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "owed_vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "usdc_decimals",
+            "type": "u8"
+          },
+          {
+            "name": "pause_open",
+            "type": "bool"
+          },
+          {
+            "name": "pause_registry",
+            "docs": [
+              "Gates creating operators and nodes and the owner's or node's updates,",
+              "except the two that pull a node whose hot key leaked: key rotation and",
+              "the owner's staging flag. It never gates settles, unregisters or the",
+              "admin's levers, so a registry pause never strands escrow or stake."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_grace",
+            "type": "u32"
+          },
+          {
+            "name": "default_grace",
+            "docs": [
+              "The grace a ticket gets when open passes 0."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "max_ticket_lifetime",
+            "type": "i64"
+          },
+          {
+            "name": "operator_stake",
+            "docs": [
+              "Micro-USDC escrowed by create_operator, which covers its first node."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "node_stake",
+            "docs": [
+              "Micro-USDC escrowed by create_node for every node after the first."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "next_operator_id",
+            "docs": [
+              "Starts at 1: 0 stays the \"unset\" operator id, as on Algorand."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "arbiter",
+            "docs": [
+              "Splits frozen tickets; kept apart from admin so the two can be",
+              "different multisigs. Set at initialize and never default; only the",
+              "arbiter names its successor, so a compromised admin can't seat itself",
+              "and award disputed escrow."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "usdc_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "A wallet, not a token account: slashes go to any USDC account it",
+              "owns, so freezing or closing one account can't block an eviction."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "genesis_hash",
+            "docs": [
+              "The cluster's genesis hash, bound into every settle ack. A program",
+              "cannot read the genesis hash on chain, so it is fixed at initialize."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Named by propose_admin and made admin when it signs accept_admin, so",
+              "a mistyped key never takes the admin seat. Default when none is",
+              "pending."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "min_grace",
+            "docs": [
+              "The least grace open accepts, so a node cannot leave a payer too",
+              "little time to answer a claim. Placed after the original fields so",
+              "they keep their offsets."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "pending_arbiter",
+            "docs": [
+              "As pending_admin, for the arbiter seat. Appended, which grew Config,",
+              "only because no Config existed on any cluster yet; once one does, a",
+              "new field must come from the reserve, sized to hold two keys."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitializeArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "genesis_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "arbiter",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_grace",
+            "type": "u32"
+          },
+          {
+            "name": "default_grace",
+            "type": "u32"
+          },
+          {
+            "name": "min_grace",
+            "type": "u32"
+          },
+          {
+            "name": "max_ticket_lifetime",
+            "type": "i64"
+          },
+          {
+            "name": "operator_stake",
+            "type": "u64"
+          },
+          {
+            "name": "node_stake",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Node",
+      "docs": [
+        "Zero-copy: every open and settle writes it, and borsh would re-serialize",
+        "the metrics ring each time. Field order keeps the struct free of padding."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "staging",
+            "docs": [
+              "Advertised on chain but held out of normal routing."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "base_url_len",
+            "type": "u8"
+          },
+          {
+            "name": "_pad0",
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "signing",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "Stored so the hot path compares a key instead of re-deriving the PDA."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "docs": [
+              "The Operator PDA, stored for the same reason as `vault`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "base_url",
+            "type": {
+              "array": [
+                "u8",
+                248
+              ]
+            }
+          },
+          {
+            "name": "operator_id",
+            "type": "u64"
+          },
+          {
+            "name": "node_id",
+            "type": "u64"
+          },
+          {
+            "name": "stake",
+            "docs": [
+              "This node's share of the operator's stake: 0 for the first node."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "accrued_payout",
+            "type": "u64"
+          },
+          {
+            "name": "accrued_fee",
+            "type": "u64"
+          },
+          {
+            "name": "live_tickets",
+            "type": "u64"
+          },
+          {
+            "name": "opens_total",
+            "docs": [
+              "Every open takes the next value; the ticket keeps it as open_seq."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "last_activity_at",
+            "type": "i64"
+          },
+          {
+            "name": "settled_count",
+            "docs": [
+              "Settled with the payer's ack, off chain or by `ack`."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "lapsed_count",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_count",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_total",
+            "docs": [
+              "Σ max_price of the tickets refunded inactive."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "latency_total_ms",
+            "docs": [
+              "Σ ttft_ms over token-output settles; latency_samples is its divisor."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "latency_samples",
+            "type": "u64"
+          },
+          {
+            "name": "ttft_ewma_ms",
+            "docs": [
+              "0 until the first token-output settle, which seeds it."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "decode_tps_ewma",
+            "docs": [
+              "Output tokens per second; 0 until the first token settle with decode",
+              "time and output."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "revenue_total",
+            "docs": [
+              "Σ amount charged, before the protocol fee."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "input_units_total",
+            "type": "u64"
+          },
+          {
+            "name": "output_units",
+            "type": {
+              "array": [
+                "u64",
+                8
+              ]
+            }
+          },
+          {
+            "name": "ring_day",
+            "docs": [
+              "The day index (unix time / 86,400) of the latest ring write."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "ring_revenue",
+            "type": {
+              "array": [
+                "u64",
+                30
+              ]
+            }
+          },
+          {
+            "name": "protested_count",
+            "docs": [
+              "Tickets the payer froze by protest, and Σ the amount their receipts",
+              "charged, each capped at its ticket's max_price: Algorand's",
+              "ticketsProtested and totalProtestedUsdc, which the SDKs show beside",
+              "the other metrics. Carved from the head of the reserve, so every",
+              "earlier offset stays put."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protested_total",
+            "type": "u64"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                48
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Operator",
+      "docs": [
+        "One per owner. Read-only on the hot path: open checks its status, and",
+        "nothing per-ticket writes it, so an operator's nodes never share a write",
+        "lane. That is why it carries no rolled-up metrics, unlike the Algorand",
+        "OperatorRecord; a reader sums the operator's nodes instead."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "OperatorStatus"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "next_node_id",
+            "docs": [
+              "Starts at 1 and never goes back, so a removed node's id is never",
+              "reused."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "live_node_count",
+            "type": "u64"
+          },
+          {
+            "name": "stake",
+            "docs": [
+              "Micro-USDC this operator has in the stake vault, stored rather than",
+              "summed so it can be the slash base. It equals the operator stake paid",
+              "plus Σ live node.stake until a slash lowers it; node.stake is never",
+              "lowered, so unregister_node refunds at most this, and the operator's",
+              "unregister returns whatever remains."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "name_ref",
+            "docs": [
+              "A name-service account the owner proved it holds; default when unset."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "OperatorEvicted",
+      "docs": [
+        "The admin's stated cause, kept on chain with the slash as Algorand keeps it",
+        "in the slash transfer's note."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "operator_id",
+            "type": "u64"
+          },
+          {
+            "name": "slashed",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OperatorStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Evicted"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RefundBumps",
+      "docs": [
+        "Bumps of the payer's ATA and RefundOwed, computed off chain by whoever",
+        "submits a settle. The program then derives each address once instead of",
+        "searching for it, and a search's length depends on the payer's key, which",
+        "the payer can grind to push a node's settle past its compute limit."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payer_ata",
+            "type": "u8"
+          },
+          {
+            "name": "refund_owed",
+            "docs": [
+              "Read only when the settle creates the payer's RefundOwed; an existing",
+              "record's own bump is used otherwise."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RefundOwed",
+      "docs": [
+        "A payer's refunds that settles could not push to its token account (closed",
+        "or frozen). The USDC itself is in the owed vault."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Whoever's settle created this account. Closing it returns the rent",
+              "there; were it the payer, a payer could keep its token account closed",
+              "and collect the rent of every RefundOwed a settle creates for it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SetConfigArgs",
+      "docs": [
+        "Each field left `None` keeps its current value. Stakes apply to later",
+        "registrations only, and fee and grace to later opens: a ticket keeps the",
+        "fee_bps and grace it opened with, and a stake is refunded as paid. The",
+        "arbiter is not here: it moves only by propose_arbiter and accept_arbiter."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pause_open",
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "pause_registry",
+            "type": {
+              "option": "bool"
+            }
+          },
+          {
+            "name": "fee_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "max_grace",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "default_grace",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "min_grace",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "max_ticket_lifetime",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "operator_stake",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "node_stake",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "treasury",
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettleOutcome",
+      "docs": [
+        "How a ticket ended. Only the claim endings fold the claim into metrics.",
+        "Variants are appended, never reordered: the event encodes the index."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Cooperative"
+          },
+          {
+            "name": "Acked"
+          },
+          {
+            "name": "Lapsed"
+          },
+          {
+            "name": "RefundedInactive"
+          },
+          {
+            "name": "Resolved"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SignerIndex",
+      "docs": [
+        "`[\"signer\", signing key]`: which node holds a signing key. Its address can",
+        "hold only one account, which is what keeps keys unique across nodes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Ticket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "TicketStatus"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "grace",
+            "type": "u32"
+          },
+          {
+            "name": "open_seq",
+            "docs": [
+              "Unique per open of this node. A closed ticket's address can be opened",
+              "again with the same ticket id, so the ack binds this, not the address",
+              "alone; otherwise an old ack replays against the new ticket."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "max_price",
+            "type": "u64"
+          },
+          {
+            "name": "pending_amount",
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "node_signing",
+            "docs": [
+              "The node's signing key at open, which signs this ticket's receipt.",
+              "Settles check the node's current key instead, so a rotation retires a",
+              "leaked one. A protest must check the receipt against this snapshot, as",
+              "Algorand's protest checks its ticket's nodeSigning: against the",
+              "current key, a rotation would void every protest of a receipt the old",
+              "key signed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Who funded the rent. Closing the ticket refunds it here, never to the",
+              "caller, so a permissionless refund cannot capture the rent."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "claim_hash",
+            "docs": [
+              "sha256 of the claim fields; settle_lapsed callers resupply them."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "_reserve",
+            "docs": [
+              "Smaller than the long-lived accounts' reserves: every live ticket's",
+              "rent is float the node has out, and tickets are short-lived, so a new",
+              "layout can apply to new opens while `version` tells the few remaining",
+              "old tickets apart."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketClaimed",
+      "docs": [
+        "Carries no payer and no model; the ticket address names the claim."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketProtested",
+      "docs": [
+        "Carries no payer: the ticket address names the dispute."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "What the protested receipt charged, read from the bytes the node",
+              "signed; on Algorand the payer asserts it beside the digest."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketSettled",
+      "docs": [
+        "Every way a ticket ends. Carries no payer and no model: the ticket address",
+        "names the ticket, and the payer appears only where the open's transfer",
+        "already put it on chain."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticket",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "SettleOutcome"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "refund",
+            "type": "u64"
+          },
+          {
+            "name": "refund_owed",
+            "docs": [
+              "The refund went to the payer's RefundOwed, not its token account."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TicketStatus",
+      "docs": [
+        "One enum rather than a status plus a separate \"pending by\" field, so an",
+        "open ticket cannot also name a claimant."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "PendingByOperator"
+          },
+          {
+            "name": "Frozen"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "CONFIG_SEED",
+      "type": "bytes",
+      "value": "[99, 111, 110, 102, 105, 103]"
+    },
+    {
+      "name": "NODE_SEED",
+      "type": "bytes",
+      "value": "[110, 111, 100, 101]"
+    },
+    {
+      "name": "OPERATOR_SEED",
+      "type": "bytes",
+      "value": "[111, 112]"
+    },
+    {
+      "name": "OWED_VAULT_SEED",
+      "docs": [
+        "Refunds that could not be pushed to the payer at settle time move here,",
+        "out of the node's vault, so the node can still sweep and unregister while",
+        "the payer has not claimed. Like the stake vault, it is its own authority."
+      ],
+      "type": "bytes",
+      "value": "[111, 119, 101, 100, 95, 118, 97, 117, 108, 116]"
+    },
+    {
+      "name": "REFUND_OWED_SEED",
+      "type": "bytes",
+      "value": "[111, 119, 101, 100]"
+    },
+    {
+      "name": "SIGNER_SEED",
+      "docs": [
+        "Seeds the one SignerIndex a signing key may have, so no two nodes share a",
+        "key and a signature over a ticket or receipt names exactly one node."
+      ],
+      "type": "bytes",
+      "value": "[115, 105, 103, 110, 101, 114]"
+    },
+    {
+      "name": "STAKE_VAULT_SEED",
+      "docs": [
+        "Operator and node stakes sit in their own token account, which is its own",
+        "authority: only an instruction that signs with these seeds can move them,",
+        "so no escrow path can draw on stakes by mistake."
+      ],
+      "type": "bytes",
+      "value": "[115, 116, 97, 107, 101]"
+    },
+    {
+      "name": "TICKET_SEED",
+      "docs": [
+        "Ticket PDAs are seeded by the node PDA as well as the ticket id. With a",
+        "global seed, a rival node that sees a ticket id broadcast could open it",
+        "first and squat it. The id is proto's wire ticket id, 16 bytes, so the",
+        "receipt a protest carries names the same id the ticket was opened with."
+      ],
+      "type": "bytes",
+      "value": "[116]"
+    },
+    {
+      "name": "VAULT_SEED",
+      "type": "bytes",
+      "value": "[118, 97, 117, 108, 116]"
+    }
+  ]
+}
