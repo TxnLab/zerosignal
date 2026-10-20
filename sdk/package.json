@@ -63,6 +63,10 @@
             "types": "./dist/accounts/xhd.d.ts",
             "import": "./dist/accounts/xhd.js"
         },
+        "./accounts/solana": {
+            "types": "./dist/accounts/solana.d.ts",
+            "import": "./dist/accounts/solana.js"
+        },
         "./node": {
             "types": "./dist/node/index.d.ts",
             "node": "./dist/node/index.js"

@@ -35,6 +35,12 @@ The seed uses an **empty BIP-39 passphrase** (matching the client). A passphrase
 
 Derivation uses [`github.com/algonode/go-algorand-hd-wallet`](https://github.com/algonode/go-algorand-hd-wallet) (xHD derivation + signing) and `github.com/tyler-smith/go-bip39` (checksum + seed). The HD lib is **pinned to an exact version**: it sits on the signing path, so a bump must be deliberate and must re-run the golden-vector tests in `keystore_hd_test.go`, which cross-check derived addresses against the client's `@algorandfoundation/xhd-wallet-api` output (regenerate via `client/`'s `entropyToMnemonic → mnemonicToSeedSync → fromSeed → keyGen` pipeline). Those vectors guard `m/44'/283'/0'/0/0` specifically — extend them if the derivation path is ever parameterized.
 
+A valid 12-, 15-, 18- or 21-word BIP-39 phrase is skipped here (logged at Info), since no Algorand form takes it; one that fails the checksum still fails the load.
+
+### Solana keys
+
+`NewSolanaKeys` reads the same providers and loads every BIP-39 phrase of 12 to 24 words at **m/44'/501'/0'/0'** (SLIP-0010 Ed25519, empty passphrase), keyed by base58 address. That is Phantom's and Solflare's default account, so the client's exported 24-word phrase loads the same Solana address a user sees after importing it there. `solana-keygen` gives the same address only at that path (`--derivation-path`, or `prompt://?key=0/0`); plain `solana-keygen new` / `recover` use no path. A 25-word Algorand mnemonic is skipped. The `slip10` and `solana` rows of `testdata/account_vectors.json` pin this to the TS twin, `@txnlab/zerosignal/accounts/solana`.
+
 ## URL form (production; cloud-backed)
 
 ```
