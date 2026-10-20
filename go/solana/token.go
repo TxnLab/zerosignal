@@ -31,3 +31,32 @@ func TransferChecked(source, mint, destination, authority PublicKey, amount uint
 		Data: data,
 	}
 }
+
+// AssociatedTokenCreateIdempotent is the associated token program's
+// CreateIdempotent tag, its only data byte.
+const AssociatedTokenCreateIdempotent = 1
+
+// CreateAssociatedTokenAccountIdempotent creates owner's associated token
+// account for mint under the classic token program, paid for by payer, and
+// succeeds without change when it already exists for owner, so a transaction
+// can carry it ahead of a payout without first reading the chain. It fails,
+// and with it the whole transaction, when owner has moved that account's
+// ownership to another key, which the classic program allows.
+func CreateAssociatedTokenAccountIdempotent(payer, owner, mint PublicKey) Instruction {
+	ata, _, err := AssociatedTokenAddress(owner, mint)
+	if err != nil {
+		panic("solana: " + err.Error())
+	}
+	return Instruction{
+		ProgramID: AssociatedTokenProgramID,
+		Accounts: []AccountMeta{
+			{PublicKey: payer, IsSigner: true, IsWritable: true},
+			{PublicKey: ata, IsWritable: true},
+			{PublicKey: owner},
+			{PublicKey: mint},
+			{PublicKey: SystemProgramID},
+			{PublicKey: TokenProgramID},
+		},
+		Data: []byte{AssociatedTokenCreateIdempotent},
+	}
+}

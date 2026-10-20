@@ -102,7 +102,7 @@ func ClaimFromReceipt(r *ticket.UsageReceipt) (ClaimFields, error) {
 // data length: SetComputeUnitLimit and SetComputeUnitPrice. The fee payer
 // pays for both; the others size heap and loaded data, which an offer never
 // needs.
-var offerComputeBudget = map[byte]int{2: 5, 3: 9}
+var offerComputeBudget = map[byte]int{solana.ComputeBudgetSetComputeUnitLimit: 5, solana.ComputeBudgetSetComputeUnitPrice: 9}
 
 // VerifyOpenOffer checks the message of a node's open offer against spec
 // before the payer signs it. In order:
