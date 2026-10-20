@@ -300,6 +300,16 @@ func buildZsVectors(t *testing.T) zsVectors {
 	b = bytes.Clone(evicted)
 	b[reasonAt+4] = 0xff
 	refuseEvent("evicted_reason_not_utf8", "a reason that is not UTF-8", b)
+	// TicketResolved's reason follows the ticket and node keys and a u16
+	// share; it decodes through its own call, so it needs its own row.
+	resolved := f.events["resolved"]
+	resolvedReasonAt := 16 + 32 + 32 + 2
+	if len(resolved) <= resolvedReasonAt+4 {
+		t.Fatalf("resolved event fixture has no reason byte to corrupt (%d bytes)", len(resolved))
+	}
+	b = bytes.Clone(resolved)
+	b[resolvedReasonAt+4] = 0xff
+	refuseEvent("resolved_reason_not_utf8", "a resolution reason that is not UTF-8", b)
 	b = bytes.Clone(evicted)
 	binary.LittleEndian.PutUint32(b[reasonAt:], 1<<20)
 	refuseEvent("evicted_reason_past_end", "a reason length past the data", b)

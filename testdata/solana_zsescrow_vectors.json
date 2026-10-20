@@ -245,6 +245,11 @@
       "data_base64": "5EWlLlHLmh1oTCxpzeVG1AIAAAAAAAAAQHh9AQAAAAAZAAAA/2VydmluZyB1bmF0dGVzdGVkIG1vZGVscw=="
     },
     {
+      "name": "resolved_reason_not_utf8",
+      "about": "a resolution reason that is not UTF-8",
+      "data_base64": "5EWlLlHLmh2JDE5//lA6YhllLRwOgIRvsCRROjyavAmKp+BtC1BOQEfK1aDgnISz/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rnECSoAAAD/ZWNlaXB0IGFuZCBjbGFpbSBkaXNhZ3JlZSBvbiBvdXRwdXQgdW5pdHM="
+    },
+    {
       "name": "evicted_reason_past_end",
       "about": "a reason length past the data",
       "data_base64": "5EWlLlHLmh1oTCxpzeVG1AIAAAAAAAAAQHh9AQAAAAAAABAAc2VydmluZyB1bmF0dGVzdGVkIG1vZGVscw=="

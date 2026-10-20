@@ -401,6 +401,14 @@ describe('the ack digest in solana_tx_vectors.json', () => {
             expect([hex.encode(message), signer]).toEqual([hex.encode(digest), tx.payer])
         })
     }
+    // Go's [32]byte rules out any other length; here a check has to, or the
+    // payer would sign a digest over a hash of the wrong size.
+    it('refuses a claim hash of any length but 32', () => {
+        const ticket = acks[0]!.payer as string
+        for (const n of [31, 33]) {
+            expect(() => d.ackDigest(genesis, ticket, 1n, new Uint8Array(n))).toThrow(RangeError)
+        }
+    })
 })
 
 // The protest of a pending ticket the program accepted, as Go's

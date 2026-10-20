@@ -390,6 +390,8 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	noTreasury.Treasury = solana.PublicKey{}
 	built("fold_treasury_unknown", "the folded settle passing the treasury's USDC account, judged by a payer that names no treasury", "fold.accounts",
 		withTreasury(zsescrow.FallbackReadonly, w.treasury), func() zsescrow.OpenOfferSpec { s := foldSpec; s.Fold = &noTreasury; return s }())
+	built("fold_default_key_fallback", "the folded settle passing the default key's USDC account as the refund fallback, judged by a payer that names no treasury", "fold.accounts",
+		withTreasury(zsescrow.FallbackReadonly, solana.PublicKey{}), func() zsescrow.OpenOfferSpec { s := foldSpec; s.Fold = &noTreasury; return s }())
 	built("fold_after_transfer", "the folded settle between the transfer and open", "instructions.shape",
 		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], foldIxs[3], settle, foldIxs[4]), foldSpec)
 	withFold := func(f func(*zsescrow.FoldSpec)) zsescrow.OpenOfferSpec {

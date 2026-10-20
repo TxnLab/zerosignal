@@ -1103,6 +1103,46 @@
       "verdict": "fold.accounts"
     },
     {
+      "name": "fold_default_key_fallback",
+      "about": "the folded settle passing the default key's USDC account as the refund fallback, judged by a payer that names no treasury",
+      "source": "built",
+      "message_base64": "AgEKEQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHh/RcEdCuXiZ6z9azFScK3rwNRobebYW98PJOq32MoSHKc50GizyqLDaYEH4vyt9tpQCuoiPFUaOZBMCFZIAITDGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeQKAGygxv3M5T6Dg4yuMLN9BvMH1R/wRMaD5bzmKQw6VO0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqFYVi53U6xzvY/QBhCoZQnWCbu/YpiWUAtS3g9DMr2Ct63pOlPTwhsaT8KrxFUOIBYhIbG1BjszbH1DT3qiPX6BCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQgUIAAUCwNQBAAgACQPoAwAAAAAAAAsNAAwGBQMAAg4JCg0QC1vTOxGm2x3ZjZBfAQAAAAAA6seocF+QqqcJycbRM8/yDUihRrHS1NHSQQ5oleul2t2kAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+CgQCDgUBCgyQ0AMAAAAAAAYLBwAMDwYECQdM5NybR8e9PC1gYGBgYGBgYGBgYGBgYGBg0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzeQ0AMAAAAAAPbis2oAAAAAAAAAAA==",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "60606060606060606060606060606060",
+        "max_price": "250000",
+        "expires_at": "1790173942",
+        "fold": {
+          "operator_id": "1",
+          "node_id": "1",
+          "ticket_id": "70707070707070707070707070707070",
+          "receipt": {
+            "ticket_id": "cHBwcHBwcHBwcHBwcHBwcA==",
+            "actual_input_count": 1200,
+            "actual_output_count": 600,
+            "amount_charged": 90000,
+            "ttft_ms": 420,
+            "decode_ms": 3000,
+            "body_hash": "abababababababababababababababababababababababababababababababab",
+            "input_usage_type": 1,
+            "output_usage_type": 1,
+            "aux_output_usage_type": 0,
+            "aux_output_count": 0,
+            "cached_input_count": 0,
+            "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+            "sig": ""
+          },
+          "treasury": "11111111111111111111111111111111"
+        }
+      },
+      "verdict": "fold.accounts"
+    },
+    {
       "name": "fold_after_transfer",
       "about": "the folded settle between the transfer and open",
       "source": "built",
