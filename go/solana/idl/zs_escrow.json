@@ -539,37 +539,6 @@
           }
         },
         {
-          "name": "signing",
-          "docs": [
-            "Must sign: the key's index is unique, so registering a key nobody has",
-            "to prove they hold would let anyone squat another operator's key."
-          ],
-          "signer": true
-        },
-        {
-          "name": "signer_index",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  105,
-                  103,
-                  110,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "signing"
-              }
-            ]
-          }
-        },
-        {
           "name": "owner_usdc",
           "docs": [
             "authority over it and its mint to match the stake vault's."
@@ -610,6 +579,10 @@
         }
       ],
       "args": [
+        {
+          "name": "signing",
+          "type": "pubkey"
+        },
         {
           "name": "base_url",
           "type": "string"
@@ -1983,10 +1956,6 @@
           "writable": true
         },
         {
-          "name": "signer_index",
-          "writable": true
-        },
-        {
           "name": "owner_usdc",
           "writable": true
         },
@@ -2112,7 +2081,6 @@
       "accounts": [
         {
           "name": "owner",
-          "writable": true,
           "signer": true,
           "relations": [
             "operator"
@@ -2124,53 +2092,13 @@
         {
           "name": "node",
           "writable": true
-        },
-        {
-          "name": "old_signer_index",
-          "docs": [
-            "The index of the node's current key: create_node and this instruction",
-            "keep exactly one index per node, so naming the node identifies it."
-          ],
-          "writable": true
-        },
-        {
-          "name": "new_signing",
-          "docs": [
-            "Signs for the reason create_node's `signing` does. Rotating to the",
-            "current key, or to any key another node holds, fails at the index's",
-            "init because that index already exists."
-          ],
-          "signer": true
-        },
-        {
-          "name": "new_signer_index",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  105,
-                  103,
-                  110,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "new_signing"
-              }
-            ]
-          }
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
+        {
+          "name": "signing",
+          "type": "pubkey"
+        },
         {
           "name": "base_url",
           "type": "string"
@@ -2399,19 +2327,6 @@
         130,
         249,
         147
-      ]
-    },
-    {
-      "name": "SignerIndex",
-      "discriminator": [
-        92,
-        159,
-        166,
-        253,
-        116,
-        96,
-        107,
-        238
       ]
     },
     {
@@ -2680,96 +2595,91 @@
     },
     {
       "code": 6039,
-      "name": "WrongSignerIndex",
-      "msg": "Signer index does not belong to this node"
-    },
-    {
-      "code": 6040,
       "name": "NameNotOwned",
       "msg": "Name account is not a name-service record the signer owns"
     },
     {
-      "code": 6041,
+      "code": 6040,
       "name": "SlashOverMax",
       "msg": "slash_bps exceeds 100%"
     },
     {
-      "code": 6042,
+      "code": 6041,
       "name": "BadTreasury",
       "msg": "Treasury must be a passed account outside this program and its vaults"
     },
     {
-      "code": 6043,
+      "code": 6042,
       "name": "NoPendingAdmin",
       "msg": "No admin transfer is pending"
     },
     {
-      "code": 6044,
+      "code": 6043,
       "name": "NotPendingAdmin",
       "msg": "Signer is not the pending admin"
     },
     {
-      "code": 6045,
+      "code": 6044,
       "name": "ReasonTooLong",
       "msg": "Eviction reason exceeds 1024 bytes"
     },
     {
-      "code": 6046,
+      "code": 6045,
       "name": "UsageTypeOutOfRange",
       "msg": "A claim's usage type is outside the output-units vector"
     },
     {
-      "code": 6047,
+      "code": 6046,
       "name": "NotPayer",
       "msg": "Signer is not the ticket's payer"
     },
     {
-      "code": 6048,
+      "code": 6047,
       "name": "ProtestReasonRequired",
       "msg": "A protest must name a reason"
     },
     {
-      "code": 6049,
+      "code": 6048,
       "name": "ReceiptMalformed",
       "msg": "The receipt is not a well-formed deployment-bound usage receipt"
     },
     {
-      "code": 6050,
+      "code": 6049,
       "name": "ReceiptNotForTicket",
       "msg": "The receipt names another ticket or deployment"
     },
     {
-      "code": 6051,
+      "code": 6050,
       "name": "BadReceiptSignature",
       "msg": "The instruction before protest is not a well-formed Ed25519 verification of the node's receipt"
     },
     {
-      "code": 6052,
+      "code": 6051,
       "name": "NotArbiter",
       "msg": "Signer is not the config arbiter"
     },
     {
-      "code": 6053,
+      "code": 6052,
       "name": "NothingToPay",
       "msg": "Nothing is accrued or owed here"
     },
     {
-      "code": 6054,
+      "code": 6053,
       "name": "WrongDestination",
       "msg": "The destination is not the recipient's associated token account"
     },
     {
-      "code": 6055,
+      "code": 6054,
       "name": "NoPendingArbiter",
       "msg": "No arbiter transfer is pending"
     },
     {
-      "code": 6056,
+      "code": 6055,
       "name": "NotPendingArbiter",
       "msg": "Signer is not the pending arbiter"
     },
     {
-      "code": 6057,
+      "code": 6056,
       "name": "NoArbiter",
       "msg": "An arbiter is required"
     }
@@ -3547,39 +3457,6 @@
       }
     },
     {
-      "name": "SignerIndex",
-      "docs": [
-        "`[\"signer\", signing key]`: which node holds a signing key. Its address can",
-        "hold only one account, which is what keeps keys unique across nodes."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "node",
-            "type": "pubkey"
-          },
-          {
-            "name": "_reserve",
-            "type": {
-              "array": [
-                "u8",
-                16
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
       "name": "Ticket",
       "type": {
         "kind": "struct",
@@ -3845,15 +3722,6 @@
       "name": "REFUND_OWED_SEED",
       "type": "bytes",
       "value": "[111, 119, 101, 100]"
-    },
-    {
-      "name": "SIGNER_SEED",
-      "docs": [
-        "Seeds the one SignerIndex a signing key may have, so no two nodes share a",
-        "key and a signature over a ticket or receipt names exactly one node."
-      ],
-      "type": "bytes",
-      "value": "[115, 105, 103, 110, 101, 114]"
     },
     {
       "name": "STAKE_VAULT_SEED",

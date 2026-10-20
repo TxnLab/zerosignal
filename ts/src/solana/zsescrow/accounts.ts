@@ -32,7 +32,6 @@ export const CONFIG_SIZE = 349
 export const OPERATOR_SIZE = 171
 export const NODE_SIZE = 880
 export const TICKET_SIZE = 233
-export const SIGNER_INDEX_SIZE = 58
 export const REFUND_OWED_SIZE = 98
 export const TOKEN_ACCOUNT_SIZE = 165
 
@@ -277,18 +276,6 @@ export function decodeTicket(data: Uint8Array): Ticket {
         claimHash: r.array(32),
         reserve: r.array(16),
     }
-}
-
-export interface SignerIndex {
-    version: number
-    bump: number
-    node: PublicKey
-    reserve: Uint8Array
-}
-
-export function decodeSignerIndex(data: Uint8Array): SignerIndex {
-    const r = accountReader('SignerIndex', data, SIGNER_INDEX_SIZE)
-    return { version: r.u8(), bump: r.u8(), node: r.key(), reserve: r.array(16) }
 }
 
 export interface RefundOwed {

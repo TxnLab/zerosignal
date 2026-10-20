@@ -32,7 +32,6 @@ import {
     OWED_VAULT_SEED,
     PROGRAM_ID,
     REFUND_OWED_SIZE,
-    SIGNER_INDEX_SIZE,
     STAKE_VAULT_SEED,
     TICKET_SIZE,
     TOKEN_ACCOUNT_SIZE,
@@ -42,7 +41,6 @@ import {
     decodeNode,
     decodeOperator,
     decodeRefundOwed,
-    decodeSignerIndex,
     decodeTicket,
     decodeTokenAccount,
     discriminator,
@@ -100,7 +98,6 @@ const decoders: Record<string, [(d: Uint8Array) => Json, number]> = {
     Operator: [decodeOperator, OPERATOR_SIZE],
     Node: [decodeNode, NODE_SIZE],
     Ticket: [decodeTicket, TICKET_SIZE],
-    SignerIndex: [decodeSignerIndex, SIGNER_INDEX_SIZE],
     RefundOwed: [decodeRefundOwed, REFUND_OWED_SIZE],
     TokenAccount: [decodeTokenAccount, TOKEN_ACCOUNT_SIZE],
 }
@@ -134,9 +131,6 @@ describe('solana_account_vectors.json', () => {
                     break
                 case 'Ticket':
                     want = d.ticket(v.node, hex.decode(a.seeds_hex[2]))
-                    break
-                case 'SignerIndex':
-                    want = d.signerIndex(encodeBase58(hex.decode(a.seeds_hex[1])))
                     break
                 case 'RefundOwed':
                     want = d.refundOwed(v.payer)
@@ -268,13 +262,12 @@ describe('solana_instruction_vectors.json', () => {
                     break
                 case 'create_node': {
                     const [op, n] = nodeIds()
-                    ix = d.createNode(acct.owner!, acct.owner_usdc!, op, n, acct.signing!, args.base_url)
+                    ix = d.createNode(acct.owner!, acct.owner_usdc!, op, n, args.signing, args.base_url)
                     break
                 }
                 case 'update_node': {
                     const [op, n] = nodeIds()
-                    const old = find('old signer index', (k) => d.signerIndex(k) === acct.old_signer_index)
-                    ix = d.updateNode(acct.owner!, op, n, old, acct.new_signing!, args.base_url)
+                    ix = d.updateNode(acct.owner!, op, n, args.signing, args.base_url)
                     break
                 }
                 case 'update_node_url': {
@@ -292,8 +285,7 @@ describe('solana_instruction_vectors.json', () => {
                     break
                 case 'unregister_node': {
                     const [op, n] = nodeIds()
-                    const signing = find('signer index', (k) => d.signerIndex(k) === acct.signer_index)
-                    ix = d.unregisterNode(acct.owner!, acct.owner_usdc!, op, n, signing, acct.treasury_usdc!)
+                    ix = d.unregisterNode(acct.owner!, acct.owner_usdc!, op, n, acct.treasury_usdc!)
                     break
                 }
                 case 'unregister_operator':
@@ -567,7 +559,7 @@ describe('the IDL', () => {
         ] as [string, Json[]][]) {
             for (const e of list) expect(Array.from(discriminator(ns, e.name)), `${ns}:${e.name}`).toEqual(e.discriminator)
         }
-        expect(idl.accounts.length).toBe(6)
+        expect(idl.accounts.length).toBe(5)
         expect(idl.events.length).toBe(4)
     })
 })

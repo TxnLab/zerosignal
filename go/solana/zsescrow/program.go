@@ -32,7 +32,6 @@ const (
 	StakeVaultSeed     = "stake"
 	OwedVaultSeed      = "owed_vault"
 	RefundOwedSeed     = "owed"
-	SignerSeed         = "signer"
 	TicketSeed         = "t"
 	EventAuthoritySeed = "__event_authority"
 )
@@ -90,12 +89,6 @@ func (d Deployment) Node(operatorID, nodeID uint64) solana.PublicKey {
 // is its own authority.
 func (d Deployment) Vault(node solana.PublicKey) solana.PublicKey {
 	k, _ := d.pda([]byte(VaultSeed), node[:])
-	return k
-}
-
-// SignerIndex records which node holds a signing key.
-func (d Deployment) SignerIndex(signing solana.PublicKey) solana.PublicKey {
-	k, _ := d.pda([]byte(SignerSeed), signing[:])
 	return k
 }
 

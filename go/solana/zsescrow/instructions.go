@@ -177,11 +177,13 @@ func (d Deployment) CreateOperator(owner, ownerUSDC solana.PublicKey, nextOperat
 	)
 }
 
-// CreateNode adds node nextNodeID, the operator's next_node_id. The signing
-// key signs too, proving the owner holds it. A node after the first escrows
-// the node stake from ownerUSDC.
+// CreateNode adds node nextNodeID, the operator's next_node_id, with signing
+// as its key. The owner alone signs, as on Algorand: the node holds the key.
+// It escrows the node stake from ownerUSDC unless the operator has no live
+// node, whose stake the operator stake covers.
 func (d Deployment) CreateNode(owner, ownerUSDC solana.PublicKey, operatorID, nextNodeID uint64, signing solana.PublicKey, baseURL string) solana.Instruction {
 	w := writer{}
+	w.key(signing)
 	w.vec([]byte(baseURL))
 	node := d.Node(operatorID, nextNodeID)
 	return d.ix("create_node", w.b,
@@ -190,8 +192,6 @@ func (d Deployment) CreateNode(owner, ownerUSDC solana.PublicKey, operatorID, ne
 		writable(d.Operator(operatorID)),
 		writable(node),
 		writable(d.Vault(node)),
-		signer(signing),
-		writable(d.SignerIndex(signing)),
 		writable(ownerUSDC),
 		writable(d.StakeVault()),
 		readonly(d.Mint),
@@ -200,18 +200,17 @@ func (d Deployment) CreateNode(owner, ownerUSDC solana.PublicKey, operatorID, ne
 	)
 }
 
-// UpdateNode rotates the node's signing key, and sets its URL.
-func (d Deployment) UpdateNode(owner solana.PublicKey, operatorID, nodeID uint64, oldSigning, newSigning solana.PublicKey, baseURL string) solana.Instruction {
+// UpdateNode moves the node to signing as its key, and sets its URL. The
+// owner alone signs. No Config: rotation isn't pause-gated, so a leaked key
+// can be replaced during a registry pause.
+func (d Deployment) UpdateNode(owner solana.PublicKey, operatorID, nodeID uint64, signing solana.PublicKey, baseURL string) solana.Instruction {
 	w := writer{}
+	w.key(signing)
 	w.vec([]byte(baseURL))
 	return d.ix("update_node", w.b,
-		payer(owner),
+		signer(owner),
 		readonly(d.Operator(operatorID)),
 		writable(d.Node(operatorID, nodeID)),
-		writable(d.SignerIndex(oldSigning)),
-		signer(newSigning),
-		writable(d.SignerIndex(newSigning)),
-		readonly(solana.SystemProgramID),
 	)
 }
 
@@ -254,7 +253,7 @@ func (d Deployment) UpdateOperator(owner solana.PublicKey, operatorID uint64, ne
 
 // UnregisterNode removes a node with no live tickets, refunds its stake to
 // ownerUSDC and its unswept fee to treasuryUSDC.
-func (d Deployment) UnregisterNode(owner, ownerUSDC solana.PublicKey, operatorID, nodeID uint64, signing, treasuryUSDC solana.PublicKey) solana.Instruction {
+func (d Deployment) UnregisterNode(owner, ownerUSDC solana.PublicKey, operatorID, nodeID uint64, treasuryUSDC solana.PublicKey) solana.Instruction {
 	node := d.Node(operatorID, nodeID)
 	return d.ix("unregister_node", nil,
 		payer(owner),
@@ -262,7 +261,6 @@ func (d Deployment) UnregisterNode(owner, ownerUSDC solana.PublicKey, operatorID
 		writable(d.Operator(operatorID)),
 		writable(node),
 		writable(d.Vault(node)),
-		writable(d.SignerIndex(signing)),
 		writable(ownerUSDC),
 		writable(treasuryUSDC),
 		writable(d.StakeVault()),

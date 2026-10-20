@@ -231,18 +231,6 @@
           "pubkey": "ELJZoLaH667BbaHW8M7NXxUbmcnjVfRJSSLz1Sk9V11W"
         },
         {
-          "is_signer": true,
-          "is_writable": false,
-          "name": "signing",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
-        },
-        {
-          "is_signer": false,
-          "is_writable": true,
-          "name": "signer_index",
-          "pubkey": "CVNk7CF5hp8Wx2LRZXUD1G6WEHgQiQjZxgnvqPYy2LsW"
-        },
-        {
           "is_signer": false,
           "is_writable": true,
           "name": "owner_usdc",
@@ -274,10 +262,11 @@
         }
       ],
       "args": {
-        "base_url": "https://node-1.example.net"
+        "base_url": "https://node-1.example.net",
+        "signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
       },
       "case": "create_node",
-      "data_base64": "FLeG6TMzc1MaAAAAaHR0cHM6Ly9ub2RlLTEuZXhhbXBsZS5uZXQ=",
+      "data_base64": "FLeG6TMzc1ML7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzBoAAABodHRwczovL25vZGUtMS5leGFtcGxlLm5ldA==",
       "discriminator_hex": "14b786e933337353",
       "instruction": "create_node",
       "program": "ok"
@@ -286,7 +275,7 @@
       "accounts": [
         {
           "is_signer": true,
-          "is_writable": true,
+          "is_writable": false,
           "name": "owner",
           "pubkey": "mBKqcnGotbsSb5vNrdyhzZ5EhqZdids9QYiTRckvi7v"
         },
@@ -301,37 +290,14 @@
           "is_writable": true,
           "name": "node",
           "pubkey": "45Mmjvw64yU98qJc1FCLGr28c5AcNRNN9JA9dA1K62z7"
-        },
-        {
-          "is_signer": false,
-          "is_writable": true,
-          "name": "old_signer_index",
-          "pubkey": "FUjGfCSWwBRHFVVHKtaGig9rjgc7VUTSiy7tGHPmLXWh"
-        },
-        {
-          "is_signer": true,
-          "is_writable": false,
-          "name": "new_signing",
-          "pubkey": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs"
-        },
-        {
-          "is_signer": false,
-          "is_writable": true,
-          "name": "new_signer_index",
-          "pubkey": "HtBrBaSxS1KSQ24KwcP1vJF9YXrhj3WLPZKUCbTSdVcM"
-        },
-        {
-          "is_signer": false,
-          "is_writable": false,
-          "name": "system_program",
-          "pubkey": "11111111111111111111111111111111"
         }
       ],
       "args": {
-        "base_url": "https://node-2b.example.net"
+        "base_url": "https://node-2b.example.net",
+        "signing": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs"
       },
       "case": "update_node",
-      "data_base64": "DUH2ZmVbYisbAAAAaHR0cHM6Ly9ub2RlLTJiLmV4YW1wbGUubmV0",
+      "data_base64": "DUH2ZmVbYitcnG3yYcnLhAR1d2qu/NlEtAUyj6so+bOpXvQEkNPehBsAAABodHRwczovL25vZGUtMmIuZXhhbXBsZS5uZXQ=",
       "discriminator_hex": "0d41f666655b622b",
       "instruction": "update_node",
       "program": "ok"
@@ -1932,12 +1898,6 @@
           "is_writable": true,
           "name": "vault",
           "pubkey": "7XPPPfdZviRGPgDiVSQ3yXM6LqTEMmJz4pH7Xiz9EY8o"
-        },
-        {
-          "is_signer": false,
-          "is_writable": true,
-          "name": "signer_index",
-          "pubkey": "HtBrBaSxS1KSQ24KwcP1vJF9YXrhj3WLPZKUCbTSdVcM"
         },
         {
           "is_signer": false,

@@ -40,12 +40,11 @@ func accountReader(name string, data []byte, size int) (*reader, error) {
 }
 
 const (
-	ConfigSize      = 349
-	OperatorSize    = 171
-	NodeSize        = 880
-	TicketSize      = 233
-	SignerIndexSize = 58
-	RefundOwedSize  = 98
+	ConfigSize     = 349
+	OperatorSize   = 171
+	NodeSize       = 880
+	TicketSize     = 233
+	RefundOwedSize = 98
 )
 
 type Config struct {
@@ -294,23 +293,6 @@ func DecodeTicket(data []byte) (*Ticket, error) {
 	r.array(t.ClaimHash[:])
 	r.array(t.Reserve[:])
 	return t, r.err
-}
-
-type SignerIndex struct {
-	Version uint8            `json:"version"`
-	Bump    uint8            `json:"bump"`
-	Node    solana.PublicKey `json:"node"`
-	Reserve [16]byte         `json:"_reserve"`
-}
-
-func DecodeSignerIndex(data []byte) (*SignerIndex, error) {
-	r, err := accountReader("SignerIndex", data, SignerIndexSize)
-	if err != nil {
-		return nil, err
-	}
-	s := &SignerIndex{Version: r.u8(), Bump: r.u8(), Node: r.key()}
-	r.array(s.Reserve[:])
-	return s, r.err
 }
 
 type RefundOwed struct {

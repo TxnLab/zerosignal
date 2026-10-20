@@ -343,26 +343,6 @@
       "type": "Node"
     },
     {
-      "address": "CVNk7CF5hp8Wx2LRZXUD1G6WEHgQiQjZxgnvqPYy2LsW",
-      "bump": 255,
-      "data_base64": "XJ+m/XRga+4B//8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAA==",
-      "data_len": 58,
-      "decoded": {
-        "_reserve": "00000000000000000000000000000000",
-        "bump": 255,
-        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
-        "version": 1
-      },
-      "lamports": "944880",
-      "name": "signer_index",
-      "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
-      "seeds_hex": [
-        "7369676e6572",
-        "0beef5a9e679e6a3e134fe27837bff32c7cb5f5d44ea09bcb0e542bad6a4c0cc"
-      ],
-      "type": "SignerIndex"
-    },
-    {
       "address": "ELJZoLaH667BbaHW8M7NXxUbmcnjVfRJSSLz1Sk9V11W",
       "bump": 255,
       "data_base64": "TtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqj/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uaSRBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
