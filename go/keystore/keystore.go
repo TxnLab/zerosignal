@@ -116,7 +116,8 @@ func (k hdKey) signBytesRaw(msg []byte) ([]byte, error) {
 // provider is consulted exactly once. Empty-mnemonic entries are
 // skipped; entries that fail to decode (bad checksum, wrong word count)
 // fail the build with a wrapped error so misconfiguration surfaces at
-// startup rather than at first sign.
+// startup rather than at first sign. A valid 12- to 21-word BIP-39 phrase
+// is a Solana wallet's and is skipped, unless it is all New was given.
 //
 // New is safe to call with no providers — the resulting KeyStore has no
 // addresses and HasAccount returns false for everything. This is the
@@ -124,6 +125,7 @@ func (k hdKey) signBytesRaw(msg []byte) ([]byte, error) {
 // (the proxy with admission disabled, for example).
 func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 	ks := &KeyStore{keys: map[string]accountKey{}, unlisted: map[string]bool{}}
+	skippedName, skippedWords := "", 0
 	for i, p := range providers {
 		if p == nil {
 			continue
@@ -136,10 +138,29 @@ func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 			if strings.TrimSpace(e.Mnemonic) == "" {
 				continue
 			}
+			// A valid 12- to 21-word BIP-39 phrase is a Solana wallet's
+			// (Phantom and Solflare export 12 words): no Algorand form takes
+			// it, and one provider chain may hold keys for both rails, so it
+			// is left to NewSolanaKeys rather than failing this load. One
+			// that isn't valid BIP-39 is a typo either way and still fails.
+			if words := strings.Fields(e.Mnemonic); solanaOnlyLength(len(words)) && bip39.IsMnemonicValid(strings.Join(words, " ")) {
+				slog.WarnContext(ctx, "keystore: Solana-length phrase skipped; the Algorand keystore takes 25 words or a 24-word BIP-39 phrase",
+					slog.String("name", e.Name), slog.Int("words", len(words)))
+				if skippedWords == 0 {
+					skippedName, skippedWords = e.Name, len(words)
+				}
+				continue
+			}
 			if err := ks.add(ctx, e); err != nil {
 				return nil, err
 			}
 		}
+	}
+	// Skipped phrases and nothing else: a Solana phrase where an Algorand
+	// key was wanted. Failing here keeps the startup error naming the phrase
+	// instead of a later "no mnemonic loaded".
+	if len(ks.keys) == 0 && skippedWords != 0 {
+		return nil, fmt.Errorf("keystore: mnemonic %q: a %d-word phrase is a Solana wallet's; want a 25-word Algorand mnemonic or a 24-word BIP-39 phrase", skippedName, skippedWords)
 	}
 	slog.InfoContext(ctx, "keystore loaded", slog.Int("addresses", len(ks.keys)))
 	return ks, nil

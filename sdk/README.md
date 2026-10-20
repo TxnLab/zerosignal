@@ -72,8 +72,9 @@ is untested. `nodeFetch` throws there rather than hand back a guard that checks 
 
 ### Accounts
 
-Three subpaths build a `Signer` from a key held in memory, each the twin of Go's keystore and
-pinned to it by `testdata/account_vectors.json`. Passkeys are not one of them: derive 32 secret
+Four subpaths build a signer from a key held in memory, each the twin of Go's keystore and
+pinned to it by `testdata/account_vectors.json`: three Algorand `Signer`s and one Solana
+`PayerSigner`. Passkeys are not one of them: derive 32 secret
 bytes from the passkey (a WebAuthn PRF output) and hand them to `xhdRootFromEntropy`.
 
 - `@txnlab/zerosignal/accounts/algosdk`: `algosdkSigner(account)` over an algosdk `Account`.
@@ -92,6 +93,13 @@ bytes from the passkey (a WebAuthn PRF output) and hand them to `xhdRootFromEntr
   polyfill all three (e.g. vite-plugin-node-polyfills). The signer holds a copy of the root key,
   the whole tree's secret, for as long as it lives, and under Node the library leaves copies of
   key bytes in Buffer's shared pool after it signs.
+- `@txnlab/zerosignal/accounts/solana`: the Solana account of a BIP-39 phrase, at
+  m/44'/501'/0'/0' (SLIP-0010) with an empty passphrase, so the chat app's 24-word phrase
+  imported into Phantom or Solflare shows the same address. `solanaKeyFromPhrase(phrase)` takes
+  12 to 24 words, validated as `accounts/xhd` validates them; `solanaKeyFromEntropy(bytes)`
+  derives from the same 32 bytes as `xhdRootFromEntropy`. `solanaSigner(key)` signs as the
+  account and holds its own copy of the seed. It needs the optional peer dependency
+  `@scure/bip39`.
 
 Each signs only as its own address: `signBytes` for any other rejects with
 `SignerAddressError`.

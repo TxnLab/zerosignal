@@ -82,6 +82,7 @@ for (const [sub, fn] of [
     ['accounts/algosdk', 'algosdkSigner'],
     ['accounts/mnemonic', 'mnemonicSigner'],
     ['accounts/xhd', 'xhdSigner'],
+    ['accounts/solana', 'solanaSigner'],
 ]) {
     const m = await import(`${pkg.name}/${sub}`)
     if (typeof m[fn] !== 'function') fail(`${pkg.name}/${sub} exports no ${fn}`)
