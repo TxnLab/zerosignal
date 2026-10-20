@@ -17,7 +17,7 @@ import { base64, hex } from '@scure/base'
 import { describe, expect, it } from 'vitest'
 
 import type { Instruction } from '../src/solana/index.js'
-import { SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, transferChecked } from '../src/solana/index.js'
+import { ED25519_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, transferChecked } from '../src/solana/index.js'
 import {
     type ClaimFields,
     type Ending,
@@ -29,18 +29,17 @@ import {
     EVENT_IX_TAG,
     NODE_SIZE,
     OPERATOR_SIZE,
-    OWED_VAULT_SEED,
     PROGRAM_ID,
-    REFUND_OWED_SIZE,
     STAKE_VAULT_SEED,
     TICKET_SIZE,
     TOKEN_ACCOUNT_SIZE,
     VAULT_SEED,
     ZeroTreasuryError,
+    claimFromReceipt,
+    claimHash,
     decodeConfig,
     decodeNode,
     decodeOperator,
-    decodeRefundOwed,
     decodeTicket,
     decodeTokenAccount,
     discriminator,
@@ -53,7 +52,7 @@ import {
     tokenAccountStateName,
     verifyOpenOffer,
 } from '../src/solana/zsescrow/index.js'
-import { parseReceiptJSON } from '../src/ticket/receipt.js'
+import { parseReceiptJSON, receiptCanonicalBytes, receiptSigDigest } from '../src/ticket/receipt.js'
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -79,7 +78,7 @@ function toFixture(type: string, v: Json): Json {
     for (const [k, x] of Object.entries(v)) {
         if (k === 'event') continue
         let name = k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-        if (name === 'pad0' || name === 'reserve') name = `_${name}`
+        if (name === 'pad0' || name === 'reserve' || name.startsWith('retired_')) name = `_${name}`
         if ((name === 'status' || name === 'state' || name === 'outcome') && ENUMS[type]) out[name] = ENUMS[type]!(x)
         else if (name === 'genesis_hash') out[name] = hex.encode(decodeBase58(x, 32))
         else out[name] = plain(x)
@@ -98,7 +97,6 @@ const decoders: Record<string, [(d: Uint8Array) => Json, number]> = {
     Operator: [decodeOperator, OPERATOR_SIZE],
     Node: [decodeNode, NODE_SIZE],
     Ticket: [decodeTicket, TICKET_SIZE],
-    RefundOwed: [decodeRefundOwed, REFUND_OWED_SIZE],
     TokenAccount: [decodeTokenAccount, TOKEN_ACCOUNT_SIZE],
 }
 
@@ -132,13 +130,10 @@ describe('solana_account_vectors.json', () => {
                 case 'Ticket':
                     want = d.ticket(v.node, hex.decode(a.seeds_hex[2]))
                     break
-                case 'RefundOwed':
-                    want = d.refundOwed(v.payer)
-                    break
                 case 'TokenAccount': {
                     owner = TOKEN_PROGRAM_ID
                     const seed = new TextDecoder().decode(hex.decode(a.seeds_hex[0]))
-                    want = seed === VAULT_SEED ? d.vault(v.owner) : seed === STAKE_VAULT_SEED ? d.stakeVault() : seed === OWED_VAULT_SEED ? d.owedVault() : undefined
+                    want = seed === VAULT_SEED ? d.vault(v.owner) : seed === STAKE_VAULT_SEED ? d.stakeVault() : undefined
                     expect(v.mint).toBe(d.mint)
                     break
                 }
@@ -190,13 +185,13 @@ describe('solana_instruction_vectors.json', () => {
             const claim = (f: Json): ClaimFields => ({
                 amount: BigInt(f.amount),
                 receiptDigest: hex.decode(f.receipt_digest),
-                ttftMs: f.ttft_ms,
-                decodeMs: f.decode_ms,
+                ttftMs: BigInt(f.ttft_ms),
+                decodeMs: BigInt(f.decode_ms),
                 inputUnits: BigInt(f.input_units),
                 outputUnits: BigInt(f.output_units),
                 outputUsageType: f.output_usage_type,
                 auxUsageType: f.aux_usage_type,
-                auxCount: f.aux_count,
+                auxCount: BigInt(f.aux_count),
             })
             const ending = (): Ending => {
                 const [op, n] = nodeIds()
@@ -208,9 +203,13 @@ describe('solana_instruction_vectors.json', () => {
                     rentPayer: acct.rent_payer!,
                     payer: ownerOf('payer_ata'),
                 }
-                const owed = (c.accounts as Json[]).find((a) => a.name === 'refund_owed')
-                if (owed && owed.pubkey !== d.program) e.fallback = owed.is_writable ? 'writable' : 'readonly'
-                expect(d.refundBumps(e.payer)).toEqual({ payerAta: args.bumps.payer_ata, refundOwed: args.bumps.refund_owed })
+                const treasury = (c.accounts as Json[]).find((a) => a.name === 'treasury_usdc')
+                if (treasury && treasury.pubkey !== d.program) {
+                    e.treasury = ownerOf('treasury_usdc')
+                    e.fallback = treasury.is_writable ? 'writable' : 'readonly'
+                }
+                expect(d.refundBumps(e.payer)).toEqual({ payerAta: args.bumps.payer_ata })
+                expect(Object.keys(args.bumps)).toEqual(['payer_ata'])
                 return e
             }
             const big = (v: string | null) => (v === null ? null : BigInt(v))
@@ -221,7 +220,6 @@ describe('solana_instruction_vectors.json', () => {
                     ix = d.initialize(acct.admin!, acct.treasury!, {
                         // The fixture writes the genesis hash as hex; the builder takes base58.
                         genesisHash: encodeBase58(hex.decode(args.genesis_hash)),
-                        arbiter: args.arbiter,
                         feeBps: args.fee_bps,
                         maxGrace: args.max_grace,
                         defaultGrace: args.default_grace,
@@ -233,8 +231,7 @@ describe('solana_instruction_vectors.json', () => {
                     break
                 case 'set_config':
                     ix = d.setConfig(acct.admin!, {
-                        pauseOpen: args.pause_open,
-                        pauseRegistry: args.pause_registry,
+                        paused: args.paused,
                         feeBps: args.fee_bps,
                         maxGrace: args.max_grace,
                         defaultGrace: args.default_grace,
@@ -250,12 +247,6 @@ describe('solana_instruction_vectors.json', () => {
                     break
                 case 'accept_admin':
                     ix = d.acceptAdmin(acct.new_admin!)
-                    break
-                case 'propose_arbiter':
-                    ix = d.proposeArbiter(acct.arbiter!, args.new_arbiter)
-                    break
-                case 'accept_arbiter':
-                    ix = d.acceptArbiter(acct.new_arbiter!)
                     break
                 case 'create_operator':
                     ix = d.createOperator(acct.owner!, acct.owner_usdc!, operatorId())
@@ -311,11 +302,9 @@ describe('solana_instruction_vectors.json', () => {
                     })
                     break
                 }
-                case 'claim': {
-                    const [op, n] = nodeIds()
-                    ix = d.claim(acct.node_signer!, op, n, ticketId(acct.node!), claim(args.fields))
+                case 'claim':
+                    ix = d.claim(ending(), claim(args.fields))
                     break
-                }
                 case 'settle_cooperative':
                     ix = d.settleCooperative(ending(), claim(args.fields))
                     break
@@ -329,21 +318,13 @@ describe('solana_instruction_vectors.json', () => {
                     ix = d.refundInactive(ending())
                     break
                 case 'resolve_frozen':
-                    ix = d.resolveFrozen(ending(), BigInt(args.node_amount))
+                    ix = d.resolveFrozen(ending(), args.operator_share_bps, args.reason)
                     break
                 case 'protest': {
                     const [op, n] = nodeIds()
                     const id = hex.decode(args.ticket_id)
                     expect(d.ticket(acct.node!, id)).toBe(acct.ticket)
-                    ix = d.protest(acct.payer!, op, n, id, hex.decode(args.receipt), args.reason)
-                    break
-                }
-                case 'claim_refund_owed':
-                    ix = d.claimRefundOwed(acct.payer!, acct.rent_payer!)
-                    break
-                case 'close_refund_owed': {
-                    const payer = find('refund owed', (k) => d.refundOwed(k) === acct.refund_owed)
-                    ix = d.closeRefundOwed(acct.rent_payer!, payer)
+                    ix = d.protest(acct.payer!, op, n, id, hex.decode(args.receipt), args.reason, args.pending === null ? null : claim(args.pending))
                     break
                 }
                 case 'withdraw_payout': {
@@ -394,6 +375,97 @@ describe('solana_event_vectors.json', () => {
     }
 })
 
+// The payer's ack the program checked, from solana_tx_vectors.json: the claim
+// hash of the settle's own fields, the digest over it, and the Ed25519
+// precompile instruction signing exactly that digest with the payer's key, as
+// Go's TestAckDigestFixture reads them.
+describe('the ack digest in solana_tx_vectors.json', () => {
+    const txs = load('testdata/solana_tx_vectors.json')
+    const d = new Deployment(txs.program_id, txs.context.usdc_mint)
+    const genesis = encodeBase58(hex.decode(txs.context.genesis_hash))
+    const settleDisc = discriminator('global', 'settle_cooperative')
+    const acks = (txs.transactions as Json[]).filter((t) => t.ack_digest_hex)
+    it('is carried by a transaction', () => expect(acks.length).toBeGreaterThan(0))
+    for (const tx of acks) {
+        it(tx.name, () => {
+            const ixs = (tx.built_instructions as Json[]).map((b) => ({ programId: b.program_id as string, accounts: b.accounts as Json[], data: base64.decode(b.data_base64) }))
+            const settle = ixs.find((ix) => ix.programId === d.program && hex.encode(ix.data.subarray(0, 8)) === hex.encode(settleDisc))
+            const precompile = ixs.find((ix) => ix.programId === ED25519_PROGRAM_ID)
+            if (!settle || !precompile) throw new Error('no settle_cooperative beside an Ed25519 instruction')
+            const claim = claimHash(claimFieldsOf(settle.data.subarray(8)))
+            expect(hex.encode(claim)).toBe(tx.claim_hash_hex)
+            const ticketAt = 4
+            const digest = d.ackDigest(genesis, settle.accounts[ticketAt]!.pubkey, BigInt(tx.open_seq), claim)
+            expect(hex.encode(digest)).toBe(tx.ack_digest_hex)
+            const { message, signer } = ed25519Message(precompile.data)
+            expect([hex.encode(message), signer]).toEqual([hex.encode(digest), tx.payer])
+        })
+    }
+})
+
+// The protest of a pending ticket the program accepted, as Go's
+// TestProtestPendingFixture reads it: its pending claim fields hash to the
+// ticket's claim and carry the receipt's digest, sha256 of its canonical bytes,
+// which the node's Ed25519 instruction signs.
+describe('the protest of a pending ticket in solana_tx_vectors.json', () => {
+    const txs = load('testdata/solana_tx_vectors.json')
+    const protestDisc = discriminator('global', 'protest')
+    const tx = (txs.transactions as Json[]).find((t) => t.name === 'protest_pending')
+    it('passes the pending half the receipt names', () => {
+        if (!tx) throw new Error('no protest_pending transaction')
+        expect(tx.program).toBe('ok')
+        const ixs = (tx.built_instructions as Json[]).map((b) => ({ programId: b.program_id as string, data: base64.decode(b.data_base64) }))
+        const protest = ixs.find((ix) => ix.programId === txs.program_id && hex.encode(ix.data.subarray(0, 8)) === hex.encode(protestDisc))
+        const precompile = ixs.find((ix) => ix.programId === ED25519_PROGRAM_ID)
+        if (!protest || !precompile) throw new Error('no protest beside an Ed25519 instruction')
+        // ticket_id, then the receipt as a u32-prefixed vector, the reason, and the pending fields as Some.
+        const args = protest.data.subarray(8 + 16)
+        const n = new DataView(args.buffer, args.byteOffset, args.byteLength).getUint32(0, true)
+        const receipt = args.subarray(4, 4 + n)
+        const rest = args.subarray(4 + n + 1)
+        expect(rest[0]).toBe(1)
+        const pending = claimFieldsOf(rest.subarray(1))
+        expect(hex.encode(claimHash(pending))).toBe(tx.claim_hash_hex)
+        const r = parseReceiptJSON(new TextEncoder().encode(JSON.stringify(tx.receipt_value)))
+        expect(hex.encode(receiptCanonicalBytes(r))).toBe(hex.encode(receipt))
+        const digest = receiptSigDigest(r)
+        expect([hex.encode(pending.receiptDigest), hex.encode(digest)]).toEqual([tx.receipt_digest_hex, tx.receipt_digest_hex])
+        expect(claimFromReceipt(r)).toEqual(pending)
+        expect(hex.encode(ed25519Message(precompile.data).message)).toBe(hex.encode(digest))
+    })
+})
+
+// ClaimFields from the head of an instruction's arguments, in the program's Borsh order.
+function claimFieldsOf(b: Uint8Array): ClaimFields {
+    if (b.length < 82) throw new Error(`claim fields of ${b.length} bytes`)
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength)
+    const le = (at: number) => v.getBigUint64(at, true)
+    return {
+        amount: le(0),
+        receiptDigest: b.slice(8, 40),
+        ttftMs: le(40),
+        decodeMs: le(48),
+        inputUnits: le(56),
+        outputUnits: le(64),
+        outputUsageType: b[72]!,
+        auxUsageType: b[73]!,
+        auxCount: le(74),
+    }
+}
+
+// The one signature an Ed25519 precompile instruction verifies: the message it
+// signs and the key, each at an offset in the instruction's own data.
+function ed25519Message(data: Uint8Array): { message: Uint8Array; signer: string } {
+    if (data.length < 16 || data[0] !== 1) throw new Error(`an Ed25519 instruction of ${data.length} bytes, not one signature`)
+    const v = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const u16 = (at: number) => v.getUint16(at, true)
+    const own = 0xffff
+    if (u16(4) !== own || u16(8) !== own || u16(14) !== own) throw new Error("the precompile reads another instruction's data")
+    const [pk, msg, size] = [u16(6), u16(10), u16(12)]
+    if (pk + 32 > data.length || msg + size > data.length) throw new Error("the precompile's offsets run past its data")
+    return { message: data.subarray(msg, msg + size), signer: encodeBase58(data.subarray(pk, pk + 32)) }
+}
+
 // What the program never writes, pinned by the Go-generated
 // solana_zsescrow_vectors.json: data the decoders refuse or read a particular
 // way, instructions that only look like events, deadlines at their edges,
@@ -442,6 +514,7 @@ describe('solana_zsescrow_vectors.json', () => {
                 ticketId: hex.decode(c.ending.ticket_id),
                 rentPayer: c.ending.rent_payer,
                 payer: c.ending.payer,
+                treasury: c.ending.treasury,
                 fallback: c.ending.fallback as RefundFallback,
             }
             if (c.builder !== 'refund_inactive') throw new Error(`no builder for ${c.builder}`)
@@ -479,6 +552,7 @@ describe('solana_open_offer_vectors.json', () => {
                       nodeId: BigInt(s.fold.node_id),
                       ticketId: hex.decode(s.fold.ticket_id),
                       receipt: s.fold.receipt === null ? (undefined as never) : parseReceiptJSON(new TextEncoder().encode(JSON.stringify(s.fold.receipt))),
+                      treasury: s.fold.treasury,
                   },
               }
             : {}),
@@ -559,7 +633,7 @@ describe('the IDL', () => {
         ] as [string, Json[]][]) {
             for (const e of list) expect(Array.from(discriminator(ns, e.name)), `${ns}:${e.name}`).toEqual(e.discriminator)
         }
-        expect(idl.accounts.length).toBe(5)
-        expect(idl.events.length).toBe(4)
+        expect(idl.accounts.length).toBe(4)
+        expect(idl.events.length).toBe(6)
     })
 })

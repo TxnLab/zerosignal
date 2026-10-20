@@ -14,6 +14,7 @@ package zsescrow_test
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 type fixtureContext struct {
@@ -122,8 +124,7 @@ func TestAccountFixtures(t *testing.T) {
 	d := zsescrow.Deployment{Program: f.ProgramID, Mint: f.Context.USDCMint}
 	sizes := map[string]int{
 		"Config": zsescrow.ConfigSize, "Operator": zsescrow.OperatorSize, "Node": zsescrow.NodeSize,
-		"Ticket": zsescrow.TicketSize, "RefundOwed": zsescrow.RefundOwedSize,
-		"TokenAccount": zsescrow.TokenAccountSize,
+		"Ticket": zsescrow.TicketSize, "TokenAccount": zsescrow.TokenAccountSize,
 	}
 	seen := map[string]bool{}
 	for _, a := range f.Accounts {
@@ -143,8 +144,6 @@ func TestAccountFixtures(t *testing.T) {
 				got, err = zsescrow.DecodeNode(data)
 			case "Ticket":
 				got, err = zsescrow.DecodeTicket(data)
-			case "RefundOwed":
-				got, err = zsescrow.DecodeRefundOwed(data)
 			case "TokenAccount":
 				got, err = zsescrow.DecodeTokenAccount(data)
 			default:
@@ -173,8 +172,6 @@ func TestAccountFixtures(t *testing.T) {
 			case *zsescrow.Ticket:
 				id, _ := hex.DecodeString(a.SeedsHex[2])
 				want = d.Ticket(v.Node, [16]byte(id))
-			case *zsescrow.RefundOwed:
-				want = d.RefundOwed(v.Payer)
 			case *zsescrow.TokenAccount:
 				owner = solana.TokenProgramID
 				switch seed, _ := hex.DecodeString(a.SeedsHex[0]); string(seed) {
@@ -182,8 +179,6 @@ func TestAccountFixtures(t *testing.T) {
 					want = d.Vault(v.Owner)
 				case zsescrow.StakeVaultSeed:
 					want = d.StakeVault()
-				case zsescrow.OwedVaultSeed:
-					want = d.OwedVault()
 				}
 				if v.Mint != d.Mint {
 					t.Errorf("a vault of mint %s", v.Mint)
@@ -239,21 +234,36 @@ type argReader struct {
 func (a argReader) sub(k string) argReader { return argReader{a.t, a.m[k].(map[string]any)} }
 func (a argReader) null(k string) bool     { return a.m[k] == nil }
 func (a argReader) u64(k string) uint64 {
-	v, err := strconv.ParseUint(a.m[k].(string), 10, 64)
+	v, err := strconv.ParseUint(a.str(k), 10, 64)
 	if err != nil {
 		a.t.Fatal(err)
 	}
 	return v
 }
 func (a argReader) i64(k string) int64 {
-	v, err := strconv.ParseInt(a.m[k].(string), 10, 64)
+	v, err := strconv.ParseInt(a.str(k), 10, 64)
 	if err != nil {
 		a.t.Fatal(err)
 	}
 	return v
 }
-func (a argReader) num(k string) uint64 { return uint64(a.m[k].(float64)) }
-func (a argReader) str(k string) string { return a.m[k].(string) }
+
+// num and str fail the case, not the run, on an arg the fixture lacks: a
+// fixture from another program version then reports every case it breaks.
+func (a argReader) num(k string) uint64 {
+	v, ok := a.m[k].(float64)
+	if !ok {
+		a.t.Fatalf("arg %s is %v, not a number", k, a.m[k])
+	}
+	return uint64(v)
+}
+func (a argReader) str(k string) string {
+	v, ok := a.m[k].(string)
+	if !ok {
+		a.t.Fatalf("arg %s is %v, not a string", k, a.m[k])
+	}
+	return v
+}
 func (a argReader) key(k string) solana.PublicKey {
 	return solana.MustPublicKey(a.str(k))
 }
@@ -268,10 +278,10 @@ func (a argReader) claim(k string) zsescrow.ClaimFields {
 	f := a.sub(k)
 	return zsescrow.ClaimFields{
 		Amount: f.u64("amount"), ReceiptDigest: [32]byte(f.bytes("receipt_digest")),
-		TTFTMs: uint32(f.num("ttft_ms")), DecodeMs: uint32(f.num("decode_ms")),
+		TTFTMs: f.u64("ttft_ms"), DecodeMs: f.u64("decode_ms"),
 		InputUnits: f.u64("input_units"), OutputUnits: f.u64("output_units"),
 		OutputUsageType: uint8(f.num("output_usage_type")), AuxUsageType: uint8(f.num("aux_usage_type")),
-		AuxCount: uint32(f.num("aux_count")),
+		AuxCount: f.u64("aux_count"),
 	}
 }
 
@@ -354,15 +364,16 @@ func TestInstructionFixtures(t *testing.T) {
 					RentPayer: acct["rent_payer"], Payer: ownerOf("payer_ata"),
 				}
 				for _, a := range c.Accounts {
-					if a.Name == "refund_owed" && a.Pubkey != d.Program {
+					if a.Name == "treasury_usdc" && a.Pubkey != d.Program {
+						e.Treasury = ownerOf("treasury_usdc")
 						e.Fallback = zsescrow.FallbackReadonly
 						if a.IsWritable {
 							e.Fallback = zsescrow.FallbackWritable
 						}
 					}
 				}
-				if want := args.sub("bumps"); d.RefundBumps(e.Payer) != (zsescrow.RefundBumps{PayerATA: uint8(want.num("payer_ata")), RefundOwed: uint8(want.num("refund_owed"))}) {
-					t.Errorf("refund bumps %+v", d.RefundBumps(e.Payer))
+				if want := args.sub("bumps"); d.RefundBumps(e.Payer) != (zsescrow.RefundBumps{PayerATA: uint8(want.num("payer_ata"))}) || len(want.m) != 1 {
+					t.Errorf("refund bumps %+v, fixture %v", d.RefundBumps(e.Payer), want.m)
 				}
 				return e
 			}
@@ -371,8 +382,8 @@ func TestInstructionFixtures(t *testing.T) {
 			switch c.Instruction {
 			case "initialize":
 				ix = d.Initialize(acct["admin"], acct["treasury"], zsescrow.InitializeArgs{
-					GenesisHash: solana.Hash(args.bytes("genesis_hash")), Arbiter: args.key("arbiter"),
-					FeeBps: uint16(args.num("fee_bps")), MaxGrace: uint32(args.num("max_grace")),
+					GenesisHash: solana.Hash(args.bytes("genesis_hash")),
+					FeeBps:      uint16(args.num("fee_bps")), MaxGrace: uint32(args.num("max_grace")),
 					DefaultGrace: uint32(args.num("default_grace")), MinGrace: uint32(args.num("min_grace")),
 					MaxTicketLifetime: args.i64("max_ticket_lifetime"),
 					OperatorStake:     args.u64("operator_stake"), NodeStake: args.u64("node_stake"),
@@ -380,8 +391,7 @@ func TestInstructionFixtures(t *testing.T) {
 			case "set_config":
 				var err error
 				ix, err = d.SetConfig(acct["admin"], zsescrow.SetConfigArgs{
-					PauseOpen:         optional(args, "pause_open", func(k string) bool { return args.m[k].(bool) }),
-					PauseRegistry:     optional(args, "pause_registry", func(k string) bool { return args.m[k].(bool) }),
+					Paused:            optional(args, "paused", func(k string) bool { return args.m[k].(bool) }),
 					FeeBps:            optional(args, "fee_bps", func(k string) uint16 { return uint16(args.num(k)) }),
 					MaxGrace:          optional(args, "max_grace", func(k string) uint32 { return uint32(args.num(k)) }),
 					DefaultGrace:      optional(args, "default_grace", func(k string) uint32 { return uint32(args.num(k)) }),
@@ -398,10 +408,6 @@ func TestInstructionFixtures(t *testing.T) {
 				ix = d.ProposeAdmin(acct["admin"], args.key("new_admin"))
 			case "accept_admin":
 				ix = d.AcceptAdmin(acct["new_admin"])
-			case "propose_arbiter":
-				ix = d.ProposeArbiter(acct["arbiter"], args.key("new_arbiter"))
-			case "accept_arbiter":
-				ix = d.AcceptArbiter(acct["new_arbiter"])
 			case "create_operator":
 				ix = d.CreateOperator(acct["owner"], acct["owner_usdc"], operatorID())
 			case "create_node":
@@ -436,8 +442,7 @@ func TestInstructionFixtures(t *testing.T) {
 					MaxPrice: args.u64("max_price"), ExpiresAt: args.i64("expires_at"), Grace: uint32(args.num("grace")),
 				})
 			case "claim":
-				op, n := nodeIDs()
-				ix = d.Claim(acct["node_signer"], op, n, ticketID(acct["node"]), args.claim("fields"))
+				ix = d.Claim(ending(), args.claim("fields"))
 			case "settle_cooperative":
 				ix = d.SettleCooperative(ending(), args.claim("fields"))
 			case "ack":
@@ -447,19 +452,14 @@ func TestInstructionFixtures(t *testing.T) {
 			case "refund_inactive":
 				ix = d.RefundInactive(ending())
 			case "resolve_frozen":
-				ix = d.ResolveFrozen(ending(), args.u64("node_amount"))
+				ix = d.ResolveFrozen(ending(), uint16(args.num("operator_share_bps")), args.str("reason"))
 			case "protest":
 				op, n := nodeIDs()
 				id := [16]byte(args.bytes("ticket_id"))
 				if d.Ticket(acct["node"], id) != acct["ticket"] {
 					t.Error("the protest's ticket id names another ticket")
 				}
-				ix = d.Protest(acct["payer"], op, n, id, args.bytes("receipt"), uint8(args.num("reason")))
-			case "claim_refund_owed":
-				ix = d.ClaimRefundOwed(acct["payer"], acct["rent_payer"])
-			case "close_refund_owed":
-				payer := find("refund owed", func(k solana.PublicKey) bool { return d.RefundOwed(k) == acct["refund_owed"] })
-				ix = d.CloseRefundOwed(acct["rent_payer"], payer)
+				ix = d.Protest(acct["payer"], op, n, id, args.bytes("receipt"), uint8(args.num("reason")), optional(args, "pending", args.claim))
 			case "withdraw_payout":
 				op, n := nodeIDs()
 				ix = d.WithdrawPayout(op, n, ownerOf("owner_usdc"))
@@ -492,6 +492,179 @@ func TestInstructionFixtures(t *testing.T) {
 			t.Errorf("no fixture pins the %s builder", ix.Name)
 		}
 	}
+}
+
+// The payer's ack the program checked: the claim hash of the settle's own
+// fields, the digest over it, and the Ed25519 precompile instruction signing
+// exactly that digest with the payer's key. A payer that computes another
+// digest signs an ack the program refuses.
+func TestAckDigestFixture(t *testing.T) {
+	type ackTx struct {
+		txFixture
+		OpenSeq   string `json:"open_seq"`
+		ClaimHash string `json:"claim_hash_hex"`
+		AckDigest string `json:"ack_digest_hex"`
+	}
+	var f struct {
+		ProgramID solana.PublicKey `json:"program_id"`
+		Context   struct {
+			GenesisHash string `json:"genesis_hash"`
+		} `json:"context"`
+		Transactions []ackTx `json:"transactions"`
+	}
+	readFixture(t, "solana_tx_vectors.json", &f)
+	d := zsescrow.Deployment{Program: f.ProgramID}
+	genesis := solana.Hash(mustHex(t, f.Context.GenesisHash))
+	settleDisc := zsescrow.Discriminator("global", "settle_cooperative")
+	seen := 0
+	for _, tx := range f.Transactions {
+		if tx.AckDigest == "" {
+			continue
+		}
+		seen++
+		t.Run(tx.Name, func(t *testing.T) {
+			var settle, precompile *solana.Instruction
+			for _, ix := range tx.instructions(t) {
+				switch {
+				case ix.ProgramID == d.Program && bytes.HasPrefix(ix.Data, settleDisc[:]):
+					settle = &ix
+				case ix.ProgramID == solana.Ed25519ProgramID:
+					precompile = &ix
+				}
+			}
+			if settle == nil || precompile == nil {
+				t.Fatal("no settle_cooperative beside an Ed25519 instruction")
+			}
+			claim := zsescrow.ClaimHash(claimFieldsOf(t, settle.Data[8:]))
+			if hex.EncodeToString(claim[:]) != tx.ClaimHash {
+				t.Errorf("claim hash %x, fixture %s", claim, tx.ClaimHash)
+			}
+			openSeq, err := strconv.ParseUint(tx.OpenSeq, 10, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const ticketAt = 4
+			digest := d.AckDigest(genesis, settle.Accounts[ticketAt].PublicKey, openSeq, claim)
+			if hex.EncodeToString(digest[:]) != tx.AckDigest {
+				t.Errorf("ack digest %x, fixture %s", digest, tx.AckDigest)
+			}
+			signed, by := ed25519Message(t, precompile.Data)
+			if !bytes.Equal(signed, digest[:]) || by != solana.MustPublicKey(tx.Payer) {
+				t.Errorf("the precompile signs %x by %s, want the digest by the payer %s", signed, by, tx.Payer)
+			}
+		})
+	}
+	if seen == 0 {
+		t.Fatal("no transaction carries an ack digest")
+	}
+}
+
+// The protest of a pending ticket the program accepted. Its pending claim
+// fields hash to the ticket's claim, the node's Ed25519 instruction signs the
+// receipt's digest, and the fields carry that same digest: sha256 of the
+// receipt's canonical bytes, as ticket.ReceiptSigDigest computes it and
+// ClaimFromReceipt puts it in a claim. A payer computing another digest would
+// pass fields the program refuses (ClaimMismatch against the node's claim, or
+// ReceiptNotPending against fields copied from it).
+func TestProtestPendingFixture(t *testing.T) {
+	type protestTx struct {
+		txFixture
+		Program       string `json:"program"`
+		ClaimHash     string `json:"claim_hash_hex"`
+		ReceiptDigest string `json:"receipt_digest_hex"`
+	}
+	var f struct {
+		ProgramID    solana.PublicKey `json:"program_id"`
+		Transactions []protestTx      `json:"transactions"`
+	}
+	readFixture(t, "solana_tx_vectors.json", &f)
+	protestDisc := zsescrow.Discriminator("global", "protest")
+	for _, tx := range f.Transactions {
+		if tx.Name != "protest_pending" {
+			continue
+		}
+		if tx.Program != "ok" {
+			t.Fatalf("the program refused it: %s", tx.Program)
+		}
+		var protest, precompile *solana.Instruction
+		for _, ix := range tx.instructions(t) {
+			switch {
+			case ix.ProgramID == f.ProgramID && bytes.HasPrefix(ix.Data, protestDisc[:]):
+				protest = &ix
+			case ix.ProgramID == solana.Ed25519ProgramID:
+				precompile = &ix
+			}
+		}
+		if protest == nil || precompile == nil {
+			t.Fatal("no protest beside an Ed25519 instruction")
+		}
+		// ticket_id, then the receipt as a u32-prefixed vector, the reason,
+		// and the pending fields as Some.
+		args := protest.Data[8+16:]
+		n := int(binary.LittleEndian.Uint32(args))
+		if len(args) < 4+n+2 {
+			t.Fatalf("protest arguments of %d bytes, receipt of %d", len(args), n)
+		}
+		receipt, rest := args[4:4+n], args[4+n+1:]
+		if rest[0] != 1 {
+			t.Fatal("the protest passes no pending fields")
+		}
+		pending := claimFieldsOf(t, rest[1:])
+		if claim := zsescrow.ClaimHash(pending); hex.EncodeToString(claim[:]) != tx.ClaimHash {
+			t.Errorf("claim hash %x, fixture %s", claim, tx.ClaimHash)
+		}
+		var r ticket.UsageReceipt
+		if err := json.Unmarshal(tx.Receipt, &r); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(r.CanonicalBytes(), receipt) {
+			t.Fatal("the protest's receipt is not the receipt value's canonical bytes")
+		}
+		digest := ticket.ReceiptSigDigest(&r)
+		if digest != pending.ReceiptDigest || hex.EncodeToString(digest[:]) != tx.ReceiptDigest {
+			t.Errorf("receipt digest %x, pending names %x, fixture %s", digest, pending.ReceiptDigest, tx.ReceiptDigest)
+		}
+		if zsescrow.ClaimFromReceipt(&r) != pending {
+			t.Errorf("the pending claim is not the receipt's: %+v", pending)
+		}
+		if signed, _ := ed25519Message(t, precompile.Data); !bytes.Equal(signed, digest[:]) {
+			t.Errorf("the precompile signs %x, not the receipt's digest", signed)
+		}
+		return
+	}
+	t.Fatal("no protest_pending transaction")
+}
+
+// claimFieldsOf reads ClaimFields from the head of an instruction's
+// arguments, in the program's Borsh order.
+func claimFieldsOf(t *testing.T, b []byte) zsescrow.ClaimFields {
+	if len(b) < 82 {
+		t.Fatalf("claim fields of %d bytes", len(b))
+	}
+	le := func(at int) uint64 { return binary.LittleEndian.Uint64(b[at:]) }
+	return zsescrow.ClaimFields{
+		Amount: le(0), ReceiptDigest: [32]byte(b[8:40]), TTFTMs: le(40), DecodeMs: le(48),
+		InputUnits: le(56), OutputUnits: le(64), OutputUsageType: b[72], AuxUsageType: b[73], AuxCount: le(74),
+	}
+}
+
+// ed25519Message reads the one signature an Ed25519 precompile instruction
+// verifies: the message it signs and the key, each at an offset in the
+// instruction's own data.
+func ed25519Message(t *testing.T, data []byte) ([]byte, solana.PublicKey) {
+	if len(data) < 16 || data[0] != 1 {
+		t.Fatalf("an Ed25519 instruction of %d bytes, not one signature", len(data))
+	}
+	u16 := func(at int) int { return int(binary.LittleEndian.Uint16(data[at:])) }
+	const own = 0xffff
+	if u16(4) != own || u16(8) != own || u16(14) != own {
+		t.Fatal("the precompile reads another instruction's data")
+	}
+	pk, msg, size := u16(6), u16(10), u16(12)
+	if pk+32 > len(data) || msg+size > len(data) {
+		t.Fatal("the precompile's offsets run past its data")
+	}
+	return data[msg : msg+size], solana.PublicKey(data[pk : pk+32])
 }
 
 func TestEventFixtures(t *testing.T) {

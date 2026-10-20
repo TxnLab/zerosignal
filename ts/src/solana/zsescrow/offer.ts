@@ -22,7 +22,7 @@ import { base64 } from '@scure/base'
 import { type UsageReceipt, receiptSigDigest } from '../../ticket/receipt.js'
 import { equalBytes } from '../../util/bytes.js'
 import { COMPUTE_BUDGET_SET_COMPUTE_UNIT_LIMIT, COMPUTE_BUDGET_SET_COMPUTE_UNIT_PRICE } from '../computebudget.js'
-import { COMPUTE_BUDGET_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from '../key.js'
+import { COMPUTE_BUDGET_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from '../key.js'
 import { type AccountMeta, type Instruction, isWritable, parseMessage } from '../message.js'
 import { TOKEN_TRANSFER_CHECKED, transferChecked } from '../token.js'
 import { type ClaimFields, type Deployment, type Ending, type RefundFallback } from './instructions.js'
@@ -68,29 +68,32 @@ export interface FoldSpec {
      */
     ticketId: Uint8Array
     receipt: UsageReceipt
+    /**
+     * The Config's treasury, whose USDC account the folded settle may pass for
+     * a refund the payer's account can't take. Absent, or the default key,
+     * accepts only a fold that passes none. Its account is accepted writable
+     * too, so the payer's signature can ack a settle that forfeits the refund:
+     * the program forfeits a refund the payer's account can't take on every
+     * ending, so refusing the fold changes only which settle does it.
+     */
+    treasury?: PublicKey
 }
-
-const U32_MAX = 0xffffffff
 
 /**
  * The claim a payer acks for a receipt: the values the node signed, and the
- * digest of the receipt's canonical bytes. A receipt whose timings or aux
- * count overflow the claim's u32 fields has no claim the program can carry.
+ * digest of the receipt's canonical bytes.
  */
 export function claimFromReceipt(r: UsageReceipt): ClaimFields {
-    if (r.ttft_ms > U32_MAX || r.decode_ms > U32_MAX || r.aux_output_count > U32_MAX) {
-        throw new RangeError("zsescrow: receipt timings or aux count exceed a claim's u32 fields")
-    }
     return {
         amount: BigInt(r.amount_charged),
         receiptDigest: receiptSigDigest(r),
-        ttftMs: r.ttft_ms,
-        decodeMs: r.decode_ms,
+        ttftMs: BigInt(r.ttft_ms),
+        decodeMs: BigInt(r.decode_ms),
         inputUnits: BigInt(r.actual_input_count),
         outputUnits: BigInt(r.actual_output_count),
         outputUsageType: r.output_usage_type,
         auxUsageType: r.aux_output_usage_type,
-        auxCount: r.aux_output_count,
+        auxCount: BigInt(r.aux_output_count),
     }
 }
 
@@ -179,19 +182,16 @@ function verifyFold(d: Deployment, ix: Instruction, spec: OpenOfferSpec): void {
     // can make two spellings of one id agree.
     const want = base64.encode(f.ticketId)
     if (f.receipt.ticket_id !== want) throw new OfferRejectedError('fold.receipt', `the receipt names ticket ${JSON.stringify(f.receipt.ticket_id)}, not the payer's ${JSON.stringify(want)}`)
-    let claim: ClaimFields
-    try {
-        claim = claimFromReceipt(f.receipt)
-    } catch (err) {
-        throw new OfferRejectedError('fold.receipt', err instanceof Error ? err.message : String(err))
-    }
+    const claim = claimFromReceipt(f.receipt)
     // The rent payer is whoever funded the ticket, which the program checks
     // against the ticket itself, so the offer's own is taken. Each fallback
     // shape is one the program may be handed for the same settle.
     const rentPayer = ix.accounts[5]
     if (!rentPayer) throw new OfferRejectedError('fold.accounts', `settle_cooperative names ${ix.accounts.length} accounts`)
-    const e: Ending = { submitter: spec.nodeSigning, operatorId: f.operatorId, nodeId: f.nodeId, ticketId: f.ticketId, rentPayer: rentPayer.publicKey, payer: spec.payer }
-    for (const fallback of ['none', 'readonly'] as RefundFallback[]) {
+    const treasury = f.treasury === SYSTEM_PROGRAM_ID ? undefined : f.treasury
+    const e: Ending = { submitter: spec.nodeSigning, operatorId: f.operatorId, nodeId: f.nodeId, ticketId: f.ticketId, rentPayer: rentPayer.publicKey, payer: spec.payer, treasury }
+    const fallbacks: RefundFallback[] = treasury ? ['none', 'readonly'] : ['none']
+    for (const fallback of fallbacks) {
         const want = d.settleCooperative({ ...e, fallback }, claim)
         if (sameKeys(ix.accounts, want.accounts)) return sameInstruction(ix, want, 'fold')
     }

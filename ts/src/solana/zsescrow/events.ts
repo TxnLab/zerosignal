@@ -37,15 +37,17 @@ export interface TicketSettled {
     amount: bigint
     fee: bigint
     refund: bigint
-    /** The refund went to the payer's RefundOwed, not its token account. */
-    refundOwed: boolean
+    /** The payer's token account couldn't take the refund, so it went to the treasury, as Algorand's payOrForfeit sends it. */
+    refundForfeited: boolean
 }
 
+/** A first half of a settle: the node's claim, or the payer's (byPayer). */
 export interface TicketClaimed {
     event: 'TicketClaimed'
     ticket: PublicKey
     node: PublicKey
     amount: bigint
+    byPayer: boolean
 }
 
 export interface TicketProtested {
@@ -57,6 +59,26 @@ export interface TicketProtested {
     amount: bigint
 }
 
+/** A second half that differed from the first, which froze the ticket. */
+export interface TicketDisputed {
+    event: 'TicketDisputed'
+    ticket: PublicKey
+    node: PublicKey
+    /** What the first half charged. */
+    claimed: bigint
+    /** What the second half charged. */
+    amount: bigint
+}
+
+/** The admin's split of a frozen ticket, beside the TicketSettled that pays it, with the admin's stated reason. */
+export interface TicketResolved {
+    event: 'TicketResolved'
+    ticket: PublicKey
+    node: PublicKey
+    operatorShareBps: number
+    reason: string
+}
+
 export interface OperatorEvicted {
     event: 'OperatorEvicted'
     operatorId: bigint
@@ -64,7 +86,7 @@ export interface OperatorEvicted {
     reason: string
 }
 
-export type Event = TicketSettled | TicketClaimed | TicketProtested | OperatorEvicted
+export type Event = TicketSettled | TicketClaimed | TicketProtested | TicketDisputed | TicketResolved | OperatorEvicted
 
 /**
  * isEventInstruction reports whether an inner instruction is one of d's
@@ -85,6 +107,8 @@ const DISC = {
     TicketSettled: discriminator('event', 'TicketSettled'),
     TicketClaimed: discriminator('event', 'TicketClaimed'),
     TicketProtested: discriminator('event', 'TicketProtested'),
+    TicketDisputed: discriminator('event', 'TicketDisputed'),
+    TicketResolved: discriminator('event', 'TicketResolved'),
     OperatorEvicted: discriminator('event', 'OperatorEvicted'),
 }
 
@@ -95,11 +119,15 @@ export function parseEvent(data: Uint8Array): Event {
     const disc = data.subarray(8, 16)
     let ev: Event
     if (equalBytes(disc, DISC.TicketSettled)) {
-        ev = { event: 'TicketSettled', ticket: r.key(), node: r.key(), outcome: r.u8(), amount: r.u64(), fee: r.u64(), refund: r.u64(), refundOwed: r.bool() }
+        ev = { event: 'TicketSettled', ticket: r.key(), node: r.key(), outcome: r.u8(), amount: r.u64(), fee: r.u64(), refund: r.u64(), refundForfeited: r.bool() }
     } else if (equalBytes(disc, DISC.TicketClaimed)) {
-        ev = { event: 'TicketClaimed', ticket: r.key(), node: r.key(), amount: r.u64() }
+        ev = { event: 'TicketClaimed', ticket: r.key(), node: r.key(), amount: r.u64(), byPayer: r.bool() }
     } else if (equalBytes(disc, DISC.TicketProtested)) {
         ev = { event: 'TicketProtested', ticket: r.key(), node: r.key(), reason: r.u8(), amount: r.u64() }
+    } else if (equalBytes(disc, DISC.TicketDisputed)) {
+        ev = { event: 'TicketDisputed', ticket: r.key(), node: r.key(), claimed: r.u64(), amount: r.u64() }
+    } else if (equalBytes(disc, DISC.TicketResolved)) {
+        ev = { event: 'TicketResolved', ticket: r.key(), node: r.key(), operatorShareBps: r.u16(), reason: decodeUtf8(r.vec(), 'reason') }
     } else if (equalBytes(disc, DISC.OperatorEvicted)) {
         ev = { event: 'OperatorEvicted', operatorId: r.u64(), slashed: r.u64(), reason: decodeUtf8(r.vec(), 'reason') }
     } else {

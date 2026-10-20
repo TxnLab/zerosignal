@@ -6,6 +6,7 @@
 package zsescrow
 
 import (
+	"crypto/sha256"
 	"errors"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -52,26 +53,24 @@ func (d Deployment) programData() solana.PublicKey {
 	return k
 }
 
-// InitializeArgs are the terms initialize sets. Arbiter must not be the
-// default key, and only the arbiter can name its successor.
+// InitializeArgs are the terms initialize sets.
 type InitializeArgs struct {
-	GenesisHash       solana.Hash      `json:"genesis_hash"`
-	Arbiter           solana.PublicKey `json:"arbiter"`
-	FeeBps            uint16           `json:"fee_bps"`
-	MaxGrace          uint32           `json:"max_grace"`
-	DefaultGrace      uint32           `json:"default_grace"`
-	MinGrace          uint32           `json:"min_grace"`
-	MaxTicketLifetime int64            `json:"max_ticket_lifetime"`
-	OperatorStake     uint64           `json:"operator_stake"`
-	NodeStake         uint64           `json:"node_stake"`
+	GenesisHash       solana.Hash `json:"genesis_hash"`
+	FeeBps            uint16      `json:"fee_bps"`
+	MaxGrace          uint32      `json:"max_grace"`
+	DefaultGrace      uint32      `json:"default_grace"`
+	MinGrace          uint32      `json:"min_grace"`
+	MaxTicketLifetime int64       `json:"max_ticket_lifetime"`
+	OperatorStake     uint64      `json:"operator_stake"`
+	NodeStake         uint64      `json:"node_stake"`
 }
 
 // Initialize must be signed by the program's upgrade authority, which becomes
-// the admin.
+// the admin. The treasury's USDC account must already exist, unfrozen: the
+// program refuses a treasury that couldn't take a fee (TreasuryCannotReceive).
 func (d Deployment) Initialize(admin, treasury solana.PublicKey, a InitializeArgs) solana.Instruction {
 	w := writer{}
 	w.bytes(a.GenesisHash[:])
-	w.key(a.Arbiter)
 	w.u16(a.FeeBps)
 	w.u32(a.MaxGrace)
 	w.u32(a.DefaultGrace)
@@ -84,18 +83,19 @@ func (d Deployment) Initialize(admin, treasury solana.PublicKey, a InitializeArg
 		readonly(d.programData()),
 		writable(d.Config()),
 		writable(d.StakeVault()),
-		writable(d.OwedVault()),
 		readonly(d.Mint),
 		readonly(treasury),
+		readonly(d.TokenAccount(treasury)),
 		readonly(solana.TokenProgramID),
 		readonly(solana.SystemProgramID),
 	)
 }
 
-// SetConfigArgs changes the fields that are set and leaves the rest.
+// SetConfigArgs changes the fields that are set and leaves the rest. Paused
+// stops open and every registry write, as Algorand's paused does; settles,
+// unregisters and the admin's levers run through a pause.
 type SetConfigArgs struct {
-	PauseOpen         *bool             `json:"pause_open"`
-	PauseRegistry     *bool             `json:"pause_registry"`
+	Paused            *bool             `json:"paused"`
 	FeeBps            *uint16           `json:"fee_bps"`
 	MaxGrace          *uint32           `json:"max_grace"`
 	DefaultGrace      *uint32           `json:"default_grace"`
@@ -111,15 +111,15 @@ type SetConfigArgs struct {
 // slash would be lost.
 var ErrZeroTreasury = errors.New("zsescrow: the treasury is the default key")
 
-// SetConfig passes the new treasury as an account too: the program checks
-// it is not one of its own.
+// SetConfig passes the new treasury as an account too, so the program can
+// check it is not one of its own, and the treasury's USDC account, which the
+// program requires to exist unfrozen, as Algorand's setTreasury does.
 func (d Deployment) SetConfig(admin solana.PublicKey, a SetConfigArgs) (solana.Instruction, error) {
 	if a.Treasury != nil && a.Treasury.IsZero() {
 		return solana.Instruction{}, ErrZeroTreasury
 	}
 	w := writer{}
-	option(&w, a.PauseOpen, w.bool)
-	option(&w, a.PauseRegistry, w.bool)
+	option(&w, a.Paused, w.bool)
 	option(&w, a.FeeBps, w.u16)
 	option(&w, a.MaxGrace, w.u32)
 	option(&w, a.DefaultGrace, w.u32)
@@ -128,11 +128,17 @@ func (d Deployment) SetConfig(admin solana.PublicKey, a SetConfigArgs) (solana.I
 	option(&w, a.OperatorStake, w.u64)
 	option(&w, a.NodeStake, w.u64)
 	option(&w, a.Treasury, w.key)
-	var treasury solana.PublicKey
+	var treasury, treasuryUSDC solana.PublicKey
 	if a.Treasury != nil {
 		treasury = *a.Treasury
+		treasuryUSDC = d.TokenAccount(treasury)
 	}
-	return d.ix("set_config", w.b, signer(admin), writable(d.Config()), d.optional(treasury, false)), nil
+	return d.ix("set_config", w.b,
+		signer(admin),
+		writable(d.Config()),
+		d.optional(treasury, false),
+		d.optional(treasuryUSDC, false),
+	), nil
 }
 
 func (d Deployment) ProposeAdmin(admin, next solana.PublicKey) solana.Instruction {
@@ -145,22 +151,12 @@ func (d Deployment) AcceptAdmin(next solana.PublicKey) solana.Instruction {
 	return d.ix("accept_admin", nil, signer(next), writable(d.Config()))
 }
 
-func (d Deployment) ProposeArbiter(arbiter, next solana.PublicKey) solana.Instruction {
-	w := writer{}
-	w.key(next)
-	return d.ix("propose_arbiter", w.b, signer(arbiter), writable(d.Config()))
-}
-
-func (d Deployment) AcceptArbiter(next solana.PublicKey) solana.Instruction {
-	return d.ix("accept_arbiter", nil, signer(next), writable(d.Config()))
-}
-
 // The program takes any USDC account the owner (or the treasury) holds where
 // it pays a stake in or out, so a frozen or closed associated account can't
 // block a registration, an unregister or an eviction. Those builders take
-// the account; d.TokenAccount(owner) is the usual one. Payouts, fee sweeps
-// and RefundOwed claims go only to the associated account, which their
-// builders derive.
+// the account; d.TokenAccount(owner) is the usual one. Payouts, fee sweeps,
+// refunds and forfeited refunds go only to the associated account, which
+// their builders derive.
 
 // CreateOperator registers the owner as operator nextOperatorID, the
 // Config's next_operator_id, and escrows the operator stake from ownerUSDC.
@@ -201,14 +197,15 @@ func (d Deployment) CreateNode(owner, ownerUSDC solana.PublicKey, operatorID, ne
 }
 
 // UpdateNode moves the node to signing as its key, and sets its URL. The
-// owner alone signs. No Config: rotation isn't pause-gated, so a leaked key
-// can be replaced during a registry pause.
+// owner alone signs. It is pause-gated, as Algorand's updateNode is, so a
+// key can't be rotated while the protocol is paused.
 func (d Deployment) UpdateNode(owner solana.PublicKey, operatorID, nodeID uint64, signing solana.PublicKey, baseURL string) solana.Instruction {
 	w := writer{}
 	w.key(signing)
 	w.vec([]byte(baseURL))
 	return d.ix("update_node", w.b,
 		signer(owner),
+		readonly(d.Config()),
 		readonly(d.Operator(operatorID)),
 		writable(d.Node(operatorID, nodeID)),
 	)
@@ -355,58 +352,80 @@ func (d Deployment) Open(nodeSigner solana.PublicKey, operatorID, nodeID uint64,
 type ClaimFields struct {
 	Amount          uint64   `json:"amount"`
 	ReceiptDigest   [32]byte `json:"receipt_digest"`
-	TTFTMs          uint32   `json:"ttft_ms"`
-	DecodeMs        uint32   `json:"decode_ms"`
+	TTFTMs          uint64   `json:"ttft_ms"`
+	DecodeMs        uint64   `json:"decode_ms"`
 	InputUnits      uint64   `json:"input_units"`
 	OutputUnits     uint64   `json:"output_units"`
 	OutputUsageType uint8    `json:"output_usage_type"`
 	AuxUsageType    uint8    `json:"aux_usage_type"`
-	AuxCount        uint32   `json:"aux_count"`
+	AuxCount        uint64   `json:"aux_count"`
 }
 
 func (f ClaimFields) put(w *writer) {
 	w.u64(f.Amount)
 	w.bytes(f.ReceiptDigest[:])
-	w.u32(f.TTFTMs)
-	w.u32(f.DecodeMs)
+	w.u64(f.TTFTMs)
+	w.u64(f.DecodeMs)
 	w.u64(f.InputUnits)
 	w.u64(f.OutputUnits)
 	w.u8(f.OutputUsageType)
 	w.u8(f.AuxUsageType)
-	w.u32(f.AuxCount)
+	w.u64(f.AuxCount)
 }
 
-// Claim records the node's claim on a ticket the payer has not acked; it
-// lapses to the node at the deadline unless the payer answers.
-func (d Deployment) Claim(nodeSigner solana.PublicKey, operatorID, nodeID uint64, ticketID [16]byte, f ClaimFields) solana.Instruction {
-	w := writer{}
+// The domain tags of the claim hash and the payer's ack digest, the
+// program's CLAIM_TAG and ACK_TAG.
+const (
+	claimTag = "zs-claim-v3\x00"
+	ackTag   = "zs-settle-ack-v3\x00"
+)
+
+// ClaimHash is the hash a ticket stores for the first half's fields, and the
+// one the other half and settle_lapsed must match.
+func ClaimHash(f ClaimFields) [32]byte {
+	w := writer{b: []byte(claimTag)}
 	f.put(&w)
-	node := d.Node(operatorID, nodeID)
-	return d.ix("claim", w.b, append([]solana.AccountMeta{
-		signer(nodeSigner),
-		readonly(node),
-		writable(d.Ticket(node, ticketID)),
-	}, d.eventCPI()...)...)
+	return sha256.Sum256(w.b)
 }
 
-// RefundFallback is how a settle passes the payer's RefundOwed and the owed
-// vault, which it needs only when the payer's token account can't take the
-// refund.
+// AckDigest is what the payer signs off chain to accept a claim, for the
+// Ed25519 precompile instruction before a settle_cooperative. It binds the
+// cluster, the program, the ticket and its open_seq: a closed ticket's
+// address can be opened again with the same id, and only open_seq tells the
+// two apart, so an ack never replays against the reopened ticket.
+func (d Deployment) AckDigest(genesis solana.Hash, ticket solana.PublicKey, openSeq uint64, claimHash [32]byte) [32]byte {
+	w := writer{b: []byte(ackTag)}
+	w.bytes(genesis[:])
+	w.key(d.Program)
+	w.key(ticket)
+	w.u64(openSeq)
+	w.bytes(claimHash[:])
+	return sha256.Sum256(w.b)
+}
+
+// RefundFallback is how a settle passes the treasury's USDC account, which
+// takes the refund only when the payer's token account can't (closed, never
+// created, or frozen): the refund is forfeited there, as Algorand's
+// payOrForfeit forfeits it.
 type RefundFallback uint8
 
 const (
-	// NoFallback leaves them out: the common settle.
+	// NoFallback leaves it out: the common settle.
 	NoFallback RefundFallback = iota
-	// FallbackReadonly passes them read-only, which a settle may always do;
-	// the program refuses with RefundOwedNotWritable if it needs them.
+	// FallbackReadonly passes it read-only, which a settle may always do; the
+	// program refuses with TreasuryAccountNotWritable if it needs it.
 	FallbackReadonly
-	// FallbackWritable passes them writable, for a payer whose token account
-	// is closed or frozen.
+	// FallbackWritable passes it writable, for a payer whose token account
+	// can't take the refund. Only then: the account is one for the whole
+	// protocol, so a write lock on it in every settle would serialize them all.
 	FallbackWritable
 )
 
 // Ending names the ticket a settle ends and who submits it.
 type Ending struct {
+	// Submitter signs: the node's current signing key for Claim (and for a
+	// SettleCooperative of an open ticket), the payer for Ack, the admin for
+	// ResolveFrozen, anyone for SettleLapsed and RefundInactive.
 	Submitter  solana.PublicKey
 	OperatorID uint64
 	NodeID     uint64
@@ -415,19 +434,26 @@ type Ending struct {
 	// rent_payer.
 	RentPayer solana.PublicKey
 	// Payer is the ticket's payer, whose token account takes the refund.
-	Payer    solana.PublicKey
+	Payer solana.PublicKey
+	// Treasury is the Config's treasury, read only when Fallback passes its
+	// USDC account; set_config can move it, so it comes from the Config, not
+	// a constant. Left zero there, it names the default key's account, which
+	// the program refuses as the forfeit's destination.
+	Treasury solana.PublicKey
 	Fallback RefundFallback
 }
 
 func (d Deployment) ending(name string, e Ending, args func(w *writer)) solana.Instruction {
 	w := writer{}
 	args(&w)
-	b := d.RefundBumps(e.Payer)
-	w.u8(b.PayerATA)
-	w.u8(b.RefundOwed)
+	w.u8(d.RefundBumps(e.Payer).PayerATA)
 	node := d.Node(e.OperatorID, e.NodeID)
-	accounts := []solana.AccountMeta{
-		payer(e.Submitter),
+	treasuryUSDC := readonly(d.Program)
+	if e.Fallback != NoFallback {
+		treasuryUSDC = solana.AccountMeta{PublicKey: d.TokenAccount(e.Treasury), IsWritable: e.Fallback == FallbackWritable}
+	}
+	return d.ix(name, w.b, append([]solana.AccountMeta{
+		signer(e.Submitter),
 		readonly(d.Config()),
 		writable(node),
 		writable(d.Vault(node)),
@@ -437,17 +463,17 @@ func (d Deployment) ending(name string, e Ending, args func(w *writer)) solana.I
 		readonly(d.Mint),
 		readonly(solana.SysvarInstructionsID),
 		readonly(solana.TokenProgramID),
-	}
-	if e.Fallback == NoFallback {
-		accounts = append(accounts, readonly(d.Program), readonly(d.Program), readonly(d.Program))
-	} else {
-		owedWritable := e.Fallback == FallbackWritable
-		accounts = append(accounts,
-			solana.AccountMeta{PublicKey: d.RefundOwed(e.Payer), IsWritable: owedWritable},
-			solana.AccountMeta{PublicKey: d.OwedVault(), IsWritable: owedWritable},
-			readonly(solana.SystemProgramID))
-	}
-	return d.ix(name, w.b, append(accounts, d.eventCPI()...)...)
+		treasuryUSDC,
+	}, d.eventCPI()...)...)
+}
+
+// Claim is the node's half of a settle, signed by its current signing key.
+// On an open ticket it is the first half, which lapses to the node at the
+// deadline unless the payer answers; on the payer's first half it is the
+// second, which settles if the fields match and freezes the ticket if not.
+// Reposting the same fields is a no-op; other fields are refused.
+func (d Deployment) Claim(e Ending, f ClaimFields) solana.Instruction {
+	return d.ending("claim", e, f.put)
 }
 
 // SettleCooperative settles on the payer's ack: an Ed25519 precompile
@@ -457,35 +483,52 @@ func (d Deployment) SettleCooperative(e Ending, f ClaimFields) solana.Instructio
 	return d.ending("settle_cooperative", e, f.put)
 }
 
-// Ack is the payer's answer to a claim: the payer signs the transaction.
+// Ack is the payer's half of a settle, signed by the payer, with the same
+// rules as Claim from the other side: on an open ticket the first half,
+// which refund_inactive refunds in full at the deadline unless the node
+// answers.
 func (d Deployment) Ack(e Ending, f ClaimFields) solana.Instruction {
 	return d.ending("ack", e, f.put)
 }
 
-// SettleLapsed pays a claim the payer did not answer by the deadline; the
-// claim fields are resupplied and checked against the stored hash.
+// SettleLapsed pays a node's claim the payer did not answer by the deadline;
+// the claim fields are resupplied and checked against the stored hash.
 func (d Deployment) SettleLapsed(e Ending, f ClaimFields) solana.Instruction {
 	return d.ending("settle_lapsed", e, f.put)
 }
 
-// RefundInactive refunds an open ticket nobody claimed by the deadline.
+// RefundInactive refunds the whole escrow of a ticket the node never claimed,
+// or whose payer-posted first half the node never answered, after the
+// deadline.
 func (d Deployment) RefundInactive(e Ending) solana.Instruction {
 	return d.ending("refund_inactive", e, func(*writer) {})
 }
 
-// ResolveFrozen is the arbiter's split of a protested ticket: nodeAmount to
-// the node, the rest back to the payer.
-func (d Deployment) ResolveFrozen(e Ending, nodeAmount uint64) solana.Instruction {
-	return d.ending("resolve_frozen", e, func(w *writer) { w.u64(nodeAmount) })
+// ResolveFrozen is the admin's split of a frozen ticket: the node is awarded
+// operatorShareBps of the pre-fee ceiling, the protocol its fee on that, and
+// the rest returns to the payer. reason is the admin's stated basis, at most
+// 1024 bytes, kept in the TicketResolved event.
+func (d Deployment) ResolveFrozen(e Ending, operatorShareBps uint16, reason string) solana.Instruction {
+	return d.ending("resolve_frozen", e, func(w *writer) {
+		w.u16(operatorShareBps)
+		w.vec([]byte(reason))
+	})
 }
 
 // Protest freezes a ticket on the node's receipt, which the payer proves the
-// node signed with an Ed25519 precompile instruction beside it.
-func (d Deployment) Protest(payerKey solana.PublicKey, operatorID, nodeID uint64, ticketID [16]byte, receipt []byte, reason uint8) solana.Instruction {
+// node signed with an Ed25519 precompile instruction beside it. On a ticket
+// with a pending half, pending must be that half's claim fields, and the
+// receipt the one whose digest they carry, as Algorand requires the protested
+// digest to equal the pending one; the program ignores it on an open ticket.
+// The ticket keeps only the fields' hash: a payer has its own half's fields,
+// and the node's from the node's claim instruction, which are
+// ClaimFromReceipt(receipt) only when the node claimed exactly its receipt.
+func (d Deployment) Protest(payerKey solana.PublicKey, operatorID, nodeID uint64, ticketID [16]byte, receipt []byte, reason uint8, pending *ClaimFields) solana.Instruction {
 	w := writer{}
 	w.bytes(ticketID[:])
 	w.vec(receipt)
 	w.u8(reason)
+	option(&w, pending, func(f ClaimFields) { f.put(&w) })
 	node := d.Node(operatorID, nodeID)
 	return d.ix("protest", w.b, append([]solana.AccountMeta{
 		signer(payerKey),
@@ -494,26 +537,6 @@ func (d Deployment) Protest(payerKey solana.PublicKey, operatorID, nodeID uint64
 		writable(d.Ticket(node, ticketID)),
 		readonly(solana.SysvarInstructionsID),
 	}, d.eventCPI()...)...)
-}
-
-// ClaimRefundOwed pays the payer what settles could not, once its token
-// account can take it, and returns the record's rent to whoever funded it.
-func (d Deployment) ClaimRefundOwed(payerKey, rentPayer solana.PublicKey) solana.Instruction {
-	return d.ix("claim_refund_owed", nil,
-		signer(payerKey),
-		readonly(d.Config()),
-		writable(d.RefundOwed(payerKey)),
-		writable(rentPayer),
-		writable(d.OwedVault()),
-		writable(d.TokenAccount(payerKey)),
-		readonly(d.Mint),
-		readonly(solana.TokenProgramID),
-	)
-}
-
-// CloseRefundOwed closes a RefundOwed with nothing owed, for its rent.
-func (d Deployment) CloseRefundOwed(rentPayer, payerKey solana.PublicKey) solana.Instruction {
-	return d.ix("close_refund_owed", nil, payer(rentPayer), writable(d.RefundOwed(payerKey)))
 }
 
 // WithdrawPayout sends the node's accrued payout to the operator owner's USDC

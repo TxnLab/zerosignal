@@ -10,14 +10,6 @@
         "pubkey": "FMUEmtxhU46GzhKF4FW9MLJdQWiLgjiXP9TYRWSrqTpV",
         "seed": 21
       },
-      "arbiter": {
-        "pubkey": "7v54NWdBtkjuAFJrLGsS2SXnuk8nKam81mZJeeYxVFi9",
-        "seed": 11
-      },
-      "arbiter_next": {
-        "pubkey": "6TcyBfPdBt1kjsvDZLzmBFnuMaLWiTaAt4RjUr9VA5YD",
-        "seed": 22
-      },
       "attacker": {
         "pubkey": "3BuW9SR5tG6VFK4MmkQQ3Ak8ny1K1Vv5Uz7is8Aa5pwG",
         "seed": 20
@@ -101,7 +93,7 @@
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "Cooperative",
         "refund": "145000",
-        "refund_owed": false,
+        "refund_forfeited": false,
         "ticket": "EHQ4j6CtFMDzq53BtdeNmBJxF1SUiD8Brbb9HKmgSzCn"
       },
       "discriminator_hex": "48280d03b89fbed3",
@@ -121,18 +113,19 @@
       "case": "claimed",
       "decoded": {
         "amount": "120000",
+        "by_payer": false,
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "ticket": "2rvFdosqnbzmWPUM5uDJcfnLDkzc42KtLihJe8xeEaLZ"
       },
       "discriminator_hex": "b6e99754fb24e858",
       "emitted_by": "claim",
       "event": "TicketClaimed",
-      "event_base64": "tumXVPsk6FgbpVvyElewrf4817sQGLWavEZCEQ4dSd1jCELPiMbQCv8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5wNQBAAAAAAA=",
+      "event_base64": "tumXVPsk6FgbpVvyElewrf4817sQGLWavEZCEQ4dSd1jCELPiMbQCv8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5wNQBAAAAAAAA",
       "inner_instruction": {
         "accounts": [
           "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
         ],
-        "data_base64": "5EWlLlHLmh226ZdU+yToWBulW/ISV7Ct/jzXuxAYtZq8RkIRDh1J3WMIQs+IxtAK/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rnA1AEAAAAAAA==",
+        "data_base64": "5EWlLlHLmh226ZdU+yToWBulW/ISV7Ct/jzXuxAYtZq8RkIRDh1J3WMIQs+IxtAK/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rnA1AEAAAAAAAA=",
         "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "stack_height": 2
       }
@@ -145,7 +138,7 @@
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "Acked",
         "refund": "124000",
-        "refund_owed": false,
+        "refund_forfeited": false,
         "ticket": "2rvFdosqnbzmWPUM5uDJcfnLDkzc42KtLihJe8xeEaLZ"
       },
       "discriminator_hex": "48280d03b89fbed3",
@@ -157,6 +150,51 @@
           "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
         ],
         "data_base64": "5EWlLlHLmh1IKA0DuJ++0xulW/ISV7Ct/jzXuxAYtZq8RkIRDh1J3WMIQs+IxtAK/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkBwNQBAAAAAABwFwAAAAAAAGDkAQAAAAAAAA==",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "claimed_by_payer",
+      "decoded": {
+        "amount": "110000",
+        "by_payer": true,
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "ticket": "6Axko1Zb8tWfrzMs9fvzSwKaY18U6Q1TdgJiittYHKG4"
+      },
+      "discriminator_hex": "b6e99754fb24e858",
+      "emitted_by": "ack",
+      "event": "TicketClaimed",
+      "event_base64": "tumXVPsk6FhM17RQuB0a9IU4Iiq9IOQnUDyMbPZ8sdLCjNtvF+qCgf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5sK0BAAAAAAAB",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh226ZdU+yToWEzXtFC4HRr0hTgiKr0g5CdQPIxs9nyx0sKM228X6oKB/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rmwrQEAAAAAAAE=",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "settled_claim_matched",
+      "decoded": {
+        "amount": "110000",
+        "fee": "5500",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "outcome": "Acked",
+        "refund": "134500",
+        "refund_forfeited": false,
+        "ticket": "6Axko1Zb8tWfrzMs9fvzSwKaY18U6Q1TdgJiittYHKG4"
+      },
+      "discriminator_hex": "48280d03b89fbed3",
+      "emitted_by": "claim",
+      "event": "TicketSettled",
+      "event_base64": "SCgNA7ifvtNM17RQuB0a9IU4Iiq9IOQnUDyMbPZ8sdLCjNtvF+qCgf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AbCtAQAAAAAAfBUAAAAAAABkDQIAAAAAAAA=",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh1IKA0DuJ++00zXtFC4HRr0hTgiKr0g5CdQPIxs9nyx0sKM228X6oKB/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkBsK0BAAAAAAB8FQAAAAAAAGQNAgAAAAAAAA==",
         "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "stack_height": 2
       }
@@ -185,23 +223,89 @@
     {
       "case": "settled_resolved",
       "decoded": {
-        "amount": "60000",
-        "fee": "3000",
+        "amount": "59523",
+        "fee": "2976",
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "Resolved",
-        "refund": "187000",
-        "refund_owed": false,
+        "refund": "187501",
+        "refund_forfeited": false,
         "ticket": "2i8g3diPaESdumvkGCcyg3ex3vQ7ia8WiEU9ZBqAK946"
       },
       "discriminator_hex": "48280d03b89fbed3",
       "emitted_by": "resolve_frozen",
       "event": "TicketSettled",
-      "event_base64": "SCgNA7ifvtMZZS0cDoCEb7AkUTo8mrwJiqfgbQtQTkBHytWg4JyEs/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BGDqAAAAAAAAuAsAAAAAAAB42gIAAAAAAAA=",
+      "event_base64": "SCgNA7ifvtMZZS0cDoCEb7AkUTo8mrwJiqfgbQtQTkBHytWg4JyEs/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BIPoAAAAAAAAoAsAAAAAAABt3AIAAAAAAAA=",
       "inner_instruction": {
         "accounts": [
           "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
         ],
-        "data_base64": "5EWlLlHLmh1IKA0DuJ++0xllLRwOgIRvsCRROjyavAmKp+BtC1BOQEfK1aDgnISz/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkEYOoAAAAAAAC4CwAAAAAAAHjaAgAAAAAAAA==",
+        "data_base64": "5EWlLlHLmh1IKA0DuJ++0xllLRwOgIRvsCRROjyavAmKp+BtC1BOQEfK1aDgnISz/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkEg+gAAAAAAACgCwAAAAAAAG3cAgAAAAAAAA==",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "resolved",
+      "decoded": {
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "operator_share_bps": 2500,
+        "reason": "receipt and claim disagree on output units",
+        "ticket": "2i8g3diPaESdumvkGCcyg3ex3vQ7ia8WiEU9ZBqAK946"
+      },
+      "discriminator_hex": "890c4e7ffe503a62",
+      "emitted_by": "resolve_frozen",
+      "event": "TicketResolved",
+      "event_base64": "iQxOf/5QOmIZZS0cDoCEb7AkUTo8mrwJiqfgbQtQTkBHytWg4JyEs/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5xAkqAAAAcmVjZWlwdCBhbmQgY2xhaW0gZGlzYWdyZWUgb24gb3V0cHV0IHVuaXRz",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh2JDE5//lA6YhllLRwOgIRvsCRROjyavAmKp+BtC1BOQEfK1aDgnISz/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rnECSoAAAByZWNlaXB0IGFuZCBjbGFpbSBkaXNhZ3JlZSBvbiBvdXRwdXQgdW5pdHM=",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "disputed",
+      "decoded": {
+        "amount": "70000",
+        "claimed": "100000",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "ticket": "97AzSGMHYf67K4rpWKPXaYjEtU7GJEXFtRSikvMLtMQW"
+      },
+      "discriminator_hex": "dbb9823c5a0d6e0b",
+      "emitted_by": "ack",
+      "event": "TicketDisputed",
+      "event_base64": "27mCPFoNbgt4cka7fRxvWiLlbmQFSLSYs+ChgG6F7qOUMX8Necbki/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5oIYBAAAAAABwEQEAAAAAAA==",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh3buYI8Wg1uC3hyRrt9HG9aIuVuZAVItJiz4KGAboXuo5Qxfw15xuSL/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rmghgEAAAAAAHARAQAAAAAA",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "settled_resolved_whole_share",
+      "decoded": {
+        "amount": "238095",
+        "fee": "11904",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "outcome": "Resolved",
+        "refund": "1",
+        "refund_forfeited": false,
+        "ticket": "97AzSGMHYf67K4rpWKPXaYjEtU7GJEXFtRSikvMLtMQW"
+      },
+      "discriminator_hex": "48280d03b89fbed3",
+      "emitted_by": "resolve_frozen",
+      "event": "TicketSettled",
+      "event_base64": "SCgNA7ifvtN4cka7fRxvWiLlbmQFSLSYs+ChgG6F7qOUMX8Necbki/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BA+iAwAAAAAAgC4AAAAAAAABAAAAAAAAAAA=",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh1IKA0DuJ++03hyRrt9HG9aIuVuZAVItJiz4KGAboXuo5Qxfw15xuSL/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkED6IDAAAAAACALgAAAAAAAAEAAAAAAAAAAA==",
         "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "stack_height": 2
       }
@@ -214,7 +318,7 @@
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "Lapsed",
         "refund": "166000",
-        "refund_owed": false,
+        "refund_forfeited": false,
         "ticket": "CVK6Z8r14fX6dqWkoLMYWkx7toRupbaA2g8vbh8ZNZcr"
       },
       "discriminator_hex": "48280d03b89fbed3",
@@ -231,14 +335,38 @@
       }
     },
     {
-      "case": "settled_refunded_owed",
+      "case": "settled_cooperative_forfeited",
+      "decoded": {
+        "amount": "90000",
+        "fee": "4500",
+        "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
+        "outcome": "Cooperative",
+        "refund": "155500",
+        "refund_forfeited": true,
+        "ticket": "GB2CWehvUAcniXS123yRfR55bzgobVdMvsRgAQcr9Ff9"
+      },
+      "discriminator_hex": "48280d03b89fbed3",
+      "emitted_by": "settle_cooperative",
+      "event": "TicketSettled",
+      "event_base64": "SCgNA7ifvtPhcHeT0zpDu/D28a4OhAK95G+P87xC5y+RE/5ugoR8DP8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AJBfAQAAAAAAlBEAAAAAAABsXwIAAAAAAAE=",
+      "inner_instruction": {
+        "accounts": [
+          "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        ],
+        "data_base64": "5EWlLlHLmh1IKA0DuJ++0+Fwd5PTOkO78Pbxrg6EAr3kb4/zvELnL5ET/m6ChHwM/yUCws3QCYKQkHt5GD3JbrV7wcqPhSm04agaWKYr+rkAkF8BAAAAAACUEQAAAAAAAGxfAgAAAAAAAQ==",
+        "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "stack_height": 2
+      }
+    },
+    {
+      "case": "settled_refund_forfeited",
       "decoded": {
         "amount": "0",
         "fee": "0",
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "RefundedInactive",
         "refund": "250000",
-        "refund_owed": true,
+        "refund_forfeited": true,
         "ticket": "ELPp1SddXEuwaXKKBp5KFFcxCukxk234NACDNvPbvhzR"
       },
       "discriminator_hex": "48280d03b89fbed3",
@@ -262,7 +390,7 @@
         "node": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C",
         "outcome": "RefundedInactive",
         "refund": "250000",
-        "refund_owed": false,
+        "refund_forfeited": false,
         "ticket": "5EPM4VcfJC1nKUhNwaZiNFQxQW7hLfd7SYUXYmu1JBG"
       },
       "discriminator_hex": "48280d03b89fbed3",
