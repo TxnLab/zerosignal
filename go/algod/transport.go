@@ -12,8 +12,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
+
+	"github.com/TxnLab/zerosignal/go/httpx"
 )
 
 // RetryRoundTripper wraps an *http.Transport and retries transient
@@ -155,23 +156,7 @@ func drainAndClose(res *http.Response) {
 // (also clamped to RetryWaitMax) so a server-asserted throttle window
 // is always honored.
 func backoff(attempt int, res *http.Response, min, max time.Duration) time.Duration {
-	return backoffAt(attempt, retryAfterHeader(res), time.Now(), min, max)
-}
-
-// backoffAt is backoff for a Retry-After value read at now, so
-// testdata/algod_retry_vectors.json can pin it against the TS twin.
-func backoffAt(attempt int, retryAfterValue string, now time.Time, min, max time.Duration) time.Duration {
-	wait := time.Duration(attempt+1) * min
-	if wait > max {
-		wait = max
-	}
-	if ra := retryAfterAt(retryAfterValue, now); ra > wait {
-		if ra > max {
-			ra = max
-		}
-		wait = ra
-	}
-	return wait
+	return httpx.LinearBackoff(attempt, retryAfterHeader(res), time.Now(), min, max)
 }
 
 func retryAfterHeader(res *http.Response) string {
@@ -185,22 +170,7 @@ func retryAfterHeader(res *http.Response) string {
 // two forms: a non-negative integer count of seconds, or an HTTP-date.
 // Anything unparseable returns 0 (no server-supplied wait).
 func retryAfter(res *http.Response) time.Duration {
-	return retryAfterAt(retryAfterHeader(res), time.Now())
-}
-
-func retryAfterAt(v string, now time.Time) time.Duration {
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
-		return time.Duration(secs) * time.Second
-	}
-	if t, err := http.ParseTime(v); err == nil {
-		if d := t.Sub(now); d > 0 {
-			return d
-		}
-	}
-	return 0
+	return httpx.RetryAfter(retryAfterHeader(res), time.Now())
 }
 
 // DefaultTransport returns the connection-pooled, retrying transport
