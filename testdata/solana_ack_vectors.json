@@ -1223,6 +1223,58 @@
   ],
   "digests": [
     {
+      "name": "operator_and_node_differ",
+      "about": "the receipt's claim on a ticket of node 2 under operator 1",
+      "operator_id": "1",
+      "node_id": "2",
+      "ticket_id": "80808080808080808080808080808080",
+      "open_seq": "7",
+      "receipt": {
+        "ticket_id": "gICAgICAgICAgICAgICAgA==",
+        "actual_input_count": 1200,
+        "actual_output_count": 600,
+        "amount_charged": 70000,
+        "ttft_ms": 420,
+        "decode_ms": 3000,
+        "body_hash": "abababababababababababababababababababababababababababababababab",
+        "input_usage_type": 1,
+        "output_usage_type": 1,
+        "aux_output_usage_type": 0,
+        "aux_output_count": 0,
+        "cached_input_count": 0,
+        "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+        "sig": ""
+      },
+      "digest_hex": "4610f3f04d601d34cc390885d4b598a94c1c1873b0200560e8bdc61ad2b52e06",
+      "verdict": "ok"
+    },
+    {
+      "name": "operator_and_node_swapped",
+      "about": "the same ticket id under operator 2, node 1: another PDA",
+      "operator_id": "2",
+      "node_id": "1",
+      "ticket_id": "80808080808080808080808080808080",
+      "open_seq": "7",
+      "receipt": {
+        "ticket_id": "gICAgICAgICAgICAgICAgA==",
+        "actual_input_count": 1200,
+        "actual_output_count": 600,
+        "amount_charged": 70000,
+        "ttft_ms": 420,
+        "decode_ms": 3000,
+        "body_hash": "abababababababababababababababababababababababababababababababab",
+        "input_usage_type": 1,
+        "output_usage_type": 1,
+        "aux_output_usage_type": 0,
+        "aux_output_count": 0,
+        "cached_input_count": 0,
+        "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+        "sig": ""
+      },
+      "digest_hex": "2380a01a34994775e4e89152097297eed94264fa43bc8144fd02f862cb528204",
+      "verdict": "ok"
+    },
+    {
       "name": "receipt_claim",
       "about": "the receipt's claim on the relayed ack's ticket",
       "operator_id": "1",

@@ -337,20 +337,27 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("no_receipt", "the payer holds no receipt for the ticket", "ack.receipt", compile(relayer, ack),
 		withSpec(func(s *zsescrow.AckSpec) { s.Receipt = nil }))
 
-	digest := func(name, about string, ticketID [16]byte, openSeq uint64, r *ticket.UsageReceipt) {
+	digestAt := func(name, about string, operatorID, nodeID uint64, ticketID [16]byte, openSeq uint64, r *ticket.UsageReceipt) {
 		rj, err := json.Marshal(r)
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := ackDigestCase{Name: name, About: about, OperatorID: strconv.FormatUint(spec.OperatorID, 10), NodeID: strconv.FormatUint(spec.NodeID, 10),
+		c := ackDigestCase{Name: name, About: about, OperatorID: strconv.FormatUint(operatorID, 10), NodeID: strconv.FormatUint(nodeID, 10),
 			TicketID: hex.EncodeToString(ticketID[:]), OpenSeq: strconv.FormatUint(openSeq, 10), Receipt: rj}
-		got, err := zsescrow.ReceiptAckDigest(d, w.genesis, spec.OperatorID, spec.NodeID, ticketID, openSeq, r)
+		got, err := zsescrow.ReceiptAckDigest(d, w.genesis, operatorID, nodeID, ticketID, openSeq, r)
 		c.Verdict = ackVerdictOf(err)
 		if err == nil {
 			c.Digest = hex.EncodeToString(got[:])
 		}
 		v.Digests = append(v.Digests, c)
 	}
+	digest := func(name, about string, ticketID [16]byte, openSeq uint64, r *ticket.UsageReceipt) {
+		digestAt(name, about, spec.OperatorID, spec.NodeID, ticketID, openSeq, r)
+	}
+	// The fixtures' operator and node ids are equal, which would hide the two
+	// swapped in the ticket PDA's derivation.
+	digestAt("operator_and_node_differ", "the receipt's claim on a ticket of node 2 under operator 1", 1, 2, spec.TicketID, 7, spec.Receipt)
+	digestAt("operator_and_node_swapped", "the same ticket id under operator 2, node 1: another PDA", 2, 1, spec.TicketID, 7, spec.Receipt)
 	digest("receipt_claim", "the receipt's claim on the relayed ack's ticket", spec.TicketID, 7, spec.Receipt)
 	digest("open_seq_max", "the same at the largest open_seq", spec.TicketID, math.MaxUint64, spec.Receipt)
 	digest("receipt_of_another_ticket", "the payer's ticket is not the one the receipt names", [16]byte(append([]byte{spec.TicketID[0] ^ 1}, spec.TicketID[1:]...)), 7, spec.Receipt)
@@ -484,7 +491,19 @@ func TestAckVectorsMeanWhatTheySay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := w.d.AckDigest(w.genesis, w.d.Ticket(w.d.Node(spec.OperatorID, spec.NodeID), spec.TicketID), seq, zsescrow.ClaimHash(receiptClaim))
+		op, err := strconv.ParseUint(c.OperatorID, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, err := strconv.ParseUint(c.NodeID, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := hex.DecodeString(c.TicketID)
+		if err != nil || len(id) != 16 {
+			t.Fatalf("%s: ticket id %q", c.Name, c.TicketID)
+		}
+		want := w.d.AckDigest(w.genesis, w.d.Ticket(w.d.Node(op, node), [16]byte(id)), seq, zsescrow.ClaimHash(receiptClaim))
 		if c.Digest != hex.EncodeToString(want[:]) {
 			t.Errorf("%s: digest %s, want %x", c.Name, c.Digest, want)
 		}
