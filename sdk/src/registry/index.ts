@@ -13,6 +13,7 @@ export {
     ChainOperatorSource,
     type ChainOperatorSourceOptions,
     type ChainReadOptions,
+    type ChainReader,
     FETCH_BOX_CONCURRENCY,
     NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
@@ -28,6 +29,7 @@ export {
     readOperatorBox,
     resolveOperatorNode,
 } from './chain.js'
+export { SolanaChainReader, type SolanaChainReaderOptions, resolveSolanaNode } from './solana.js'
 export {
     DEFAULT_DETAILS_CONCURRENCY,
     NodeProber,

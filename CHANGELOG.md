@@ -31,6 +31,40 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — the Solana registry read (unreleased)
+
+Discovery can read its operators and nodes from the `zs_escrow` program, read-only. Nothing
+in either SDK builds it by default: `ResolveNetwork` ↔ `resolveNetwork` still refuse the Solana
+rail, and a host opts in by building its own registry over it.
+
+- **The seam.** `ChainOperatorSource` reads the chain through a `ChainReader`
+  (`ReadChain`, `ReadDeployment`) ↔ the SDK's `ChainReader` port (`readChain`,
+  `readDeployment`), set as `ChainOperatorSource.Chain` ↔ the `chain` option. Unset, it reads
+  the Algorand app as before. The probes, routing stores and registry are the same on either
+  rail. The algod signer-balance pass runs only for the Algorand read, so a Solana node's
+  `SignerSpendableMicroAlgos` stays unset, which routes.
+- **The Solana reader.** `zs.SolanaChainReader` ↔ `SolanaChainReader` read the `Operator` and
+  `Node` accounts with two confirmed `getProgramAccounts` calls, each filtered on its account
+  discriminator, decode them with `solana/zsescrow`, and build the Operator the Algorand read
+  builds: owner, signing key and address (base58), base URL under the same rules, staging,
+  and the node's metrics, EWMAs and 30-day revenue windows read the way the Algorand ring is.
+  An evicted operator's nodes are left out, an unknown operator status and the node status byte
+  are not read, `NFDAppID` is 0, and an account that won't decode (a later program's version)
+  fails the read as a malformed box does, all as on Algorand. An account the program does not
+  own, which only a faulty RPC returns, is skipped and logged. `SolanaChainReader.OperatorIDs`
+  restricts the read, and an empty program is `NoOperatorsError`, as on Algorand. The
+  deployment id is `SolanaDeploymentID(getGenesisHash, program id)`.
+- **TS options.** `ChainOperatorSourceOptions` is now a union: `algod` and `escrowAppId`, or
+  `chain`. An Algorand host's options type-check as before.
+- **`zsescrow.AccountDiscriminator`** (Go) is new, for the filter; the TS side already exported
+  `discriminator`. The TS `NoOperatorsError` constructor also takes a string naming the escrow.
+
+The new `testdata/solana_registry_vectors.json` (Go's `TestSolanaRegistryVectors`) pins the read
+across languages: the program's own Operator and Node fixtures, and edits of them re-encoded in
+Go, as `getProgramAccounts` answers, to the Operators built (in `operator_vectors.json`'s
+`chain_nodes` shape), the accounts left out and why, the params each read sends, and the
+deployment id.
+
 ### 2026-10-21 — the payer's Solana transaction signer (unreleased)
 
 The Solana rail gets its transaction half of the signer port, in the shape of Algorand's: the
