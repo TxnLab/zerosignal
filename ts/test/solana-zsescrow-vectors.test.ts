@@ -19,10 +19,12 @@ import { describe, expect, it } from 'vitest'
 import type { Instruction } from '../src/solana/index.js'
 import { ED25519_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, transferChecked } from '../src/solana/index.js'
 import {
+    type AckSpec,
     type ClaimFields,
     type Ending,
     type OpenOfferSpec,
     type RefundFallback,
+    AckRejectedError,
     OfferRejectedError,
     CONFIG_SIZE,
     Deployment,
@@ -46,11 +48,13 @@ import {
     isEventInstruction,
     operatorStatusName,
     parseEvent,
+    receiptAckDigest,
     settleOutcomeName,
     ticketDeadline,
     ticketStatusName,
     tokenAccountStateName,
     verifyOpenOffer,
+    verifyRelayedAck,
 } from '../src/solana/zsescrow/index.js'
 import { parseReceiptJSON, receiptCanonicalBytes, receiptSigDigest } from '../src/ticket/receipt.js'
 
@@ -628,6 +632,87 @@ describe('solana_open_offer_vectors.json', () => {
     it("matches the program's own fixture messages", () => {
         const tx = new Map((load('testdata/solana_tx_vectors.json').transactions as Json[]).map((t) => [t.name, t.message_base64]))
         for (const c of (offers.cases as Json[]).filter((c) => c.source === 'fixture')) expect(c.message_base64, c.name).toBe(tx.get(c.name))
+    })
+})
+
+// The relayed-ack verdicts and receipt ack digests, pinned by the Go-generated
+// solana_ack_vectors.json: the program's own ack transactions, and the ones Go
+// built for checks those shapes don't reach.
+describe('solana_ack_vectors.json', () => {
+    const acks = load('testdata/solana_ack_vectors.json')
+    const d = new Deployment(acks.program_id, acks.usdc_mint)
+    const genesis = encodeBase58(hex.decode(acks.genesis_hash))
+    const receiptOf = (r: Json | null) => (r === null ? undefined : parseReceiptJSON(new TextEncoder().encode(JSON.stringify(r))))
+    const specOf = (s: Json): AckSpec => ({
+        payer: s.payer,
+        operatorId: BigInt(s.operator_id),
+        nodeId: BigInt(s.node_id),
+        ticketId: hex.decode(s.ticket_id),
+        receipt: receiptOf(s.receipt),
+        treasury: s.treasury,
+    })
+    const verdictOf = (f: () => unknown): string => {
+        try {
+            f()
+        } catch (err) {
+            if (!(err instanceof AckRejectedError)) throw err
+            return err.field
+        }
+        return 'ok'
+    }
+    it('covers both sources and every check that refuses', () => {
+        const cases = acks.relayed_acks as Json[]
+        expect(new Set(cases.map((c) => c.source))).toEqual(new Set(['fixture', 'built']))
+        expect(cases.filter((c) => c.verdict === 'ok').length).toBeGreaterThan(2)
+        expect(new Set(cases.map((c) => c.verdict))).toEqual(
+            new Set([
+                'ok',
+                'message.parse',
+                'message.lookups',
+                'header.signers',
+                'header.payer',
+                'header.payerWritable',
+                'computeBudget.order',
+                'computeBudget.instruction',
+                'computeBudget.duplicate',
+                'escrow.instruction',
+                'instruction.program',
+                'instructions.shape',
+                'ack.receipt',
+                'ack.accounts',
+                'ack.data',
+            ]),
+        )
+    })
+    for (const c of acks.relayed_acks as Json[]) {
+        it(`${c.source} ${c.name}: ${c.verdict}`, () => {
+            expect(verdictOf(() => verifyRelayedAck(d, base64.decode(c.message_base64), specOf(c.spec))), c.about).toBe(c.verdict)
+        })
+    }
+    for (const c of acks.digests as Json[]) {
+        it(`digest ${c.name}: ${c.verdict}`, () => {
+            let digest: Uint8Array | undefined
+            const verdict = verdictOf(() => {
+                digest = receiptAckDigest(d, genesis, BigInt(c.operator_id), BigInt(c.node_id), hex.decode(c.ticket_id), BigInt(c.open_seq), receiptOf(c.receipt))
+            })
+            expect(verdict, c.about).toBe(c.verdict)
+            if (verdict === 'ok') expect(hex.encode(digest!)).toBe(c.digest_hex)
+        })
+    }
+    it('throws a RangeError for a ticket id not 16 bytes', () => {
+        const c = (acks.relayed_acks as Json[]).find((c) => c.name === 'receipt_claim')!
+        const message = base64.decode(c.message_base64)
+        const spec = specOf(c.spec)
+        expect(() => verifyRelayedAck(d, message, spec)).not.toThrow()
+        // Ahead of every refusal, so a caller's bad spec never reads as the relayer's bad ack.
+        expect(() => verifyRelayedAck(d, new Uint8Array(), { ...spec, ticketId: spec.ticketId.subarray(1) })).toThrow(RangeError)
+        expect(() => receiptAckDigest(d, genesis, spec.operatorId, spec.nodeId, spec.ticketId.subarray(1), 1n, spec.receipt)).toThrow(RangeError)
+    })
+    it("matches the program's own fixture messages", () => {
+        const tx = new Map((load('testdata/solana_tx_vectors.json').transactions as Json[]).map((t) => [t.name, t.message_base64]))
+        const fixtures = (acks.relayed_acks as Json[]).filter((c) => c.source === 'fixture')
+        expect(fixtures.map((c) => c.name)).toEqual(expect.arrayContaining(['ack_relayed', 'ack_extra_settle']))
+        for (const c of fixtures) expect(c.message_base64, c.name).toBe(tx.get(c.name))
     })
 })
 
