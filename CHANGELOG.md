@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-20 — the payer freezes an operator claim above its receipt
+### 2026-10-20 — the payer freezes an operator claim above its receipt (0.9.0)
 
 The payer now answers an operator's settle claim that it can see on the ticket box, by the
 rule in [`SPEC.md` §3a "Payer's check of an operator claim"](./SPEC.md): a claim above a
@@ -93,7 +93,7 @@ half that lands after one at another figure still freezes the ticket.
   `signed` on any row.
 - `Settlement` and `SettleSubmitted` gain `Frozen` / `frozen`.
 
-### 2026-10-19 — network fees are reported in the rail's coin (0.8.0)
+### 2026-10-19 — network fees are reported in the rail's coin (0.9.0)
 
 A payer's network fees now have names that do not assume ALGO, so a Solana rail can report
 lamports without filling fields named for µALGO.
