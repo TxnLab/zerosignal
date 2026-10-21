@@ -289,12 +289,18 @@ type SettleSubmitted struct {
 	// NetworkFees is the payer's fee for the settle, in base units of the
 	// deployment's FeeUnit.
 	NetworkFees uint64
+	// Frozen: the settle went against an operator claim above the receipt,
+	// so it freezes the ticket rather than settling it (Settlement.Frozen).
+	Frozen bool
 }
 
-// NodeExcluded fires on a stream, before SettleSubmitted, when the node's
-// pre-signed settle group fails verification. The node is barred for the
-// rest of the process. A whole reply learns this after done, and only logs
-// it.
+// NodeExcluded fires on a stream, before SettleSubmitted (or after
+// ReceiptViolated, when a refused protest fell back to a freeze), when the
+// node contradicted its own receipt: its pre-signed settle group failed
+// verification (Reason "settle_group_rejected"), or the settle claim it
+// posted on chain takes more than the receipt charges
+// ("settle_claim_exceeds_receipt"). The node is barred for the rest of the
+// process. A whole reply learns this after done, and only logs it.
 type NodeExcluded struct {
 	Node   NodeRef
 	Reason string

@@ -7,6 +7,8 @@
 // composer cases: what reaches the wire is decoded and read back, so the
 // fee, the references and the ABI args are the ones algod would see.
 
+import { readFileSync } from 'node:fs'
+
 import algosdk, { ABIMethod, OnApplicationComplete, type ABIValue } from 'algosdk'
 import {
     NODE_RECORD_SIZE,
@@ -23,7 +25,7 @@ import {
 } from '@txnlab/zs-proto/escrow'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { settleOutcomeOf } from '../src/escrow/algod.js'
+import { RESOLVE_FROZEN_SIGNATURE, programHasMethod, settleOutcomeOf } from '../src/escrow/algod.js'
 import { ESCROW_METHOD_SIGNATURES } from '../src/escrow/generated/abi.js'
 import {
     APPROVAL_ASSERT,
@@ -61,6 +63,7 @@ type SimAnswer = { value?: ABIValue; failure?: string }
 /** algod as the chain reaches it, with every request it saw. */
 class FakeAlgod implements algosdk.BaseHTTPClient {
     globals = new Map<string, Global>()
+    approvalProgram = new Uint8Array()
     /** Box values by base64 name; a number is the status a read fails with. */
     boxes = new Map<string, Uint8Array | number>()
     accounts = new Map<string, { amount: bigint; minBalance: bigint; apps: bigint[] }>()
@@ -120,7 +123,7 @@ class FakeAlgod implements algosdk.BaseHTTPClient {
                 key: b64(utf8(k)),
                 value: v.type === 1 ? { type: 1, bytes: b64(v.bytes), uint: 0 } : { type: 2, bytes: '', uint: Number(v.uint) },
             }))
-            const params = { 'approval-program': '', 'clear-state-program': '', creator: OTHER, 'global-state': state }
+            const params = { 'approval-program': b64(this.approvalProgram), 'clear-state-program': '', creator: OTHER, 'global-state': state }
             return json({ id: Number(APP), params })
         }
         const acct = /^\/v2\/accounts\/([A-Z2-7]+)$/.exec(path)
@@ -377,9 +380,50 @@ describe('AlgodEscrowChain config', () => {
             appAddress: algosdk.getApplicationAddress(APP).toString(),
             usdcAssetId: USDC,
             settlementGraceDefault: 600n,
+            resolvesFrozen: false,
         })
         await chain.config()
         expect(fake.paths.filter((p) => p === `/v2/applications/${APP}`)).toHaveLength(1)
+    })
+
+    // Go's TestResolveFrozenSelector: pinned as a literal, since Go derives
+    // its own from the same signature.
+    it('derives the resolveFrozen selector Go does', () => {
+        expect(Buffer.from(ABIMethod.fromSignature(RESOLVE_FROZEN_SIGNATURE).getSelector()).toString('hex')).toBe('5825a047')
+    })
+
+    // Go's TestReadGlobals_ProbesResolveFrozen: the same application read
+    // answers whether the program routes resolveFrozen.
+    it.each([
+        ['routes resolveFrozen', true, true],
+        ['routes other methods only', false, false],
+    ] as const)('probes the approval program for resolveFrozen: %s', async (_name, withIt, want) => {
+        const sel = (sig: string) => [0x80, 0x04, ...ABIMethod.fromSignature(sig).getSelector()]
+        const settle = sel(ESCROW_METHOD_SIGNATURES.settle!)
+        fake.approvalProgram = Uint8Array.from([0x0a, 0x31, 0x1b, 0x41, ...settle, ...(withIt ? sel(RESOLVE_FROZEN_SIGNATURE) : [])])
+        expect((await newChain().config()).resolvesFrozen).toBe(want)
+    })
+
+    // Go's TestProgramHasMethod_EmbeddedApprovalRoutesResolveFrozen: the
+    // shared ARC-56 is the deployed program, compiled as it ships. The
+    // generated client is minimal and carries no byteCode, so read the file.
+    it('finds resolveFrozen in the shipped approval program', () => {
+        const spec = JSON.parse(readFileSync(new URL('../../go/escrow/ZeroSignalEscrow.arc56.json', import.meta.url), 'utf8')) as {
+            byteCode?: { approval?: string }
+        }
+        const approval = Buffer.from(spec.byteCode?.approval ?? '', 'base64')
+        expect(approval.length).toBeGreaterThan(0)
+        expect(programHasMethod(new Uint8Array(approval), RESOLVE_FROZEN_SIGNATURE)).toBe(true)
+    })
+
+    it('finds a method only where its whole selector sits', () => {
+        const s = ABIMethod.fromSignature(RESOLVE_FROZEN_SIGNATURE).getSelector()
+        expect(programHasMethod(undefined, RESOLVE_FROZEN_SIGNATURE)).toBe(false)
+        expect(programHasMethod(new Uint8Array(), RESOLVE_FROZEN_SIGNATURE)).toBe(false)
+        expect(programHasMethod(s.slice(0, 3), RESOLVE_FROZEN_SIGNATURE)).toBe(false)
+        expect(programHasMethod(Uint8Array.from([...s.slice(0, 3), 0, s[3]!]), RESOLVE_FROZEN_SIGNATURE)).toBe(false)
+        expect(programHasMethod(s, RESOLVE_FROZEN_SIGNATURE)).toBe(true)
+        expect(programHasMethod(Uint8Array.from([1, 2, ...s]), RESOLVE_FROZEN_SIGNATURE)).toBe(true)
     })
 
     // Go's readGlobals: an absent grace reads 0, a mistyped one is fatal.
@@ -612,6 +656,17 @@ describe('AlgodEscrowChain settle calls', () => {
         fake.boxes.set(b64(operatorBoxKey(7n)), operatorBox(TODAY - 15n))
         await chain.settleStandalone(settleCall({ amountCharged: 0n, maxPrice: 0n }))
         expect(lastSent(fake)[0]!.txn.fee).toBe(4n * MIN_FEE)
+    })
+
+    // TestComposeSettleStandalone_FreezePaysTheOuterCallOnly: the contract's
+    // freeze branch, like a first half on an open box, fires no disbursement
+    // and no op-up, whatever the ring.
+    it('pays for the outer call alone on a call that cannot finalize', async () => {
+        fake.boxes.set(b64(nodeBoxKey(7n, 1n)), nodeBox(TODAY - 5n))
+        fake.boxes.set(b64(operatorBoxKey(7n)), operatorBox(TODAY - 15n))
+        const r = await chain.settleStandalone({ ...settleCall(), outerFeeOnly: true })
+        expect(lastSent(fake)[0]!.txn.fee).toBe(MIN_FEE)
+        expect(r.payerFeeMicroalgos).toBe(MIN_FEE)
     })
 
     it('checks the settle inputs before reaching the chain', async () => {

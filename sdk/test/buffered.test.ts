@@ -119,7 +119,7 @@ describe('checkTurnReceipt', () => {
         ['payer ack after a rejected group', { txid: 'ACKTX', fee: 1000, groupRejected: true }, true, VALID_GROUP, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000, networkFees: 1000 }, undefined, true, false],
         ['failed ack', { txid: 'IGNORED', fee: 7, err: ackErr }, true, VALID_GROUP, { kind: 'atomic', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],
         // The payer signs the protest, so its fee is the payer's.
-        ['protest', { txid: 'PROTESTTX', fee: 3000 }, false, null, { kind: 'protest', txId: 'PROTESTTX', feesMicroAlgos: 3000, networkFees: 3000 }, undefined, false, false],
+        ['protest', { txid: 'PROTESTTX', fee: 3000 }, false, null, { kind: 'protest', txId: 'PROTESTTX', feesMicroAlgos: 3000, networkFees: 3000, frozen: true }, undefined, false, false],
         ['failed protest', { txid: 'IGNORED', err: ackErr }, false, null, { kind: 'protest', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],
     ] as const)('%s finishes the slot with the submit', async (_name, script, matching, group, want, wantErr, watched, confirms) => {
         const f = await fixture()
@@ -498,9 +498,35 @@ describe('usageEvents', () => {
             ],
         ],
         [
+            'verified, a claim above the receipt, then the freezing ack',
+            {
+                excluded: true,
+                exclusion: 'settle_claim_exceeds_receipt',
+                settled: { ticketId: 'T', kind: 'payer_ack', txId: 'ACK', feesMicroAlgos: 1000, networkFees: 1000, frozen: true },
+            },
+            [
+                { type: 'receipt.verified' },
+                { type: 'node.excluded', node: { op: 7, node: 2 }, reason: 'settle_claim_exceeds_receipt' },
+                { type: 'settle.submitted', ticketId: 'T', txId: 'ACK', feesMicroAlgos: 1000, atomic: false, networkFees: 1000, frozen: true },
+            ],
+        ],
+        [
             'body_hash, protested',
-            { violation: 'body_hash', settled: { ticketId: 'T', kind: 'protest', txId: 'PROTEST', feesMicroAlgos: 0, networkFees: 0 } },
+            { violation: 'body_hash', settled: { ticketId: 'T', kind: 'protest', txId: 'PROTEST', feesMicroAlgos: 0, networkFees: 0, frozen: true } },
             [{ type: 'receipt.violated', violation: 'body_hash', protestTxId: 'PROTEST' }],
+        ],
+        [
+            'body_hash, protest refused, then the freeze over a claim above the receipt',
+            {
+                violation: 'body_hash',
+                excluded: true,
+                exclusion: 'settle_claim_exceeds_receipt',
+                settled: { ticketId: 'T', kind: 'protest', txId: 'FREEZE', feesMicroAlgos: 0, networkFees: 0, frozen: true },
+            },
+            [
+                { type: 'receipt.violated', violation: 'body_hash', protestTxId: 'FREEZE' },
+                { type: 'node.excluded', node: { op: 7, node: 2 }, reason: 'settle_claim_exceeds_receipt' },
+            ],
         ],
         ['body_hash, protest not yet run', { violation: 'body_hash' }, [{ type: 'receipt.violated', violation: 'body_hash', protestTxId: '' }]],
         ['sig', { violation: 'sig' }, [{ type: 'receipt.violated', violation: 'sig', protestTxId: '' }]],

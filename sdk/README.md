@@ -559,8 +559,16 @@ camel case:
 - **Receipt and settlement:** `receipt.verified`, then on a stream `settle.submitted`. When
   the node's pre-signed settle group fails its check, the payer acks on its own instead
   (`atomic: false`), and with `Stores.nodeExclusions` set `node.excluded` comes first and bars
-  the node. `receipt.violated` replaces `receipt.verified` when the receipt fails its check, and
-  no settle follows.
+  the node (`reason: 'settle_group_rejected'`). Before that ack, and after a node's group fails
+  to submit, the payer reads the node's own claim on the ticket. One above the receipt gets the
+  payer's settle anyway, which freezes the ticket (`settle.submitted` with `frozen: true`), and
+  bars the node (`reason: 'settle_claim_exceeds_receipt'`). One that differs without taking
+  more is not acked, and no `settle.submitted` follows. After a failed group submit, a ticket
+  with no claim on it gets the payer's own half (`settle.submitted` with `atomic: false`). On an
+  escrow contract without `resolveFrozen`, the payer sends neither that half nor a freeze: the
+  over-claim's node is still barred, and no `settle.submitted` follows. `receipt.violated` replaces
+  `receipt.verified` when the receipt fails its check, and no settle follows; when a refused
+  protest falls back to freezing an over-claim, `node.excluded` follows it.
 - **End:** `done`, for a turn the node sealed as finished. A failed turn ends with the events
   loop throwing instead.
 

@@ -16,14 +16,22 @@ import type { TicketRecord } from '@txnlab/zs-proto/escrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 
-import { type AckSettleResult, type SettleSubmission, ackSettle, settleArgsOf, settleGroupSpecOf } from './ack.js'
+import {
+    type AckSettleResult,
+    NoResolveFrozenError,
+    type SettleSubmission,
+    ackSettle,
+    settleArgsOf,
+    settleGroupSpecOf,
+} from './ack.js'
 import { type CompletedOpenGroup, completeOpenGroup, type OpenGroupSpec } from './escrow/open.js'
 import { completeSettleGroup } from './escrow/settle.js'
 import { type MbrDeposit, type MbrPoolChain, MbrDepositUnaffordableError, ensureMbrDeposit, mbrPoolState } from './mbr.js'
 import type { Operator } from './operator.js'
 import type { EscrowCall, OpenHandle, ProtestReasonCode, SettleOutcome, WalletOpener } from './parts.js'
 import { type Logger, type Signer, discardLogger } from './ports.js'
-import type { SettleArgs } from './reconcile.js'
+import { SETTLE_SUBMIT_TIMEOUT_MS } from './receipt-check.js'
+import { type ClaimVerdict, type SettleArgs, judgeClaim } from './reconcile.js'
 import { refundSources } from './refund-watchdog.js'
 import { walletParts } from './wallet-parts.js'
 
@@ -39,6 +47,15 @@ export interface EscrowChainConfig {
      * global is absent, a misconfigured deployment.
      */
     settlementGraceDefault: bigint
+    /**
+     * Whether the deployed approval program routes resolveFrozen
+     * (programHasMethod), Go's EscrowChainConfig.ResolvesFrozen. Without it a
+     * frozen ticket's escrow is locked for good, so the payer sends no freeze
+     * of an over-claim, and no half of its own on an open box after a failed
+     * group submit. The first half the standalone ack or the reconciler's
+     * resettle posts on an open box is not gated. Absent is false.
+     */
+    resolvesFrozen?: boolean
 }
 
 /** The payer's half of settle(); the contract freezes the ticket if any value differs from the node's. */
@@ -51,6 +68,15 @@ export interface PayerSettleCall {
     operatorOwnerAddr: string
     operatorId: bigint
     nodeId: bigint
+    /**
+     * Set by a caller that read the box and expects this call not to finalize
+     * the ticket: a first half on an open box, or a half that mismatches an
+     * operator claim and so takes the contract's freeze branch. Neither fires
+     * a disbursement or an op-up, so the fee covers the outer call alone. A
+     * call that does reach finalize with it set reverts for want of fee, which
+     * commits nothing. Go's escrow.SettleArgs.OuterFeeOnly.
+     */
+    outerFeeOnly?: boolean
 }
 
 export interface ProtestCall {
@@ -477,7 +503,10 @@ export class Wallet implements WalletOpener {
 
     // graceSeconds is the grace global the open was checked against, which
     // the refund watchdog times its first read by.
-    #handle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'refundInactive' | 'settleLapsed' | 'settleOutcome'>, graceSeconds: bigint): OpenHandle {
+    #handle(
+        fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'freezeOverclaim' | 'refundInactive' | 'settleLapsed' | 'settleOutcome'>,
+        graceSeconds: bigint,
+    ): OpenHandle {
         const chain = this.#chain
         const signer = this.#signer
         const payer = signer.address
@@ -487,10 +516,41 @@ export class Wallet implements WalletOpener {
             operatorId: BigInt(fields.operator.id),
             nodeId: BigInt(fields.operator.nodeId),
         })
+        const readClaim = async (a: SettleArgs, signal?: AbortSignal): Promise<ClaimVerdict> =>
+            judgeClaim(a, await chain.readTicketBox(decodeTicketId(fields.ticketId), signal))
+        // outerFeeOnly: the payer read the box and expects the call not to finalize.
+        const settleAt = (a: SettleArgs, signal?: AbortSignal, outerFeeOnly = false) =>
+            chain.settleStandalone(
+                {
+                    ticketIdRaw: decodeTicketId(fields.ticketId),
+                    args: a,
+                    maxPrice: BigInt(fields.maxPrice),
+                    payer,
+                    operatorOwnerAddr: fields.operator.ownerAddr,
+                    operatorId: BigInt(fields.operator.id),
+                    nodeId: BigInt(fields.operator.nodeId),
+                    ...(outerFeeOnly ? { outerFeeOnly } : {}),
+                },
+                signal,
+            )
+        // A config that can't be read is no evidence of resolveFrozen, and a
+        // freeze on an escrow without it is locked for good.
+        const resolvesFrozen = async (signal?: AbortSignal): Promise<boolean> => {
+            try {
+                return (await chain.config(signal)).resolvesFrozen === true
+            } catch {
+                return false
+            }
+        }
         const h: OpenHandle = {
             ...fields,
             ackSettle(receipt: UsageReceipt, settleGroup: string | null, signal?: AbortSignal): Promise<AckSettleResult> {
                 const group = settleGroup ?? ''
+                // Whatever runs after the node's group failed runs on follow:
+                // the box read, and the freeze or the payer's half it may call
+                // for. An ack delivery the node held open until signal's
+                // timeout would otherwise leave them nothing. Go's followCtx.
+                let follow = signal
                 return ackSettle({
                     // An empty group is none, as Go's len(group) > 0 reads it.
                     atomic: group !== '',
@@ -507,39 +567,52 @@ export class Wallet implements WalletOpener {
                         })
                     },
                     submitGroup: async (spec) => {
-                        // Checked and signed either way, so a refused group
-                        // still takes ackSettle's standalone path.
-                        const g = await completeSettleGroup(group, spec, signer)
-                        const done = { txid: g.txid, payerFeeMicroalgos: g.payerFeeMicroalgos }
-                        const deliver = h.deliverAck
-                        if (deliver) {
-                            try {
-                                await deliver({ ticket_id: fields.ticketId, settle_group: g.encoded }, signal)
-                                return done
-                            } catch (err) {
-                                // Anything but "no route" may have reached the
-                                // node, whose driver settles on its own; a
-                                // broadcast now would only race it.
-                                if (!(err instanceof NoSettleAckRouteError)) throw err
+                        try {
+                            // Checked and signed either way, so a refused group
+                            // still takes ackSettle's standalone path.
+                            const g = await completeSettleGroup(group, spec, signer)
+                            const done = { txid: g.txid, payerFeeMicroalgos: g.payerFeeMicroalgos }
+                            const deliver = h.deliverAck
+                            if (deliver) {
+                                try {
+                                    await deliver({ ticket_id: fields.ticketId, settle_group: g.encoded }, signal)
+                                    return done
+                                } catch (err) {
+                                    // Anything but "no route" may have reached the
+                                    // node, whose driver settles on its own; a
+                                    // broadcast now would only race it.
+                                    if (!(err instanceof NoSettleAckRouteError)) throw err
+                                }
                             }
+                            await chain.sendGroup(g.signedGroup, 'settle', signal)
+                            return done
+                        } catch (err) {
+                            follow = followUpSignal(signal)
+                            throw err
                         }
-                        await chain.sendGroup(g.signedGroup, 'settle', signal)
-                        return done
                     },
-                    standalone: () =>
-                        chain.settleStandalone(
-                            {
-                                ticketIdRaw: decodeTicketId(fields.ticketId),
-                                args: settleArgsOf(receipt),
-                                maxPrice: BigInt(fields.maxPrice),
-                                payer,
-                                operatorOwnerAddr: fields.operator.ownerAddr,
-                                operatorId: BigInt(fields.operator.id),
-                                nodeId: BigInt(fields.operator.nodeId),
-                            },
-                            signal,
-                        ),
+                    claim: () => readClaim(settleArgsOf(receipt), follow),
+                    standalone: () => settleAt(settleArgsOf(receipt), follow),
+                    freeze: () => settleAt(settleArgsOf(receipt), follow, true),
+                    half: () => settleAt(settleArgsOf(receipt), follow, true),
+                    resolvesFrozen: () => resolvesFrozen(follow),
                 })
+            },
+            async freezeOverclaim(receipt, signal) {
+                const a = settleArgsOf(receipt)
+                let claim: ClaimVerdict
+                try {
+                    claim = await readClaim(a, signal)
+                } catch (err) {
+                    return { claim: 'unreadable', err }
+                }
+                if (claim !== 'overclaims') return { claim }
+                if (!(await resolvesFrozen(signal))) return { claim, err: new NoResolveFrozenError() }
+                try {
+                    return { claim, call: await wrap('freeze', settleAt(a, signal, true)) }
+                } catch (err) {
+                    return { claim, err }
+                }
             },
             async protest(receipt, excerpt, reason, signal) {
                 let call: ProtestCall
@@ -578,6 +651,25 @@ export class Wallet implements WalletOpener {
         })
         return h
     }
+}
+
+/**
+ * followUpSignal is a budget of SETTLE_SUBMIT_TIMEOUT_MS of its own for the
+ * calls an ack makes after the node's group failed, Go's followUpCtx. Only an
+ * abort of signal carries over, not its timeout, which the failed attempt may
+ * have spent.
+ */
+function followUpSignal(signal: AbortSignal | undefined): AbortSignal {
+    const fresh = AbortSignal.timeout(SETTLE_SUBMIT_TIMEOUT_MS)
+    if (signal === undefined) return fresh
+    const cancelled = new AbortController()
+    const onAbort = () => {
+        const reason: unknown = signal.reason
+        if (!(reason instanceof DOMException && reason.name === 'TimeoutError')) cancelled.abort(reason)
+    }
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+    return AbortSignal.any([fresh, cancelled.signal])
 }
 
 /**

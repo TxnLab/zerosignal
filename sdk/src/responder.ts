@@ -37,7 +37,14 @@ import { openAIError } from './http.js'
 import { type Operator, refOf } from './operator.js'
 import type { Reserved } from './parts.js'
 import type { LogAttrs, Logger } from './ports.js'
-import { type ReceiptCheckDeps, type SettleSlot, type SettleSubmit, type TurnCheck, checkTurnReceipt } from './receipt-check.js'
+import {
+    EXCLUSION_REASONS,
+    type ReceiptCheckDeps,
+    type SettleSlot,
+    type SettleSubmit,
+    type TurnCheck,
+    checkTurnReceipt,
+} from './receipt-check.js'
 import { parseRetryAfter } from './reserve.js'
 import type { RelayHop } from './routing/relay.js'
 import { nodeRetryHintMs } from './routing/verdict.js'
@@ -62,8 +69,14 @@ export interface UsageReport {
 /** usageEvents is the report in the order the payer hears it. */
 export function usageEvents(u: UsageReport): Event[] {
     const c = u.check
+    const excluded: Event[] = c.excluded
+        ? [{ type: 'node.excluded', node: refOf(u.op), reason: c.exclusion ?? EXCLUSION_REASONS.settleGroup }]
+        : []
     if (c.violation !== '') {
-        return [{ type: 'receipt.violated', violation: c.violation, protestTxId: c.settled.kind === 'protest' ? c.settled.txId : '' }]
+        return [
+            { type: 'receipt.violated', violation: c.violation, protestTxId: c.settled.kind === 'protest' ? c.settled.txId : '' },
+            ...excluded,
+        ]
     }
     const evs: Event[] = [
         {
@@ -84,7 +97,7 @@ export function usageEvents(u: UsageReport): Event[] {
             feeUnit: u.feeUnit,
         },
     ]
-    if (c.excluded) evs.push({ type: 'node.excluded', node: refOf(u.op), reason: 'settle_group_rejected' })
+    evs.push(...excluded)
     if (c.settled.txId !== '') {
         evs.push({
             type: 'settle.submitted',
@@ -93,6 +106,7 @@ export function usageEvents(u: UsageReport): Event[] {
             feesMicroAlgos: c.settled.feesMicroAlgos,
             atomic: c.settled.kind === 'atomic',
             networkFees: c.settled.networkFees,
+            ...(c.settled.frozen === true ? { frozen: true } : {}),
         })
     }
     return evs

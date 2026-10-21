@@ -34,15 +34,21 @@ type scriptedSettleHandle struct {
 	txid          string
 	fee           uint64
 	groupRejected bool
+	claim         ClaimVerdict
+	payerSettle   bool
+	frozen        bool
 	err           error
 	panicWith     any
 }
 
-func (h *scriptedSettleHandle) AckSettle(context.Context, *ticket.UsageReceipt, string) (string, uint64, bool, error) {
+func (h *scriptedSettleHandle) AckSettle(context.Context, *ticket.UsageReceipt, string) (AckResult, error) {
 	if h.panicWith != nil {
 		panic(h.panicWith)
 	}
-	return h.txid, h.fee, h.groupRejected, h.err
+	return AckResult{
+		TxID: h.txid, FeeMicroalgos: h.fee, GroupRejected: h.groupRejected, Claim: h.claim,
+		PayerSettle: h.payerSettle, Frozen: h.frozen,
+	}, h.err
 }
 
 func (h *scriptedSettleHandle) Protest(context.Context, *ticket.UsageReceipt, []byte, escrow.ProtestReasonCode) (string, uint64, error) {
@@ -132,7 +138,7 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 			Settlement{Kind: SettleAtomic}, ackErr, true},
 		// The payer signs the protest, so its fee is the payer's.
 		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, "",
-			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000, NetworkFees: 3000}, nil, false},
+			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000, NetworkFees: 3000, Frozen: true}, nil, false},
 		{"failed protest", &scriptedSettleHandle{txid: "IGNORED", err: ackErr}, false, "",
 			Settlement{Kind: SettleProtest}, ackErr, true},
 	}
@@ -554,9 +560,9 @@ func TestCheckSettleGroupHeader(t *testing.T) {
 // The bridge reads the deployment's settings off the client: the grace here
 // is every refund watchdog deadline, and the app id every settle group spec.
 func TestEscrowClientChain_Config(t *testing.T) {
-	got := NewEscrowChain(&escrow.Client{AppID: 42, SettlementGraceDefault: 600}).Config()
-	if got != (EscrowChainConfig{AppID: 42, SettlementGraceDefault: 600}) {
-		t.Errorf("Config = %+v, want app 42 and grace 600", got)
+	got := NewEscrowChain(&escrow.Client{AppID: 42, SettlementGraceDefault: 600, ResolvesFrozen: true}).Config()
+	if got != (EscrowChainConfig{AppID: 42, SettlementGraceDefault: 600, ResolvesFrozen: true}) {
+		t.Errorf("Config = %+v, want app 42, grace 600 and resolveFrozen", got)
 	}
 	if NewEscrowChain(nil) != nil {
 		t.Error("NewEscrowChain(nil) is a non-nil chain the wallet's nil guards would miss")

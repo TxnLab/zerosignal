@@ -108,11 +108,15 @@ func (u *usageReport) events() []Event {
 		if c.settled.Kind == SettleProtest {
 			v.ProtestTxID = c.settled.TxID
 		}
-		return []Event{v}
+		evs := []Event{v}
+		if c.excluded {
+			evs = append(evs, NodeExcluded{Node: RefOf(u.op), Reason: c.exclusion})
+		}
+		return evs
 	}
 	evs := []Event{u.verified()}
 	if c.excluded {
-		evs = append(evs, NodeExcluded{Node: RefOf(u.op), Reason: "settle_group_rejected"})
+		evs = append(evs, NodeExcluded{Node: RefOf(u.op), Reason: c.exclusion})
 	}
 	if c.settled.TxID != "" {
 		evs = append(evs, SettleSubmitted{
@@ -121,6 +125,7 @@ func (u *usageReport) events() []Event {
 			FeesMicroAlgos: c.settled.FeesMicroAlgos,
 			Atomic:         c.settled.Kind == SettleAtomic,
 			NetworkFees:    c.settled.NetworkFees,
+			Frozen:         c.settled.Frozen,
 		})
 	}
 	return evs

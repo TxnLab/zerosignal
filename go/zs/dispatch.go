@@ -3910,11 +3910,15 @@ func checkSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticke
 //     settle claim has already posted and matches, this finalizes and
 //     disburses. If the operator hasn't posted yet, this records the
 //     payer's pending claim and the operator's subsequent call
-//     finalizes.
+//     finalizes. A claim that takes more than the receipt is acked
+//     anyway, which freezes the ticket, and its node is barred; one that
+//     contradicts the receipt but takes no more is not acked.
 //   - ReceiptViolationBodyHash → OpenHandle.Protest(receipt, excerpt).
 //     The excerpt in v1 is the reconstructed plaintext (truncated to
 //     the contract's maxDisputeExcerptBytes) — enough for the off-chain
-//     arbiter to inspect.
+//     arbiter to inspect. A refused protest over an operator claim that
+//     takes more than the receipt falls back to the receipt's settle,
+//     which freezes the ticket too.
 //   - ReceiptViolationSig / ReceiptViolationAmount → log only; the
 //     contract refuses these on-chain, so re-submitting would just
 //     waste fees. Dispute evidence is still retained via logs.
@@ -3952,9 +3956,25 @@ type receiptCheck struct {
 	// violation names the failed check; empty when the receipt verified.
 	violation string
 	settled   Settlement
-	// excluded is set when the node's settle group failed verification and
-	// the node was barred for it.
-	excluded bool
+	// excluded is set when the node was barred for contradicting its own
+	// receipt, and exclusion names how.
+	excluded  bool
+	exclusion string
+}
+
+// The NodeExcluded reasons a receipt check reports.
+const (
+	// exclusionSettleGroup: the node's settle group failed verification.
+	exclusionSettleGroup = "settle_group_rejected"
+	// exclusionOverclaim: the node's settle claim on chain takes more than
+	// the receipt it signed.
+	exclusionOverclaim = "settle_claim_exceeds_receipt"
+)
+
+// overclaimFreezer is the protest's fallback, which *OpenHandle has and a
+// test's handle may not.
+type overclaimFreezer interface {
+	freezeOverclaim(ctx context.Context, receipt *ticket.UsageReceipt) (txid string, feeMicroalgos uint64, claim ClaimVerdict, err error)
 }
 
 // checkReceipt is runReceiptChecks without the submit: it verifies the
@@ -4053,6 +4073,9 @@ func (s *Client) checkReceipt(
 		if s.spend != nil {
 			recordSpend(s.log, "settle", ticket.TicketID, func() { s.spend.Settle(ticket.TicketID, receipt.AmountCharged) })
 		}
+		// The signed amount is the only figure the watchdog can hold a later
+		// operator claim against, should the ack below not land.
+		s.refunds.recordReceipt(ticket.TicketID, RefOf(op), receipt.AmountCharged)
 		if handle == nil {
 			return nil, check
 		}
@@ -4062,7 +4085,8 @@ func (s *Client) checkReceipt(
 			// tracking the ticket, so the escrow is still recovered on chain.
 			// Only Wait reports it.
 			atomic := settleGroup != ""
-			txid, fee, groupRejected, err := handle.AckSettle(settleCtx, receipt, settleGroup)
+			ack, err := handle.AckSettle(settleCtx, receipt, settleGroup)
+			txid, fee, groupRejected := ack.TxID, ack.FeeMicroalgos, ack.GroupRejected
 			if groupRejected && s.nodeExcluder != nil {
 				// The node handed a fraudulent atomic settle group (rekey /
 				// ClearState / value mismatch vs its own receipt). Proven
@@ -4073,11 +4097,39 @@ func (s *Client) checkReceipt(
 				// eligible).
 				ref := RefOf(op)
 				s.nodeExcluder.ExcludeNode(ref)
-				check.excluded = true
+				check.excluded, check.exclusion = true, exclusionSettleGroup
 				s.log.Warn("node excluded: handed a fraudulent settle group",
 					slog.String("ticket_id", ticket.TicketID),
 					slog.Uint64("operator_id", op.ID),
 					slog.Uint64("node_id", op.NodeID))
+			}
+			switch {
+			case ack.Claim == ClaimOverclaims:
+				// The node signed the receipt and posted the claim under one
+				// registered key, so this is the same self-contradiction the
+				// settle-group check bars a node for, whether or not the freeze
+				// went out.
+				s.excludeOverclaim(check, op)
+				attrs := []any{slog.String("ticket_id", ticket.TicketID), opAttr(op), slog.Uint64("receipt_microusdc", receipt.AmountCharged)}
+				switch {
+				case ack.Frozen:
+					s.log.Warn("node excluded: its on-chain settle claim exceeds the receipt it signed; acked with the receipt to freeze the ticket", attrs...)
+				case err != nil && ack.PayerSettle:
+					s.log.Warn("node excluded: its on-chain settle claim exceeds the receipt it signed; the settle to freeze the ticket failed", append(attrs, slog.Any("err", err))...)
+				case err != nil:
+					// The node's group failed to submit and no settle followed it.
+					s.log.Warn("node excluded: its on-chain settle claim exceeds the receipt it signed; its settle group failed to submit, and no freeze was sent, since the deployed escrow has no resolveFrozen", append(attrs, slog.Any("err", err))...)
+				default:
+					// Nothing went out, so the turn reports no submit.
+					s.log.Warn("node excluded: its on-chain settle claim exceeds the receipt it signed; not freezing it, since the deployed escrow has no resolveFrozen and would lock the escrow for good — the claim lapses at the operator's figure", attrs...)
+					return Settlement{}, nil
+				}
+			case ack.Claim == ClaimContradicts && err == nil:
+				s.log.Warn("operator's settle claim contradicts its own receipt but takes no more; not acking, since that would only freeze the payer's escrow — the claim lapses at the operator's figure",
+					slog.String("ticket_id", ticket.TicketID),
+					opAttr(op),
+					slog.Uint64("receipt_microusdc", receipt.AmountCharged))
+				return Settlement{}, nil
 			}
 			// The 2-tx atomic group actually FINALIZED (deleted the ticket box)
 			// only when it wasn't rejected. When groupRejected is true, AckSettle
@@ -4085,8 +4137,10 @@ func (s *Client) checkReceipt(
 			// posts a pendingBy=PAYER claim the refund watchdog must KEEP tracking
 			// (refundInactive at the deadline), exactly like the no-settle-group
 			// case. So the ticket header being present is not enough; gate the
-			// watchdog Resolve on the group having truly finalized.
-			settledAtomically := atomic && !groupRejected
+			// watchdog Resolve on the group having truly finalized. A freeze or
+			// the payer's half on an open box is the payer's own settle, sent in
+			// the group's place when it failed to submit.
+			settledAtomically := atomic && !groupRejected && !ack.PayerSettle
 			kind := SettlePayerAck
 			if settledAtomically {
 				kind = SettleAtomic
@@ -4121,7 +4175,9 @@ func (s *Client) checkReceipt(
 					s.refunds.Resolve(ticket.TicketID)
 					s.confirmSettled(ticket.TicketID, txid, handle)
 				}
-				return s.settlement(kind, txid, fee), nil
+				settled := s.settlement(kind, txid, fee)
+				settled.Frozen = ack.Frozen
+				return settled, nil
 			}
 		}), check
 	}
@@ -4151,6 +4207,19 @@ func (s *Client) checkReceipt(
 	if s.spend != nil {
 		recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 	}
+	switch re.Violation {
+	case ReceiptViolationAmount, ReceiptViolationBodyHash:
+		// Both are found only after the signature verified, so the amount is
+		// still one the node signed. Named rather than "all but Sig": the
+		// ReceiptOK stand-in above has an unknown signature, and a pinned
+		// figure set too high would wave every later over-claim through. The
+		// journal keeps it for the reconciler, which would otherwise lapse an
+		// over-claim the watchdog refused to.
+		s.refunds.recordReceipt(ticket.TicketID, RefOf(op), receipt.AmountCharged)
+		if handle != nil {
+			s.journalSigned(handle, receipt)
+		}
+	}
 	if handle == nil || re.Violation != ReceiptViolationBodyHash {
 		return nil, check
 	}
@@ -4160,22 +4229,65 @@ func (s *Client) checkReceipt(
 		if perr != nil {
 			// A turn that outlived expires_at + grace (a long stream, mostly)
 			// can no longer freeze the ticket, and no retry changes that. The
-			// same deadline bars settle, so the ticket goes to settleLapsed if
-			// the operator has a pending claim and to refundInactive if not;
-			// the refund watchdog stays armed and drives whichever applies.
-			// Logged apart from a submit fault so it doesn't read as one.
+			// same deadline bars settle, so no freeze fallback either: the
+			// ticket goes to settleLapsed if the operator has a pending claim
+			// and to refundInactive if not; the refund watchdog stays armed and
+			// drives whichever applies. Logged apart from a submit fault so it
+			// doesn't read as one.
 			if errors.Is(perr, escrow.ErrProtestAfterDeadline) {
 				s.log.Warn("protest window closed; the ticket lapses on chain",
 					slog.String("ticket_id", ticket.TicketID),
 					slog.String("reason", re.Violation.String()),
 					slog.Any("verification_err", err))
-			} else {
-				s.log.Warn("protest failed",
-					slog.String("ticket_id", ticket.TicketID),
-					slog.String("reason", re.Violation.String()),
-					slog.Any("verification_err", err),
-					slog.Any("submit_err", perr))
+				return Settlement{Kind: SettleProtest}, perr
 			}
+			// A box read that failed, which leaves the protest's own failure
+			// to report.
+			var claimErr error
+			if f, ok := handle.(overclaimFreezer); ok {
+				ftx, ffee, claim, ferr := f.freezeOverclaim(settleCtx, receipt)
+				if claim == ClaimOverclaims {
+					// Same self-contradiction as on the ack path.
+					s.excludeOverclaim(check, op)
+					if errors.Is(ferr, errNoResolveFrozen) {
+						// The protest's own failure stands.
+						s.log.Warn("protest refused; the operator's claim exceeds the receipt it signed, but the deployed escrow has no resolveFrozen, so no freeze was sent",
+							slog.String("ticket_id", ticket.TicketID),
+							opAttr(op),
+							slog.Any("protest_err", perr))
+						return Settlement{Kind: SettleProtest}, perr
+					}
+					if ferr != nil {
+						s.log.Warn("protest refused, and the settle to freeze an operator claim above the receipt failed",
+							slog.String("ticket_id", ticket.TicketID),
+							opAttr(op),
+							slog.Any("protest_err", perr),
+							slog.Any("submit_err", ferr))
+						return Settlement{Kind: SettleProtest}, ferr
+					}
+					s.log.Warn("protest refused; the operator's claim exceeds the receipt it signed, so submitted the payer's settle at the receipt to freeze the ticket instead",
+						slog.String("ticket_id", ticket.TicketID),
+						opAttr(op),
+						slog.String("txid", ftx),
+						slog.Uint64("receipt_microusdc", receipt.AmountCharged),
+						slog.Any("protest_err", perr))
+					s.refunds.Resolve(ticket.TicketID)
+					settled := s.settlement(SettleProtest, ftx, ffee)
+					settled.Frozen = true
+					return settled, nil
+				}
+				claimErr = ferr
+			}
+			attrs := []any{
+				slog.String("ticket_id", ticket.TicketID),
+				slog.String("reason", re.Violation.String()),
+				slog.Any("verification_err", err),
+				slog.Any("submit_err", perr),
+			}
+			if claimErr != nil {
+				attrs = append(attrs, slog.Any("claim_err", claimErr))
+			}
+			s.log.Warn("protest failed", attrs...)
 			return Settlement{Kind: SettleProtest}, perr
 		}
 		s.log.Warn("protest submitted",
@@ -4186,8 +4298,23 @@ func (s *Client) checkReceipt(
 		// Frozen ticket: refundInactive reverts on FROZEN, so the refund
 		// watchdog has nothing to do — only the admin's resolveFrozen closes it.
 		s.refunds.Resolve(ticket.TicketID)
-		return s.settlement(SettleProtest, txid, fee), nil
+		settled := s.settlement(SettleProtest, txid, fee)
+		settled.Frozen = true
+		return settled, nil
 	}), check
+}
+
+// excludeOverclaim bars the node whose claim on chain takes more than the
+// receipt it signed, and names the exclusion on check unless an earlier one
+// this turn already did.
+func (s *Client) excludeOverclaim(check *receiptCheck, op Operator) {
+	if s.nodeExcluder == nil {
+		return
+	}
+	s.nodeExcluder.ExcludeNode(RefOf(op))
+	if !check.excluded {
+		check.excluded, check.exclusion = true, exclusionOverclaim
+	}
 }
 
 // protestReasonForViolation maps a verification violation to the

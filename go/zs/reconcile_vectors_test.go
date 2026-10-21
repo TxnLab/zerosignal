@@ -62,6 +62,8 @@ type reconcileVectorCase struct {
 	ExpiresAtMs int64                  `json:"expires_at_ms"`
 	UpdatedAtMs int64                  `json:"updated_at_ms"`
 	Settle      *reconcileVectorSettle `json:"settle"`
+	// Signed is the receipt that failed a check, absent when none.
+	Signed *reconcileVectorSettle `json:"signed,omitempty"`
 	// Box is null when the ticket has no box on chain.
 	Box             *reconcileVectorBox `json:"box"`
 	NowMs           int64               `json:"now_ms"`
@@ -131,15 +133,18 @@ func reconcileVectorInputs() []reconcileVectorCase {
 		status TicketStatus
 		settle bool
 		ageMs  int64
+		signed bool
 	}
 	records := []record{
-		{"open", TicketOpen, false, grace},
-		{"settle_pending", TicketSettlePending, true, grace},
-		{"settle_pending_young", TicketSettlePending, true, grace - 1},
-		{"settle_pending_no_args", TicketSettlePending, false, grace},
+		{"open", TicketOpen, false, grace, false},
+		{"settle_pending", TicketSettlePending, true, grace, false},
+		{"settle_pending_young", TicketSettlePending, true, grace - 1, false},
+		{"settle_pending_no_args", TicketSettlePending, false, grace, false},
 		// Receipt values on a row not yet marked settle_pending: the status,
 		// not the values, decides a re-fire.
-		{"open_with_args", TicketOpen, true, grace},
+		{"open_with_args", TicketOpen, true, grace, false},
+		// A receipt that failed a check: held against a claim, never re-fired.
+		{"open_signed", TicketOpen, false, grace, true},
 	}
 	mk := func(name string, r record, box *reconcileVectorBox, now int64) reconcileVectorCase {
 		c := reconcileVectorCase{
@@ -149,6 +154,10 @@ func reconcileVectorInputs() []reconcileVectorCase {
 		if r.settle {
 			s := rvSettle()
 			c.Settle = &s
+		}
+		if r.signed {
+			s := rvSettle()
+			c.Signed = &s
 		}
 		return c
 	}
@@ -189,6 +198,34 @@ func reconcileVectorInputs() []reconcileVectorCase {
 		cases = append(cases, mk("pending_operator/claim_differs_in_"+m.field, records[1], &box, deadlineMs-skew-1))
 	}
 
+	// An operator claim against the receipt's amount, across every boundary.
+	// One above it is frozen inside the window, ahead of the settle-pending
+	// grace, and never lapsed by the payer after it; one below it, or level
+	// with it on another digest, is left alone inside the window and lapsed
+	// like any other claim after it.
+	otherDigest := func(b *reconcileVectorBox) {
+		d := rvDigest()
+		d[0] ^= 0xff
+		b.PendingDigest = base64.StdEncoding.EncodeToString(d[:])
+	}
+	claims := []struct {
+		name string
+		edit func(*reconcileVectorBox)
+	}{
+		{"claim_above_receipt", func(b *reconcileVectorBox) { b.PendingAmount += 1000; otherDigest(b) }},
+		{"claim_below_receipt", func(b *reconcileVectorBox) { b.PendingAmount -= 1000; otherDigest(b) }},
+		{"claim_level_other_digest", otherDigest},
+	}
+	for _, cl := range claims {
+		for _, off := range offsets {
+			for _, r := range records {
+				box := rvBox(escrow.StatusPendingSettle, escrow.PendingByOperator)
+				cl.edit(&box)
+				cases = append(cases, mk(fmt.Sprintf("pending_operator/%s/%s at D%+dms", cl.name, r.name, off), r, &box, deadlineMs+off))
+			}
+		}
+	}
+
 	// Other lapse fallbacks: one below the skew, where the classify cut-off
 	// decides instead, and one longer than the default.
 	for _, lf := range []int64{10_000, 30 * 60_000} {
@@ -212,19 +249,20 @@ func reconcileVectorInputs() []reconcileVectorCase {
 
 func runReconcileVector(t *testing.T, c reconcileVectorCase) string {
 	t.Helper()
+	rec, box := reconcileVectorInputsOf(t, c)
+	return decideTicket(rec, box, time.UnixMilli(c.NowMs), time.Duration(c.LapseFallbackMs)*time.Millisecond).String()
+}
+
+// reconcileVectorInputsOf decodes a case into the record and box (nil when
+// none) it describes.
+func reconcileVectorInputsOf(t *testing.T, c reconcileVectorCase) (TicketRecord, *escrow.TicketRecord) {
+	t.Helper()
 	rec := TicketRecord{
 		Status:    c.Status,
 		ExpiresAt: time.UnixMilli(c.ExpiresAtMs),
 		UpdatedAt: time.UnixMilli(c.UpdatedAtMs),
 	}
-	if s := c.Settle; s != nil {
-		rec.Settle = &SettleArgs{
-			AmountCharged: s.AmountCharged, ReceiptDigest: rvDecode32(t, s.ReceiptDigest),
-			TtftMs: s.TtftMs, DecodeMs: s.DecodeMs, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
-			OutputUsageType: ticket.UsageType(s.OutputUsageType), AuxOutputUsageType: ticket.UsageType(s.AuxOutputUsageType),
-			AuxOutputCount: s.AuxOutputCount,
-		}
-	}
+	rec.Settle, rec.Signed = rvArgs(t, c.Settle), rvArgs(t, c.Signed)
 	var box *escrow.TicketRecord
 	if b := c.Box; b != nil {
 		box = &escrow.TicketRecord{
@@ -236,7 +274,20 @@ func runReconcileVector(t *testing.T, c reconcileVectorCase) string {
 			PendingAuxOutputCount: b.PendingAuxOutputCount,
 		}
 	}
-	return decideTicket(rec, box, time.UnixMilli(c.NowMs), time.Duration(c.LapseFallbackMs)*time.Millisecond).String()
+	return rec, box
+}
+
+func rvArgs(t *testing.T, s *reconcileVectorSettle) *SettleArgs {
+	t.Helper()
+	if s == nil {
+		return nil
+	}
+	return &SettleArgs{
+		AmountCharged: s.AmountCharged, ReceiptDigest: rvDecode32(t, s.ReceiptDigest),
+		TtftMs: s.TtftMs, DecodeMs: s.DecodeMs, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
+		OutputUsageType: ticket.UsageType(s.OutputUsageType), AuxOutputUsageType: ticket.UsageType(s.AuxOutputUsageType),
+		AuxOutputCount: s.AuxOutputCount,
+	}
 }
 
 func rvDecode32(t *testing.T, s string) [32]byte {
@@ -281,7 +332,7 @@ func TestReconcileVectorsCoverEveryAction(t *testing.T) {
 	for _, c := range reconcileVectorInputs() {
 		seen[runReconcileVector(t, c)] = true
 	}
-	for a := reconcileWait; a <= reconcileResettle; a++ {
+	for a := reconcileWait; a <= reconcileFreeze; a++ {
 		if !seen[a.String()] {
 			t.Errorf("no vector yields %s", a)
 		}

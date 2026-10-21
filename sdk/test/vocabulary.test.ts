@@ -106,7 +106,7 @@ const eventFields = {
         'feeUnit',
     ],
     'receipt.violated': ['violation', 'protestTxId'],
-    'settle.submitted': ['ticketId', 'txId', 'feesMicroAlgos', 'atomic', 'networkFees'],
+    'settle.submitted': ['ticketId', 'txId', 'feesMicroAlgos', 'atomic', 'networkFees', 'frozen'],
     'node.excluded': ['node', 'reason'],
     done: ['finishReason', 'incompleteReason', 'empty'],
 } as const satisfies { [K in EventType]: readonly FieldsOf<EventOf<K>>[] }
@@ -132,7 +132,7 @@ const errorFields = [
 const nodeRefFields = ['op', 'node'] as const satisfies readonly (keyof NodeRef)[]
 const itemFields = ['id', 'type', 'raw'] as const satisfies readonly (keyof Item)[]
 const ticketFields = ['id', 'signed', 'target'] as const satisfies readonly (keyof Ticket)[]
-const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos', 'networkFees'] as const satisfies readonly (keyof Settlement)[]
+const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos', 'networkFees', 'frozen'] as const satisfies readonly (keyof Settlement)[]
 const feeUnitFields = ['currency', 'decimals'] as const satisfies readonly (keyof FeeUnit)[]
 const providerErrorFields = ['code', 'message', 'status'] as const satisfies readonly (keyof ProviderError)[]
 // What ProviderError adds to Error, plus the message Go declares as a field.
@@ -150,6 +150,7 @@ const ticketRecordFields = [
     'createdAt',
     'updatedAt',
     'settle',
+    'signed',
 ] as const satisfies readonly (keyof TicketRecord)[]
 const settleArgsFields = [
     'amountCharged',

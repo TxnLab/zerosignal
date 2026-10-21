@@ -106,6 +106,13 @@ type EscrowChainConfig struct {
 	// window of a ticket opened with settlementGraceSeconds 0, as the payer
 	// opens every one.
 	SettlementGraceDefault uint64
+	// ResolvesFrozen is whether the deployed app has resolveFrozen
+	// (escrow.Client.ResolvesFrozen). Without it a frozen ticket's escrow is
+	// locked for good, so the payer sends no freeze of an over-claim, and no
+	// half of its own on an open box after a failed group submit. The first
+	// half the standalone ack or the reconciler's resettle posts on an open
+	// box is not gated.
+	ResolvesFrozen bool
 }
 
 // NewEscrowChain is the production EscrowChain over c. Its reads of c's
@@ -127,7 +134,7 @@ type escrowClientChain struct{ *escrow.Client }
 func (a escrowClientChain) TicketMBR() uint64 { return a.TicketMbr }
 
 func (a escrowClientChain) Config() EscrowChainConfig {
-	return EscrowChainConfig{AppID: a.AppID, SettlementGraceDefault: a.SettlementGraceDefault}
+	return EscrowChainConfig{AppID: a.AppID, SettlementGraceDefault: a.SettlementGraceDefault, ResolvesFrozen: a.ResolvesFrozen}
 }
 
 func (a escrowClientChain) ProtocolFeeBps(ctx context.Context) (uint64, error) {

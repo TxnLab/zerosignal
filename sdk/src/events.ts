@@ -259,11 +259,21 @@ export interface SettleSubmitted {
     atomic: boolean
     /** The payer's fee for the settle, in base units of the deployment's fee unit. */
     networkFees: number
+    /**
+     * The settle went against an operator claim above the receipt, so it
+     * freezes the ticket rather than settling it (Settlement.frozen). Absent
+     * where Go's Frozen is false.
+     */
+    frozen?: boolean
 }
 
 /**
- * On a stream, when the node's pre-signed settle group fails verification;
- * the node is barred for the rest of the process.
+ * On a stream, before settle.submitted (or after receipt.violated, when a
+ * refused protest fell back to a freeze), when the node contradicted its own
+ * receipt: its pre-signed settle group failed verification (reason
+ * settle_group_rejected), or the settle claim it posted on chain takes more
+ * than the receipt charges (settle_claim_exceeds_receipt). The node is barred
+ * for the rest of the process.
  */
 export interface NodeExcluded {
     type: 'node.excluded'

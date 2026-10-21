@@ -18,6 +18,7 @@ import { AlgodEscrowChain } from './escrow/algod.js'
 import { configError } from './errors.js'
 import type { EstimatePolicy } from './estimate.js'
 import { FeeRateCache } from './fee-rate.js'
+import type { NodeRef } from './types.js'
 import { FETCH_BASE_URL, type FetchTarget, openAIFetch } from './fetch/serve.js'
 import {
     type RegistryProvider,
@@ -34,7 +35,7 @@ import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
-import { type JournalDeps, Reconciler, journalOpen, journalReceipt, walletChain } from './reconciler.js'
+import { type JournalDeps, Reconciler, journalOpen, journalReceipt, journalSigned, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { deploymentOrFail, readDeploymentId } from './registry/chain.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
@@ -202,6 +203,22 @@ export class Client {
             weightsWarned: new Set(),
         }
         const guard = cfg.spendGuard
+        // Go's Client.barOverclaimer: bars a node the watchdog or the sweep
+        // found claiming more on chain than the receipt it signed, after the
+        // ack's read, after the ack failed, or after a restart. Both find it
+        // again on every read of the box, so only the first is logged.
+        const exclusions = st.nodeExclusions
+        const barOverclaimer = exclusions
+            ? (ticketId: string, node: NodeRef) => {
+                  if (exclusions.nodeExcluded(node)) return
+                  exclusions.excludeNode(node)
+                  cfg.logger.warn('node excluded: its on-chain settle claim exceeds the receipt it signed', {
+                      ticket_id: ticketId,
+                      operator_id: node.op,
+                      node_id: node.node,
+                  })
+              }
+            : undefined
         // The watchdog and the sweep time contract deadlines, so they read the
         // wall clock, as Go's do: Config.clock drives affinity and the cache,
         // and a clock running ahead there would send calls the chain reverts.
@@ -211,6 +228,7 @@ export class Client {
             // A ticket whose request failed after its escrow opened keeps its
             // reservation in dispatch; its refund is what frees it.
             refunded: guard ? (ticketId) => guardRecords(cfg.logger, 'release', ticketId, () => guard.release(ticketId)) : undefined,
+            overclaimed: barOverclaimer,
         })
         const life = new AbortController()
         const settles = new Settles({ logger: cfg.logger, journal, life: life.signal })
@@ -226,6 +244,7 @@ export class Client {
                 deployment: cfg.network,
                 watching: (ticketId) => refunds.watching(ticketId),
                 spend: guard,
+                overclaimed: barOverclaimer ? (rec) => barOverclaimer(rec.ticketId, rec.target) : undefined,
                 logger: cfg.logger,
             })
             reconciler.remedy = cfg.remedies.recoverTicket
@@ -404,7 +423,9 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         spendGuard: cfg.spendGuard,
         nodeExclusions: st.nodeExclusions,
         journalReceipt: (h, receipt) => journalReceipt(journal, h, receipt),
+        journalSigned: (h, receipt) => journalSigned(journal, h, receipt),
         resolveRefund: (ticketId) => p.refunds.resolve(ticketId),
+        recordReceipt: (ticketId, node, amountCharged) => p.refunds.recordReceipt(ticketId, node, amountCharged),
         confirmSettled: (ticketId, txId, h) => p.settles.confirmSettled(ticketId, txId, h),
         toolAffinity: p.pick.toolAffinity,
         responseAffinity: p.pick.responseAffinity,

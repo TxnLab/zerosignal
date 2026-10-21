@@ -69,6 +69,36 @@ interface Globals extends EscrowChainConfig {
 /** Thrown by freeQuotaMbrDue's read when the deployed app predates the free-ticket quota. */
 class FreeQuotaUnsupportedError extends Error {}
 
+/**
+ * The ARC-4 signature of the admin call that ends a frozen ticket, Go's
+ * escrow.ResolveFrozenSignature. No payer calls it, so it is absent from the
+ * generated ABI; the payer only needs to know whether the deployed app has it.
+ */
+export const RESOLVE_FROZEN_SIGNATURE = 'resolveFrozen(byte[],uint64,byte[])void'
+
+/**
+ * programHasMethod reports whether an approval program carries the ARC-4
+ * selector of signature, Go's escrow.ProgramHasMethod. A router matches each
+ * call's first argument against its methods' selectors, so a method the
+ * program routes has its 4-byte selector somewhere in the bytecode. A chance
+ * match in other bytes is possible but unlikely at these program sizes.
+ */
+export function programHasMethod(program: Uint8Array | undefined, signature: string): boolean {
+    if (program === undefined || program.length === 0) return false
+    const sel = ABIMethod.fromSignature(signature).getSelector()
+    outer: for (let i = 0; i + sel.length <= program.length; i++) {
+        for (let j = 0; j < sel.length; j++) if (program[i + j] !== sel[j]) continue outer
+        return true
+    }
+    return false
+}
+
+function globalStateOf(app: algosdk.modelsv2.Application): Map<string, algosdk.modelsv2.TealValue> {
+    const out = new Map<string, algosdk.modelsv2.TealValue>()
+    for (const kv of app.params?.globalState ?? []) out.set(new TextDecoder().decode(kv.key), kv.value)
+    return out
+}
+
 // settleInnerCount's ceiling: a settle that refunds the payer, pays the
 // operator and pays the treasury (Go's settleLapsedMaxInners).
 const SETTLE_MAX_INNERS = 3n
@@ -143,7 +173,13 @@ export class AlgodEscrowChain implements EscrowChain {
 
     async config(signal?: AbortSignal): Promise<EscrowChainConfig> {
         const g = await this.#readGlobalsOnce(signal)
-        return { appId: g.appId, appAddress: g.appAddress, usdcAssetId: g.usdcAssetId, settlementGraceDefault: g.settlementGraceDefault }
+        return {
+            appId: g.appId,
+            appAddress: g.appAddress,
+            usdcAssetId: g.usdcAssetId,
+            settlementGraceDefault: g.settlementGraceDefault,
+            resolvesFrozen: g.resolvesFrozen === true,
+        }
     }
 
     /**
@@ -188,21 +224,23 @@ export class AlgodEscrowChain implements EscrowChain {
     }
 
     async #globalState(signal?: AbortSignal): Promise<Map<string, algosdk.modelsv2.TealValue>> {
-        let app: algosdk.modelsv2.Application
+        return globalStateOf(await this.#application(signal))
+    }
+
+    async #application(signal?: AbortSignal): Promise<algosdk.modelsv2.Application> {
         try {
-            app = await this.#algod.getApplicationByID(this.#appId).do(undefined, this.#opts(signal))
+            return await this.#algod.getApplicationByID(this.#appId).do(undefined, this.#opts(signal))
         } catch (err) {
             throw new Error(`escrow: get application ${this.#appId}: ${message(err)}`, { cause: err })
         }
-        const out = new Map<string, algosdk.modelsv2.TealValue>()
-        for (const kv of app.params?.globalState ?? []) out.set(new TextDecoder().decode(kv.key), kv.value)
-        return out
     }
 
     // Go's readGlobals: usdc and treasury are required, a contract missing
-    // either is misconfigured.
+    // either is misconfigured. The same fetch answers whether the program
+    // routes resolveFrozen.
     async #readGlobals(signal?: AbortSignal): Promise<Globals> {
-        const kv = await this.#globalState(signal)
+        const app = await this.#application(signal)
+        const kv = globalStateOf(app)
         const usdc = kv.get('usdc')
         if (usdc === undefined) throw new Error(`escrow: usdcAssetId global not found on app ${this.#appId}`)
         if (usdc.type !== 2) throw new Error(`escrow: usdcAssetId global has type ${usdc.type}, want 2 (uint)`)
@@ -220,6 +258,7 @@ export class AlgodEscrowChain implements EscrowChain {
             appAddress: this.#appAddress,
             usdcAssetId: BigInt(usdc.uint),
             settlementGraceDefault: grace === undefined ? 0n : BigInt(grace.uint),
+            resolvesFrozen: programHasMethod(app.params?.approvalProgram, RESOLVE_FROZEN_SIGNATURE),
             treasury: new Address(trea.bytes).toString(),
         }
     }
@@ -360,7 +399,9 @@ export class AlgodEscrowChain implements EscrowChain {
      * The payer's standalone settle (Go's ComposeSettleStandalone). The fee
      * pools the disbursements this settle fires if it finalizes, finalize's
      * base op-up, and an op-up per revenue-ring catch-up a long-idle node or
-     * operator box runs.
+     * operator box runs. A call the caller expects not to finalize
+     * (outerFeeOnly: a freeze, or a first half on an open box) fires none of
+     * them, so it pays for itself alone.
      */
     async settleStandalone(c: PayerSettleCall, signal?: AbortSignal): Promise<SettleSubmission> {
         checkLen('settle ticket id', c.ticketIdRaw, TICKET_ID_LEN)
@@ -368,8 +409,11 @@ export class AlgodEscrowChain implements EscrowChain {
         checkAddr('settle payer addr', c.payer)
         checkAddr('settle operator owner addr', c.operatorOwnerAddr)
         const g = await this.#readGlobalsOnce(signal)
-        const gap = await this.#gapSettleOpUps(c.operatorId, c.nodeId, signal)
         const a = c.args
+        const inners =
+            c.outerFeeOnly === true
+                ? 0n
+                : settleInnerCount(a.amountCharged, c.maxPrice) + 1n + (await this.#gapSettleOpUps(c.operatorId, c.nodeId, signal))
         const r = await this.#single(
             c.payer,
             {
@@ -390,7 +434,7 @@ export class AlgodEscrowChain implements EscrowChain {
                 boxes: [ticketBoxKey(c.ticketIdRaw), operatorBoxKey(c.operatorId), nodeBoxKey(c.operatorId, c.nodeId)],
                 accounts: [c.payer, c.operatorOwnerAddr, g.treasury],
                 assets: [g.usdcAssetId],
-                inners: settleInnerCount(a.amountCharged, c.maxPrice) + 1n + gap,
+                inners,
             },
             signal,
         )

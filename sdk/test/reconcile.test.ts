@@ -46,6 +46,7 @@ interface Vector {
     expires_at_ms: number
     updated_at_ms: number
     settle: VectorSettle | null
+    signed?: VectorSettle
     box: VectorBox | null
     now_ms: number
     lapse_fallback_ms: number
@@ -92,17 +93,18 @@ function boxOf(b: VectorBox): TicketBoxView {
 
 describe('decideTicket', () => {
     it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
-        const rec = { status: v.status, expiresAt: v.expires_at_ms, updatedAt: v.updated_at_ms }
-        const got = decideTicket(
-            v.settle ? { ...rec, settle: settleOf(v.settle) } : rec,
-            v.box ? boxOf(v.box) : null,
-            { nowMs: v.now_ms },
-            v.lapse_fallback_ms,
-        )
+        const rec = {
+            status: v.status,
+            expiresAt: v.expires_at_ms,
+            updatedAt: v.updated_at_ms,
+            ...(v.settle && { settle: settleOf(v.settle) }),
+            ...(v.signed && { signed: settleOf(v.signed) }),
+        }
+        const got = decideTicket(rec, v.box ? boxOf(v.box) : null, { nowMs: v.now_ms }, v.lapse_fallback_ms)
         expect(got).toBe(v.action)
         // One clock given twice is Go's one clock.
         const both = decideTicket(
-            v.settle ? { ...rec, settle: settleOf(v.settle) } : rec,
+            rec,
             v.box ? boxOf(v.box) : null,
             { nowMs: v.now_ms, chainMs: v.now_ms },
             v.lapse_fallback_ms,
@@ -251,7 +253,7 @@ describe('decideTicket', () => {
     // Go's generator guarantees this too; a fixture that lost an action would
     // leave the port's branch for it unchecked.
     it('has a vector for every action', () => {
-        const actions: ReconcileAction[] = ['wait', 'forget', 'refundInactive', 'settleLapsed', 'settle']
+        const actions: ReconcileAction[] = ['wait', 'forget', 'refundInactive', 'settleLapsed', 'settle', 'freeze']
         expect(new Set(vectors.map((v) => v.action))).toEqual(new Set(actions))
     })
 })

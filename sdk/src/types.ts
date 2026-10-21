@@ -80,4 +80,11 @@ export interface Settlement {
     feesMicroAlgos: number
     /** The payer's fee for the submit, in base units of the deployment's fee unit. */
     networkFees: number
+    /**
+     * Set when the submit freezes the ticket once it lands, leaving its escrow
+     * to arbitration: a protest, or the payer's settle against an operator
+     * claim above the receipt, under any kind. Absent where Go's Frozen is
+     * false.
+     */
+    frozen?: boolean
 }

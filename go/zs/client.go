@@ -331,8 +331,14 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 			recordSpend(log, "release", ticketID, func() { guard.Release(ticketID) })
 		}
 	}
+	if c.nodeExcluder != nil {
+		c.refunds.overclaimed = c.barOverclaimer
+	}
 	if sdkWallet != nil {
 		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), dep, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
+		if c.nodeExcluder != nil {
+			c.reconcile.overclaimed = func(rec TicketRecord) { c.barOverclaimer(rec.TicketID, rec.Target) }
+		}
 		c.reconcile.remedy = cfg.Remedies.RecoverTicket
 		c.reconcile.release = release
 		// A memory journal dies with this Client, so its watchdog stays the
@@ -342,6 +348,22 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	c.warmFeeRate()
 	return c, nil
+}
+
+// barOverclaimer bars a node whose claim on a ticket's box exceeds the receipt
+// it signed, found by the refund watchdog or the reconciler rather than by a
+// turn's ack: a claim posted after the ack's read, or after the ack failed,
+// or one a restart left. Both find it again on every read of the box, so only
+// the first is logged.
+func (s *Client) barOverclaimer(ticketID string, node NodeRef) {
+	if s.nodeExcluder == nil || s.nodeExcluder.NodeExcluded(node) {
+		return
+	}
+	s.nodeExcluder.ExcludeNode(node)
+	s.log.Warn("node excluded: its on-chain settle claim exceeds the receipt it signed",
+		slog.String("ticket_id", ticketID),
+		slog.Uint64("operator_id", node.Op),
+		slog.Uint64("node_id", node.Node))
 }
 
 // remedies fills the defaults here rather than trusting New to have, because a
@@ -418,7 +440,7 @@ type settlementHandle interface {
 	// already checked to decode — the wallet signs the payer-ack member and
 	// submits as a 2-tx group (payer pays 0 ALGO at settle). When empty,
 	// falls back to the standalone path (payer pays ~5,000 µALGO outer fee).
-	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (txid string, feeMicroalgos uint64, groupRejected bool, err error)
+	AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (AckResult, error)
 	// Protest freezes the ticket. The payer signs and pays for it, so the fee
 	// is the payer's.
 	Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (txid string, feeMicroalgos uint64, err error)

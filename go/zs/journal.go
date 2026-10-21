@@ -20,7 +20,8 @@ const (
 	// TicketOpen: escrow is open and no verified receipt has been seen. Once
 	// the box's deadline passes the reconciler refunds it, or calls
 	// settleLapsed when the operator has a pending claim, since
-	// refundInactive reverts on such a box.
+	// refundInactive reverts on such a box, unless the claim takes more than
+	// the row's Signed receipt.
 	TicketOpen TicketStatus = "open"
 	// TicketSettlePending: a verified receipt was seen and Settle holds the
 	// arguments to re-fire the payer's settle if the first submit was lost.
@@ -55,6 +56,21 @@ type TicketRecord struct {
 	UpdatedAt time.Time
 	// Settle is set with TicketSettlePending.
 	Settle *SettleArgs
+	// Signed is set on a TicketOpen row whose receipt the node signed but
+	// that failed a later check (its amount or its body hash). The payer
+	// co-signs none of it; the reconciler holds an operator claim against
+	// its amount, to freeze one that takes more and never lapse it.
+	Signed *SettleArgs
+}
+
+// signedArgs is the receipt the reconciler holds an operator claim against:
+// a verified one on a settle_pending row, else one the node signed that
+// failed a check, else none.
+func (rec TicketRecord) signedArgs() *SettleArgs {
+	if rec.Status == TicketSettlePending && rec.Settle != nil {
+		return rec.Settle
+	}
+	return rec.Signed
 }
 
 // SettleArgs are the receipt values the payer co-signs on settle(). The

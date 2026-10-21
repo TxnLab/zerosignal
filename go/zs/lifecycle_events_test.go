@@ -159,7 +159,7 @@ func TestReserveWithTransientRetry_NoRelayLeftAnnouncesNoRetry(t *testing.T) {
 // on that path reaching for the turn's note would.
 type noteSpyHandle struct{ scriptedSettleHandle }
 
-func (h *noteSpyHandle) AckSettle(ctx context.Context, r *ticket.UsageReceipt, g string) (string, uint64, bool, error) {
+func (h *noteSpyHandle) AckSettle(ctx context.Context, r *ticket.UsageReceipt, g string) (AckResult, error) {
 	noteFrom(ctx)(Done{})
 	return h.scriptedSettleHandle.AckSettle(ctx, r, g)
 }
@@ -184,8 +184,9 @@ func TestCheckReceipt_SettleCarriesNoNote(t *testing.T) {
 }
 
 // The receipt's report: a violation replaces the verified receipt and says
-// nothing of a settle, and a verified one is followed by the node's
-// exclusion and the settle submitted, in that order.
+// nothing of a settle but the protest's, and a verified one is followed by
+// the node's exclusion and the settle submitted, in that order. Either
+// reports the exclusion.
 func TestUsageReport_Events(t *testing.T) {
 	op := Operator{ID: 7, NodeID: 2}
 	report := func(check receiptCheck) []Event {
@@ -207,12 +208,19 @@ func TestUsageReport_Events(t *testing.T) {
 			receiptCheck{settled: Settlement{Kind: SettleAtomic, TxID: "TX", FeesMicroAlgos: 0}},
 			[]Event{ReceiptVerified{}, SettleSubmitted{TicketID: "T", TxID: "TX", Atomic: true}}},
 		{"verified, a forged group, then a payer ack",
-			receiptCheck{excluded: true, settled: Settlement{Kind: SettlePayerAck, TxID: "ACK", FeesMicroAlgos: 1000, NetworkFees: 1000}},
+			receiptCheck{excluded: true, exclusion: exclusionSettleGroup, settled: Settlement{Kind: SettlePayerAck, TxID: "ACK", FeesMicroAlgos: 1000, NetworkFees: 1000}},
 			[]Event{ReceiptVerified{}, NodeExcluded{Node: NodeRef{Op: 7, Node: 2}, Reason: "settle_group_rejected"},
 				SettleSubmitted{TicketID: "T", TxID: "ACK", FeesMicroAlgos: 1000, NetworkFees: 1000}}},
+		{"verified, a claim above the receipt, then the freezing ack",
+			receiptCheck{excluded: true, exclusion: exclusionOverclaim, settled: Settlement{Kind: SettlePayerAck, TxID: "ACK", FeesMicroAlgos: 1000, NetworkFees: 1000, Frozen: true}},
+			[]Event{ReceiptVerified{}, NodeExcluded{Node: NodeRef{Op: 7, Node: 2}, Reason: "settle_claim_exceeds_receipt"},
+				SettleSubmitted{TicketID: "T", TxID: "ACK", FeesMicroAlgos: 1000, NetworkFees: 1000, Frozen: true}}},
 		{"body_hash, protested",
-			receiptCheck{violation: "body_hash", settled: Settlement{Kind: SettleProtest, TxID: "PROTEST"}},
+			receiptCheck{violation: "body_hash", settled: Settlement{Kind: SettleProtest, TxID: "PROTEST", Frozen: true}},
 			[]Event{ReceiptViolated{Violation: "body_hash", ProtestTxID: "PROTEST"}}},
+		{"body_hash, protest refused, then the freeze over a claim above the receipt",
+			receiptCheck{violation: "body_hash", excluded: true, exclusion: exclusionOverclaim, settled: Settlement{Kind: SettleProtest, TxID: "FREEZE", Frozen: true}},
+			[]Event{ReceiptViolated{Violation: "body_hash", ProtestTxID: "FREEZE"}, NodeExcluded{Node: NodeRef{Op: 7, Node: 2}, Reason: "settle_claim_exceeds_receipt"}}},
 		{"body_hash, protest not yet run", receiptCheck{violation: "body_hash"}, []Event{ReceiptViolated{Violation: "body_hash"}}},
 		{"sig", receiptCheck{violation: "sig"}, []Event{ReceiptViolated{Violation: "sig"}}},
 	} {

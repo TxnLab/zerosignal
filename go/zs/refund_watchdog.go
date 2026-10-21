@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -86,6 +87,15 @@ type RefundWatchdog struct {
 
 	mu      sync.Mutex
 	pending map[string]chan struct{} // ticket_id → cancel signal
+	// receipts is the amount_charged the node signed for each tracked ticket
+	// this process saw a receipt for, and the node that signed it: the one
+	// figure an operator claim found on the box later can be held against.
+	// Dropped with the ticket's pending entry.
+	receipts map[string]signedReceipt
+	// overclaimed hears of each node whose claim on a tracked ticket exceeds
+	// the receipt it signed, so the node is barred though the live ack never
+	// saw the claim. Nil when nothing bars nodes.
+	overclaimed func(ticketID string, node NodeRef)
 	// handedOff is set by handOff: Track arms nothing more.
 	handedOff bool
 	// refunded hears each ticket a refundInactive was submitted for; nil
@@ -112,7 +122,46 @@ func NewRefundWatchdog(log *slog.Logger) *RefundWatchdog {
 		lapseFallback: 10 * time.Minute,
 		remedy:        Remedies{}.withDefaults().RecoverTicket,
 		pending:       map[string]chan struct{}{},
+		receipts:      map[string]signedReceipt{},
 	}
+}
+
+// signedReceipt is one recordReceipt entry.
+type signedReceipt struct {
+	amount uint64
+	node   NodeRef
+}
+
+// recordReceipt pins the amount node signed for a ticket, so driveLapse can
+// tell a stalled honest claim from one that contradicts the receipt. An
+// untracked ticket records nothing: no driver would read the entry or delete
+// it. Track runs at open and Resolve only after the ack that follows the
+// receipt, so a live ticket is always still tracked here.
+func (rw *RefundWatchdog) recordReceipt(ticketID string, node NodeRef, amountCharged uint64) {
+	if rw == nil {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	if _, tracked := rw.pending[ticketID]; !tracked {
+		return
+	}
+	if rw.receipts == nil {
+		rw.receipts = map[string]signedReceipt{}
+	}
+	rw.receipts[ticketID] = signedReceipt{amount: amountCharged, node: node}
+}
+
+func (rw *RefundWatchdog) signedAmount(ticketID string) (uint64, bool) {
+	r, ok := rw.signed(ticketID)
+	return r.amount, ok
+}
+
+func (rw *RefundWatchdog) signed(ticketID string) (signedReceipt, bool) {
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	r, ok := rw.receipts[ticketID]
+	return r, ok
 }
 
 // probeOnce runs one box read under its own timeout, and callOnce one on-chain
@@ -193,6 +242,10 @@ type ticketProbe struct {
 	// D = expires_at + settlement_grace_seconds — the authoritative value,
 	// unlike the Track-time computation from the cached grace default.
 	deadline time.Time
+	// pendingAmount is the amount on whichever side's claim the box carries.
+	// driveLapse reads it only beside VerdictLapse, an operator claim: a
+	// payer claim's amount is the payer's own receipt.
+	pendingAmount uint64
 }
 
 // Track arms a deferred refundInactive for the ticket behind h, firing at
@@ -221,9 +274,10 @@ func (rw *RefundWatchdog) Track(h *OpenHandle, expiresAt int64) {
 			return ticketProbe{exists: false}, nil
 		}
 		return ticketProbe{
-			exists:   true,
-			verdict:  escrow.Classify(rec, time.Now()),
-			deadline: rec.SettlementDeadline(),
+			exists:        true,
+			verdict:       escrow.Classify(rec, time.Now()),
+			deadline:      rec.SettlementDeadline(),
+			pendingAmount: rec.PendingAmount,
 		}, nil
 	}
 	refund := func(ctx context.Context) (string, error) {
@@ -246,12 +300,15 @@ func (rw *RefundWatchdog) Track(h *OpenHandle, expiresAt int64) {
 // nobody else will ever move it, so the payer posts settleLapsed itself: it is
 // permissionless, and it returns max_price minus the operator's claim.
 //
-// Driven unconditionally, even when the operator's claim eats the whole
-// max_price and the USDC refund would be 0 — settling is still strictly better
-// than leaving the box parked, because finalizing is what decrements
-// openTickets(payer). A parked ticket holds one prepaid-MBR-pool slot out of
-// the payer's bounded working set forever AND blocks closeDeposit ('tickets
-// still open'), so the ALGO is what's really being recovered in that case.
+// Driven even when the operator's claim eats the whole max_price and the USDC
+// refund would be 0 — settling is still strictly better than leaving the box
+// parked, because finalizing is what decrements openTickets(payer). A parked
+// ticket holds one prepaid-MBR-pool slot out of the payer's bounded working
+// set forever AND blocks closeDeposit ('tickets still open'), so the ALGO is
+// what's really being recovered in that case.
+//
+// The one claim it will not finalize is one above the amount the node signed
+// for the ticket (recordReceipt). See that case below for what refusing buys.
 //
 // Runs on the tracking goroutine (Resolve still cancels it) and shares the
 // refund path's attempt bound, so a stalled ticket costs a bounded number of
@@ -269,6 +326,10 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 		// says Lapse past it), and that deadline is immutable once written — so
 		// there is no "on-chain window still ahead" case left to wait out.
 		res, perr := rw.probeOnce(cancel, probe)
+		// Read per attempt: the receipt can be pinned while this waits out
+		// lapseFallback.
+		receipt, haveReceipt := rw.signed(ticketID)
+		signed := receipt.amount
 		if perr == nil {
 			switch {
 			case !res.exists:
@@ -286,20 +347,44 @@ func (rw *RefundWatchdog) driveLapse(ticketID string, cancel <-chan struct{}, pr
 				rw.log.Warn("refund watchdog: unrecognized ticket state, likely a contract newer than these escrow bindings; not attempting settleLapsed — upgrade before acting on this ticket",
 					slog.String("ticket_id", ticketID))
 				return
+			case res.verdict == escrow.VerdictLapse && haveReceipt && res.pendingAmount > signed:
+				// Refusing is no defense: settleLapsed is permissionless and
+				// pays the operator, who can post it and collect either way.
+				// It keeps the payer from paying the fee for a payout its own
+				// receipt contradicts, and gives the event a warning instead of
+				// a success line. The pool slot stays held until someone lapses
+				// the ticket.
+				rw.log.Warn("refund watchdog: operator's settle claim exceeds the receipt it signed; not finalizing it with settleLapsed",
+					slog.String("ticket_id", ticketID),
+					slog.Uint64("claimed_microusdc", res.pendingAmount),
+					slog.Uint64("receipt_microusdc", signed),
+					slog.String("remedy", rw.remedy))
+				if rw.overclaimed != nil {
+					rw.overclaimed(ticketID, receipt.node)
+				}
+				return
 			}
 		}
-		// Box still parked past the node's own lapse schedule (or the probe
-		// errored — try anyway; a revert is cheap and the error may be
-		// transient).
-		txid, lerr := rw.callOnce(cancel, lapse)
-		if errors.Is(lerr, errCancelled) {
-			return
-		}
-		if lerr == nil {
-			rw.log.Info("refund watchdog: finalized a stalled operator claim via settleLapsed",
-				slog.String("ticket_id", ticketID),
-				slog.String("txid", txid))
-			return
+		var lerr error
+		if perr != nil && haveReceipt {
+			// The claim could be above the receipt, and a blind settleLapsed
+			// would pay it in full. Counted as a failed attempt.
+			lerr = fmt.Errorf("box unreadable, so not lapsing a claim the receipt may contradict: %w", perr)
+		} else {
+			// Box still parked past the node's own lapse schedule (or the
+			// probe errored with no receipt to hold the claim against — try
+			// anyway; a revert is cheap and the error may be transient).
+			var txid string
+			txid, lerr = rw.callOnce(cancel, lapse)
+			if errors.Is(lerr, errCancelled) {
+				return
+			}
+			if lerr == nil {
+				rw.log.Info("refund watchdog: finalized a stalled operator claim via settleLapsed",
+					slog.String("ticket_id", ticketID),
+					slog.String("txid", txid))
+				return
+			}
 		}
 		if attempt >= rw.attempts {
 			rw.log.Warn("refund watchdog: settleLapsed failed; giving up",
@@ -399,6 +484,7 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 		defer func() {
 			rw.mu.Lock()
 			delete(rw.pending, ticketID)
+			delete(rw.receipts, ticketID)
 			rw.mu.Unlock()
 		}()
 		timer := time.NewTimer(time.Until(deadline))
