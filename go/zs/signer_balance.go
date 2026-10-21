@@ -17,7 +17,9 @@ import (
 // A node's signing account pays the pooled fees of every open() group and
 // atomic settle it signs, so the shared selection policy drops a node whose
 // account is known to be below selection.MinSignerSpendableMicroAlgos. This
-// file supplies the reading.
+// file supplies the reading. On Solana the account pays the open's fees and
+// its Ticket's rent, and the same pass reads it through the Chain's
+// SignerLamportsReader against selection.MinSignerSpendableLamports.
 //
 // Every signer in the fleet is read on every chain refresh, never just the
 // nodes a request is about to use. The open() group this process submits
@@ -27,7 +29,8 @@ import (
 
 const (
 	// signerBalanceConcurrency bounds in-flight account reads. Each is a ~400
-	// byte GET; the bound exists for public algod rate limits, not our sockets.
+	// byte GET (a smaller POST on Solana); the bound exists for public algod
+	// and RPC rate limits, not our sockets.
 	signerBalanceConcurrency = 8
 	// signerBalanceTimeout caps the whole pass inside the registry's refresh
 	// budget (DefaultRefreshTimeout, shared with the details probes). A signer
@@ -35,10 +38,7 @@ const (
 	signerBalanceTimeout = 10 * time.Second
 )
 
-// fillSignerBalances sets SignerSpendableMicroAlgos on every op from a fresh
-// read of each distinct signing address, falling back to the last successful
-// reading when a read fails. An address never read successfully leaves the
-// field nil (eligible).
+// fillSignerBalances sets SignerSpendableMicroAlgos on every op from algod.
 func (s *ChainOperatorSource) fillSignerBalances(ctx context.Context, ops []Operator) {
 	read := s.readSpendable
 	if read == nil {
@@ -47,7 +47,15 @@ func (s *ChainOperatorSource) fillSignerBalances(ctx context.Context, ops []Oper
 		}
 		read = s.algodSpendable
 	}
+	s.fillSignerReadings(ctx, ops, read, func(op *Operator, v *uint64) { op.SignerSpendableMicroAlgos = v })
+}
 
+// fillSignerReadings sets each op's reading, through set, from a fresh read of
+// each distinct signing address, falling back to the last successful reading
+// when a read fails. An address never read successfully leaves the field nil
+// (eligible).
+func (s *ChainOperatorSource) fillSignerReadings(ctx context.Context, ops []Operator,
+	read func(ctx context.Context, addr string) (uint64, error), set func(op *Operator, v *uint64)) {
 	seen := make(map[string]struct{}, len(ops))
 	addrs := make([]string, 0, len(ops))
 	for _, op := range ops {
@@ -123,7 +131,7 @@ func (s *ChainOperatorSource) fillSignerBalances(ctx context.Context, ops []Oper
 	}
 	for i := range ops {
 		if v, ok := s.signerSpendable[ops[i].SigningAddr]; ok {
-			ops[i].SignerSpendableMicroAlgos = &v
+			set(&ops[i], &v)
 		}
 	}
 	s.signerMu.Unlock()

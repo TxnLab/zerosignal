@@ -20,6 +20,9 @@
 //   - The reader takes its own clock for the revenue windows, as Go's takes
 //     its own; a host passing one to ChainOperatorSource passes it here too.
 //   - The program id is base58 text, checked to be a key at construction.
+//   - A spendable reading narrows to a number on Operator, as
+//     signerSpendableMicroAlgos does, which rounds past 2^53 lamports
+//     (about nine million SOL), far above the floor it is compared with.
 
 import { SECONDS_PER_DAY, windowedRingRevenue } from '@txnlab/zs-proto/escrow'
 import { type PublicKey, decodeBase58, publicKeyBytes } from '@txnlab/zs-proto/solana'
@@ -47,6 +50,13 @@ const GENESIS_READ_TIMEOUT_MS = 10_000
 // or so. A confirmed block that never finalizes costs one refresh routed on a
 // registry the next read corrects.
 const REGISTRY_COMMITMENT: Commitment = 'confirmed'
+
+/**
+ * An upper bound on the rent-exempt minimum of a signer's own, empty account,
+ * which a spendable reading leaves out of its balance: Go's
+ * solanaSignerReserveLamports, where the reason is.
+ */
+export const SOLANA_SIGNER_RESERVE_LAMPORTS = 890_880n
 
 export interface SolanaChainReaderOptions {
     rpc: SolanaRpc
@@ -114,6 +124,27 @@ export class SolanaChainReader implements ChainReader {
         } catch (err) {
             throw new Error(`fetch nodes: ${message(err)}`, { cause: err })
         }
+    }
+
+    /**
+     * readSignerSpendableLamports reads addr's balance at the registry's
+     * commitment and returns what lies above the account's own reserve, as
+     * Go's ReadSignerSpendableLamports.
+     */
+    async readSignerSpendableLamports(addr: string, signal: AbortSignal): Promise<bigint> {
+        const rpc = this.#requireRpc()
+        try {
+            publicKeyBytes(addr)
+        } catch (err) {
+            throw new Error(`signing address ${JSON.stringify(addr)}: ${message(err)}`, { cause: err })
+        }
+        let lamports: bigint
+        try {
+            lamports = await rpc.getBalance(addr, { commitment: REGISTRY_COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`balance ${addr}: ${message(err)}`, { cause: err })
+        }
+        return lamports < SOLANA_SIGNER_RESERVE_LAMPORTS ? 0n : lamports - SOLANA_SIGNER_RESERVE_LAMPORTS
     }
 
     // A JavaScript caller can leave out what the type requires.
@@ -237,6 +268,7 @@ export function resolveSolanaNode(op: SolanaOperator, node: SolanaNode, currentD
         reachable: false,
         staging: node.staging !== 0,
         signerSpendableMicroAlgos: undefined,
+        signerSpendableLamports: undefined,
         ephemeralRecipient: undefined,
         ephemeralExpiry: 0,
         ephemeralIssuedAt: 0,

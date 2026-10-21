@@ -165,6 +165,40 @@ func TestSignerUnderfunded_Boundary(t *testing.T) {
 	}
 }
 
+func TestSignerLamportsUnderfunded_Boundary(t *testing.T) {
+	floor := selection.MinSignerSpendableLamports
+	u := func(v uint64) *uint64 { return &v }
+	cases := []struct {
+		name string
+		in   *uint64
+		want bool
+	}{
+		{"never read", nil, false},
+		{"zero", u(0), true},
+		{"one short", u(floor - 1), true},
+		{"at floor", u(floor), false},
+		{"max", u(^uint64(0)), false},
+	}
+	for _, tc := range cases {
+		if got := selection.SignerLamportsUnderfunded(tc.in); got != tc.want {
+			t.Errorf("%s: SignerLamportsUnderfunded = %v, want %v", tc.name, got, tc.want)
+		}
+		o := op(1, "A")
+		o.SignerSpendableLamports = tc.in
+		if got := o.SignerUnderfunded(); got != tc.want {
+			t.Errorf("%s: Operator.SignerUnderfunded = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// SelectTargets reads the predicate, so a Solana node short of the floor
+	// leaves the pool as an Algorand one does.
+	broke := op(2, "B")
+	broke.SignerSpendableLamports = u(floor - 1)
+	got := selection.SelectTargets([]selection.Operator{op(1, "A"), broke}, cc(), nil)
+	if want := []uint64{1}; !reflect.DeepEqual(ids(got.Operators), want) {
+		t.Errorf("ids = %v, want %v (lamports-broke signer excluded)", ids(got.Operators), want)
+	}
+}
+
 func TestSelectTargets_SignerUnderfunded(t *testing.T) {
 	zero := uint64(0)
 	broke := op(2, "B")

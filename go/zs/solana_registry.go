@@ -42,8 +42,9 @@ import (
 //   - An account that won't decode fails the read, as a malformed box does.
 //   - Stake, accruals, live tickets, input and output units and the
 //     admin-resolution counters are on both records and on neither Operator.
-//
-// It reads no signer balance; see FetchChain.
+//   - The signer's balance is SignerSpendableLamports, which
+//     ChainOperatorSource's balance pass reads through
+//     ReadSignerSpendableLamports, not SignerSpendableMicroAlgos.
 type SolanaChainReader struct {
 	RPC rpc.Client
 	// Program is the zs_escrow program id; zero is zsescrow.ProgramID.
@@ -59,7 +60,20 @@ type SolanaChainReader struct {
 	clock func() time.Time
 }
 
-var _ ChainReader = (*SolanaChainReader)(nil)
+var (
+	_ ChainReader          = (*SolanaChainReader)(nil)
+	_ SignerLamportsReader = (*SolanaChainReader)(nil)
+)
+
+// solanaSignerReserveLamports bounds the rent-exempt minimum of a signer's own
+// account from above: no data, so the 128-byte account overhead at 6,960
+// lamports a byte, the ceiling selection.MinSignerSpendableLamports prices the
+// Ticket's rent at (the current rate can be lower; see there). The runtime
+// refuses a transaction that leaves its fee payer above zero but below its
+// minimum (InsufficientFundsForRent), so the minimum is the Solana account's
+// min-balance, and the spendable reading is what lies above this bound, as
+// spendableMicroAlgos reads above algod's.
+const solanaSignerReserveLamports uint64 = 890_880
 
 // solanaRegistryCommitment is confirmed rather than the RPC's default,
 // finalized, so a key rotation or an eviction reaches routing in about a
@@ -99,6 +113,35 @@ func (c *SolanaChainReader) ReadDeployment(ctx context.Context) (ticket.Deployme
 		return ticket.DeploymentID{}, fmt.Errorf("zs: %w", err)
 	}
 	return d, nil
+}
+
+// ReadSignerSpendableLamports reads addr's balance at the registry's
+// commitment, so a node is judged on a balance from about the slot its
+// registry was read at, and returns what lies above the account's own
+// reserve. getBalance answers 0 for an account that does not exist, which is
+// the honest reading of a signer nobody funded.
+func (c *SolanaChainReader) ReadSignerSpendableLamports(ctx context.Context, addr string) (uint64, error) {
+	if c.RPC == nil {
+		return 0, errors.New("SolanaChainReader.RPC is nil")
+	}
+	key, err := solana.ParsePublicKey(addr)
+	if err != nil {
+		return 0, fmt.Errorf("signing address %q: %w", addr, err)
+	}
+	lamports, err := c.RPC.GetBalance(ctx, key, solanaRegistryCommitment)
+	if err != nil {
+		return 0, fmt.Errorf("balance %s: %w", addr, err)
+	}
+	return solanaSpendableLamports(lamports), nil
+}
+
+// solanaSpendableLamports is lamports less the signer's reserve, floored at
+// zero, as spendableMicroAlgos is.
+func solanaSpendableLamports(lamports uint64) uint64 {
+	if lamports < solanaSignerReserveLamports {
+		return 0
+	}
+	return lamports - solanaSignerReserveLamports
 }
 
 // solanaAccountFilter selects one account type by its discriminator alone.

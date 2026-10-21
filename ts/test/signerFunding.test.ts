@@ -6,7 +6,9 @@
 import { describe, it, expect } from 'vitest'
 
 import {
+    MIN_SIGNER_SPENDABLE_LAMPORTS,
     MIN_SIGNER_SPENDABLE_MICROALGOS,
+    signerLamportsBelowFloor,
     signerSpendableBelowFloor,
     signerUnderfunded,
     type Operator,
@@ -47,5 +49,21 @@ describe('signer funding floor (mirror of selection.SignerUnderfunded)', () => {
     ] as const)('%s', (_name, spendable, want) => {
         expect(signerSpendableBelowFloor(spendable)).toBe(want)
         expect(signerUnderfunded(op(spendable))).toBe(want)
+    })
+})
+
+// Mirrors proto/go/selection TestSignerLamportsUnderfunded_Boundary; the
+// floor's value is pinned against Go by solana_registry_vectors.json.
+describe('Solana signer funding floor (mirror of selection.SignerLamportsUnderfunded)', () => {
+    it.each([
+        ['never read (undefined)', undefined, false],
+        ['never read (null)', null, false],
+        ['zero is a real reading', 0, true],
+        ['one short', MIN_SIGNER_SPENDABLE_LAMPORTS - 1, true],
+        ['at floor', MIN_SIGNER_SPENDABLE_LAMPORTS, false],
+        ['max safe', Number.MAX_SAFE_INTEGER, false],
+    ] as const)('%s', (_name, spendable, want) => {
+        expect(signerLamportsBelowFloor(spendable)).toBe(want)
+        expect(signerUnderfunded({ ...op(undefined), signer_spendable_lamports: spendable as number | undefined })).toBe(want)
     })
 })

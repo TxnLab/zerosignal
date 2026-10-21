@@ -727,7 +727,7 @@ func (p *DynamicRegistryProvider) logTransitions(prev, next *registrySnapshot) {
 		switch was, is := old.SignerUnderfunded(), op.SignerUnderfunded(); {
 		case !was && is:
 			p.logSignerUnderfunded(op)
-		case was && !is && op.SignerSpendableMicroAlgos == nil:
+		case was && !is && op.SignerSpendableMicroAlgos == nil && op.SignerSpendableLamports == nil:
 			// A rotated signer whose first read failed: nothing says it was
 			// funded, only that it is no longer known to be broke.
 			p.log.Info("node signing account balance is unknown (signer changed); routing to it again",
@@ -736,11 +736,12 @@ func (p *DynamicRegistryProvider) logTransitions(prev, next *registrySnapshot) {
 				slog.String("signing_addr", op.SigningAddr),
 			)
 		case was && !is:
+			spendable, _ := signerReadingAttrs(op)
 			p.log.Info("node signing account topped up; routing to it again",
 				slog.Uint64("operator_id", op.ID),
 				slog.Uint64("node_id", op.NodeID),
 				slog.String("signing_addr", op.SigningAddr),
-				slog.Uint64("signer_spendable_microalgos", *op.SignerSpendableMicroAlgos),
+				spendable,
 			)
 		}
 		if old.Reachable != op.Reachable {
@@ -783,17 +784,29 @@ func (p *DynamicRegistryProvider) logTransitions(prev, next *registrySnapshot) {
 // models from this payer's catalog: without it, "why did my model vanish" has
 // no answer in the proxy log.
 func (p *DynamicRegistryProvider) logSignerUnderfunded(op Operator) {
-	var spendable uint64
-	if op.SignerSpendableMicroAlgos != nil {
-		spendable = *op.SignerSpendableMicroAlgos
-	}
+	spendable, floor := signerReadingAttrs(op)
 	p.log.Warn("node signing account is below the routing floor; not routing to it until topped up",
 		slog.Uint64("operator_id", op.ID),
 		slog.Uint64("node_id", op.NodeID),
 		slog.String("signing_addr", op.SigningAddr),
-		slog.Uint64("signer_spendable_microalgos", spendable),
-		slog.Uint64("floor_microalgos", selection.MinSignerSpendableMicroAlgos),
+		spendable,
+		floor,
 	)
+}
+
+// signerReadingAttrs names op's signer reading and the floor it is judged
+// against in its rail's unit: lamports when op has a lamports reading, else
+// microAlgos, 0 when unread.
+func signerReadingAttrs(op Operator) (spendable, floor slog.Attr) {
+	if op.SignerSpendableLamports != nil {
+		return slog.Uint64("signer_spendable_lamports", *op.SignerSpendableLamports),
+			slog.Uint64("floor_lamports", selection.MinSignerSpendableLamports)
+	}
+	var v uint64
+	if op.SignerSpendableMicroAlgos != nil {
+		v = *op.SignerSpendableMicroAlgos
+	}
+	return slog.Uint64("signer_spendable_microalgos", v), slog.Uint64("floor_microalgos", selection.MinSignerSpendableMicroAlgos)
 }
 
 func (p *DynamicRegistryProvider) logUnderfundedIn(ops []Operator) {

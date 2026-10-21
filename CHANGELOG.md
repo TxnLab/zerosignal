@@ -41,8 +41,34 @@ rail, and a host opts in by building its own registry over it.
   (`ReadChain`, `ReadDeployment`) ↔ the SDK's `ChainReader` port (`readChain`,
   `readDeployment`), set as `ChainOperatorSource.Chain` ↔ the `chain` option. Unset, it reads
   the Algorand app as before. The probes, routing stores and registry are the same on either
-  rail. The algod signer-balance pass runs only for the Algorand read, so a Solana node's
-  `SignerSpendableMicroAlgos` stays unset, which routes.
+  rail.
+- **The signer-funding gate on Solana.** A node's signing key pays the open offer's fees and
+  the Ticket account's rent (`open` makes `node_signer` the rent payer), so the router holds out
+  a node that can't afford one open, as it holds out an Algorand node below 5 ALGO.
+  `ChainOperatorSource` runs its signer-balance pass over a reader that is a
+  `SignerLamportsReader` (`ReadSignerSpendableLamports`) ↔ one with
+  `readSignerSpendableLamports`, as `SolanaChainReader` is: every distinct signer read with
+  `getBalance` at `confirmed`, eight at a time within the pass's 10 s, a failed read keeping the
+  last reading and a never-read signer routing, all as on Algorand. The reading is the
+  balance less an upper bound on the signer account's own rent-exempt reserve (890,880
+  lamports), and it rides
+  `Operator.SignerSpendableLamports` ↔ `signerSpendableLamports` into the new
+  `selection.Operator.SignerSpendableLamports` ↔ `signer_spendable_lamports` (omitted when
+  unset, so an Algorand descriptor's bytes and the selection vectors are unchanged).
+  `SignerUnderfunded` ↔ `signerUnderfunded` hold a node out when either rail's reading is
+  below its floor; the Solana floor is `selection.MinSignerSpendableLamports` ↔
+  `MIN_SIGNER_SPENDABLE_LAMPORTS`, 2,522,680 lamports: two 5,000-lamport signatures, the
+  program fixtures' 120-lamport priority fee (1,000 micro-lamports per unit on a 120,000-unit
+  limit) and the rent-exempt minimum of the 233-byte Ticket plus the 128-byte account
+  overhead. Floor and reserve both price rent at 6,960 lamports a byte, the ceiling
+  SIMD-0437's steps fall from (the program's fixtures already charge 5,080), so both are
+  upper bounds that hold out a node a lower rate would admit. Unlike the ALGO floor it
+  carries no staleness budget. `SignerReadingsUnderfunded` ↔ `signerReadingsUnderfunded` is
+  the one two-rail predicate the gates share. `/v1/zs/operators` lists the reading as
+  `signer_spendable_lamports`, and the registry's funding log lines name lamports and
+  `floor_lamports` for a Solana node. Still Algorand-only: the `no_funded_operator` message
+  and both pin refusals say "5 ALGO", and the doctor copies only the microAlgo reading, so it
+  would count a Solana node short of lamports as usable (it reads only algod today).
 - **The Solana reader.** `zs.SolanaChainReader` ↔ `SolanaChainReader` read the `Operator` and
   `Node` accounts with two confirmed `getProgramAccounts` calls, each filtered on its account
   discriminator, decode them with `solana/zsescrow`, and build the Operator the Algorand read
@@ -63,7 +89,10 @@ The new `testdata/solana_registry_vectors.json` (Go's `TestSolanaRegistryVectors
 across languages: the program's own Operator and Node fixtures, and edits of them re-encoded in
 Go, as `getProgramAccounts` answers, to the Operators built (in `operator_vectors.json`'s
 `chain_nodes` shape), the accounts left out and why, the params each read sends, and the
-deployment id.
+deployment id. Its `signer_balance` block pins the balance pass: passes of one source over
+funded, exactly-at-floor, one-below, below-reserve and unreadable balances, a signer two nodes
+share, the `getBalance` params each pass sends, each node's reading and whether the selection
+rule holds it out, and the floor and reserve as literals.
 
 ### 2026-10-21 — the payer's Solana transaction signer (unreleased)
 

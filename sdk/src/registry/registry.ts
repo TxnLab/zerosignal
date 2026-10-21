@@ -64,7 +64,7 @@
 //   - A logger or subscriber that throws is caught.
 
 import type { OperatorDetailsModel } from '@txnlab/zs-proto/inject'
-import { MIN_SIGNER_SPENDABLE_MICROALGOS, signerSpendableBelowFloor } from '@txnlab/zs-proto/selection'
+import { MIN_SIGNER_SPENDABLE_LAMPORTS, MIN_SIGNER_SPENDABLE_MICROALGOS, signerReadingsUnderfunded } from '@txnlab/zs-proto/selection'
 import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 
 import { DEFAULT_DEMAND_MAX, ModelDemand, selectProbeSet } from '../catalog/probe.js'
@@ -73,7 +73,7 @@ import { type Discovery, defaults } from '../config.js'
 import { quietLogger } from '../log.js'
 import { type BuiltinToolDef, type Operator, refOf, sealRecipientOf } from '../operator.js'
 import type { RegistryProvider } from '../parts.js'
-import { type Clock, type Logger, type StorageAdapter, discardLogger } from '../ports.js'
+import { type Clock, type LogAttrs, type Logger, type StorageAdapter, discardLogger } from '../ports.js'
 import { MAX_TIMER_MS, untilAborted } from '../sleep.js'
 import { type NodeRef, nodeRefString } from '../types.js'
 import { aggregateBuiltinTools, aggregateModelDetails, aggregateModels } from './aggregate.js'
@@ -523,7 +523,7 @@ export class DiscoveryRegistry implements RegistryProvider {
             const is = signerUnderfunded(op)
             if (!was && is) {
                 this.#logSignerUnderfunded(op)
-            } else if (was && !is && op.signerSpendableMicroAlgos === undefined) {
+            } else if (was && !is && op.signerSpendableMicroAlgos === undefined && op.signerSpendableLamports === undefined) {
                 // A rotated signer whose first read failed: nothing says it was
                 // funded, only that it is no longer known to be broke.
                 this.#log.info('node signing account balance is unknown (signer changed); routing to it again', {
@@ -531,10 +531,11 @@ export class DiscoveryRegistry implements RegistryProvider {
                     signing_addr: op.signingAddr,
                 })
             } else if (was && !is) {
+                const { spendable } = signerReadingAttrs(op)
                 this.#log.info('node signing account topped up; routing to it again', {
                     ...nodeAttrs(op),
                     signing_addr: op.signingAddr,
-                    signer_spendable_microalgos: op.signerSpendableMicroAlgos,
+                    ...spendable,
                 })
             }
             if (old.reachable !== op.reachable) {
@@ -561,11 +562,12 @@ export class DiscoveryRegistry implements RegistryProvider {
     // WARN, not info: it silently takes models out of this payer's catalog, and
     // without it "why did my model vanish" has no answer in the log.
     #logSignerUnderfunded(op: Operator): void {
+        const { spendable, floor } = signerReadingAttrs(op)
         this.#log.warn('node signing account is below the routing floor; not routing to it until topped up', {
             ...nodeAttrs(op),
             signing_addr: op.signingAddr,
-            signer_spendable_microalgos: op.signerSpendableMicroAlgos ?? 0,
-            floor_microalgos: MIN_SIGNER_SPENDABLE_MICROALGOS,
+            ...spendable,
+            ...floor,
         })
     }
 
@@ -794,7 +796,23 @@ export function advertisable(op: Operator, nowMs: number, allowStaging: boolean,
 // ---- helpers ----
 
 function signerUnderfunded(op: Operator): boolean {
-    return signerSpendableBelowFloor(op.signerSpendableMicroAlgos)
+    return signerReadingsUnderfunded(op.signerSpendableMicroAlgos, op.signerSpendableLamports)
+}
+
+// Names op's signer reading and its floor in its rail's unit, as Go's
+// signerReadingAttrs: lamports when op has a lamports reading, else
+// microAlgos, 0 when unread.
+function signerReadingAttrs(op: Operator): { spendable: LogAttrs; floor: LogAttrs } {
+    if (op.signerSpendableLamports !== undefined) {
+        return {
+            spendable: { signer_spendable_lamports: op.signerSpendableLamports },
+            floor: { floor_lamports: MIN_SIGNER_SPENDABLE_LAMPORTS },
+        }
+    }
+    return {
+        spendable: { signer_spendable_microalgos: op.signerSpendableMicroAlgos ?? 0 },
+        floor: { floor_microalgos: MIN_SIGNER_SPENDABLE_MICROALGOS },
+    }
 }
 
 function buildSnapshot(ops: readonly Operator[], nowMs: number): Snapshot {

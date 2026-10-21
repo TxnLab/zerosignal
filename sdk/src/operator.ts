@@ -148,6 +148,8 @@ export interface Operator {
     staging: boolean
     /** Undefined: never read, which routes as funded. */
     signerSpendableMicroAlgos?: number | undefined
+    /** The same for a node on Solana, in lamports above the account's own reserve. */
+    signerSpendableLamports?: number | undefined
     /**
      * The node's signed ephemeral age recipient, set only once its
      * advertisement verified against ticketSigningKey. Undefined leaves the
@@ -362,5 +364,6 @@ export function selectionOf(o: Operator): SelectionOperator {
     }
     if (o.staging) out.staging = true
     if (o.signerSpendableMicroAlgos !== undefined) out.signer_spendable_microalgos = o.signerSpendableMicroAlgos
+    if (o.signerSpendableLamports !== undefined) out.signer_spendable_lamports = o.signerSpendableLamports
     return out
 }

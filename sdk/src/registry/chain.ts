@@ -124,6 +124,13 @@ export interface ChainReader {
     /** Throws when the read fails or the escrow has no operators; one node that won't resolve is skipped and logged. */
     readChain(signal?: AbortSignal): Promise<Operator[]>
     readDeployment(signal?: AbortSignal): Promise<Uint8Array>
+    /**
+     * Reads a node signer's spendable lamports, on a reader over Solana, so
+     * the source runs its signer-balance pass over it as it runs it over algod
+     * for the Algorand read. A reader without it leaves every signer unread,
+     * which routes. Go's SignerLamportsReader.
+     */
+    readSignerSpendableLamports?(addr: string, signal: AbortSignal): Promise<bigint>
 }
 
 /**
@@ -377,7 +384,7 @@ export function safeId(id: bigint, what: string): number {
     return Number(id)
 }
 
-/** SIGNER_BALANCE_CONCURRENCY bounds the account reads in flight, for public algod rate limits. */
+/** SIGNER_BALANCE_CONCURRENCY bounds the account reads in flight, for public algod and RPC rate limits. */
 export const SIGNER_BALANCE_CONCURRENCY = 8
 
 /**
@@ -427,10 +434,10 @@ export const SIGNER_BALANCE_TIMEOUT_MS = 10_000
 
 /**
  * The chain a ChainOperatorSource reads: the ZeroSignalEscrow app on Algorand
- * from algod and escrowAppId, with the signer-balance pass, or another rail
- * through a ChainReader such as SolanaChainReader. With a chain, the Algorand
- * read's options (operatorIds, requestTimeoutMs, signerBalanceTimeoutMs) are
- * unused; a restriction to some operators goes on the reader.
+ * from algod and escrowAppId, or another rail through a ChainReader such as
+ * SolanaChainReader, each with its signer-balance pass. With a chain, the
+ * Algorand read's options (operatorIds, requestTimeoutMs) are unused; a
+ * restriction to some operators goes on the reader.
  */
 export type ChainOperatorSourceOptions = ChainSourceCommonOptions &
     (
@@ -526,20 +533,41 @@ export class ChainOperatorSource {
 
     /**
      * fetchChain returns one Operator per live node, unprobed, with its
-     * signing account's spendable ALGO when the chain is Algorand. It fails
-     * when the chain read is not configured, a read fails, or the escrow has
-     * no operators; one node that won't resolve is skipped and logged instead.
+     * signing account's spendable ALGO, or lamports on Solana. It fails when
+     * the chain read is not configured, a read fails, or the escrow has no
+     * operators; one node that won't resolve is skipped and logged instead.
      */
     async fetchChain(signal?: AbortSignal): Promise<Operator[]> {
         const reader = this.#reader
         const ops = reader ? await reader.readChain(signal) : await this.#readChainNodes(signal)
         // Before the probes, which every refresh path runs after this call.
         await this.#deriveDeployment(signal)
-        // The pass reads algod accounts, so it can judge only an Algorand
-        // signer. Another rail's nodes keep signerSpendableMicroAlgos
-        // undefined, which routes, as an Algorand signer never read
-        // successfully does.
-        if (!reader) await this.#fillSignerBalances(this.#algodOrThrow(), ops, signal)
+        // algod can judge only an Algorand signer, so another rail's reader
+        // supplies its own read. A reader with none leaves every reading
+        // undefined, which routes, as a signer never read successfully does.
+        if (!reader) {
+            const algod = this.#algodOrThrow()
+            await this.#fillSignerReadings(
+                ops,
+                (addr, pass) => this.#readSpendable(algod, addr, pass),
+                (op, v) => {
+                    op.signerSpendableMicroAlgos = v
+                },
+                signal,
+            )
+        } else {
+            const readLamports = reader.readSignerSpendableLamports?.bind(reader)
+            if (readLamports !== undefined) {
+                await this.#fillSignerReadings(
+                    ops,
+                    readLamports,
+                    (op, v) => {
+                        op.signerSpendableLamports = v
+                    },
+                    signal,
+                )
+            }
+        }
         return ops
     }
 
@@ -615,12 +643,17 @@ export class ChainOperatorSource {
         return out
     }
 
-    // Sets signerSpendableMicroAlgos on every op from a fresh read of each
-    // distinct signing address, or the last successful reading when this one
-    // fails. An address never read successfully stays undefined, which routes.
+    // Sets each op's reading, through set, from a fresh read of each distinct
+    // signing address, or the last successful reading when this one fails. An
+    // address never read successfully stays undefined, which routes.
     // Addresses no longer in ops are forgotten, so a signer that returns is not
     // judged on a reading from before it left.
-    async #fillSignerBalances(algod: algosdk.Algodv2, ops: Operator[], signal?: AbortSignal): Promise<void> {
+    async #fillSignerReadings(
+        ops: Operator[],
+        read: (addr: string, signal: AbortSignal) => Promise<bigint>,
+        set: (op: Operator, v: number) => void,
+        signal?: AbortSignal,
+    ): Promise<void> {
         const live = new Set<string>()
         for (const op of ops) if (op.signingAddr !== '') live.add(op.signingAddr)
         if (live.size === 0) return
@@ -641,7 +674,7 @@ export class ChainOperatorSource {
                     continue
                 }
                 try {
-                    results[i] = { spendable: await this.#readSpendable(algod, addrs[i]!, pass) }
+                    results[i] = { spendable: await read(addrs[i]!, pass) }
                 } catch (err) {
                     results[i] = { err }
                 }
@@ -666,7 +699,7 @@ export class ChainOperatorSource {
         for (const addr of this.#signerSpendable.keys()) if (!live.has(addr)) this.#signerSpendable.delete(addr)
         for (const op of ops) {
             const v = this.#signerSpendable.get(op.signingAddr)
-            if (v !== undefined) op.signerSpendableMicroAlgos = Number(v)
+            if (v !== undefined) set(op, Number(v))
         }
         // One line per pass: a rate-limited algod fails a fraction of reads
         // every pass, and those signers route on stale values.

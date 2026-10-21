@@ -73,6 +73,13 @@ type Operator struct {
 	// immutable: snapshots share it.
 	SignerSpendableMicroAlgos *uint64
 
+	// SignerSpendableLamports is the same for a node on Solana: SigningAddr's
+	// lamports less its own rent-exempt reserve, filled when the
+	// ChainOperatorSource's Chain is a SignerLamportsReader. Projected the same
+	// way, against selection.MinSignerSpendableLamports. Nil on an Algorand
+	// node, as SignerSpendableMicroAlgos is on a Solana one.
+	SignerSpendableLamports *uint64
+
 	// EphemeralRecipient / EphemeralRecipientPubkey / EphemeralExpiry /
 	// EphemeralIssuedAt carry the operator's signed short-lived age recipient
 	// (mandatory forward secrecy by key-erasure — SPEC.md § 3c, § 4, § 8). They
@@ -678,7 +685,7 @@ func (o Operator) ServesModel(model string) bool {
 // below the routing floor. The shared predicate, so discovery and dispatch
 // agree with SelectTargets on the boundary.
 func (o Operator) SignerUnderfunded() bool {
-	return selection.SignerUnderfunded(o.SignerSpendableMicroAlgos)
+	return selection.SignerReadingsUnderfunded(o.SignerSpendableMicroAlgos, o.SignerSpendableLamports)
 }
 
 // Selection projects this enriched operator onto the shared, transport-agnostic
@@ -735,7 +742,8 @@ func (o Operator) Selection() selection.Operator {
 		Models:          o.Models,
 		ModelCapacities: caps,
 		BuiltinTools:    tools,
-		// Shared pointer, never written through — see the field doc.
+		// Shared pointers, never written through — see the field docs.
 		SignerSpendableMicroAlgos: o.SignerSpendableMicroAlgos,
+		SignerSpendableLamports:   o.SignerSpendableLamports,
 	}
 }

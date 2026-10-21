@@ -2586,6 +2586,21 @@ app pick identically.
     demand-independent and adds no channel.
   - The floor doubles as the staleness budget. At ~7,000 µALGO of pooled fees
     per paid request, 5 ALGO covers ~700 requests between reads.
+  - **On Solana** the node's signing key is the open offer's fee payer and the
+    Ticket account's rent payer. Its reading is
+    `selection.Operator.signer_spendable_lamports`: the `getBalance` balance at
+    `confirmed` less an upper bound on the account's own rent-exempt minimum
+    (890,880 lamports), below which the runtime refuses a transaction that
+    leaves a fee payer above zero. The floor, `MinSignerSpendableLamports`
+    (2,522,680), is one open: two signatures at 5,000 lamports, a 120-lamport
+    priority fee, and the rent-exempt minimum of the 233-byte Ticket plus the
+    128-byte account overhead. Both price rent at 6,960 lamports a byte, the
+    ceiling SIMD-0437's lower steps fall from, so they hold out a node that a
+    lower current rate would admit rather than route to one that can't pay.
+    The floor is no staleness budget. Every other rule above applies
+    unchanged, and a node carries the reading of its own rail only. The
+    lamports gate is pinned by `solana_registry_vectors.json`, not the
+    `selection_vectors.json` cases below.
   - Both continuation pins re-check it, because a pinned node can drain
     mid-conversation. The tool-affinity pin: under `prefer` it yields, under
     `strict` the result is `signer_underfunded_blocked` — after the caller's

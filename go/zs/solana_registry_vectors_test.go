@@ -8,7 +8,8 @@ package zs
 // Generates / verifies proto/testdata/solana_registry_vectors.json: the
 // zs_escrow program's Operator and Node accounts, as a getProgramAccounts
 // answer, to the operators SolanaChainReader builds, through the RPC client
-// against a fake RPC. Every account starts from the program's own fixtures
+// against a fake RPC, and the signer-balance pass ChainOperatorSource runs
+// over it. Every account starts from the program's own fixtures
 // (solana_account_vectors.json); the edited ones are re-encoded here, after
 // this test's encoder is checked against those fixtures. want uses the field
 // names of operator_vectors.json's chain_nodes, so a node reads the same on
@@ -38,6 +39,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
@@ -83,6 +85,40 @@ type solanaRegistryCase struct {
 	Error       string                  `json:"error"`
 }
 
+// solanaSignerBalance is one signer's getBalance answer: Lamports, or an RPC
+// error when it is null.
+type solanaSignerBalance struct {
+	SigningAddr string  `json:"signing_addr"`
+	Lamports    *uint64 `json:"lamports"`
+}
+
+// solanaSignerWant is a node's reading after a pass, and whether the shared
+// selection rule holds it out.
+type solanaSignerWant struct {
+	OperatorID              uint64  `json:"operator_id"`
+	NodeID                  uint64  `json:"node_id"`
+	SigningAddr             string  `json:"signing_addr"`
+	SignerSpendableLamports *uint64 `json:"signer_spendable_lamports"`
+	Underfunded             bool    `json:"underfunded"`
+}
+
+// solanaSignerPass is one FetchChain: the balances the RPC answers, the
+// getBalance params the pass sent, sorted, and the nodes it built.
+type solanaSignerPass struct {
+	Balances []solanaSignerBalance `json:"balances"`
+	Sent     []json.RawMessage     `json:"sent"`
+	Want     []solanaSignerWant    `json:"want"`
+}
+
+// solanaSignerCase is a run of passes by one ChainOperatorSource over the
+// block's operators and the case's nodes, so a pass can read what an earlier
+// one left.
+type solanaSignerCase struct {
+	Name   string                  `json:"name"`
+	Nodes  []solanaRegistryAccount `json:"nodes"`
+	Passes []solanaSignerPass      `json:"passes"`
+}
+
 // solanaFixtureAccount is the part of a solana_account_vectors.json account
 // this test reads.
 type solanaFixtureAccount struct {
@@ -107,16 +143,23 @@ type solanaAccountFixtures struct {
 
 // fakeSolanaRPC answers getGenesisHash and the two getProgramAccounts reads,
 // telling them apart by the discriminator they filter on, and keeps the
-// params each read sent.
+// params each read sent. It answers getBalance from balances, with an RPC
+// error for an address it has no lamports for, and keeps each one's params.
 type fakeSolanaRPC struct {
 	genesis   solana.Hash
 	operators []solanaRegistryAccount
 	nodes     []solanaRegistryAccount
 
-	mu         sync.Mutex
-	opParams   json.RawMessage
-	nodeParams json.RawMessage
+	mu            sync.Mutex
+	opParams      json.RawMessage
+	nodeParams    json.RawMessage
+	balances      map[string]*uint64
+	balanceParams []json.RawMessage
 }
+
+// solanaRPCError is a JSON-RPC error neither client retries (invalid params),
+// so an unreadable balance fails its read at once.
+const solanaRPCError = -32602
 
 func (f *fakeSolanaRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -133,6 +176,24 @@ func (f *fakeSolanaRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case "getGenesisHash":
 		result = f.genesis.String()
+	case "getBalance":
+		var addr string
+		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &addr) != nil {
+			http.Error(w, "unexpected getBalance params", http.StatusBadRequest)
+			return
+		}
+		params, _ := json.Marshal(req.Params)
+		f.mu.Lock()
+		f.balanceParams = append(f.balanceParams, params)
+		lamports := f.balances[addr]
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if lamports == nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID,
+				"error": map[string]any{"code": solanaRPCError, "message": "unreadable"}})
+			return
+		}
+		result = map[string]any{"context": map[string]any{"slot": 1}, "value": *lamports}
 	case "getProgramAccounts":
 		var cfg struct {
 			Filters []struct {
@@ -362,10 +423,51 @@ func TestSolanaRegistryVectors(t *testing.T) {
 		runSolanaRegistryCase(t, &cases[i], fake, client, program)
 	}
 
+	signer1, signer2 := decodedNode("node_with_metrics").Signing.String(), decodedNode("node_staging_rotated").Signing.String()
+	floor, reserve := selection.MinSignerSpendableLamports, solanaSignerReserveLamports
+	lamports := func(v uint64) *uint64 { return &v }
+	const funded = 1_000_000_000
+	balances := func(b1, b2 *uint64) []solanaSignerBalance {
+		return []solanaSignerBalance{{signer1, b1}, {signer2, b2}}
+	}
+	twoNodes := []solanaRegistryAccount{node1, node2}
+	pass := func(b []solanaSignerBalance) solanaSignerPass { return solanaSignerPass{Balances: b} }
+	signerCases := []solanaSignerCase{
+		{Name: "funded signers route", Nodes: twoNodes,
+			Passes: []solanaSignerPass{pass(balances(lamports(funded), lamports(funded)))}},
+		{Name: "a signer exactly at the floor above its reserve routes", Nodes: twoNodes,
+			Passes: []solanaSignerPass{pass(balances(lamports(floor+reserve), lamports(funded)))}},
+		{Name: "a signer one lamport below the floor is held out", Nodes: twoNodes,
+			Passes: []solanaSignerPass{pass(balances(lamports(floor+reserve-1), lamports(funded)))}},
+		{Name: "a signer below its own reserve, or with no account, has nothing spendable", Nodes: twoNodes,
+			Passes: []solanaSignerPass{pass(balances(lamports(reserve-1), lamports(0)))}},
+		{Name: "a balance never read routes", Nodes: twoNodes,
+			Passes: []solanaSignerPass{pass(balances(nil, lamports(floor+reserve-1)))}},
+		{Name: "an unreadable balance keeps the last reading until a read shows a top-up", Nodes: twoNodes,
+			Passes: []solanaSignerPass{
+				pass(balances(lamports(floor+reserve-1), lamports(floor+reserve))),
+				pass(balances(nil, nil)),
+				pass(balances(lamports(funded), nil)),
+			}},
+		{Name: "a signer two nodes share is read once", Nodes: []solanaRegistryAccount{
+			node1, nodeAccount("node_staging_rotated", func(n *zsescrow.Node) { n.Signing = solana.MustPublicKey(signer1) }),
+		}, Passes: []solanaSignerPass{pass([]solanaSignerBalance{{signer1, lamports(floor + reserve - 1)}})}},
+	}
+	for i := range signerCases {
+		runSolanaSignerCase(t, &signerCases[i], fleet, fake, client, program)
+	}
+
 	reader := &SolanaChainReader{RPC: client, Program: program}
 	d, err := reader.ReadDeployment(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	type signerBalanceBlock struct {
+		Comment                    string                  `json:"comment"`
+		MinSignerSpendableLamports uint64                  `json:"min_signer_spendable_lamports"`
+		SignerReserveLamports      uint64                  `json:"signer_reserve_lamports"`
+		Operators                  []solanaRegistryAccount `json:"operators"`
+		Cases                      []solanaSignerCase      `json:"cases"`
 	}
 	f := struct {
 		Comment        string               `json:"comment"`
@@ -375,6 +477,7 @@ func TestSolanaRegistryVectors(t *testing.T) {
 		OperatorParams json.RawMessage      `json:"operator_params"`
 		NodeParams     json.RawMessage      `json:"node_params"`
 		Cases          []solanaRegistryCase `json:"cases"`
+		SignerBalance  signerBalanceBlock   `json:"signer_balance"`
 	}{
 		Comment: "Generated by proto/go/zs TestSolanaRegistryVectors from the accounts in solana_account_vectors.json. " +
 			"genesis_hash is what getGenesisHash answers and deployment_hex the deployment id read from it; operator_params and node_params are the getProgramAccounts params each read sends. " +
@@ -385,6 +488,16 @@ func TestSolanaRegistryVectors(t *testing.T) {
 		OperatorParams: fake.opParams,
 		NodeParams:     fake.nodeParams,
 		Cases:          cases,
+		SignerBalance: signerBalanceBlock{
+			Comment: "ChainOperatorSource over SolanaChainReader, one source per case and one FetchChain per pass, over operators and the case's nodes. " +
+				"balances are getBalance's answers (null: an RPC error); sent is the getBalance params the pass sent, sorted; want is each node's signer_spendable_lamports " +
+				"(null: never read) and whether the shared selection rule holds it out. min_signer_spendable_lamports is that rule's floor and signer_reserve_lamports " +
+				"what a reading leaves out of the balance.",
+			MinSignerSpendableLamports: floor,
+			SignerReserveLamports:      reserve,
+			Operators:                  fleet,
+			Cases:                      signerCases,
+		},
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -520,6 +633,43 @@ func runSolanaRegistryCase(t *testing.T, sc *solanaRegistryCase, fake *fakeSolan
 		sc.Skipped = append(sc.Skipped, solanaRegistrySkip{a.Pubkey, reason})
 	}
 	slices.SortFunc(sc.Skipped, func(a, b solanaRegistrySkip) int { return strings.Compare(a.Account, b.Account) })
+}
+
+// runSolanaSignerCase runs the case's passes through one ChainOperatorSource
+// and records, for each, what it sent and the readings and verdicts it built.
+func runSolanaSignerCase(t *testing.T, sc *solanaSignerCase, operators []solanaRegistryAccount, fake *fakeSolanaRPC, client rpc.Client, program solana.PublicKey) {
+	s := &ChainOperatorSource{
+		Chain: &SolanaChainReader{RPC: client, Program: program},
+		Log:   slog.New(slog.DiscardHandler),
+	}
+	for i := range sc.Passes {
+		p := &sc.Passes[i]
+		fake.mu.Lock()
+		fake.operators, fake.nodes, fake.balanceParams = operators, sc.Nodes, nil
+		fake.balances = map[string]*uint64{}
+		for _, b := range p.Balances {
+			fake.balances[b.SigningAddr] = b.Lamports
+		}
+		fake.mu.Unlock()
+		ops, err := s.FetchChain(context.Background())
+		if err != nil {
+			t.Fatalf("%s: pass %d: FetchChain: %v", sc.Name, i, err)
+		}
+		fake.mu.Lock()
+		p.Sent = slices.Clone(fake.balanceParams)
+		fake.mu.Unlock()
+		slices.SortFunc(p.Sent, func(a, b json.RawMessage) int { return bytes.Compare(a, b) })
+		p.Want = []solanaSignerWant{}
+		for _, o := range ops {
+			if o.SignerSpendableMicroAlgos != nil {
+				t.Fatalf("%s: pass %d: a Solana node read a microAlgo balance", sc.Name, i)
+			}
+			p.Want = append(p.Want, solanaSignerWant{
+				OperatorID: o.ID, NodeID: o.NodeID, SigningAddr: o.SigningAddr,
+				SignerSpendableLamports: o.SignerSpendableLamports, Underfunded: o.Selection().SignerUnderfunded(),
+			})
+		}
+	}
 }
 
 func chainNodeVectorOf(o Operator) chainNodeVector {

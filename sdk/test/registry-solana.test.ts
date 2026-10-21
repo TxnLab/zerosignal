@@ -5,16 +5,22 @@
 
 // The chain half of discovery on Solana against a fake RPC behind an injected
 // fetch: testdata/solana_registry_vectors.json, which go/zs's
-// TestSolanaRegistryVectors generates, then ChainOperatorSource over a
+// TestSolanaRegistryVectors generates, with its signer_balance block through
+// ChainOperatorSource's balance pass, then ChainOperatorSource over a
 // ChainReader, ported from go/zs's solana_registry_test.go.
 
 import { readFileSync } from 'node:fs'
 
+import { MIN_SIGNER_SPENDABLE_LAMPORTS, signerUnderfunded } from '@txnlab/zs-proto/selection'
 import { decodeNode, decodeOperator, OPERATOR_STATUS_EVICTED } from '@txnlab/zs-proto/solana/zsescrow'
+import { PROTO_VERSION } from '@txnlab/zs-proto/wire'
 import { describe, expect, it } from 'vitest'
 
 import { ChainOperatorSource, type ChainReader, type LogAttrs, type Logger, type Operator, SolanaChainReader } from '../src/index.js'
+import { selectionOf } from '../src/operator.js'
 import { NoOperatorsError } from '../src/registry/index.js'
+import { advertisable } from '../src/registry/registry.js'
+import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../src/registry/solana.js'
 import { SolanaRpcClient } from '../src/solana/rpc.js'
 
 interface VectorAccount {
@@ -35,6 +41,12 @@ interface VectorCase {
     error: string
 }
 
+interface SignerPass {
+    balances: { signing_addr: string; lamports: number | null }[]
+    sent: unknown[][]
+    want: { operator_id: number; node_id: number; signing_addr: string; signer_spendable_lamports: number | null; underfunded: boolean }[]
+}
+
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_registry_vectors.json', import.meta.url), 'utf8')) as {
     program_id: string
     genesis_hash: string
@@ -42,6 +54,12 @@ const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_registry_
     operator_params: unknown
     node_params: unknown
     cases: VectorCase[]
+    signer_balance: {
+        min_signer_spendable_lamports: number
+        signer_reserve_lamports: number
+        operators: VectorAccount[]
+        cases: { name: string; nodes: VectorAccount[]; passes: SignerPass[] }[]
+    }
 }
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex')
@@ -56,8 +74,12 @@ function memcmpBytes(params: unknown): string {
     return ((params as unknown[])[1] as { filters: { memcmp: { bytes: string } }[] }).filters[0]!.memcmp.bytes
 }
 
-/** An RPC answering getGenesisHash and the two registry reads, keeping the params each sent. */
-function fakeRpc(operators: VectorAccount[], nodes: VectorAccount[]) {
+/**
+ * An RPC answering getGenesisHash and the two registry reads, keeping the
+ * params each sent. getBalance answers from balances, with an RPC error
+ * neither client retries for an address it has no lamports for.
+ */
+function fakeRpc(operators: VectorAccount[], nodes: VectorAccount[], balances = new Map<string, number | null>()) {
     const seen: { method: string; params: unknown }[] = []
     const fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
         const req = JSON.parse(String(init?.body)) as { id: number; method: string; params: unknown[] }
@@ -65,7 +87,14 @@ function fakeRpc(operators: VectorAccount[], nodes: VectorAccount[]) {
         if (init?.signal?.aborted) throw init.signal.reason
         let result: unknown
         if (req.method === 'getGenesisHash') result = vectors.genesis_hash
-        else if (req.method === 'getProgramAccounts') {
+        else if (req.method === 'getBalance') {
+            const lamports = balances.get(String(req.params[0])) ?? null
+            if (lamports === null) {
+                const error = { code: -32602, message: 'unreadable' }
+                return new Response(JSON.stringify({ jsonrpc: '2.0', id: req.id, error }), { headers: { 'content-type': 'application/json' } })
+            }
+            result = { context: { slot: 1 }, value: lamports }
+        } else if (req.method === 'getProgramAccounts') {
             const disc = memcmpBytes(req.params)
             const accts = disc === OPERATOR_DISC ? operators : disc === NODE_DISC ? nodes : []
             result = accts.map((a) => ({
@@ -196,6 +225,60 @@ describe('Solana registry vectors', () => {
     })
 })
 
+describe('Solana signer-balance vectors', () => {
+    const block = vectors.signer_balance
+
+    it('prices the floor and the reserve as Go does', () => {
+        expect(MIN_SIGNER_SPENDABLE_LAMPORTS).toBe(block.min_signer_spendable_lamports)
+        expect(SOLANA_SIGNER_RESERVE_LAMPORTS).toBe(BigInt(block.signer_reserve_lamports))
+    })
+
+    it('covers every case', () => expect(block.cases.length).toBeGreaterThan(0))
+
+    it.each(block.cases.map((c) => [c.name, c] as const))('%s', async (_name, c) => {
+        const balances = new Map<string, number | null>()
+        const { rpc, seen } = fakeRpc(block.operators, c.nodes, balances)
+        const source = new ChainOperatorSource({ chain: new SolanaChainReader({ rpc, programId: vectors.program_id }) })
+        for (const p of c.passes) {
+            balances.clear()
+            for (const b of p.balances) balances.set(b.signing_addr, b.lamports)
+            seen.length = 0
+            const ops = await source.fetchChain()
+            const sent = seen
+                .filter((s) => s.method === 'getBalance')
+                .map((s) => s.params as unknown[])
+                .sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : String(a[0]) > String(b[0]) ? 1 : 0))
+            expect(sent).toEqual(p.sent)
+            expect(ops.every((o) => o.signerSpendableMicroAlgos === undefined)).toBe(true)
+            expect(
+                ops.map((o) => ({
+                    operator_id: o.id,
+                    node_id: o.nodeId,
+                    signing_addr: o.signingAddr,
+                    signer_spendable_lamports: o.signerSpendableLamports ?? null,
+                    underfunded: signerUnderfunded(selectionOf(o)),
+                })),
+            ).toEqual(p.want)
+        }
+    })
+
+    // The discovery aggregates hold out what dispatch refuses, on either rail.
+    it('holds a node below the lamports floor out of the discovery aggregates', async () => {
+        const { rpc } = fakeRpc(vectors.cases[0]!.operators, vectors.cases[0]!.nodes)
+        const [op] = await new SolanaChainReader({ rpc, programId: vectors.program_id }).readChain()
+        const probed = { ...op!, probed: true, reachable: true, protoVersion: PROTO_VERSION }
+        const at = (signerSpendableLamports: number) => advertisable({ ...probed, signerSpendableLamports }, 0, false, 60_000)
+        expect([at(MIN_SIGNER_SPENDABLE_LAMPORTS), at(MIN_SIGNER_SPENDABLE_LAMPORTS - 1)]).toEqual([true, false])
+    })
+
+    it('refuses a signing address that is not a key without asking the RPC', async () => {
+        const { rpc, seen } = fakeRpc([], [])
+        const reader = new SolanaChainReader({ rpc, programId: vectors.program_id })
+        await expect(reader.readSignerSpendableLamports('not-a-key', new AbortController().signal)).rejects.toThrow(/^signing address "not-a-key"/)
+        expect(seen).toEqual([])
+    })
+})
+
 /** A ChainReader that counts its calls. */
 class FakeChainReader implements ChainReader {
     ops: Operator[] = []
@@ -223,14 +306,15 @@ describe('ChainOperatorSource over a ChainReader', () => {
         const { rpc } = fakeRpc(vectors.cases[0]!.operators, vectors.cases[0]!.nodes)
         const chain = new FakeChainReader()
         chain.ops = await new SolanaChainReader({ rpc, programId: vectors.program_id }).readChain()
-        // No algod at all: the balance pass would throw for want of one.
+        // No algod at all: the balance pass would throw for want of one. This
+        // reader reads no balance of its own, so the signers stay unread.
         const source = new ChainOperatorSource({ chain })
         const ops = await source.fetchChain()
         expect(ops.map((o) => [o.id, o.nodeId])).toEqual([
             [1, 1],
             [1, 2],
         ])
-        expect(ops.every((o) => o.signerSpendableMicroAlgos === undefined)).toBe(true)
+        expect(ops.every((o) => o.signerSpendableMicroAlgos === undefined && o.signerSpendableLamports === undefined)).toBe(true)
         await source.fetchChain()
         expect([chain.reads, chain.derives]).toEqual([2, 1])
     })

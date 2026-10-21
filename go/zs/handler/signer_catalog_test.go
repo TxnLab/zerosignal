@@ -75,3 +75,35 @@ func TestSignerCatalogAndDispatchAgree(t *testing.T) {
 		})
 	}
 }
+
+// A Solana node's lamports reading drives the same gate and is listed under
+// its own name, with no microAlgo balance beside it.
+func TestSignerCatalogLamports(t *testing.T) {
+	broke := catalogOp(2, "broke-only", false)
+	broke.SignerSpendableLamports = new(selection.MinSignerSpendableLamports - 1)
+	funded := catalogOp(1, "funded-model", false)
+	funded.SignerSpendableLamports = new(selection.MinSignerSpendableLamports)
+	s := catalogServer(t, false, funded, broke)
+
+	if ids := listedModelIDs(t, s); !ids["funded-model"] || ids["broke-only"] {
+		t.Errorf("/v1/models = %v, want funded-model only", ids)
+	}
+	for _, d := range operatorsPayload(t, s) {
+		id, _ := d["operator_id"].(float64)
+		if _, present := d["signer_spendable_microalgos"]; present {
+			t.Errorf("node %v carries a microAlgo balance: %v", id, d)
+		}
+		lamports, _ := d["signer_spendable_lamports"].(float64)
+		underfunded, _ := d["signer_underfunded"].(bool)
+		switch id {
+		case 1:
+			if lamports != float64(selection.MinSignerSpendableLamports) || underfunded {
+				t.Errorf("node 1 = %v, want the floor, not underfunded", d)
+			}
+		case 2:
+			if lamports != float64(selection.MinSignerSpendableLamports-1) || !underfunded {
+				t.Errorf("node 2 = %v, want one below the floor, underfunded", d)
+			}
+		}
+	}
+}

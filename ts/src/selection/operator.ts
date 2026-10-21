@@ -98,6 +98,13 @@ export interface Operator {
     // MIN_SIGNER_SPENDABLE_MICROALGOS. Absent ⇒ never read ⇒ ELIGIBLE (Go nil
     // pointer, omitempty). 0 is a real, disqualifying reading. Target-only.
     signer_spendable_microalgos?: number
+    // the same reading for a node on Solana: the signing account's lamports
+    // less its own rent-exempt reserve. That account pays the open offer's fees
+    // and the Ticket account's rent, so selectTargets drops a node below
+    // MIN_SIGNER_SPENDABLE_LAMPORTS, under the microAlgo field's rules. A node
+    // carries its own rail's reading only; absent keeps an Algorand node's
+    // descriptor as it was. Mirror of selection.Operator.SignerSpendableLamports.
+    signer_spendable_lamports?: number
     // advertised model list (the node's /v1/zs/details set). Empty = "serves
     // nothing" — not a candidate for any model.
     models: string[]
@@ -133,10 +140,30 @@ export function signerSpendableBelowFloor(spendable: number | null | undefined):
     return spendable != null && spendable < MIN_SIGNER_SPENDABLE_MICROALGOS
 }
 
-/** Reports whether op's signing account is known to be below the routing floor.
- *  Mirror of selection.Operator.SignerUnderfunded. */
+/** Routing floor for a Solana node signing account's spendable lamports: one
+ *  open's fees and Ticket rent, the rent at its 6,960-a-byte ceiling. Mirror
+ *  of selection.MinSignerSpendableLamports (the derivation is in the Go doc). */
+export const MIN_SIGNER_SPENDABLE_LAMPORTS = 2_522_680
+
+/**
+ * Reports whether a spendable-lamports reading is known and below the Solana
+ * routing floor; nullish (never read) is not underfunded, 0 is. Mirror of
+ * selection.SignerLamportsUnderfunded.
+ */
+export function signerLamportsBelowFloor(spendable: number | null | undefined): boolean {
+    return spendable != null && spendable < MIN_SIGNER_SPENDABLE_LAMPORTS
+}
+
+/** Reports whether either rail's reading is known and below its floor: the
+ *  predicate every gate shares. Mirror of selection.SignerReadingsUnderfunded. */
+export function signerReadingsUnderfunded(microAlgos: number | null | undefined, lamports: number | null | undefined): boolean {
+    return signerSpendableBelowFloor(microAlgos) || signerLamportsBelowFloor(lamports)
+}
+
+/** Reports whether op's signing account is known to be below its rail's
+ *  routing floor. Mirror of selection.Operator.SignerUnderfunded. */
 export function signerUnderfunded(op: Operator): boolean {
-    return signerSpendableBelowFloor(op.signer_spendable_microalgos)
+    return signerReadingsUnderfunded(op.signer_spendable_microalgos, op.signer_spendable_lamports)
 }
 
 /** Reports whether the operator advertises every tool in needed. */

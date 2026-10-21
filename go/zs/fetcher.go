@@ -55,6 +55,14 @@ type ChainReader interface {
 	ReadDeployment(ctx context.Context) (ticket.DeploymentID, error)
 }
 
+// SignerLamportsReader reads a Solana node signer's spendable lamports. When
+// ChainOperatorSource's Chain also implements it, the source runs the
+// signer-balance pass over it as it runs it over algod for the Algorand read.
+// The TS SDK's ChainReader.readSignerSpendableLamports is the twin.
+type SignerLamportsReader interface {
+	ReadSignerSpendableLamports(ctx context.Context, addr string) (uint64, error)
+}
+
 // ChainOperatorSource loads operators from the escrow on chain and enriches
 // them with capability data from each operator's /v1/zs/details endpoint. It's
 // the production OperatorSource used by the proxy; tests should inject a fake
@@ -237,8 +245,9 @@ type ChainOperatorSource struct {
 
 	// signerMu guards signerSpendable.
 	signerMu sync.Mutex
-	// signerSpendable is the last SUCCESSFUL spendable-ALGO reading per signing
-	// address — see signer_balance.go. It outlives the per-cycle Operator values
+	// signerSpendable is the last SUCCESSFUL spendable reading per signing
+	// address, in its rail's unit — see signer_balance.go. It outlives the
+	// per-cycle Operator values
 	// so a failed read keeps the previous verdict instead of reverting to
 	// "unknown", which would re-admit a node last seen broke. Pruned to the
 	// current fleet every pass, so it is bounded by fleet size.
@@ -337,8 +346,8 @@ func (s *ChainOperatorSource) Fetch(ctx context.Context) ([]Operator, error) {
 
 // FetchChain reads the on-chain operator + node set WITHOUT probing any
 // /v1/zs/details endpoint. Each returned Operator carries its ids, owner,
-// signing key, base URL, staging flag, signing-account spendable ALGO (on the
-// Algorand read only), and on-chain reliability metrics (LatencyEwmaMs / TokensPerSecEwma), but
+// signing key, base URL, staging flag, signing-account spendable ALGO (or
+// lamports, on Solana), and on-chain reliability metrics (LatencyEwmaMs / TokensPerSecEwma), but
 // Reachable=false and empty capabilities until a probe lands. The balance
 // pass lives here rather than beside the probes because every refresh path —
 // the startup Fetch, the unbounded fallback, the bounded split — starts with
@@ -360,11 +369,16 @@ func (s *ChainOperatorSource) FetchChain(ctx context.Context) ([]Operator, error
 	}
 	// Before the probes, which every refresh path runs after this call.
 	s.deriveDeployment(ctx)
-	// The pass reads algod accounts, so it can judge only an Algorand
-	// signer. Another rail's nodes keep SignerSpendableMicroAlgos nil, which
-	// routes, as an Algorand signer never read successfully does.
-	if s.Chain == nil {
+	// algod can judge only an Algorand signer, so another rail's reader
+	// supplies its own read. A reader with none leaves every reading nil,
+	// which routes, as a signer never read successfully does.
+	lamports, ok := s.Chain.(SignerLamportsReader)
+	switch {
+	case s.Chain == nil:
 		s.fillSignerBalances(ctx, ops)
+	case ok:
+		s.fillSignerReadings(ctx, ops, lamports.ReadSignerSpendableLamports,
+			func(op *Operator, v *uint64) { op.SignerSpendableLamports = v })
 	}
 	return ops, nil
 }
