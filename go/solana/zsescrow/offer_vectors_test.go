@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -355,6 +356,9 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	shortOpen := openIx
 	shortOpen.Accounts = openIx.Accounts[:len(openIx.Accounts)-1]
 	built("open_short", "open without its last account", "open.accounts", compile(node, cbLimit, cbPrice, transfer, shortOpen), spec)
+	longOpen := openIx
+	longOpen.Accounts = append(slices.Clone(openIx.Accounts), solana.AccountMeta{PublicKey: w.attacker})
+	built("open_extra_account", "open with one more account after its last", "open.accounts", compile(node, cbLimit, cbPrice, transfer, longOpen), spec)
 	bareOpen := openIx
 	bareOpen.Data = openIx.Data[:8]
 	built("open_discriminator_only", "open's discriminator with no arguments", "open.data", compile(node, cbLimit, cbPrice, transfer, bareOpen), spec)

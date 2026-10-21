@@ -56,6 +56,7 @@ import {
     verifyOpenOffer,
     verifyRelayedAck,
 } from '../src/solana/zsescrow/index.js'
+import { solanaDeploymentId } from '../src/ticket/deployment.js'
 import { parseReceiptJSON, receiptCanonicalBytes, receiptSigDigest } from '../src/ticket/receipt.js'
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -700,7 +701,7 @@ describe('solana_ack_vectors.json', () => {
         })
     }
     it('throws a RangeError for a ticket id not 16 bytes', () => {
-        const c = (acks.relayed_acks as Json[]).find((c) => c.name === 'receipt_claim')!
+        const c = (acks.relayed_acks as Json[]).find((c) => c.name === 'ack_relayed')!
         const message = base64.decode(c.message_base64)
         const spec = specOf(c.spec)
         expect(() => verifyRelayedAck(d, message, spec)).not.toThrow()
@@ -713,6 +714,26 @@ describe('solana_ack_vectors.json', () => {
         const fixtures = (acks.relayed_acks as Json[]).filter((c) => c.source === 'fixture')
         expect(fixtures.map((c) => c.name)).toEqual(expect.arrayContaining(['ack_relayed', 'ack_extra_settle']))
         for (const c of fixtures) expect(c.message_base64, c.name).toBe(tx.get(c.name))
+    })
+    // The vectors' specs carry each fixture's receipt; this ties that receipt to the ack the program ran, so the
+    // acceptance of ack_relayed is the verifier's on a real receipt's claim.
+    it("claims, in each of the program's acks, the receipt its fixture records", () => {
+        const txs = load('testdata/solana_tx_vectors.json')
+        const dep = hex.encode(solanaDeploymentId(hex.decode(txs.context.genesis_hash), decodeBase58(txs.program_id, 32)))
+        const ackDisc = hex.encode(discriminator('global', 'ack'))
+        const fixtures = (txs.transactions as Json[]).filter((t) => (t.name as string).startsWith('ack'))
+        const cases = (acks.relayed_acks as Json[]).filter((c) => c.source === 'fixture')
+        expect(fixtures.map((t) => t.name)).toEqual(cases.map((c) => c.name))
+        for (const f of fixtures) {
+            expect(cases.find((c) => c.name === f.name)!.spec.receipt, f.name).toEqual(f.receipt_value)
+            const r = parseReceiptJSON(new TextEncoder().encode(JSON.stringify(f.receipt_value)))
+            expect(hex.encode(receiptCanonicalBytes(r)), f.name).toBe(f.receipt_hex)
+            expect(hex.encode(receiptSigDigest(r)), f.name).toBe(f.receipt_digest_hex)
+            expect([f.deployment_hex, hex.encode(base64.decode(r.deployment!))], f.name).toEqual([dep, dep])
+            const ack = (f.built_instructions as Json[]).map((b) => base64.decode(b.data_base64)).find((d) => hex.encode(d.subarray(0, 8)) === ackDisc)
+            if (!ack) throw new Error(`${f.name}: no ack`)
+            expect(claimFieldsOf(ack.subarray(8)), f.name).toEqual(claimFromReceipt(r))
+        }
     })
 })
 

@@ -54,12 +54,15 @@ slug matches `OfferRejectedError`'s where the check is the same.
 account's `open_seq`.
 
 The open offer's verifier now shares its message checks with the ack's; its verdicts are
-unchanged (`solana_open_offer_vectors.json` regenerates byte for byte). The new
-`testdata/solana_ack_vectors.json` (Go's `TestAckVectors`) pins both for the two languages,
-over the program's own `ack_relayed` and `ack_extra_settle` transactions and acks built in Go.
-The program's `ack_relayed` claims a placeholder `receipt_digest`, so it is refused as
-`ack.data` against any receipt; the acceptance is the same message with only those 32 bytes the
-receipt's, which `TestAckVectorsMeanWhatTheySay` checks.
+unchanged, and `solana_open_offer_vectors.json` gains one case, an `open` with an account past
+its last. The new `testdata/solana_ack_vectors.json` (Go's `TestAckVectors`) pins both for the
+two languages, over the program's own ack transactions and acks built in Go. Each of the
+program's acks claims a real receipt, which its fixture records and the vectors' spec carries,
+so the program's `ack_relayed` is accepted as it ran. `ack_extra_settle` is refused as
+`escrow.instruction` because of the `settle_cooperative` beside its ack; the ack alone is
+accepted (`extra_settle_ack_alone`). The payer-paid `ack`,
+`ack_first_half` and `ack_mismatch` are refused as `header.signers`: they have one signer, and
+a payer that builds its own ack has no relayer's transaction to check.
 
 ### 2026-10-21 — the payer refuses a receipt for another ticket and bars its node (unreleased)
 

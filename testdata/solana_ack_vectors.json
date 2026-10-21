@@ -9,7 +9,7 @@
       "name": "ack",
       "about": "the payer posts the second half, matching the node's pending claim, itself, as submitter and fee payer, which settles it",
       "source": "fixture",
-      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzBulW/ISV7Ct/jzXuxAYtZq8RkIRDh1J3WMIQs+IxtAKxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEcDUAQAAAAAACQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQmkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAECAwAAAAAAAAD+",
+      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzBulW/ISV7Ct/jzXuxAYtZq8RkIRDh1J3WMIQs+IxtAKxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEcDUAQAAAAAABs/1PauLVBtKrk6ydUERKmVVi2VEwrJ0O1zX8ICe8eWkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAECAwAAAAAAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
@@ -25,8 +25,8 @@
           "body_hash": "abababababababababababababababababababababababababababababababab",
           "input_usage_type": 1,
           "output_usage_type": 1,
-          "aux_output_usage_type": 0,
-          "aux_output_count": 0,
+          "aux_output_usage_type": 2,
+          "aux_output_count": 3,
           "cached_input_count": 0,
           "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
           "sig": ""
@@ -39,7 +39,7 @@
       "name": "ack_first_half",
       "about": "the payer posts the first half on an open ticket, as submitter and fee payer; it refunds in full at the deadline unless the node answers",
       "source": "fixture",
-      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzEzXtFC4HRr0hTgiKr0g5CdQPIxs9nyx0sKM228X6oKBxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEbCtAQAAAAAACQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQmkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
+      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzEzXtFC4HRr0hTgiKr0g5CdQPIxs9nyx0sKM228X6oKBxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEbCtAQAAAAAA2IItpU/RY6ik599FStu0OowdsL6BGV8jPJGebYUQ7hOkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
@@ -69,7 +69,7 @@
       "name": "ack_mismatch",
       "about": "the payer answers the node's pending claim with other fields, whose counts don't fit a u32, which freezes the ticket",
       "source": "fixture",
-      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzHhyRrt9HG9aIuVuZAVItJiz4KGAboXuo5Qxfw15xuSLxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEXARAQAAAAAACQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkAAAAAAQAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAECAAAAAAEAAAD+",
+      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR4L7vWp5nnmo+E0/ieDe/8yx8tfXUTqCbyw5UK61qTAzHhyRrt9HG9aIuVuZAVItJiz4KGAboXuo5Qxfw15xuSLxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEXARAQAAAAAAry0BbfPK1EIihf5m2TTt0E1/U4anu2zhXGXNczzQuYoAAAAAAQAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAECAAAAAAEAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
@@ -80,13 +80,13 @@
           "actual_input_count": 1200,
           "actual_output_count": 600,
           "amount_charged": 70000,
-          "ttft_ms": 420,
+          "ttft_ms": 4294967296,
           "decode_ms": 3000,
           "body_hash": "abababababababababababababababababababababababababababababababab",
           "input_usage_type": 1,
           "output_usage_type": 1,
-          "aux_output_usage_type": 0,
-          "aux_output_count": 0,
+          "aux_output_usage_type": 2,
+          "aux_output_count": 4294967296,
           "cached_input_count": 0,
           "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
           "sig": ""
@@ -99,66 +99,6 @@
       "name": "ack_relayed",
       "about": "the payer's ack of its pending ticket, sent by a relayer (here the node) as fee payer, the payer signing as submitter",
       "source": "fixture",
-      "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAQkFBAMAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAACQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQmkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
-      "spec": {
-        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "operator_id": "1",
-        "node_id": "1",
-        "ticket_id": "80808080808080808080808080808080",
-        "receipt": {
-          "ticket_id": "gICAgICAgICAgICAgICAgA==",
-          "actual_input_count": 1200,
-          "actual_output_count": 600,
-          "amount_charged": 70000,
-          "ttft_ms": 420,
-          "decode_ms": 3000,
-          "body_hash": "abababababababababababababababababababababababababababababababab",
-          "input_usage_type": 1,
-          "output_usage_type": 1,
-          "aux_output_usage_type": 0,
-          "aux_output_count": 0,
-          "cached_input_count": 0,
-          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
-          "sig": ""
-        },
-        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
-      },
-      "verdict": "ack.data"
-    },
-    {
-      "name": "ack_extra_settle",
-      "about": "as ack_relayed, with a settle_cooperative of another of the payer's claimed tickets beside the ack, which the payer's signature on the transaction acks",
-      "source": "fixture",
-      "message_base64": "AgEGDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhlZ4RtNy6jLLJilnt+UHfJKL/B9auVA8JX3X5sGoaaixhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h37EZDFcO1FGe7Th9JVYaXso2OZKm0XmDwwpjsr65pGsv8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkICCQ0BCgYEBQACCwcICQwJW+OIF3euT8kRcBEBAAAAAAAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCaQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4JDQAKBgQDAAILBwgJDAlb0zsRptsd2Y1ADQMAAAAAAAkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJpAEAAAAAAAC4CwAAAAAAALAEAAAAAAAAWAIAAAAAAAABAAAAAAAAAAAA/g==",
-      "spec": {
-        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "operator_id": "1",
-        "node_id": "1",
-        "ticket_id": "81818181818181818181818181818181",
-        "receipt": {
-          "ticket_id": "gYGBgYGBgYGBgYGBgYGBgQ==",
-          "actual_input_count": 1200,
-          "actual_output_count": 600,
-          "amount_charged": 70000,
-          "ttft_ms": 420,
-          "decode_ms": 3000,
-          "body_hash": "abababababababababababababababababababababababababababababababab",
-          "input_usage_type": 1,
-          "output_usage_type": 1,
-          "aux_output_usage_type": 0,
-          "aux_output_count": 0,
-          "cached_input_count": 0,
-          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
-          "sig": ""
-        },
-        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
-      },
-      "verdict": "escrow.instruction"
-    },
-    {
-      "name": "receipt_claim",
-      "about": "the program's relayed ack with the claim's receipt_digest the receipt's: only those 32 bytes differ",
-      "source": "built",
       "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAQkFBAMAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAAAL48iiqq4F3opsUXWz8rm0dOlP/2A12VCcCzeuikOpykAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
@@ -184,6 +124,36 @@
         "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
       },
       "verdict": "ok"
+    },
+    {
+      "name": "ack_extra_settle",
+      "about": "as ack_relayed, with a settle_cooperative of another of the payer's claimed tickets beside the ack, which the payer's signature on the transaction acks",
+      "source": "fixture",
+      "message_base64": "AgEGDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhlZ4RtNy6jLLJilnt+UHfJKL/B9auVA8JX3X5sGoaaixhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h37EZDFcO1FGe7Th9JVYaXso2OZKm0XmDwwpjsr65pGsv8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkICCQ0BCgYEBQACCwcICQwJW+OIF3euT8kRcBEBAAAAAADnmy0r9xtszkTJ6DDhGGidOAbEjJIAgpC/PKmzHNTFAaQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4JDQAKBgQDAAILBwgJDAlb0zsRptsd2Y1ADQMAAAAAAC+QFuppfuZ4fhfz2twxmgtrH0Mrd01vneCmx7B1fdPPpAEAAAAAAAC4CwAAAAAAALAEAAAAAAAAWAIAAAAAAAABAAAAAAAAAAAA/g==",
+      "spec": {
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "operator_id": "1",
+        "node_id": "1",
+        "ticket_id": "81818181818181818181818181818181",
+        "receipt": {
+          "ticket_id": "gYGBgYGBgYGBgYGBgYGBgQ==",
+          "actual_input_count": 1200,
+          "actual_output_count": 600,
+          "amount_charged": 70000,
+          "ttft_ms": 420,
+          "decode_ms": 3000,
+          "body_hash": "abababababababababababababababababababababababababababababababab",
+          "input_usage_type": 1,
+          "output_usage_type": 1,
+          "aux_output_usage_type": 0,
+          "aux_output_count": 0,
+          "cached_input_count": 0,
+          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+          "sig": ""
+        },
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+      },
+      "verdict": "escrow.instruction"
     },
     {
       "name": "from_the_builders",
@@ -366,8 +336,38 @@
       "verdict": "ack.accounts"
     },
     {
+      "name": "default_key_fallback",
+      "about": "the ack passing the default key's USDC account as its refund fallback, judged by a payer that names no treasury",
+      "source": "built",
+      "message_base64": "AgEHDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeQKAGygxv3M5T6Dg4yuMLN9BvMH1R/wRMaD5bzmKQw6VO0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIBCA0BCQUEAwACCwYHCgwIW+OIF3euT8kRcBEBAAAAAAAAvjyKKqrgXeimxRdbPyubR06U//YDXZUJwLN66KQ6nKQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4=",
+      "spec": {
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "operator_id": "1",
+        "node_id": "1",
+        "ticket_id": "80808080808080808080808080808080",
+        "receipt": {
+          "ticket_id": "gICAgICAgICAgICAgICAgA==",
+          "actual_input_count": 1200,
+          "actual_output_count": 600,
+          "amount_charged": 70000,
+          "ttft_ms": 420,
+          "decode_ms": 3000,
+          "body_hash": "abababababababababababababababababababababababababababababababab",
+          "input_usage_type": 1,
+          "output_usage_type": 1,
+          "aux_output_usage_type": 0,
+          "aux_output_count": 0,
+          "cached_input_count": 0,
+          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+          "sig": ""
+        },
+        "treasury": "11111111111111111111111111111111"
+      },
+      "verdict": "ack.accounts"
+    },
+    {
       "name": "truncated",
-      "about": "the receipt-claim ack's message with its last byte cut",
+      "about": "the relayed ack's message with its last byte cut",
       "source": "built",
       "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAQkFBAMAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAAAL48iiqq4F3opsUXWz8rm0dOlP/2A12VCcCzeuikOpykAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAA=",
       "spec": {
@@ -726,10 +726,40 @@
       "verdict": "instruction.program"
     },
     {
-      "name": "extra_settle_receipt_claim",
-      "about": "the receipt-claim ack with the program's settle_cooperative of another of the payer's claimed tickets beside it",
+      "name": "extra_settle_ack_alone",
+      "about": "the program's ack_extra_settle without its settle_cooperative: the settle is all the fixture's refusal rests on",
       "source": "built",
-      "message_base64": "AgEGDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhlZ4RtNy6jLLJilnt+UHfJKL/B9auVA8JX3X5sGoaaiUfJ5YOaAz1H9XCRJOR9Zt/c/4eguP7ehTsfmp9RvTWzGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkICCQ0BCgYFBAACCwcICQwJW+OIF3euT8kRcBEBAAAAAAAAvjyKKqrgXeimxRdbPyubR06U//YDXZUJwLN66KQ6nKQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4JDQAKBgUDAAILBwgJDAlb0zsRptsd2Y1ADQMAAAAAAAkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJpAEAAAAAAAC4CwAAAAAAALAEAAAAAAAAWAIAAAAAAAABAAAAAAAAAAAA/g==",
+      "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHsYZ06hbFyJqSVAQ3D512sREOSPpi4VLE4yCqxMG4+Yd+xGQxXDtRRnu04fSVWGl7KNjmSptF5g8MKY7K+uaRrL/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAQkFAwQAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAA55stK/cbbM5Eyegw4RhonTgGxIySAIKQvzypsxzUxQGkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
+      "spec": {
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "operator_id": "1",
+        "node_id": "1",
+        "ticket_id": "81818181818181818181818181818181",
+        "receipt": {
+          "ticket_id": "gYGBgYGBgYGBgYGBgYGBgQ==",
+          "actual_input_count": 1200,
+          "actual_output_count": 600,
+          "amount_charged": 70000,
+          "ttft_ms": 420,
+          "decode_ms": 3000,
+          "body_hash": "abababababababababababababababababababababababababababababababab",
+          "input_usage_type": 1,
+          "output_usage_type": 1,
+          "aux_output_usage_type": 0,
+          "aux_output_count": 0,
+          "cached_input_count": 0,
+          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+          "sig": ""
+        },
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+      },
+      "verdict": "ok"
+    },
+    {
+      "name": "settle_before_ack",
+      "about": "ack_extra_settle's settle_cooperative before the relayed ack",
+      "source": "built",
+      "message_base64": "AgEGDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhlZ4RtNy6jLLJilnt+UHfJKL/B9auVA8JX3X5sGoaaiUfJ5YOaAz1H9XCRJOR9Zt/c/4eguP7ehTsfmp9RvTWzGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkICCQ0ACgYFAwACCwcICQwJW9M7EabbHdmNQA0DAAAAAAAvkBbqaX7meH4X89rcMZoLax9DK3dNb53gpsewdX3Tz6QBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4JDQEKBgUEAAILBwgJDAlb44gXd65PyRFwEQEAAAAAAAC+PIoqquBd6KbFF1s/K5tHTpT/9gNdlQnAs3ropDqcpAEAAAAAAAC4CwAAAAAAALAEAAAAAAAAWAIAAAAAAAABAAAAAAAAAAAA/g==",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
@@ -756,10 +786,40 @@
       "verdict": "escrow.instruction"
     },
     {
-      "name": "settle_before_ack",
-      "about": "that settle_cooperative before the ack",
+      "name": "escrow_no_data",
+      "about": "an escrow instruction with no data beside the ack",
       "source": "built",
-      "message_base64": "AgEGDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhlZ4RtNy6jLLJilnt+UHfJKL/B9auVA8JX3X5sGoaaiUfJ5YOaAz1H9XCRJOR9Zt/c/4eguP7ehTsfmp9RvTWzGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5BqfVFxh70WY12tQEVf3CwMEkxo8hVnWl27rLXwgAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqRvM4EfEMw4XDmTDRxgZeNc8UHkPCaOeTmZRzTIAXDRIKmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkICCQ0ACgYFAwACCwcICQwJW9M7EabbHdmNQA0DAAAAAAAJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCaQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4JDQEKBgUEAAILBwgJDAlb44gXd65PyRFwEQEAAAAAAAC+PIoqquBd6KbFF1s/K5tHTpT/9gNdlQnAs3ropDqcpAEAAAAAAAC4CwAAAAAAALAEAAAAAAAAWAIAAAAAAAABAAAAAAAAAAAA/g==",
+      "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAggNAQkFBAMAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAAAL48iiqq4F3opsUXWz8rm0dOlP/2A12VCcCzeuikOpykAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+CAAA",
+      "spec": {
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "operator_id": "1",
+        "node_id": "1",
+        "ticket_id": "80808080808080808080808080808080",
+        "receipt": {
+          "ticket_id": "gICAgICAgICAgICAgICAgA==",
+          "actual_input_count": 1200,
+          "actual_output_count": 600,
+          "amount_charged": 70000,
+          "ttft_ms": 420,
+          "decode_ms": 3000,
+          "body_hash": "abababababababababababababababababababababababababababababababab",
+          "input_usage_type": 1,
+          "output_usage_type": 1,
+          "aux_output_usage_type": 0,
+          "aux_output_count": 0,
+          "cached_input_count": 0,
+          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+          "sig": ""
+        },
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+      },
+      "verdict": "escrow.instruction"
+    },
+    {
+      "name": "escrow_seven_bytes",
+      "about": "an escrow instruction of the ack's discriminator less its last byte, beside the ack",
+      "source": "built",
+      "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAggNAQkFBAMAAgoGBwgLCFvjiBd3rk/JEXARAQAAAAAAAL48iiqq4F3opsUXWz8rm0dOlP/2A12VCcCzeuikOpykAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+CAAH44gXd65PyQ==",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
@@ -1030,6 +1090,36 @@
       "about": "the ack without its last account",
       "source": "built",
       "message_base64": "AgEGDAvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgMAQkFBAMAAgoGBwgLW+OIF3euT8kRcBEBAAAAAAAAvjyKKqrgXeimxRdbPyubR06U//YDXZUJwLN66KQ6nKQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAP4=",
+      "spec": {
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "operator_id": "1",
+        "node_id": "1",
+        "ticket_id": "80808080808080808080808080808080",
+        "receipt": {
+          "ticket_id": "gICAgICAgICAgICAgICAgA==",
+          "actual_input_count": 1200,
+          "actual_output_count": 600,
+          "amount_charged": 70000,
+          "ttft_ms": 420,
+          "decode_ms": 3000,
+          "body_hash": "abababababababababababababababababababababababababababababababab",
+          "input_usage_type": 1,
+          "output_usage_type": 1,
+          "aux_output_usage_type": 0,
+          "aux_output_count": 0,
+          "cached_input_count": 0,
+          "deployment": "KVh7SqZ+gp8LuPu6dU9vaqHXeRrazCWO6XzNmHJQ0Xk=",
+          "sig": ""
+        },
+        "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+      },
+      "verdict": "ack.accounts"
+    },
+    {
+      "name": "extra_account",
+      "about": "the ack with one more account after its last",
+      "source": "built",
+      "message_base64": "AgEHDQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHlHyeWDmgM9R/VwkSTkfWbf3P+HoLj+3oU7H5qfUb01sxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCCCi/XFvcrLaEhjM2wgL7VZnaSL5VlmFXQhcHBb7Kn3KmVUZPKDbvscc0CTgb3sMpynb7py3vUSWHmlgqpYYR5O0y9jvzXw7u/LJfKKLh+9yHOuKDVnGwyUYPXxLkVWqOt6TpT08IbGk/Cq8RVDiAWISGxtQY7M2x9Q096oj1+gQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIBCA4BCgUEAwACCwYHCAwICVvjiBd3rk/JEXARAQAAAAAAAL48iiqq4F3opsUXWz8rm0dOlP/2A12VCcCzeuikOpykAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",

@@ -14,8 +14,8 @@ package zsescrow_test
 //	cd proto/go && go test ./solana/zsescrow -run TestAckVectors -update
 //
 // TestAckVectorsMeanWhatTheySay checks each fixture's verdict against why the
-// program's tests wrote it, and ties the built acceptances to the program's
-// own relayed ack.
+// program's tests wrote it, and each fixture's ack against the receipt it
+// records.
 
 import (
 	"bytes"
@@ -26,6 +26,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -77,17 +78,24 @@ type ackVectors struct {
 	Digests     []ackDigestCase `json:"digests"`
 }
 
-// The fixtures' verdicts, from why the program's tests wrote each ack. The
-// program's relayed ack carries a placeholder receipt_digest, not a digest of
-// any receipt, so it is refused as data; its receipt-claim twin below is the
-// acceptance. The payer-paid acks have one signer: a payer builds those
+// The fixtures' verdicts, from why the program's tests wrote each ack. Each
+// ack claims the receipt its fixture records, so the program's relayed ack is
+// the acceptance. The payer-paid acks have one signer: a payer builds those
 // itself and has no relayer's transaction to check.
 var ackFixtureVerdicts = map[string]string{
 	"ack":              "header.signers",
 	"ack_first_half":   "header.signers",
 	"ack_mismatch":     "header.signers",
-	"ack_relayed":      "ack.data",
+	"ack_relayed":      "ok",
 	"ack_extra_settle": "escrow.instruction",
+}
+
+// ackTx is an ack fixture with the digest and deployment of the receipt its
+// claim was built from.
+type ackTx struct {
+	txFixture
+	ReceiptDigest string `json:"receipt_digest_hex"`
+	Deployment    string `json:"deployment_hex"`
 }
 
 type ackWorld struct {
@@ -98,11 +106,8 @@ type ackWorld struct {
 	attacker  solana.PublicKey
 	treasury  solana.PublicKey
 	decimals  uint8
-	// foldReceipt is the program's receipt for its folded settle, of the
-	// same usage as every ack fixture's claim.
-	foldReceipt ticket.UsageReceipt
-	byName      map[string]txFixture
-	order       []string
+	byName    map[string]ackTx
+	order     []string
 }
 
 func loadAckWorld(t *testing.T) ackWorld {
@@ -113,12 +118,12 @@ func loadAckWorld(t *testing.T) ackWorld {
 			GenesisHash string `json:"genesis_hash"`
 			Decimals    uint8  `json:"usdc_decimals"`
 		} `json:"context"`
-		Transactions []txFixture `json:"transactions"`
+		Transactions []ackTx `json:"transactions"`
 	}
 	readFixture(t, "solana_tx_vectors.json", &f)
 	w := ackWorld{d: zsescrow.Deployment{Program: f.ProgramID, Mint: f.Context.USDCMint}, genesis: solana.Hash(mustHex(t, f.Context.GenesisHash)),
 		payer: f.Context.Keys["payer"].Pubkey, attacker: f.Context.Keys["attacker"].Pubkey, treasury: f.Context.Treasury,
-		decimals: f.Context.Decimals, byName: map[string]txFixture{}}
+		decimals: f.Context.Decimals, byName: map[string]ackTx{}}
 	for _, x := range f.Transactions {
 		w.byName[x.Name] = x
 		if strings.HasPrefix(x.Name, "ack") {
@@ -130,9 +135,6 @@ func loadAckWorld(t *testing.T) ackWorld {
 		t.Fatal(err)
 	}
 	w.blockhash = bh
-	if err := json.Unmarshal(w.byName["open_fold_settle"].Receipt, &w.foldReceipt); err != nil {
-		t.Fatal(err)
-	}
 	return w
 }
 
@@ -148,33 +150,28 @@ func (f txFixture) ackOf(t *testing.T) solana.Instruction {
 	return solana.Instruction{}
 }
 
-// specFor is the spec the payer of fixture f holds: its ticket, found as the
-// node and ticket id the fixtures' flows use, and a receipt for that ticket
-// of the usage the fixtures claim, at amount.
-func (w ackWorld) specFor(t *testing.T, f txFixture, amount uint64) zsescrow.AckSpec {
+// specFor is the spec the payer of fixture f holds: the receipt the fixture
+// records, for the ticket that receipt names, at the node of the fixtures'
+// flows where that ticket's account is the one the ack passes. The node is
+// found through the receipt's ticket, so a fixture whose receipt names
+// another ticket fails here rather than yielding a spec.
+func (w ackWorld) specFor(t *testing.T, f ackTx) zsescrow.AckSpec {
 	ack := f.ackOf(t)
-	s := zsescrow.AckSpec{Payer: solana.MustPublicKey(f.Payer), Treasury: w.treasury}
+	var r ticket.UsageReceipt
+	if err := json.Unmarshal(f.Receipt, &r); err != nil {
+		t.Fatalf("%s: %v", f.Name, err)
+	}
+	s := zsescrow.AckSpec{Payer: solana.MustPublicKey(f.Payer), TicketID: [16]byte(mustB64(t, r.TicketID)), Receipt: &r, Treasury: w.treasury}
 	for op := uint64(1); op < 8 && s.OperatorID == 0; op++ {
 		for n := uint64(1); n < 8; n++ {
-			if w.d.Node(op, n) == ack.Accounts[2].PublicKey {
+			if w.d.Ticket(w.d.Node(op, n), s.TicketID) == ack.Accounts[4].PublicKey {
 				s.OperatorID, s.NodeID = op, n
 			}
 		}
 	}
-	node := w.d.Node(s.OperatorID, s.NodeID)
-	for b := 0; b < 256; b++ {
-		id := [16]byte(bytes.Repeat([]byte{byte(b)}, 16))
-		if w.d.Ticket(node, id) == ack.Accounts[4].PublicKey {
-			s.TicketID = id
-		}
+	if s.OperatorID == 0 {
+		t.Fatalf("%s: the receipt's ticket is not the ack's at any node of the fixtures' flows", f.Name)
 	}
-	if s.OperatorID == 0 || w.d.Ticket(node, s.TicketID) != ack.Accounts[4].PublicKey {
-		t.Fatalf("%s: no node and ticket id of the fixtures' flows", f.Name)
-	}
-	r := w.foldReceipt
-	r.TicketID = base64.StdEncoding.EncodeToString(s.TicketID[:])
-	r.AmountCharged = amount
-	s.Receipt = &r
 	return s
 }
 
@@ -198,9 +195,6 @@ func ackVerdictOf(err error) string {
 	return r.Field
 }
 
-// claimAmount is the amount an escrow instruction's claim fields carry.
-func claimAmount(ix solana.Instruction) uint64 { return binary.LittleEndian.Uint64(ix.Data[8:]) }
-
 func buildAckVectors(t *testing.T) ackVectors {
 	w := loadAckWorld(t)
 	d := w.d
@@ -222,11 +216,11 @@ func buildAckVectors(t *testing.T) ackVectors {
 	}
 	for _, name := range w.order {
 		f := w.byName[name]
-		add(name, f.About, "fixture", b64(t, f.Message), w.specFor(t, f, claimAmount(f.ackOf(t))))
+		add(name, f.About, "fixture", b64(t, f.Message), w.specFor(t, f))
 	}
 
 	relayed, extra := w.byName["ack_relayed"], w.byName["ack_extra_settle"]
-	spec := w.specFor(t, relayed, claimAmount(relayed.ackOf(t)))
+	spec := w.specFor(t, relayed)
 	relayer := w.feePayerOf(t, relayed)
 	claim := zsescrow.ClaimFromReceipt(spec.Receipt)
 	ending := zsescrow.Ending{Submitter: spec.Payer, OperatorID: spec.OperatorID, NodeID: spec.NodeID, TicketID: spec.TicketID,
@@ -252,7 +246,6 @@ func buildAckVectors(t *testing.T) ackVectors {
 	}
 	cbLimit, cbPrice := solana.SetComputeUnitLimit(40_000), solana.SetComputeUnitPrice(1_000)
 
-	built("receipt_claim", "the program's relayed ack with the claim's receipt_digest the receipt's: only those 32 bytes differ", "ok", compile(relayer, ack), spec)
 	built("from_the_builders", "a relayed ack under a compute-unit limit and price, from the builders", "ok", compile(relayer, cbLimit, cbPrice, ack), spec)
 	built("another_relayer", "the ack paid for by a key that is neither the node nor the payer", "ok", compile(w.attacker, ack), spec)
 	built("readonly_fallback", "the ack passing the treasury's USDC account read-only, which the program uses only for a refund the payer's account can't take", "ok",
@@ -266,8 +259,12 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("treasury_unknown", "the ack passing the treasury's USDC account, judged by a payer that names no treasury", "ack.accounts",
 		compile(relayer, ackWith(func(e *zsescrow.Ending, _ *zsescrow.ClaimFields) { e.Fallback = zsescrow.FallbackReadonly })),
 		withSpec(func(s *zsescrow.AckSpec) { s.Treasury = solana.PublicKey{} }))
+	built("default_key_fallback", "the ack passing the default key's USDC account as its refund fallback, judged by a payer that names no treasury", "ack.accounts",
+		compile(relayer, ackWith(func(e *zsescrow.Ending, _ *zsescrow.ClaimFields) {
+			e.Fallback, e.Treasury = zsescrow.FallbackReadonly, solana.PublicKey{}
+		})), withSpec(func(s *zsescrow.AckSpec) { s.Treasury = solana.PublicKey{} }))
 
-	built("truncated", "the receipt-claim ack's message with its last byte cut", "message.parse", func() []byte { b := compile(relayer, ack); return b[:len(b)-1] }(), spec)
+	built("truncated", "the relayed ack's message with its last byte cut", "message.parse", func() []byte { b := b64(t, relayed.Message); return b[:len(b)-1] }(), spec)
 	lookup := compileMessage(t, relayer, w.blockhash, solana.V0, ack)
 	lookup.AddressTableLookups = []solana.AddressTableLookup{{AccountKey: w.attacker, ReadonlyIndexes: []uint8{0}}}
 	built("lookup_table", "the ack as a v0 message that loads one address from a lookup table no instruction reads", "message.lookups", marshal(t, lookup), spec)
@@ -294,11 +291,16 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("precompile_beside", "an Ed25519 precompile instruction before the ack", "instruction.program",
 		compile(relayer, solana.Instruction{ProgramID: solana.Ed25519ProgramID, Data: []byte{0, 0}}, ack), spec)
 
+	other := w.specFor(t, extra)
 	otherSettle := extra.instructions(t)[1]
-	built("extra_settle_receipt_claim", "the receipt-claim ack with the program's settle_cooperative of another of the payer's claimed tickets beside it", "escrow.instruction",
-		compile(relayer, ack, otherSettle), spec)
-	built("settle_before_ack", "that settle_cooperative before the ack", "escrow.instruction", compile(relayer, otherSettle, ack), spec)
-	other := w.specFor(t, extra, claimAmount(extra.ackOf(t)))
+	built("extra_settle_ack_alone", "the program's ack_extra_settle without its settle_cooperative: the settle is all the fixture's refusal rests on", "ok",
+		compile(relayer, extra.ackOf(t)), other)
+	built("settle_before_ack", "ack_extra_settle's settle_cooperative before the relayed ack", "escrow.instruction", compile(relayer, otherSettle, ack), spec)
+	escrowWith := func(data []byte) solana.Instruction { return solana.Instruction{ProgramID: d.Program, Data: data} }
+	ackDisc := zsescrow.Discriminator("global", "ack")
+	built("escrow_no_data", "an escrow instruction with no data beside the ack", "escrow.instruction", compile(relayer, ack, escrowWith(nil)), spec)
+	built("escrow_seven_bytes", "an escrow instruction of the ack's discriminator less its last byte, beside the ack", "escrow.instruction",
+		compile(relayer, ack, escrowWith(ackDisc[:7])), spec)
 	otherAck := d.Ack(zsescrow.Ending{Submitter: spec.Payer, OperatorID: other.OperatorID, NodeID: other.NodeID, TicketID: other.TicketID,
 		RentPayer: ending.RentPayer, Payer: spec.Payer}, claim)
 	built("ack_twice", "a second ack, of another of the payer's tickets at this receipt's claim, beside the ack", "instructions.shape", compile(relayer, ack, otherAck), spec)
@@ -322,6 +324,9 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("five_accounts", "the ack cut off before its rent payer", "ack.accounts", compile(relayer, short), spec)
 	short.Accounts = ack.Accounts[:len(ack.Accounts)-1]
 	built("short", "the ack without its last account", "ack.accounts", compile(relayer, short), spec)
+	long := ack
+	long.Accounts = append(slices.Clone(ack.Accounts), solana.AccountMeta{PublicKey: w.attacker})
+	built("extra_account", "the ack with one more account after its last", "ack.accounts", compile(relayer, long), spec)
 
 	built("receipt_of_another_ticket", "the payer's ticket is not the one the receipt and the ack name", "ack.receipt", compile(relayer, ack),
 		withSpec(func(s *zsescrow.AckSpec) { s.TicketID[0] ^= 1 }))
@@ -354,7 +359,7 @@ func buildAckVectors(t *testing.T) ackVectors {
 	return v
 }
 
-func (w ackWorld) feePayerOf(t *testing.T, f txFixture) solana.PublicKey {
+func (w ackWorld) feePayerOf(t *testing.T, f ackTx) solana.PublicKey {
 	m, err := solana.ParseMessage(b64(t, f.Message))
 	if err != nil {
 		t.Fatal(err)
@@ -443,41 +448,34 @@ func TestAckVectorsMeanWhatTheySay(t *testing.T) {
 		}
 	}
 
-	// The acceptance stands in for the program's own relayed ack, which the
-	// program ran: the two messages differ in the claim's receipt_digest
-	// alone, and the receipt's claim is the fixture's in every other field.
-	relayed := w.byName["ack_relayed"]
-	fixtureClaim := claimFieldsOf(t, relayed.ackOf(t).Data[8:])
-	spec := w.specFor(t, relayed, fixtureClaim.Amount)
-	receiptClaim := zsescrow.ClaimFromReceipt(spec.Receipt)
-	if receiptClaim.ReceiptDigest == fixtureClaim.ReceiptDigest {
-		t.Fatal("the fixture's claim names the receipt's digest: replay it as the acceptance")
+	// Each spec's receipt is the one its fixture's ack was built from: the
+	// bytes the program's tests hashed, bound to this deployment, and claimed
+	// field for field, so a fixture's verdict is the verifier's on a real
+	// receipt rather than on a stand-in.
+	dep, err := ticket.SolanaDeploymentID(w.genesis[:], w.d.Program[:])
+	if err != nil {
+		t.Fatal(err)
 	}
-	withDigest := fixtureClaim
-	withDigest.ReceiptDigest = receiptClaim.ReceiptDigest
-	if withDigest != receiptClaim {
-		t.Errorf("the receipt's claim %+v differs from the fixture's %+v beyond receipt_digest", receiptClaim, fixtureClaim)
-	}
-	var accepted []byte
-	for _, c := range v.RelayedAcks {
-		if c.Name == "receipt_claim" {
-			accepted = b64(t, c.Message)
+	for _, name := range w.order {
+		f := w.byName[name]
+		r := w.specFor(t, f).Receipt
+		if hex.EncodeToString(r.CanonicalBytes()) != f.ReceiptHex {
+			t.Errorf("%s: the receipt's canonical bytes are not the fixture's", name)
 		}
-	}
-	fixture := b64(t, relayed.Message)
-	at := bytes.Index(fixture, fixtureClaim.ReceiptDigest[:])
-	if at < 0 {
-		t.Fatal("the fixture's receipt_digest is not in its message")
-	}
-	if len(accepted) != len(fixture) {
-		t.Fatalf("the accepted ack is %d bytes, the fixture's %d", len(accepted), len(fixture))
-	}
-	patched := append(append(append([]byte(nil), fixture[:at]...), receiptClaim.ReceiptDigest[:]...), fixture[at+32:]...)
-	if !bytes.Equal(patched, accepted) {
-		t.Error("the accepted ack is not the program's relayed ack with the receipt's digest")
+		if digest := ticket.ReceiptSigDigest(r); hex.EncodeToString(digest[:]) != f.ReceiptDigest {
+			t.Errorf("%s: receipt digest %x, the fixture's %s", name, digest, f.ReceiptDigest)
+		}
+		if r.Deployment != dep || hex.EncodeToString(dep[:]) != f.Deployment {
+			t.Errorf("%s: the receipt's deployment %x, the fixture's %s, this deployment's %x", name, r.Deployment, f.Deployment, dep)
+		}
+		if got, want := claimFieldsOf(t, f.ackOf(t).Data[8:]), zsescrow.ClaimFromReceipt(r); got != want {
+			t.Errorf("%s: the ack claims %+v, its receipt %+v", name, got, want)
+		}
 	}
 
 	// The digest is the program's: AckDigest over the receipt's claim hash.
+	spec := w.specFor(t, w.byName["ack_relayed"])
+	receiptClaim := zsescrow.ClaimFromReceipt(spec.Receipt)
 	for _, c := range v.Digests {
 		if c.Verdict != "ok" {
 			continue
@@ -490,5 +488,25 @@ func TestAckVectorsMeanWhatTheySay(t *testing.T) {
 		if c.Digest != hex.EncodeToString(want[:]) {
 			t.Errorf("%s: digest %s, want %x", c.Name, c.Digest, want)
 		}
+	}
+}
+
+// The vectors' short escrow data can't tell the length guard from a shorter
+// one: ParseMessage clones instruction data, a clone of one to seven bytes
+// has an eight-byte allocation whose spare capacity is zeros, and so data[:8]
+// past its length matches no discriminator anyway. A prefix of the
+// discriminator itself, whose capacity holds the rest, can.
+func TestHasDiscriminatorNeedsAllEightBytes(t *testing.T) {
+	disc := zsescrow.Discriminator("global", "ack")
+	if !zsescrow.HasDiscriminator(disc[:], "ack") {
+		t.Fatal("the ack's own discriminator is not ack's")
+	}
+	for _, n := range []int{0, 4, 7} {
+		if zsescrow.HasDiscriminator(disc[:n], "ack") {
+			t.Errorf("%d bytes of the ack's discriminator read as ack's", n)
+		}
+	}
+	if zsescrow.HasDiscriminator(nil, "ack") {
+		t.Error("no data reads as ack's")
 	}
 }
