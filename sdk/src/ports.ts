@@ -8,6 +8,7 @@
 // singleton, so the same code runs in a browser tab, a worker and Node.
 
 import type { TransactionSigner } from 'algosdk'
+import type { TransactionSigner as SolanaTransactionSigner } from '@txnlab/zs-proto/solana'
 import type { BytesSigner } from '@txnlab/zs-proto/ticket'
 
 /**
@@ -32,6 +33,21 @@ export interface PayerSigner extends BytesSigner {
 export interface Signer extends PayerSigner {
     signTransactions: TransactionSigner
 }
+
+/**
+ * SolanaSigner holds the payer's key, for one base58 address, on the Solana
+ * rail: the PayerSigner half, plus `signTransactionMessage`, raw Ed25519 over
+ * a transaction's message bytes, which `signTransactionWith` puts in the
+ * payer's slot. Nothing on that path needs the key: a host whose custody signs
+ * in a worker forwards both methods there (`solanaSigner` is the in-memory
+ * one). Like `signTransactions`, it signs any message it is handed:
+ * a node's offer or a relayer's ack reaches it only through
+ * `@txnlab/zs-proto/solana/zsescrow`'s `completeOpenOffer` /
+ * `completeRelayedAck`, which verify it first, and the payer's own
+ * transactions through `signTransactionWith`. It is not wallet-standard
+ * `signMessage`, which is for off-chain messages.
+ */
+export interface SolanaSigner extends PayerSigner, SolanaTransactionSigner {}
 
 /** Thrown when the SDK is asked to sign for an address other than the payer's. */
 export class SignerAddressError extends Error {

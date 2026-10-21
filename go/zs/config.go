@@ -16,6 +16,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
@@ -35,6 +36,17 @@ type PayerSigner interface {
 type Signer interface {
 	PayerSigner
 	algo.MultipleWalletSigner
+}
+
+// SolanaSigner holds the payer's key, for one base58 address, on the Solana
+// rail: the PayerSigner half plus the signer of Solana transactions. Like
+// Algorand's, the transaction half signs any message: a node's offer or a
+// relayer's ack reaches it only through zsescrow's CompleteOpenOffer and
+// CompleteRelayedAck, which verify it first, and the payer's own
+// transactions through Transaction.SignWith.
+type SolanaSigner interface {
+	PayerSigner
+	solana.TransactionSigner
 }
 
 // Network selects the chain and the escrow application. The zero value is

@@ -41,6 +41,8 @@ A valid 12-, 15-, 18- or 21-word BIP-39 phrase is skipped here (logged at Info),
 
 `NewSolanaKeys` reads the same providers and loads every BIP-39 phrase of 12 to 24 words at **m/44'/501'/0'/0'** (SLIP-0010 Ed25519, empty passphrase), keyed by base58 address. That is Phantom's and Solflare's default account, so the client's exported 24-word phrase loads the same Solana address a user sees after importing it there. `solana-keygen` gives the same address only at that path (`--derivation-path`, or `prompt://?key=0/0`); plain `solana-keygen new` / `recover` use no path. A 25-word Algorand mnemonic is skipped. The `slip10` and `solana` rows of `testdata/account_vectors.json` pin this to the TS twin, `@txnlab/zerosignal/accounts/solana`.
 
+`SolanaKeys.Signer(addr)` is a `zs.SolanaSigner`: `SignBytes` for the reserve request and `SignTransactionMessage` for a transaction's message, both raw Ed25519. `testdata/solana_sign_vectors.json` records transactions signed through it, which the TS SDK's `solanaSigner` reproduces byte for byte.
+
 ## URL form (production; cloud-backed)
 
 ```

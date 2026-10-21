@@ -31,6 +31,51 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — the payer's Solana transaction signer (unreleased)
+
+The Solana rail gets its transaction half of the signer port, in the shape of Algorand's: the
+port signs whatever message it is handed, and the verifier gate sits one layer up, in functions
+that take a counterparty's transaction, check it, and only then sign. Nothing in the SDKs calls
+them yet; their Solana rail will.
+
+- **The port.** Go's `solana.TransactionSigner` (`SignTransactionMessage(ctx, address,
+  message)`) ↔ TS's `TransactionSigner` in `@txnlab/zs-proto/solana`
+  (`signTransactionMessage(address, message)`): raw Ed25519 over a transaction's message bytes,
+  returning the 64-byte signature. It is the same primitive as `signBytes`, kept a separate
+  method so a host can route the two to different custody paths. `zs.SolanaSigner` ↔ the SDK's
+  `SolanaSigner` pair it with `PayerSigner`. `keystore.SolanaKeys` implements it, and
+  `SolanaKeys.Signer(addr)` is a `zs.SolanaSigner` that signs as `addr` alone, as the TS
+  signer refuses another address; `solanaSigner(key)` in
+  `@txnlab/zerosignal/accounts/solana` now returns a `SolanaSigner` rather than a
+  `PayerSigner`.
+- **Placing the signature.** `Transaction.SignWith` ↔ `signTransactionWith` ask the port for
+  one key's signature, check it with the runtime's strict verify, and put it in that key's slot
+  among the message's signers, leaving the other slots as given. A key that is not a signer is
+  refused before the port is asked, and a signature that is not 64 bytes or does not verify
+  under the key (a host signing with the payer's Algorand key, say) is an error, not a slot
+  filled. A signature with a small-order R, which `crypto/ed25519` and @noble's own verify
+  accept, is refused in both tests.
+- **The gate.** `zsescrow.CompleteOpenOffer` / `CompleteRelayedAck` ↔ `completeOpenOffer` /
+  `completeRelayedAck` take a node's open offer or a relayer's ack as a wire transaction, run
+  `VerifyOpenOffer` / `VerifyRelayedAck` on its message, and only then sign it as the spec's
+  payer, returning the transaction with the payer's slot filled; nothing is submitted. A refusal
+  is the verifier's `OfferRejectedError` / `AckRejectedError`, raised before the port is asked.
+  An offer that doesn't decode, or a signer that fails, is another error and no evidence against
+  the node, as with Algorand's `CompletePresignedOpenGroup`. Signed, verified and returned are
+  one message from one parse. A transaction the payer builds itself (a payer-paid ack, a
+  protest) has nothing foreign to check and goes through `SignWith` directly.
+
+The new `testdata/solana_sign_vectors.json` (Go's `TestSignVectors`) pins the signed bytes
+across languages. The program's `open`, `open_v0`, `open_fold_settle` and `ack_relayed`,
+completed with its payer's key, and its payer-built `ack` and `protest`, signed through the
+port, come out as the transactions Rust signed. Offers, a relayed ack and a payer-paid ack built
+in Go for the chat app's exported phrase and solana-keygen's 12- and 24-word phrases are signed
+through `keystore.SolanaKeys`. The SDK reproduces them by deriving each key from its phrase with
+`solanaKeyFromPhrase` and signing through `solanaSigner`. Both suites also run every case of
+`solana_open_offer_vectors.json` and `solana_ack_vectors.json` through the complete functions,
+which must refuse with the case's field slug before the signer is asked, and sign an accepted one
+exactly once, as its payer, over the message given.
+
 ### 2026-10-21 — a Solana RPC client and its retry policy (unreleased)
 
 Go's new `solana/rpc` and the TS SDK's `sdk/src/solana/rpc.ts` and `pubsub.ts` are a thin

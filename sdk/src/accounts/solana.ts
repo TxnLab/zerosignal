@@ -21,7 +21,7 @@ import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { encodeBase58 } from '@txnlab/zs-proto/solana'
 
 import { configError } from '../errors.js'
-import { type PayerSigner, SignerAddressError } from '../ports.js'
+import { SignerAddressError, type SolanaSigner } from '../ports.js'
 import { phraseWords } from './words.js'
 
 export { phraseWords }
@@ -118,25 +118,23 @@ export function solanaKeyFromEntropy(entropy: Uint8Array): SolanaKey {
 }
 
 /**
- * solanaSigner signs as key's account: raw Ed25519 over the bytes given, which
- * is also a Solana transaction's signature over its message bytes, refusing
- * any other address. It holds its own copy of the seed, so a caller that wipes
- * key.seed afterwards doesn't leave it signing with zeros, and refuses a key
- * whose address isn't its seed's: a host that rebuilt one from stored fields
- * would otherwise advertise one account and sign as another.
+ * solanaSigner signs as key's account, refusing any other address: raw Ed25519
+ * over the bytes given for `signBytes`, and over a transaction's message for
+ * `signTransactionMessage`. It holds its own copy of the seed, so a caller
+ * that wipes key.seed afterwards doesn't leave it signing with zeros, and
+ * refuses a key whose address isn't its seed's: a host that rebuilt one from
+ * stored fields would otherwise advertise one account and sign as another.
  */
-export function solanaSigner(key: SolanaKey): PayerSigner {
+export function solanaSigner(key: SolanaKey): SolanaSigner {
     const seed = key.seed.slice()
     const address = encodeBase58(ed25519.getPublicKey(seed))
     if (address !== key.address) {
         seed.fill(0)
         throw configError(`solana: key address ${key.address} is not its seed's (${address})`)
     }
-    return {
-        address,
-        async signBytes(addr, msg) {
-            if (addr !== address) throw new SignerAddressError(address, addr)
-            return ed25519.sign(msg, seed)
-        },
+    const sign = async (addr: string, msg: Uint8Array) => {
+        if (addr !== address) throw new SignerAddressError(address, addr)
+        return ed25519.sign(msg, seed)
     }
+    return { address, signBytes: sign, signTransactionMessage: sign }
 }

@@ -73,8 +73,8 @@ is untested. `nodeFetch` throws there rather than hand back a guard that checks 
 ### Accounts
 
 Four subpaths build a signer from a key held in memory, each the twin of Go's keystore and
-pinned to it by `testdata/account_vectors.json`: three Algorand `Signer`s and one Solana
-`PayerSigner`. Passkeys are not one of them: derive 32 secret
+pinned to it by `testdata/account_vectors.json`: three Algorand `Signer`s and one
+`SolanaSigner`. Passkeys are not one of them: derive 32 secret
 bytes from the passkey (a WebAuthn PRF output) and hand them to `xhdRootFromEntropy`.
 
 - `@txnlab/zerosignal/accounts/algosdk`: `algosdkSigner(account)` over an algosdk `Account`.
@@ -101,8 +101,16 @@ bytes from the passkey (a WebAuthn PRF output) and hand them to `xhdRootFromEntr
   account and holds its own copy of the seed. It needs the optional peer dependency
   `@scure/bip39`.
 
-Each signs only as its own address: `signBytes` for any other rejects with
-`SignerAddressError`.
+Each signs only as its own address: `signBytes` (or a Solana signer's
+`signTransactionMessage`) for any other rejects with `SignerAddressError`.
+
+A `SolanaSigner` is a `PayerSigner` plus `signTransactionMessage(address, message)`: raw
+Ed25519 over a Solana transaction's message bytes, the same primitive as `signBytes`, so a host
+whose key lives in a worker implements both by forwarding to one sign operation there, and
+nothing that signs through the port needs the key. It signs whatever it is handed. A node's open offer and a relayer's ack
+reach it only through `completeOpenOffer` / `completeRelayedAck` in
+`@txnlab/zs-proto/solana/zsescrow`, which check the whole message first and put the signature in
+the payer's slot; `testdata/solana_sign_vectors.json` pins the signed bytes to Go's keystore.
 
 ### `signBytes` is raw Ed25519
 
