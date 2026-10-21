@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// verifyReceipt, checked against testdata/receipt_check_vectors.json, which
-// Go's VerifyReceipt generates from the same receipts and tickets.
+// verifyReceipt and receiptExclusion, checked against
+// testdata/receipt_check_vectors.json, which Go's VerifyReceipt and
+// receiptExclusion generate from the same receipts and tickets.
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 
 import { ReceiptError, parseReceiptJSON, verifyReceipt } from '../src/index.js'
+import { receiptExclusion } from '../src/receipt-check.js'
 
 interface Scenario {
     name: string
@@ -20,6 +22,7 @@ interface Scenario {
     signing_key: string
     computed_hash: string
     violation: string
+    exclusion: string
 }
 
 const vectors = JSON.parse(
@@ -33,12 +36,15 @@ describe('verifyReceipt vectors', () => {
         const key = new Uint8Array(Buffer.from(sc.signing_key, 'base64'))
         const computed = new Uint8Array(Buffer.from(sc.computed_hash, 'hex'))
         let got = ''
+        let refusal: unknown
         try {
             verifyReceipt(receipt, sc.ticket, key, computed)
         } catch (err) {
             if (!(err instanceof ReceiptError)) throw err
             got = err.violation
+            refusal = err
         }
         expect(got).toBe(sc.violation)
+        expect(receiptExclusion(refusal) ?? '').toBe(sc.exclusion)
     })
 })

@@ -346,7 +346,13 @@ export interface ReceiptCheck {
     submit: (() => Promise<Settled>) | null
 }
 
-/** checkReceipt verifies a receipt and returns the ack it calls for, mirroring Go's checkReceipt. */
+/**
+ * checkReceipt verifies a receipt and returns the ack it calls for, mirroring
+ * Go's checkReceipt. Unlike the Client's receipt check it bars no node over a
+ * refused receipt, since excludeNode takes only a refused group: a host that
+ * bars the node for a receipt it validly signed for another ticket finds a
+ * ReceiptForAnotherTicketError in err's cause chain.
+ */
 export function checkReceipt(call: CheckReceiptCall): ReceiptCheck {
     const log = call.log ?? discardLogger
     try {

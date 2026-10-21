@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-21 — the payer refuses a receipt for another ticket (unreleased)
+### 2026-10-21 — the payer refuses a receipt for another ticket and bars its node (unreleased)
 
 Both SDKs' receipt check (`zs.VerifyReceipt`, `verifyReceipt`) now refuses a receipt whose
 `ticket_id` is not the ticket the payer opened, by the rule in [`SPEC.md` §3a "Settlement
@@ -40,13 +40,20 @@ ticket's 16 bytes, and so must the ticket's own id; the comparison is on the str
 Solana open offer's fold compares. An honest node always echoes the ticket's id, so only a
 misbehaving node is refused.
 
-The refusal is a `sig` violation and takes that path unchanged: `ReceiptViolated` with
-violation `sig`, the spend guard's reservation released, no protest, no settle, no node
-exclusion, and the receipt's figures neither pinned on the refund watchdog nor journaled as
-`Signed` / `signed`. Before this, such a receipt that matched the delivered body was acked at
-its own figure, and one that failed its `body_hash` drove a protest, which Solana's program
-refuses (`ReceiptNotForTicket`) and Algorand's would take on an open ticket, freezing it over
-a receipt about another ticket.
+The refusal is a `sig` violation: `ReceiptViolated` with violation `sig`, the spend guard's
+reservation released, no protest, no settle, and the receipt's figures neither pinned on the
+refund watchdog nor journaled as `Signed` / `signed`. Before this, such a receipt that matched
+the delivered body was acked at its own figure, and one that failed its `body_hash` drove a
+protest, which Solana's program refuses (`ReceiptNotForTicket`) and Algorand's would take on an
+open ticket, freezing it over a receipt about another ticket.
+
+Unlike the rest of the `sig` path, a receipt whose signature verified but that names another
+ticket also bars its node for the rest of the process, as an over-claim does: a `NodeExcluded`
+with reason `receipt_names_other_ticket` follows the `ReceiptViolated` on a stream, and a warn
+line logs it. A bad signature, a nil receipt or ticket, and a payer ticket id that is not
+canonical bar no node, since none shows the node wrote a receipt for another ticket. The
+classification is Go's unexported `errReceiptNamesOtherTicket` in the `ReceiptError` chain, and
+TS's `ReceiptForAnotherTicketError` as the `ReceiptError`'s cause.
 
 Go's wallet now also refuses to open a ticket whose id is not in that canonical spelling, as
 the TS wallet's decoder already did, so it no longer locks an escrow for a turn whose every
@@ -54,8 +61,9 @@ receipt it would refuse. The journal and the refund watchdog still decode such a
 escrow an older build opened under one stays refundable.
 
 `testdata/receipt_check_vectors.json` (Go's `TestReceiptCheckVectors`) pins the verdict for
-both SDKs. Go's `VerifyReceipt` also refuses a nil `ReceiptCheck.Ticket` now, where it
-skipped the deployment and amount checks before.
+both SDKs, and with each scenario's `exclusion` the reason that verdict bars the node for.
+Go's `VerifyReceipt` also refuses a nil `ReceiptCheck.Ticket` now, where it skipped the
+deployment and amount checks before.
 
 ### 2026-10-20 — the payer freezes an operator claim above its receipt (0.9.0)
 

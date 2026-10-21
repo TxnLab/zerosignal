@@ -25,7 +25,7 @@ import { guardRecords } from './spend-guard.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
 import type { RelayHop } from './routing/relay.js'
 import type { NodeRef, Settlement, SettleKind } from './types.js'
-import { ReceiptError, type ReceiptViolation, verifyReceipt } from './verify.js'
+import { ReceiptError, ReceiptForAnotherTicketError, type ReceiptViolation, verifyReceipt } from './verify.js'
 
 /**
  * The contract's default maxDisputeExcerptBytes. The excerpt is cut to it so
@@ -104,19 +104,34 @@ export interface TurnCheck {
     /** The failed check, or '' when the receipt verified. */
     violation: string
     settled: Settlement
-    /** Set when the node was barred for contradicting its own receipt. */
+    /** Set when the node was barred on its own signed word. */
     excluded: boolean
-    /** How it contradicted it, the NodeExcluded reason: one of EXCLUSION_REASONS. */
+    /** How, the NodeExcluded reason: one of EXCLUSION_REASONS. */
     exclusion?: string
 }
 
-/** The NodeExcluded reasons a receipt check reports, Go's exclusionSettleGroup and exclusionOverclaim. */
+/**
+ * The NodeExcluded reasons a receipt check reports, Go's exclusionSettleGroup,
+ * exclusionOverclaim and exclusionReceiptForAnotherTicket.
+ */
 export const EXCLUSION_REASONS = {
     /** The node's settle group failed verification. */
     settleGroup: 'settle_group_rejected',
     /** The node's settle claim on chain takes more than the receipt it signed. */
     overclaim: 'settle_claim_exceeds_receipt',
+    /** The node signed the receipt it handed over for another ticket. */
+    receiptForAnotherTicket: 'receipt_names_other_ticket',
 } as const
+
+/**
+ * The NodeExcluded reason verifyReceipt's refusal alone bars the node for, or
+ * undefined when it bars none: Go's receiptExclusion. Apart from
+ * checkTurnReceipt so the receipt vectors pin the same classification Go
+ * makes.
+ */
+export function receiptExclusion(err: unknown): string | undefined {
+    return findError(err, ReceiptForAnotherTicketError) !== undefined ? EXCLUSION_REASONS.receiptForAnotherTicket : undefined
+}
 
 /** What the receipt check reads off the Client. */
 export interface ReceiptCheckDeps {
@@ -349,6 +364,22 @@ export async function checkTurnReceipt(
     // protested, or refunds or lapses on chain.
     const guard = deps.spendGuard
     if (guard) guardRecords(log, 'release', ticketId, () => guard.release(ticketId))
+    // The receipt arrived sealed under this turn's response key, which no
+    // relay holds, and its signature verified under the node's key, so the
+    // node itself handed over a receipt for another ticket: proof of its
+    // misbehaviour, as an over-claim is. In every other way it stays a sig
+    // violation: neither pinned, journaled nor protested.
+    const reason = receiptExclusion(verifyErr)
+    if (reason !== undefined && deps.nodeExclusions) {
+        deps.nodeExclusions.excludeNode(refOf(op))
+        check.excluded = true
+        check.exclusion = reason
+        log.warn('node excluded: it signed a receipt for another ticket', {
+            ticket_id: ticketId,
+            ...opAttrs(op),
+            receipt_ticket_id: receipt.ticket_id,
+        })
+    }
     // Both are found only after the signature verified, so the amount is
     // still one the node signed for this ticket. Named rather than "all but
     // sig": a violation of no known kind has an unknown signature, and a

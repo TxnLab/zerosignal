@@ -12,9 +12,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { NoResolveFrozenError } from '../src/ack.js'
+import type { SpendGuard } from '../src/config.js'
 import { APPROVAL_ASSERT, ApprovalError } from '../src/escrow/revert.js'
 import type { OpenHandle } from '../src/parts.js'
 import { type ReceiptCheckDeps, checkTurnReceipt } from '../src/receipt-check.js'
+import { type UsageReport, usageEvents } from '../src/responder.js'
 import { type TicketProbe, Watchdog } from '../src/refund-watchdog.js'
 import { NodeExclusionStore } from '../src/routing/exclusion.js'
 import type { NodeRef } from '../src/types.js'
@@ -267,6 +269,77 @@ describe('the receipt the journal is handed', () => {
         })
         await run(deps, f, handleOf({}), { matching })
         expect(writes).toEqual(want === null ? [] : [want])
+    })
+})
+
+// Go's TestCheckReceipt_BarsANodeThatSignsAReceiptForAnotherTicket: a receipt
+// the node validly signed for another ticket bars the node, as an over-claim
+// does, and the turn reports why. Only a signature that verified shows the
+// node wrote it, and a ticket id the payer holds in another spelling is the
+// payer's fault, so neither bars anyone. Barred or not, the receipt stays a
+// sig violation: released, with no submit and nothing pinned.
+describe('a receipt for another ticket', () => {
+    const forAnother = (f: Fixture) => void (f.ticket.ticket_id = ANOTHER_TICKET)
+    it.each([
+        ['receipt for another ticket', forAnother, true, true],
+        // The body_hash would have driven a protest.
+        ["receipt for another ticket over a body that doesn't match it", forAnother, false, true],
+        ['bad signature', (f: Fixture) => void (f.receipt.sig = ''), true, false],
+        ['bad signature on a receipt for another ticket', (f: Fixture) => {
+            forAnother(f)
+            f.receipt.sig = ''
+        }, true, false],
+        ['signing key of the wrong length', (f: Fixture) => {
+            forAnother(f)
+            f.op = { ...f.op, ticketSigningKey: f.op.ticketSigningKey.slice(0, 31) }
+        }, true, false],
+        // The fixture's id with non-zero padding bits: the same bytes, which the
+        // receipt names in their canonical spelling.
+        ["payer's ticket id not canonical", (f: Fixture) => void (f.ticket.ticket_id = 'dGlja2V0LXdhaXQtMDAwMB=='), true, false],
+    ] as [string, (f: Fixture) => void, boolean, boolean][])('%s', async (_name, mutate, matching, barred) => {
+        const f = await fixture()
+        mutate(f)
+        const calls: string[] = []
+        const spendGuard: SpendGuard = {
+            admit() {},
+            reserve() {},
+            settle: (id, charged) => calls.push(`settle ${id} ${charged}`),
+            release: (id) => calls.push(`release ${id}`),
+        }
+        const { deps, recorded } = depsOf({ spendGuard })
+        const { submit, check } = await run(deps, f, handleOf({}), { matching })
+        expect(submit).toBeNull()
+        expect(deps.nodeExclusions!.nodeExcluded(NODE)).toBe(barred)
+        const report: UsageReport = {
+            receipt: f.receipt,
+            ticket: f.ticket,
+            op: f.op,
+            openFees: 0,
+            settleFees: 0,
+            algoUsdPrice: 0,
+            feeUnit: ALGO_FEES,
+            feeBps: 0,
+            haveFee: false,
+            check,
+        }
+        expect(usageEvents(report)).toEqual([
+            { type: 'receipt.violated', violation: 'sig', protestTxId: '' },
+            ...(barred ? [{ type: 'node.excluded', node: NODE, reason: 'receipt_names_other_ticket' }] : []),
+        ])
+        const logged = (deps.logger as ReturnType<typeof recLogger>).logged
+        expect(logged.some((l) => l.msg === 'node excluded: it signed a receipt for another ticket')).toBe(barred)
+        expect(calls).toEqual([`release ${f.ticket.ticket_id}`])
+        expect(recorded).toEqual([])
+    })
+
+    // Without an exclusion store there is nothing to bar the node in, and the
+    // turn reports no exclusion.
+    it('reports no exclusion without an exclusion store', async () => {
+        const f = await fixture()
+        forAnother(f)
+        const { deps } = depsOf({ nodeExclusions: undefined })
+        const { check } = await run(deps, f, handleOf({}))
+        expect([check.violation, check.excluded, check.exclusion]).toEqual(['sig', false, undefined])
     })
 })
 

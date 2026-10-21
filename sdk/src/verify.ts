@@ -123,9 +123,10 @@ export function verifyReceipt(r: UsageReceipt, t: Ticket, signingKey: Uint8Array
     // a protest over another ticket's receipt; Algorand's refuses it against a
     // pending claim with another digest, and otherwise freezes this ticket on
     // evidence about another. Ahead of the amount and body_hash checks, which
-    // would otherwise pin the figure or protest.
+    // would otherwise pin the figure or protest. The mismatch itself, unlike
+    // the rest of the sig class, bars the node (ReceiptForAnotherTicketError).
     const mismatch = receiptTicketMismatch(r.ticket_id, t.ticket_id)
-    if (mismatch !== undefined) throw new ReceiptError('sig', mismatch)
+    if (mismatch !== undefined) throw new ReceiptError('sig', mismatch.message, mismatch)
     if (r.amount_charged > t.max_price) {
         throw new ReceiptError(
             'amount',
@@ -162,6 +163,21 @@ export { decodeReceiptHeader, parseReceiptJSON } from '@txnlab/zs-proto/ticket'
 const TICKET_ID_LEN = 16
 
 /**
+ * ReceiptForAnotherTicketError is the cause of the one sig ReceiptError that
+ * is evidence against the node, Go's errReceiptNamesOtherTicket: the signature
+ * verified under the node's key over a receipt naming another ticket. The
+ * receipt check bars the node for it. A bad signature proves nothing about who
+ * produced the receipt, and a non-canonical ticket id is the payer's own
+ * input, so neither carries it.
+ */
+export class ReceiptForAnotherTicketError extends Error {
+    constructor(receiptId: string, want: string) {
+        super(`the receipt names another ticket: ${JSON.stringify(receiptId)}, not the payer's ${JSON.stringify(want)}`)
+        this.name = 'ReceiptForAnotherTicketError'
+    }
+}
+
+/**
  * Why the receipt doesn't name the payer's ticket, or undefined when it does:
  * Go's receiptNamesTicket. The receipt's id is compared as the string the node
  * signed against the canonical spelling of the bytes the payer opened, as the
@@ -170,19 +186,22 @@ const TICKET_ID_LEN = 16
  * takes non-zero padding bits and this one doesn't, so without it the two SDKs
  * would accept different receipts for one ticket. This decoder already refuses
  * every other spelling, so the ticket comparison below can't fail today; it
- * stays so the check holds should the decoder ever loosen.
+ * stays so the check holds should the decoder ever loosen. Only the receipt's
+ * mismatch is a ReceiptForAnotherTicketError; the checks of the payer's id
+ * come first, so a ticket the payer holds in another spelling never bars the
+ * node.
  */
-function receiptTicketMismatch(receiptId: string, ticketId: string): string | undefined {
+function receiptTicketMismatch(receiptId: string, ticketId: string): Error | undefined {
     let raw: Uint8Array
     try {
         raw = scureBase64.decode(ticketId)
     } catch (err) {
-        return `the payer's ticket id: ${message(err)}`
+        return new Error(`the payer's ticket id: ${message(err)}`)
     }
-    if (raw.length !== TICKET_ID_LEN) return `the payer's ticket id decodes to ${raw.length} bytes, want ${TICKET_ID_LEN}`
+    if (raw.length !== TICKET_ID_LEN) return new Error(`the payer's ticket id decodes to ${raw.length} bytes, want ${TICKET_ID_LEN}`)
     const want = scureBase64.encode(raw)
-    if (ticketId !== want) return `the payer's ticket id ${JSON.stringify(ticketId)} is not the canonical spelling ${JSON.stringify(want)}`
-    if (receiptId !== want) return `the receipt names ticket ${JSON.stringify(receiptId)}, not the payer's ${JSON.stringify(want)}`
+    if (ticketId !== want) return new Error(`the payer's ticket id ${JSON.stringify(ticketId)} is not the canonical spelling ${JSON.stringify(want)}`)
+    if (receiptId !== want) return new ReceiptForAnotherTicketError(receiptId, want)
     return undefined
 }
 

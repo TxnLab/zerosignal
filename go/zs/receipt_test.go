@@ -75,6 +75,22 @@ func TestVerifyReceipt_NilTicketIsRefused(t *testing.T) {
 	if re, ok := AsReceiptError(err); !ok || re.Violation != ReceiptViolationSig {
 		t.Errorf("VerifyReceipt(nil ticket) = %v, want a sig violation", err)
 	}
+	// The payer had no ticket to hold the receipt against, so it shows
+	// nothing about the node.
+	if got := receiptExclusion(err); got != "" {
+		t.Errorf("receiptExclusion(nil ticket) = %q, want none", got)
+	}
+}
+
+// A missing receipt is no receipt the node signed, so it bars no node.
+func TestVerifyReceipt_NilReceiptBarsNoNode(t *testing.T) {
+	err := VerifyReceipt(ReceiptCheck{Ticket: &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA=="}})
+	if re, ok := AsReceiptError(err); !ok || re.Violation != ReceiptViolationSig {
+		t.Errorf("VerifyReceipt(nil receipt) = %v, want a sig violation", err)
+	}
+	if got := receiptExclusion(err); got != "" {
+		t.Errorf("receiptExclusion(nil receipt) = %q, want none", got)
+	}
 }
 
 // TestVerifyReceipt_CachedTokenDiscount: a discounted receipt carries a

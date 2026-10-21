@@ -295,12 +295,14 @@ type SettleSubmitted struct {
 }
 
 // NodeExcluded fires on a stream, before SettleSubmitted (or after
-// ReceiptViolated, when a refused protest fell back to a freeze), when the
-// node contradicted its own receipt: its pre-signed settle group failed
-// verification (Reason "settle_group_rejected"), or the settle claim it
-// posted on chain takes more than the receipt charges
-// ("settle_claim_exceeds_receipt"). The node is barred for the rest of the
-// process. A whole reply learns this after done, and only logs it.
+// ReceiptViolated, when a refused protest fell back to a freeze or the
+// receipt named another ticket), when the node's own signed word convicts it:
+// its pre-signed settle group failed verification (Reason
+// "settle_group_rejected"), the settle claim it posted on chain takes more
+// than the receipt charges ("settle_claim_exceeds_receipt"), or the receipt
+// it signed names another ticket ("receipt_names_other_ticket"). The node is
+// barred for the rest of the process. A whole reply doesn't report it; the bar
+// is only logged.
 type NodeExcluded struct {
 	Node   NodeRef
 	Reason string

@@ -269,11 +269,13 @@ export interface SettleSubmitted {
 
 /**
  * On a stream, before settle.submitted (or after receipt.violated, when a
- * refused protest fell back to a freeze), when the node contradicted its own
- * receipt: its pre-signed settle group failed verification (reason
- * settle_group_rejected), or the settle claim it posted on chain takes more
- * than the receipt charges (settle_claim_exceeds_receipt). The node is barred
- * for the rest of the process.
+ * refused protest fell back to a freeze or the receipt named another ticket),
+ * when the node's own signed word convicts it: its pre-signed settle group
+ * failed verification (reason settle_group_rejected), the settle claim it
+ * posted on chain takes more than the receipt charges
+ * (settle_claim_exceeds_receipt), or the receipt it signed names another
+ * ticket (receipt_names_other_ticket). The node is barred for the rest of the
+ * process.
  */
 export interface NodeExcluded {
     type: 'node.excluded'

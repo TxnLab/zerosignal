@@ -568,7 +568,10 @@ camel case:
   escrow contract without `resolveFrozen`, the payer sends neither that half nor a freeze: the
   over-claim's node is still barred, and no `settle.submitted` follows. `receipt.violated` replaces
   `receipt.verified` when the receipt fails its check, and no settle follows; when a refused
-  protest falls back to freezing an over-claim, `node.excluded` follows it.
+  protest falls back to freezing an over-claim, `node.excluded` follows it. A receipt the node
+  validly signed for another ticket is `receipt.violated` with `violation: 'sig'`, followed by
+  `node.excluded` (`reason: 'receipt_names_other_ticket'`); a receipt whose signature fails bars
+  no node.
 - **End:** `done`, for a turn the node sealed as finished. A failed turn ends with the events
   loop throwing instead.
 

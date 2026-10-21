@@ -116,7 +116,8 @@ func VerifyReceipt(c ReceiptCheck) error {
 	// a protest over another ticket's receipt; Algorand's refuses it against a
 	// pending claim with another digest, and otherwise freezes this ticket on
 	// evidence about another. Ahead of the amount and body_hash checks, which
-	// would otherwise pin the figure or protest.
+	// would otherwise pin the figure or protest. The mismatch itself, unlike
+	// the rest of the sig class, bars the node (errReceiptNamesOtherTicket).
 	if err := receiptNamesTicket(c.Receipt.TicketID, c.Ticket.TicketID); err != nil {
 		return &ReceiptError{Violation: ReceiptViolationSig, Err: err}
 	}
@@ -154,13 +155,22 @@ func VerifyReceipt(c ReceiptCheck) error {
 	return nil
 }
 
+// errReceiptNamesOtherTicket marks the one sig violation that is evidence
+// against the node, which checkReceipt bars it for: the signature verified
+// under the node's key over a receipt naming another ticket. A bad signature
+// proves nothing about who produced the receipt, and a non-canonical ticket id
+// is the payer's own input, so neither carries it.
+var errReceiptNamesOtherTicket = errors.New("the receipt names another ticket")
+
 // receiptNamesTicket refuses a receipt that doesn't name the payer's ticket.
 // The receipt's id is compared as the string the node signed against the
 // canonical spelling of the bytes the payer opened, as the open offer's fold
 // compares, so no decoder's leniency makes two spellings of one id agree. The
 // ticket's own id must be that spelling too: Go's decoder takes non-zero
 // padding bits and TS's doesn't, so without it the two SDKs would accept
-// different receipts for one ticket.
+// different receipts for one ticket. Only the receipt's mismatch wraps
+// errReceiptNamesOtherTicket; the checks of the payer's id come first, so a
+// ticket the payer holds in another spelling never bars the node.
 func receiptNamesTicket(receiptID, ticketID string) error {
 	raw, err := decodeTicketID(ticketID)
 	if err != nil {
@@ -171,7 +181,7 @@ func receiptNamesTicket(receiptID, ticketID string) error {
 		return fmt.Errorf("the payer's ticket id %q is not the canonical spelling %q", ticketID, want)
 	}
 	if receiptID != want {
-		return fmt.Errorf("the receipt names ticket %q, not the payer's %q", receiptID, want)
+		return fmt.Errorf("%w: %q, not the payer's %q", errReceiptNamesOtherTicket, receiptID, want)
 	}
 	return nil
 }

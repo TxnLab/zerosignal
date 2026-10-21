@@ -18,7 +18,10 @@ package zs
 // approval program, a non-zero payer fee, or a co-signed value that contradicts
 // the node's OWN signed receipt). The node authored both halves of that group and
 // the receipt, so a mismatch is the node contradicting itself, never honest
-// desync — see wallet.go AckSettle and the slashing plan.
+// desync — see wallet.go AckSettle and the slashing plan. The receipt check
+// bars a node on the same footing when the claim it posted on chain takes more
+// than its receipt, or when the receipt it signed names another ticket (the
+// exclusion* reasons in dispatch.go).
 // Such a node is not "temporarily broken"; it tried to take the payer's account
 // or overcharge. So we stop routing to it — as a target AND as a relay — for the
 // rest of the process's life.
@@ -37,8 +40,9 @@ package zs
 type NodeExcluder interface {
 	// ExcludeNode permanently (process-lifetime) bars a node from candidate
 	// selection and the relay pool. Idempotent; safe for concurrent use. Call
-	// ONLY on proof of settle-group fraud — never for a transient failure, which
-	// belongs in TargetBackoff / relay reputation and must stay self-healing.
+	// ONLY on proof of misbehaviour under the node's own signature — never for
+	// a transient failure, which belongs in TargetBackoff / relay reputation
+	// and must stay self-healing.
 	ExcludeNode(target NodeRef)
 
 	// NodeExcluded reports whether a node has been proven malicious and must be
