@@ -117,6 +117,10 @@ func receiptCheckScenarios(t *testing.T) []receiptCheckScenario {
 	// The node signed another spelling than the one it issued the ticket in.
 	add("the payer's ticket bytes with non-zero padding bits are refused and bar the node", "sig", barred, receiptNames(payersLoose), nil)
 	add("the payer's ticket id unpadded is refused and bars the node", "sig", barred, receiptNames("c2l4dGVlbi1ieXRlLWlkIQ"), nil)
+	// Go's decoder skips line breaks, so only the string compare refuses these.
+	add("the payer's ticket id with a trailing newline is refused and bars the node", "sig", barred, receiptNames(payers+"\n"), nil)
+	add("the payer's ticket id with a line break inside is refused and bars the node", "sig", barred, receiptNames(payers[:12]+"\r\n"+payers[12:]), nil)
+	add("the payer's ticket id with a leading space is refused and bars the node", "sig", barred, receiptNames(" "+payers), nil)
 	// The payer's own id is at fault here, not the node's receipt.
 	add("a ticket id not in its canonical spelling refuses even the receipt echoing it, barring no node", "sig", "", bothName(payersLoose), nil)
 	add("a ticket id of 17 bytes refuses even the receipt echoing it, barring no node", "sig", "", bothName("dGlja2V0LXhvcnZvenp6MDA="), nil)
