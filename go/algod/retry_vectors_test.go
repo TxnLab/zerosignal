@@ -20,6 +20,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/TxnLab/zerosignal/go/httpx"
 )
 
 var updateVectors = flag.Bool("update", false, "regenerate the selected test's proto/testdata vectors")
@@ -63,7 +65,7 @@ func TestAlgodRetryVectors(t *testing.T) {
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 	var schedule []float64
 	for attempt := 0; attempt < rt.MaxRetries; attempt++ {
-		schedule = append(schedule, ms(backoffAt(attempt, "", now, rt.RetryWaitMin, rt.RetryWaitMax)))
+		schedule = append(schedule, ms(httpx.LinearBackoff(attempt, "", now, rt.RetryWaitMin, rt.RetryWaitMax)))
 	}
 
 	type in struct {
@@ -107,7 +109,7 @@ func TestAlgodRetryVectors(t *testing.T) {
 		cases = append(cases, backoffCase{
 			Attempt:    c.attempt,
 			RetryAfter: c.v,
-			WaitMs:     ms(backoffAt(c.attempt, c.v, now, rt.RetryWaitMin, rt.RetryWaitMax)),
+			WaitMs:     ms(httpx.LinearBackoff(c.attempt, c.v, now, rt.RetryWaitMin, rt.RetryWaitMax)),
 		})
 	}
 

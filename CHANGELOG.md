@@ -31,6 +31,37 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — a Solana RPC client and its retry policy (unreleased)
+
+Go's new `solana/rpc` and the TS SDK's `sdk/src/solana/rpc.ts` and `pubsub.ts` are a thin
+JSON-RPC client for the Solana rail, hand-rolled rather than `solana-go` or `@solana/kit`.
+Nothing calls them yet; the SDKs' and the node's Solana rails will. The methods are the ones
+those rails read and submit with: `getAccountInfo`, `getProgramAccounts` (with `dataSize` and
+base64 `memcmp` filters), `getBalance`, `getLatestBlockhash`, `getBlockHeight`,
+`getGenesisHash`, `sendTransaction` (base64, with `skipPreflight`, `preflightCommitment` and
+`maxRetries`) and `getSignatureStatuses`, plus `signatureSubscribe` over a WebSocket as the
+confirmation watch, since the public endpoints answer `getSignatureStatuses` polling with 429.
+Account data comes back as bytes for `solana/zsescrow`'s decoders. Go's client is an interface
+(`rpc.Client`) over a pooled HTTP/2 transport; its socket is `golang.org/x/net/websocket`, which
+the module already required. TS's socket is the platform's `WebSocket` or one the host passes.
+
+Neither client accepts an endpoint carrying `user:password` (pass credentials in a header), and
+no error either one returns spells the endpoint, since a provider's API key often rides in its
+query. Go's socket takes a header, TLS config and dialer (`PubSubOptions`) and never an HTTP
+proxy. Nothing in either notices an upstream that holds the socket open and stops sending, so
+the caller bounds each watch, by the blockhash's `lastValidBlockHeight` or a timer.
+
+Every call retries a transport failure, a 429 and any 5xx, as algod's transport does, and two
+JSON-RPC answers that are weather: `-32005` (node behind) and, on `sendTransaction` only, a
+`-32002` simulation failure whose error is `BlockhashNotFound`. Every other JSON-RPC error is returned at once, a simulation's
+`AlreadyProcessed` or `InsufficientFundsForFee` included; `Error.TxErrName` ↔ `txErrName` names
+its `TransactionError`. The budget is 8 retries after the first attempt, waiting 0.5 s more each
+time up to 10 s (18 s in all), or a longer `Retry-After` up to the same cap. The wait is
+algod's, so Go's Retry-After parse moved to `httpx.LinearBackoff` / `httpx.RetryAfter`,
+unchanged, and the TS twin calls `algodBackoffMs`. The new `testdata/solana_rpc_vectors.json`
+(Go's `TestSolanaRPCVectors`) pins the budget, which outcomes retry, the wait before each retry,
+how a `TransactionError`'s variant is read, and the params each method sends.
+
 ### 2026-10-21 — the payer's check of a relayed Solana ack, and its ack digest for a receipt (unreleased)
 
 `@txnlab/zs-proto/solana/zsescrow` and Go's `solana/zsescrow` add the payer's two ways to ack a
