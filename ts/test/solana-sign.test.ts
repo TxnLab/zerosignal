@@ -181,6 +181,24 @@ describe('signTransactionWith', () => {
             await expect(signTransactionWith(t, payer, fixtureSigner())).rejects.toThrow(MalformedMessageError)
         })
 
+        // A slot past the signer count would go out with whatever it holds.
+        it('three slots for two signers, without asking', async () => {
+            const t = fresh()
+            t.signatures = [...t.signatures, new Uint8Array(64)]
+            const padded = t.signatures.map((s) => hex.encode(s))
+            const inner = fixtureSigner()
+            let asked = 0
+            const counting = {
+                signTransactionMessage: (address: string, message: Uint8Array) => {
+                    asked++
+                    return inner.signTransactionMessage(address, message)
+                },
+            }
+            await expect(signTransactionWith(t, payer, counting)).rejects.toThrow(MalformedMessageError)
+            expect(asked).toBe(0)
+            expect(t.signatures.map((s) => hex.encode(s))).toEqual(padded)
+        })
+
         it("fills the payer's slot and leaves the node's", async () => {
             const t = fresh()
             t.signatures[1] = new Uint8Array(64)
