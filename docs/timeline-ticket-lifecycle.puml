@@ -45,18 +45,18 @@
 '                     followed by a payer broadcast of the group).
 '   [E] expires_at    unix-second boundary (TicketRecord.expiresAt); no new
 '                     inference admitted. settle() / protest() still legal
-'                     while status is OPEN or PENDING_SETTLE.
+'                     while status is OPEN or PENDING_SETTLE, until [F].
 '   [F] +grace        expires_at + settlementGraceSeconds reached.
 '                     settleLapsed() now finalizes a pending operator claim
 '                     that the payer never responded to.
 '                     refundInactive() refunds the payer when no operator
 '                     claim was ever posted (or only a payer-side claim).
-'                     settle() (the two-party happy path) is rejected past
-'                     this boundary.
+'                     settle() (the two-party happy path) and protest()
+'                     are rejected past this boundary.
 '   [G] terminal      ticket deleted (atomic match, watchdog standalone +
 '                     later finalize, settleLapsed, or refundInactive),
-'                     or STATUS_FROZEN (mismatch / protest, awaits
-'                     off-chain arbitration).
+'                     or STATUS_FROZEN (mismatch / protest), which only
+'                     the admin's resolveFrozen deletes, at any time.
 '
 ' ========== Design notes ==========
 '   1. Co-signed settle removes the race between settle() and protest().
@@ -92,16 +92,18 @@
 '      settle(ticketId, amountCharged, receiptDigest, asOperator) lets the
 '      same Algorand account act as both operator and payer (e.g. operator
 '      testing their own deployment). The contract pins authorization on
-'      the arg: asOperator=true requires Txn.sender == t.nodeSigning
-'      (the serving node's key); asOperator=false requires Txn.sender == t.payer.
+'      the arg: asOperator=true requires Txn.sender == the node box's current
+'      signing key (t.nodeSigning once the node box is gone);
+'      asOperator=false requires Txn.sender == t.payer.
 '
 '   6. protest() authorization + evidence.
 '      protest() is the payer's one-call freeze primitive: callable while
-'      status is OPEN or PENDING_SETTLE, it runs an in-contract
-'      ed25519verify_bare over the operator's receipt sig and carries a
-'      length-capped dispute_excerpt. open() and settle() instead authenticate
-'      the operator via Algorand consensus (no in-contract ed25519verify_bare).
-'      A FROZEN ticket resolves through the admin/arbiter path off-chain.
+'      status is OPEN or PENDING_SETTLE and before [F], it runs an in-contract
+'      ed25519verify_bare over the operator's receipt sig (under the key the
+'      ticket recorded at open) and carries a length-capped dispute_excerpt.
+'      open() and settle() instead authenticate the operator via Algorand
+'      consensus (no in-contract ed25519verify_bare). A FROZEN ticket is
+'      closed by the admin's resolveFrozen, which splits the escrow.
 
 @startuml
 title Ticket lifecycle on a time axis (ZeroSignalEscrow, SPEC §3a/§3b)

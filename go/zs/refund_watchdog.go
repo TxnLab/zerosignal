@@ -421,8 +421,8 @@ func (rw *RefundWatchdog) track(ticketID string, deadline time.Time, probe func(
 						slog.String("ticket_id", ticketID))
 					return
 				case res.verdict == escrow.VerdictArbitrate:
-					// refundInactive reverts on FROZEN — resolution is
-					// off-chain arbitration, nothing for the watchdog to do.
+					// refundInactive reverts on FROZEN — only the admin's
+					// resolveFrozen closes it, nothing for the watchdog to do.
 					rw.log.Info("refund watchdog: ticket is frozen (dispute); leaving to arbitration",
 						slog.String("ticket_id", ticketID))
 					return

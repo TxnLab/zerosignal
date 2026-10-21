@@ -319,6 +319,8 @@ var exportedApprovalAsserts = map[string]string{
 	"AssertInsufficientMbrDeposit":          "insufficient MBR deposit",
 	"AssertInsufficientMbrDepositFreeQuota": "insufficient MBR deposit for free-quota box",
 	"AssertPayerHasNoMbrDeposit":            "payer has no MBR deposit",
+	"AssertProtestAfterDeadline":            "protest after deadline",
+	"AssertReceiptDigestMismatch":           "receiptDigest must match the pending claim",
 }
 
 // TestApprovalAssertConstants_HoldTheirDocumentedValue is the half that stops
@@ -336,6 +338,8 @@ func TestApprovalAssertConstants_HoldTheirDocumentedValue(t *testing.T) {
 		"AssertInsufficientMbrDeposit":          AssertInsufficientMbrDeposit,
 		"AssertInsufficientMbrDepositFreeQuota": AssertInsufficientMbrDepositFreeQuota,
 		"AssertPayerHasNoMbrDeposit":            AssertPayerHasNoMbrDeposit,
+		"AssertProtestAfterDeadline":            AssertProtestAfterDeadline,
+		"AssertReceiptDigestMismatch":           AssertReceiptDigestMismatch,
 	}
 	if len(got) != len(exportedApprovalAsserts) {
 		t.Fatalf("checked %d constants, table lists %d — add the new one to both", len(got), len(exportedApprovalAsserts))
@@ -455,6 +459,50 @@ func TestEnrichSubmitError_LapseSentinels(t *testing.T) {
 				t.Errorf("Err = %v, want it to be the sentinel itself", revert.Err)
 			}
 			want := fmt.Sprintf("escrow: submit settleLapsed pc=%d: escrow: %s", pc, tc.msg)
+			if got.Error() != want {
+				t.Errorf("error text = %q, want %q", got.Error(), want)
+			}
+		})
+	}
+}
+
+// TestEnrichSubmitError_ProtestSentinels: protest()'s deadline and
+// pending-digest guards each come back as their own sentinel, and neither as
+// settle's deadline sentinel. A payer that read a late protest as a late
+// settle would chase the wrong fix.
+func TestEnrichSubmitError_ProtestSentinels(t *testing.T) {
+	spec, err := GetSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		msg      string
+		sentinel error
+	}{
+		{AssertProtestAfterDeadline, ErrProtestAfterDeadline},
+		{AssertReceiptDigestMismatch, ErrReceiptDigestMismatch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.msg, func(t *testing.T) {
+			pc := pcsForApprovalMessage(t, spec, tc.msg)[0]
+			algodErr := fmt.Errorf("HTTP 400: TransactionPool.Remember: logic eval error: assert failed pc=%d. Details: pc=%d, opcodes=...", pc, pc)
+			got := enrichSubmitError("protest", algodErr)
+			if !errors.Is(got, tc.sentinel) {
+				t.Fatalf("errors.Is(got, %v) = false; got = %v", tc.sentinel, got)
+			}
+			for _, other := range []error{ErrProtestAfterDeadline, ErrReceiptDigestMismatch, ErrSettleAfterRefundDeadline} {
+				if other != tc.sentinel && errors.Is(got, other) {
+					t.Errorf("%q also matched %v", tc.msg, other)
+				}
+			}
+			revert, ok := errors.AsType[*ApprovalError](got)
+			if !ok {
+				t.Fatalf("got = %v, want an *ApprovalError", got)
+			}
+			if revert.Sentinel() != tc.sentinel || revert.Err != tc.sentinel {
+				t.Errorf("Sentinel() = %v, Err = %v, want both %v", revert.Sentinel(), revert.Err, tc.sentinel)
+			}
+			want := fmt.Sprintf("escrow: submit protest pc=%d: escrow: %s", pc, tc.msg)
 			if got.Error() != want {
 				t.Errorf("error text = %q, want %q", got.Error(), want)
 			}

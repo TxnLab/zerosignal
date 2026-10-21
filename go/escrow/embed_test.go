@@ -132,6 +132,7 @@ func TestSpec_LoadsAllExpectedMethods(t *testing.T) {
 		"unregisterOperator",
 		"evictOperator",
 		"reinstateOperator",
+		"resolveFrozen",
 		"createNode",
 		"unregisterNode",
 		"open",

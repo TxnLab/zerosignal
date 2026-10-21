@@ -32,8 +32,9 @@ const (
 	// StatusPendingOperator: the operator has recorded a claim the payer has
 	// not matched.
 	StatusPendingOperator
-	// StatusFrozen: the two sides disagreed, or the payer protested. Terminal:
-	// no contract call accepts it, and there is no on-chain resolution path.
+	// StatusFrozen: the two sides disagreed, or the payer protested. No call
+	// the payer or the node can make accepts it; only the rail's admin
+	// resolution closes it.
 	StatusFrozen
 )
 
@@ -72,9 +73,12 @@ const (
 	// anyone; the operator's driver normally does it.
 	VerdictLapse
 	// VerdictArbitrate: frozen. No settle, protest or deadline call accepts it
-	// at any time, and there is no unfreeze or admin close, so the escrowed
-	// funds stay locked; any resolution is off-chain. Report it; don't imply it
-	// resolves itself.
+	// at any time, so neither party can move the funds. The one exit is the
+	// rail's admin resolution (resolveFrozen on Algorand, resolve_frozen on
+	// Solana), which splits the escrow at the arbiter's discretion and deletes
+	// the ticket. It has no deadline, so waiting does not help; until the admin
+	// acts, the escrow stays locked. Report it and point at the arbiter; don't
+	// imply it resolves itself.
 	VerdictArbitrate
 	// VerdictUnknown: a state the rules don't recognize. Deliberately NOT
 	// folded into VerdictWait: no call is known to be legal here, and unlike
@@ -113,7 +117,8 @@ func Classify(t Ticket, now time.Time) Verdict {
 	// the call — but only for a state that has a call to wait for. Checking the
 	// deadline first would answer "wait" for a state no call accepts, which
 	// reads as "this becomes legal at D". It never does. Frozen outranks the
-	// clock for the same reason.
+	// clock for the same reason: the admin's resolution is not time-gated, and
+	// nothing else ever accepts it.
 	switch t.Status {
 	case StatusFrozen:
 		return VerdictArbitrate

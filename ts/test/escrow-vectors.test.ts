@@ -200,6 +200,8 @@ describe('escrow_vectors.json', () => {
                     pending_aux_output_count: str(r.pendingAuxOutputCount),
                     fee_bps: str(r.feeBps),
                     discount_bps: str(r.discountBps),
+                    frozen_at: str(r.frozenAt),
+                    freeze_origin: str(r.freezeOrigin),
                     reserved_slots_hex: str(r.reservedSlots),
                 }).toEqual(c.ticket)
             })
@@ -224,6 +226,8 @@ describe('escrow_vectors.json', () => {
                     live_node_count: str(r.liveNodeCount),
                     metrics: metricsVector(r),
                     usdc_escrowed: str(r.usdcEscrowed),
+                    tickets_resolved_admin: str(r.ticketsResolvedAdmin),
+                    total_resolved_usdc: str(r.totalResolvedUsdc),
                     reserved_slots_hex: str(r.reservedSlots),
                     latency_samples: str(r.latencySamples),
                 }).toEqual(c.operator)
@@ -248,6 +252,8 @@ describe('escrow_vectors.json', () => {
                     metrics: metricsVector(r),
                     usdc_escrowed: str(r.usdcEscrowed),
                     staging: str(r.staging),
+                    tickets_resolved_admin: str(r.ticketsResolvedAdmin),
+                    total_resolved_usdc: str(r.totalResolvedUsdc),
                     reserved_slots_hex: str(r.reservedSlots),
                     latency_samples: str(r.latencySamples),
                 }).toEqual(c.node)

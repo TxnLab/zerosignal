@@ -61,13 +61,14 @@ func TestParseOperatorRecord_AllFields(t *testing.T) {
 	// throughput
 	data = put64(data, 333_000) // tokensPerSecEwma
 	// operator USDC stake
-	data = put64(data, 250_000_000) // usdcEscrowed ($250)
+	data = put64(data, 250_000_000)                    // usdcEscrowed ($250)
+	data = binary.BigEndian.AppendUint16(data, 0x0203) // ticketsResolvedAdmin (arc4.Uint16)
+	data = put64(data, 4_400_000)                      // totalResolvedUsdc
 	// Reserved padding — recognizable pattern that round-trips through the
-	// parser. 24 bytes, and it comes BEFORE latencySamples: the carve took the
-	// tail END so it can't collide with a head carve. Appending these two in
-	// the other order still yields a well-formed image of the right length,
-	// which is exactly why the values below are distinguishable.
-	reservedPattern := bytes.Repeat([]byte{0xAB}, 24)
+	// parser. 14 bytes, between the dispute block (carved from the reserve's
+	// head) and latencySamples (carved from its tail). Every field here is
+	// distinct, so reading any two in the wrong order shows below.
+	reservedPattern := bytes.Repeat([]byte{0xAB}, 14)
 	data = append(data, reservedPattern...)
 	data = put64(data, 61) // latencySamples
 
@@ -105,6 +106,8 @@ func TestParseOperatorRecord_AllFields(t *testing.T) {
 		{"TotalInputTokens", rec.TotalInputTokens, 5_555_000},
 		{"TokensPerSecEwma", rec.TokensPerSecEwma, 333_000},
 		{"UsdcEscrowed", rec.UsdcEscrowed, 250_000_000},
+		{"TicketsResolvedAdmin", rec.TicketsResolvedAdmin, 0x0203},
+		{"TotalResolvedUsdc", rec.TotalResolvedUsdc, 4_400_000},
 		{"LatencySamples", rec.LatencySamples, 61},
 	}
 	for _, c := range checks {
@@ -178,9 +181,12 @@ func TestParseNodeRecord_AllFields(t *testing.T) {
 	data = put64(data, 333_000)    // tokensPerSecEwma
 	data = put64(data, 25_000_000) // usdcEscrowed ($25)
 	data = append(data, byte(1))   // staging (arc4.Uint8, 1 byte)
-	// 24-byte residual, then latencySamples — see the operator twin above for
-	// why the reserve precedes the carved field.
-	reservedPattern := bytes.Repeat([]byte{0xCD}, 24)
+	// The dispute block starts right after staging; a one-byte skew here
+	// shifts every field after it.
+	data = binary.BigEndian.AppendUint16(data, 0x0405) // ticketsResolvedAdmin (arc4.Uint16)
+	data = put64(data, 880_000)                        // totalResolvedUsdc
+	// 14-byte residual, then latencySamples — see the operator twin above.
+	reservedPattern := bytes.Repeat([]byte{0xCD}, 14)
 	data = append(data, reservedPattern...)
 	data = put64(data, 61) // latencySamples
 
@@ -218,6 +224,8 @@ func TestParseNodeRecord_AllFields(t *testing.T) {
 		{"TokensPerSecEwma", rec.TokensPerSecEwma, 333_000},
 		{"UsdcEscrowed", rec.UsdcEscrowed, 25_000_000},
 		{"Staging", rec.Staging, 1},
+		{"TicketsResolvedAdmin", rec.TicketsResolvedAdmin, 0x0405},
+		{"TotalResolvedUsdc", rec.TotalResolvedUsdc, 880_000},
 		{"LatencySamples", rec.LatencySamples, 61},
 	}
 	for _, c := range checks {
@@ -250,16 +258,15 @@ func TestRecordSizes_UnchangedByCarves(t *testing.T) {
 	}
 }
 
-// TestParseRecords_PreCarveBoxes decodes box images written by the contract
-// version BEFORE latencySamples was carved: identical bytes except the tail is
-// a full 32-byte zero reserve. Every box on chain today is one of these, so
-// this is what the parsers actually meet the moment updateApplication lands.
+// TestParseRecords_PreCarveBoxes decodes box images written by a contract
+// version BEFORE the reserve carves: identical bytes except the tail is a full
+// 32-byte zero reserve. A box written before an updateApplication is what the
+// parsers meet the moment it lands.
 //
-// The property that makes the upgrade safe: latencySamples occupies the LAST 8
-// bytes of that old reserve, which are zero — so it reads 0 (no token settle
-// recorded yet) and the contract's one-time seed fires on the next one. Had the
-// carve taken the reserve's head instead, these same bytes would still parse
-// without error while shifting the residual.
+// The property that makes the upgrade safe: every carved field (the dispute
+// block from the reserve's head, latencySamples from its tail) occupies bytes
+// that were zero, so each reads 0 — no resolution recorded, no token settle
+// recorded (the contract's one-time seed fires on the next one).
 func TestParseRecords_PreCarveBoxes(t *testing.T) {
 	put64 := func(b []byte, v uint64) []byte { return binary.BigEndian.AppendUint64(b, v) }
 
@@ -309,8 +316,11 @@ func TestParseRecords_PreCarveBoxes(t *testing.T) {
 	if opRec.UsdcEscrowed != 250_000_000 {
 		t.Errorf("UsdcEscrowed = %d, want 250000000 — the field before the reserve must not shift", opRec.UsdcEscrowed)
 	}
-	if !bytes.Equal(opRec.ReservedSlots[:], make([]byte, 24)) {
-		t.Errorf("ReservedSlots = %x, want 24 zero bytes", opRec.ReservedSlots)
+	if opRec.TicketsResolvedAdmin != 0 || opRec.TotalResolvedUsdc != 0 {
+		t.Errorf("dispute block = %d / %d, want 0 / 0 on a pre-carve box", opRec.TicketsResolvedAdmin, opRec.TotalResolvedUsdc)
+	}
+	if !bytes.Equal(opRec.ReservedSlots[:], make([]byte, recordReservedLen)) {
+		t.Errorf("ReservedSlots = %x, want %d zero bytes", opRec.ReservedSlots, recordReservedLen)
 	}
 
 	// Node box, pre-carve layout.
@@ -360,8 +370,11 @@ func TestParseRecords_PreCarveBoxes(t *testing.T) {
 	if ndRec.Staging != 1 {
 		t.Errorf("Staging = %d, want 1", ndRec.Staging)
 	}
-	if !bytes.Equal(ndRec.ReservedSlots[:], make([]byte, 24)) {
-		t.Errorf("ReservedSlots = %x, want 24 zero bytes", ndRec.ReservedSlots)
+	if ndRec.TicketsResolvedAdmin != 0 || ndRec.TotalResolvedUsdc != 0 {
+		t.Errorf("dispute block = %d / %d, want 0 / 0 on a pre-carve box", ndRec.TicketsResolvedAdmin, ndRec.TotalResolvedUsdc)
+	}
+	if !bytes.Equal(ndRec.ReservedSlots[:], make([]byte, recordReservedLen)) {
+		t.Errorf("ReservedSlots = %x, want %d zero bytes", ndRec.ReservedSlots, recordReservedLen)
 	}
 }
 
@@ -493,9 +506,9 @@ func TestRecordMetrics_DecodeIdenticallyFromBothRecords(t *testing.T) {
 	op = put64(op, 2)                           // nextNodeId
 	op = put64(op, 1)                           // liveNodeCount
 	op = append(op, metrics...)
-	op = put64(op, 250_000_000)          // usdcEscrowed
-	op = append(op, make([]byte, 24)...) // reservedSlots
-	op = put64(op, 55)                   // latencySamples
+	op = put64(op, 250_000_000)                             // usdcEscrowed
+	op = append(op, make([]byte, 2+8+recordReservedLen)...) // dispute block + reservedSlots
+	op = put64(op, 55)                                      // latencySamples
 	if len(op) != operatorRecordSize {
 		t.Fatalf("operator image = %d bytes, want %d", len(op), operatorRecordSize)
 	}
@@ -506,10 +519,10 @@ func TestRecordMetrics_DecodeIdenticallyFromBothRecords(t *testing.T) {
 	nd = append(nd, byte(0))             // baseUrlLen
 	nd = append(nd, make([]byte, BaseURLMax)...)
 	nd = append(nd, metrics...)
-	nd = put64(nd, 25_000_000)           // usdcEscrowed
-	nd = append(nd, byte(0))             // staging
-	nd = append(nd, make([]byte, 24)...) // reservedSlots
-	nd = put64(nd, 55)                   // latencySamples
+	nd = put64(nd, 25_000_000)                              // usdcEscrowed
+	nd = append(nd, byte(0))                                // staging
+	nd = append(nd, make([]byte, 2+8+recordReservedLen)...) // dispute block + reservedSlots
+	nd = put64(nd, 55)                                      // latencySamples
 	if len(nd) != nodeRecordSize {
 		t.Fatalf("node image = %d bytes, want %d", len(nd), nodeRecordSize)
 	}

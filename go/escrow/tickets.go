@@ -36,15 +36,31 @@ const (
 	PendingByPayer    uint64 = 2
 )
 
+// Which path froze a ticket (TicketRecord.FreezeOrigin), mirrored from the
+// contract. The box records it because the two freezes are otherwise identical
+// on chain: protest() is legal over a pending claim and keeps PendingBy, so a
+// protest over an operator claim reads the same as a settle mismatch.
+const (
+	FreezeOriginNone           uint64 = 0
+	FreezeOriginSettleMismatch uint64 = 1
+	FreezeOriginProtest        uint64 = 2
+)
+
 // TicketRecord is the Go mirror of the contract's on-chain TicketRecord box.
 // All fields are fixed-size ABI types so the serialized layout is exactly
 // ticketRecordSize bytes and can be parsed by offset without ARC-4 machinery.
 type TicketRecord struct {
-	PayerAddr              string // 58-char Algorand address
-	OperatorID             uint64
-	NodeID                 uint64
-	OperatorOwnerAddr      string // operator owner — settlement payout destination
-	NodeSigningAddr        string // serving node's signing key — authorizes open/settle and signs ticket/receipt
+	PayerAddr         string // 58-char Algorand address
+	OperatorID        uint64
+	NodeID            uint64
+	OperatorOwnerAddr string // operator owner — settlement payout destination
+	// NodeSigningAddr is the serving node's signing key at open(). protest()
+	// verifies the receipt under it, so a later key rotation cannot void a
+	// receipt the payer already holds. settle(asOperator=true) authenticates
+	// against the node box's CURRENT key instead, and falls back to this one
+	// only once the node box is gone, so a rotated node can still claim its
+	// in-flight tickets and a rotated-out key cannot.
+	NodeSigningAddr        string
 	MaxPrice               uint64
 	OpenedAt               uint64
 	ExpiresAt              uint64
@@ -92,17 +108,23 @@ type TicketRecord struct {
 	FeeBps      uint64
 	DiscountBps uint64
 
-	// ReservedSlots mirrors `reservedSlots: arc4.StaticBytes<32>` on the
-	// contract-side TicketRecord (ZeroSignalEscrow.algo.ts), zero-initialized
-	// at open() time. Slack for future small fields without a fresh
-	// deploy: promote bytes here in lockstep with a rename of the contract
-	// field (carve typed field(s) out of the head, leave a shorter
-	// residual blob). The on-wire length is unchanged as long as the carve
-	// stays within 32 bytes, so existing ticket boxes keep parsing. This
-	// tail only became possible under puya-ts 1.2.0-beta.42 — earlier
-	// builds overflowed V8's max-string limit on any added TicketRecord
-	// field. See proto/SPEC.md "Reserved slots".
-	ReservedSlots [32]byte
+	// FrozenAt / FreezeOrigin say when and by which path (FreezeOrigin*) the
+	// ticket froze. Both are 0 unless Status == StatusFrozen; the two freeze
+	// branches write them once, and resolveFrozen deletes the box rather
+	// than clearing them. A ticket frozen before the contract update that
+	// added them reads FrozenAt == 0 and FreezeOrigin == FreezeOriginNone
+	// while Status == StatusFrozen. The arbiter needs the origin: "the payer
+	// protested" and "the two sides disagreed on the numbers" call for
+	// different decisions, and no other field tells them apart.
+	FrozenAt     uint64
+	FreezeOrigin uint64
+
+	// ReservedSlots mirrors `reservedSlots: arc4.StaticBytes<23>`, the
+	// residual left after FrozenAt and FreezeOrigin were carved from the head
+	// of the original 32 bytes. Carve further fields from its head in lockstep
+	// with the contract, keeping the box length constant so existing ticket
+	// boxes keep parsing. See proto/SPEC.md "Reserved slots".
+	ReservedSlots [23]byte
 }
 
 // ticketRecordSize is the byte length of a serialized TicketRecord in a
@@ -135,8 +157,10 @@ type TicketRecord struct {
 //	pendingAuxOutputCount    8
 //	feeBps                   2
 //	discountBps              2
-//	reservedSlots           32
-const ticketRecordSize = 32 + 8 + 8 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 8 + 1 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 2 + 2 + 32 // 264
+//	frozenAt                 8
+//	freezeOrigin             1
+//	reservedSlots           23
+const ticketRecordSize = 32 + 8 + 8 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 8 + 1 + 32 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 2 + 2 + 8 + 1 + 23 // 264
 
 func parseTicketRecord(data []byte) (*TicketRecord, error) {
 	if len(data) < ticketRecordSize {
@@ -176,8 +200,11 @@ func parseTicketRecord(data []byte) (*TicketRecord, error) {
 	feeBps := uint64(binary.BigEndian.Uint16(data[228:230]))      // arc4.Uint16 — 2 bytes
 	discountBps := uint64(binary.BigEndian.Uint16(data[230:232])) // arc4.Uint16 — 2 bytes
 
-	var reservedSlots [32]byte
-	copy(reservedSlots[:], data[232:264])
+	frozenAt := binary.BigEndian.Uint64(data[232:240])
+	freezeOrigin := uint64(data[240]) // arc4.Uint8 — 1 byte
+
+	var reservedSlots [23]byte
+	copy(reservedSlots[:], data[241:264])
 
 	return &TicketRecord{
 		PayerAddr:                 payer.String(),
@@ -202,6 +229,8 @@ func parseTicketRecord(data []byte) (*TicketRecord, error) {
 		PendingAuxOutputCount:     pendingAuxOutputCount,
 		FeeBps:                    feeBps,
 		DiscountBps:               discountBps,
+		FrozenAt:                  frozenAt,
+		FreezeOrigin:              freezeOrigin,
 		ReservedSlots:             reservedSlots,
 	}, nil
 }

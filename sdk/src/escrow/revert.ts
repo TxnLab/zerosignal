@@ -27,6 +27,10 @@ export const APPROVAL_ASSERT = {
     insufficientMbrDeposit: 'insufficient MBR deposit',
     insufficientMbrDepositFreeQuota: 'insufficient MBR deposit for free-quota box',
     payerHasNoMbrDeposit: 'payer has no MBR deposit',
+    // protest()'s two refusals no retry can change: the window has closed, or
+    // the receipt is not the one behind the pending claim.
+    protestAfterDeadline: 'protest after deadline',
+    receiptDigestMismatch: 'receiptDigest must match the pending claim',
 } as const
 
 // The asserts Go promotes to sentinels. Their rendering drops algod's raw
@@ -38,6 +42,8 @@ const SENTINEL_ASSERTS: ReadonlySet<string> = new Set([
     APPROVAL_ASSERT.ticketNotPendingSettle,
     APPROVAL_ASSERT.tooEarlyToLapseSettle,
     APPROVAL_ASSERT.onlyOperatorClaimsCanLapse,
+    APPROVAL_ASSERT.protestAfterDeadline,
+    APPROVAL_ASSERT.receiptDigestMismatch,
 ])
 
 let byPc: Map<number, string> | undefined

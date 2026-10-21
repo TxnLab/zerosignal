@@ -444,8 +444,10 @@ func (s *Client) journalPut(rec TicketRecord) {
 
 func (r *reconciler) forget(rec TicketRecord, box *escrow.TicketRecord) {
 	if box != nil {
-		// Frozen: no contract call accepts it, and the escrowed USDC and the
-		// MBR slot stay locked until arbitration. The reservation stays too.
+		// Frozen: only the admin's resolveFrozen can close it, so the escrowed
+		// USDC and the MBR slot stay locked until the arbiter acts, and
+		// nothing the payer can call applies. The spend reservation is left
+		// open: it outlives a resolveFrozen refund until it ages out.
 		r.log.Warn("ticket reconciler: ticket is frozen; leaving it to arbitration",
 			slog.String("ticket_id", rec.TicketID))
 	} else if rec.Settle != nil && r.spend != nil {

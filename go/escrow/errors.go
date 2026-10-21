@@ -40,6 +40,12 @@ const (
 	AssertInsufficientMbrDeposit          = "insufficient MBR deposit"
 	AssertInsufficientMbrDepositFreeQuota = "insufficient MBR deposit for free-quota box"
 	AssertPayerHasNoMbrDeposit            = "payer has no MBR deposit"
+
+	// protest()'s two refusals that no retry can change: the window has
+	// closed, or the receipt is not the one behind the pending claim. The
+	// payer's protest is the caller here.
+	AssertProtestAfterDeadline  = "protest after deadline"
+	AssertReceiptDigestMismatch = "receiptDigest must match the pending claim"
 )
 
 // ErrTicketNotFound is returned (wrapped) when the contract reverts
@@ -64,9 +70,9 @@ var ErrSettleAfterRefundDeadline = errors.New("escrow: " + AssertSettleAfterRefu
 // ErrTicketNotSettleable is returned (wrapped) when settle() reverts
 // because the ticket is not in STATUS_OPEN or STATUS_PENDING_SETTLE —
 // in practice this means the payer has called protest() and the box is
-// now STATUS_FROZEN. The contract has no path back out of FROZEN, so
-// retrying settle() can never succeed; off-chain arbitration is the
-// only forward path. Callers should fail fast, escalate the FROZEN
+// now STATUS_FROZEN. No call open to either party accepts a frozen
+// ticket; only the admin's resolveFrozen closes it, so retrying settle()
+// can never succeed. Callers should fail fast, escalate the FROZEN
 // signal in logs/ops tooling, and stop consuming retry budget.
 var ErrTicketNotSettleable = errors.New("escrow: " + AssertTicketNotSettleable)
 
@@ -74,7 +80,7 @@ var ErrTicketNotSettleable = errors.New("escrow: " + AssertTicketNotSettleable)
 // reverts because the box exists but its status has moved out of
 // STATUS_PENDING_SETTLE — almost always STATUS_FROZEN, i.e. the payer
 // answered with a disagreeing settle() or a protest(). The lapse can
-// never land now; the ticket belongs to off-chain arbitration.
+// never land now; the ticket waits for the admin's resolveFrozen.
 var ErrTicketNotPendingSettle = errors.New("escrow: " + AssertTicketNotPendingSettle)
 
 // ErrTooEarlyToLapseSettle is returned (wrapped) when settleLapsed()
@@ -89,6 +95,23 @@ var ErrTooEarlyToLapseSettle = errors.New("escrow: " + AssertTooEarlyToLapseSett
 // payer's, not the operator's. settleLapsed disburses an operator
 // claim; a payer-pending box is refundInactive's job instead.
 var ErrOnlyOperatorClaimsCanLapse = errors.New("escrow: " + AssertOnlyOperatorClaimsCanLapse)
+
+// ErrProtestAfterDeadline is returned (wrapped) when protest() reverts
+// because the block timestamp is past D = expires_at +
+// settlement_grace_seconds, the same ceiling settle() enforces. Past D
+// the ticket belongs to settleLapsed (operator claim pending) or
+// refundInactive, so retrying the protest can never succeed.
+var ErrProtestAfterDeadline = errors.New("escrow: " + AssertProtestAfterDeadline)
+
+// ErrReceiptDigestMismatch is returned (wrapped) when protest() reverts
+// on a PENDING_SETTLE ticket because the protested receipt's digest is not
+// the pendingDigest the first half recorded. The contract cannot see which
+// ticket a receipt digest commits to, so on a pending ticket it accepts
+// only the claim's own receipt. A different receipt never will be. The
+// contract still lets a payer who disagrees with the claim freeze the
+// ticket with a mismatched settle() before the deadline; the SDK's
+// protest path does not do that yet, so the claim lapses to the node.
+var ErrReceiptDigestMismatch = errors.New("escrow: " + AssertReceiptDigestMismatch)
 
 // sentinelByApprovalMessage maps the source-mapped errorMessage
 // string from the ARC-56 approval-program sourceInfo to the typed
@@ -110,6 +133,8 @@ var sentinelByApprovalMessage = map[string]error{
 	AssertTicketNotPendingSettle:     ErrTicketNotPendingSettle,
 	AssertTooEarlyToLapseSettle:      ErrTooEarlyToLapseSettle,
 	AssertOnlyOperatorClaimsCanLapse: ErrOnlyOperatorClaimsCanLapse,
+	AssertProtestAfterDeadline:       ErrProtestAfterDeadline,
+	AssertReceiptDigestMismatch:      ErrReceiptDigestMismatch,
 }
 
 // ApprovalError is a contract revert: algod rejected the submit with a TEAL

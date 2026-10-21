@@ -27,6 +27,7 @@ import {
 import { IDAffinity } from '../src/affinity.js'
 import type { SpendGuard } from '../src/config.js'
 import { NodeReply, type ZsError } from '../src/errors.js'
+import { APPROVAL_ASSERT, ApprovalError } from '../src/escrow/revert.js'
 import { resolveNetwork } from '../src/network.js'
 import { type OpenHandle, ProtestReason, type Reserved, type SettleOutcome, memoryJournal } from '../src/parts.js'
 import {
@@ -141,6 +142,26 @@ describe('checkTurnReceipt', () => {
         expect(confirmed).toEqual(confirms ? [[TICKET_ID, want.txId]] : [])
         // No exclusion store, so nothing was excluded, a refused group or not.
         expect(c.excluded).toBe(false)
+    })
+
+    // A protest refused for its deadline is the ticket lapsing on chain, not a
+    // submit fault, so it logs apart from one. Either way the submit's error is
+    // returned and the refund watchdog stays armed to drive the deadline path.
+    it.each([
+        // Wrapped, as the wallet wraps a submit failure.
+        ['after the deadline', new Error('protest', { cause: new ApprovalError('protest', 1, APPROVAL_ASSERT.protestAfterDeadline, new Error('algod')) }), 'protest window closed; the ticket lapses on chain', 'protest failed'],
+        ['any other revert', new Error('protest', { cause: new ApprovalError('protest', 1, APPROVAL_ASSERT.receiptDigestMismatch, new Error('algod')) }), 'protest failed', 'protest window closed; the ticket lapses on chain'],
+        ['any other failure', ackErr, 'protest failed', 'protest window closed; the ticket lapses on chain'],
+    ] as const)('a protest refused %s logs as such', async (_name, err, want, notWant) => {
+        const f = await fixture()
+        const { deps, resolved, logger } = depsOf()
+        const r = await (await check(deps, f, handleOf({ err }), { matching: false })).submit!()
+        expect(r.settlement.kind).toBe('protest')
+        expect(r.err).toBe(err)
+        const msgs = logger.logged.map((l) => l.msg)
+        expect(msgs).toContain(want)
+        expect(msgs).not.toContain(notWant)
+        expect(resolved).toEqual([])
     })
 
     it('logs a submitted ack at info only when the payer paid a fee', async () => {

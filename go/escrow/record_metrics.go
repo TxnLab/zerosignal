@@ -98,9 +98,29 @@ const recordMetricsSize = 8*12 + // 96 — reliability counters (lastActivityAt 
 	8 // 8  — tokensPerSecEwma
 // Total: 96 + 8 + 8 + 240 + 8 + 64 + 8 = 432.
 
-// recordTailSize is the serialized byte length of the reserve + latency-sample
-// tail both records end with (see parseRecordTail).
-const recordTailSize = 24 + 8
+// recordReservedLen is the residual reserve both records carry after the
+// dispute block (10 bytes from its head) and latencySamples (8 bytes from its
+// tail) were carved out of the original 32.
+const recordReservedLen = 14
+
+// recordTailSize is the serialized byte length of the dispute block, reserve
+// and latency-sample tail both records end with (see parseRecordTail).
+//
+//	ticketsResolvedAdmin uint16   2
+//	totalResolvedUsdc             8
+//	reservedSlots[14]            14
+//	latencySamples                8
+const recordTailSize = 2 + 8 + recordReservedLen + 8
+
+// recordTail is the block parseRecordTail decodes. Each record copies it into
+// its own flat fields rather than embedding it, so a keyed OperatorRecord or
+// NodeRecord literal in a consumer keeps compiling across a carve.
+type recordTail struct {
+	ticketsResolvedAdmin uint64
+	totalResolvedUsdc    uint64
+	reservedSlots        [recordReservedLen]byte
+	latencySamples       uint64
+}
 
 // parseRecordMetrics decodes the shared block starting at off and returns it
 // with the offset just past it. The caller has already length-guarded data;
@@ -137,24 +157,28 @@ func parseRecordMetrics(data []byte, off int) (RecordMetrics, int) {
 	return m, off
 }
 
-// parseRecordTail decodes the reserve blob and the mean-TTFT denominator that
-// close both record types, writing them through the pointers.
+// parseRecordTail decodes the block that closes both record types: the dispute
+// counters, the residual reserve, and the mean-TTFT denominator. The contract
+// lays it out identically on both, after usdcEscrowed on the operator and after
+// staging on the node.
 //
-// One home for the order, because it is not the obvious one: the residual
-// reserve PRECEDES latencySamples — the carve took the tail END of the
-// original 32 bytes, not its head. Reading these two the other way round
-// yields a garbage sample count and a corrupt reserve, silently, with the box
-// length unchanged. See the contract's reservedSlots for why the carve went
-// that way.
+// One home for the order, because it is not the obvious one: the dispute
+// block was carved from the HEAD of the original 32-byte reserve and
+// latencySamples from its TAIL END, so the residual sits between them. Reading
+// any two of these in the wrong order yields garbage counters and a corrupt
+// reserve, silently, with the box length unchanged.
 //
-// Returns nothing on purpose: this is the LAST field block in both records, so
-// there is no next offset to chain. An advertised return that both call sites
-// discard is a signature nothing verifies — if a third block is ever appended,
-// give it a real offset then.
-func parseRecordTail(data []byte, off int, reserved *[24]byte, latencySamples *uint64) {
-	copy(reserved[:], data[off:off+24])
-	off += 24
-	*latencySamples = binary.BigEndian.Uint64(data[off : off+8])
+// It returns no next offset: this is the last block in both records.
+func parseRecordTail(data []byte, off int) recordTail {
+	var t recordTail
+	t.ticketsResolvedAdmin = uint64(binary.BigEndian.Uint16(data[off : off+2])) // arc4.Uint16 — 2 bytes
+	off += 2
+	t.totalResolvedUsdc = binary.BigEndian.Uint64(data[off : off+8])
+	off += 8
+	copy(t.reservedSlots[:], data[off:off+recordReservedLen])
+	off += recordReservedLen
+	t.latencySamples = binary.BigEndian.Uint64(data[off : off+8])
+	return t
 }
 
 // Revenue24h returns gross revenue for the calendar day represented by

@@ -205,7 +205,7 @@ describe('Reconciler', () => {
         expect(chain.calls).toEqual(['lapse T'])
     })
 
-    // A frozen ticket is arbitration's and no call can touch it, so its row
+    // A frozen ticket is the admin's and no call the payer can make touches it, so its row
     // goes rather than costing a read every minute forever.
     it('forgets a frozen ticket and submits nothing', async () => {
         const j = memoryJournal()
