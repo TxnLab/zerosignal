@@ -373,6 +373,9 @@ describe('Wallet.open', () => {
         await expect(wallet.open(ticket, { ...op, signingAddr: '' }, openGroup('valid'))).rejects.toThrow(/addresses incomplete/)
         await expect(wallet.open(ticket, op, '')).rejects.toThrow(/presignedOpenGroup is empty/)
         await expect(wallet.open({ ...ticket, ticket_id: 'AAAA' }, op, openGroup('valid'))).rejects.toThrow(/decode ticket id/)
+        // 16 zero bytes with a padding bit set, which Go's decoder reads; Go
+        // refuses it at open too, since every receipt for it fails verifyReceipt.
+        await expect(wallet.open({ ...ticket, ticket_id: 'AAAAAAAAAAAAAAAAAAAAAB==' }, op, openGroup('valid'))).rejects.toThrow(/decode ticket id/)
         expect(chain.reads).toBe(0)
         expect(chain.sent).toEqual([])
     })

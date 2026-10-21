@@ -75,7 +75,7 @@ func newSettleFixture(t *testing.T) settleFixture {
 	var addr types.Address
 	copy(addr[:], pub)
 	op := Operator{ID: 7, NodeID: 3, SigningAddr: addr.String(), TicketSigningKey: pub}
-	tkt := &ticket.Ticket{TicketID: "dGlja2V0LXdhaXQtMDAwMDA=", OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000}
+	tkt := &ticket.Ticket{TicketID: "dGlja2V0LXdhaXQtMDAwMA==", OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000}
 	plaintext := []byte("hello world")
 	receipt := &ticket.UsageReceipt{TicketID: tkt.TicketID, ActualInputCount: 10, ActualOutputCount: 5, AmountCharged: 50_000}
 	receipt.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
@@ -275,6 +275,17 @@ func TestCheckReceipt_NothingToSubmitLeavesTheSlotUnexpected(t *testing.T) {
 	}
 	if slot.expected {
 		t.Error("a bad signature marked the slot expected")
+	}
+	// Nor for a receipt naming another ticket, even over a body that doesn't
+	// match its hash.
+	f = newSettleFixture(t)
+	forAnotherTicket(&f)
+	slot = newSettleSlot()
+	if submit := f.check(settleClient(), slot, &scriptedSettleHandle{}, false, ""); submit != nil {
+		t.Error("a receipt for another ticket built a submit")
+	}
+	if slot.expected {
+		t.Error("a receipt for another ticket marked the slot expected")
 	}
 }
 

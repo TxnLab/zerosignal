@@ -51,7 +51,7 @@ function keypair() {
     }
 }
 
-export const TICKET_ID = 'dGlja2V0LXdhaXQtMDAwMDA='
+export const TICKET_ID = 'dGlja2V0LXdhaXQtMDAwMA=='
 
 /** The fee unit of an Algorand deployment, which every turn fixture is. */
 export const ALGO_FEES = feeUnitOf('algorand')

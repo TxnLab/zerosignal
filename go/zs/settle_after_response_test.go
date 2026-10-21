@@ -63,7 +63,7 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 	}
 	commit := ticket.CommitResponseKey(k)
 	tkt := &ticket.Ticket{
-		TicketID:   "dGlja2V0LXhvcnZvenp6MDA=",
+		TicketID:   "dGlja2V0LXhvcnZvenowMA==",
 		OperatorID: op.ID,
 		NodeID:     op.NodeID,
 		MaxPrice:   100_000,

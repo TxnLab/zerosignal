@@ -62,7 +62,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 
 	op := Operator{ID: 7, NodeID: 3, SigningAddr: signAddr.String(), TicketSigningKey: pub}
 	tkt := &ticket.Ticket{
-		TicketID:   "dGlja2V0LXhvcnZvenp6MDA=",
+		TicketID:   "dGlja2V0LXhvcnZvenowMA==",
 		OperatorID: op.ID,
 		NodeID:     op.NodeID,
 		MaxPrice:   100_000,

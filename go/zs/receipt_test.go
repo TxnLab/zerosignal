@@ -30,7 +30,7 @@ func TestVerifyReceipt_FreeModel(t *testing.T) {
 	sum := sha256.Sum256(body)
 
 	rcpt := &ticket.UsageReceipt{
-		TicketID:          "AAAAAAAAAAAAAAAAAAAAAA==", // base64(16 zero bytes) — shape only
+		TicketID:          "AAAAAAAAAAAAAAAAAAAAAA==",
 		ActualInputCount:  1234,
 		ActualOutputCount: 5678,
 		AmountCharged:     0,
@@ -42,7 +42,7 @@ func TestVerifyReceipt_FreeModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tkt := &ticket.Ticket{MaxPrice: 0}
+	tkt := &ticket.Ticket{TicketID: rcpt.TicketID, MaxPrice: 0}
 	op := Operator{TicketSigningKey: pub}
 
 	if err := VerifyReceipt(ReceiptCheck{Ticket: tkt, Operator: op, Receipt: rcpt, ComputedHash: sum}); err != nil {
@@ -64,6 +64,35 @@ func TestVerifyReceipt_FreeModel(t *testing.T) {
 	}
 }
 
+// With no ticket there is nothing to bind the receipt to, so it is refused
+// rather than verified on its signature alone.
+func TestVerifyReceipt_NilTicketIsRefused(t *testing.T) {
+	_, pub, _, err := ticket.GenerateAlgorandKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = VerifyReceipt(ReceiptCheck{Operator: Operator{TicketSigningKey: pub}, Receipt: &ticket.UsageReceipt{TicketID: "AAAAAAAAAAAAAAAAAAAAAA=="}})
+	if re, ok := AsReceiptError(err); !ok || re.Violation != ReceiptViolationSig {
+		t.Errorf("VerifyReceipt(nil ticket) = %v, want a sig violation", err)
+	}
+	// The payer had no ticket to hold the receipt against, so it shows
+	// nothing about the node.
+	if got := receiptExclusion(err); got != "" {
+		t.Errorf("receiptExclusion(nil ticket) = %q, want none", got)
+	}
+}
+
+// A missing receipt is no receipt the node signed, so it bars no node.
+func TestVerifyReceipt_NilReceiptBarsNoNode(t *testing.T) {
+	err := VerifyReceipt(ReceiptCheck{Ticket: &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA=="}})
+	if re, ok := AsReceiptError(err); !ok || re.Violation != ReceiptViolationSig {
+		t.Errorf("VerifyReceipt(nil receipt) = %v, want a sig violation", err)
+	}
+	if got := receiptExclusion(err); got != "" {
+		t.Errorf("receiptExclusion(nil receipt) = %q, want none", got)
+	}
+}
+
 // TestVerifyReceipt_CachedTokenDiscount: a discounted receipt carries a
 // cached_input_count and an amount_charged strictly below the ticket's
 // max_price — VerifyReceipt must accept it (the discount only lowers the
@@ -79,7 +108,7 @@ func TestVerifyReceipt_CachedTokenDiscount(t *testing.T) {
 	body := []byte(`{"id":"chatcmpl-x","choices":[]}`)
 	sum := sha256.Sum256(body)
 
-	tkt := &ticket.Ticket{MaxPrice: 210_000}
+	tkt := &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA==", MaxPrice: 210_000}
 	op := Operator{TicketSigningKey: pub}
 
 	// Discounted receipt: 800 of 1000 input tokens cache-served, charged

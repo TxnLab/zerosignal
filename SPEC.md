@@ -250,7 +250,7 @@ HTTP 200, `Content-Type: application/json`:
 ```json
 {
   "ticket": {
-    "ticket_id": "<base64 16 bytes>",
+    "ticket_id": "<padded standard base64 (RFC 4648 §4) of 16 bytes>",
     "operator_id": 42,
     "node_id": 7,
     "input_count":      842,
@@ -273,6 +273,8 @@ HTTP 200, `Content-Type: application/json`:
   "presigned_open_txn":   "<base64(msgpack(SignedTxn)) for the node's gtxn[1] AppCall — present whenever payer_addr was supplied and escrow admission is enabled>"
 }
 ```
+
+`ticket_id` must be the canonical spelling of its 16 bytes: padded standard base64 with zero padding bits and no whitespace. A payer refuses to open a ticket in any other spelling, since it would refuse every receipt for it ("Settlement receipt").
 
 `wrapped_response_key` uses the same age primitive as the response-time `X-Zs-Response-Key` header (§ 5.2). Delivering it early gives the caller `K_response` in time to compute the sealed request's `admission_tag`.
 
@@ -640,7 +642,7 @@ Both sides hash the inner header's wire-form strings, with no decoding. The NUL 
 
 The receipt is the post-response counterpart of the ticket. For each completed ticket-admitted request, the node builds one `UsageReceipt` and signs it with the same node signing key that signed the ticket. It returns the receipt in the `X-Zs-Receipt` header on non-stream responses (§ 5.2), or as an `event: zs-receipt` SSE frame just before `[DONE]` on streams (§ 5.3). The proxy independently verifies:
 
-1. The Ed25519 signature, under the node's signing public key.
+1. The Ed25519 signature, under the node's signing public key, and that the receipt's `ticket_id` is the ticket the payer opened. The signature holds for whichever ticket the receipt names, so this binding is the payer's to check. The comparison is on the string: the receipt's `ticket_id` must be the canonical padded standard base64 of the opened ticket's 16 bytes, and so must the ticket's own `ticket_id`, so no decoder's leniency can make two spellings of one id agree. A receipt that fails it is a signature violation (`sig`) and is handled as one: logged, never protested, and its figures neither pinned for the refund watchdog nor journaled. Only a misbehaving node fails it, since an honest node echoes the ticket's id. So a receipt whose signature verified but whose `ticket_id` differs from the opened ticket's canonical id also bars its node for the rest of the process, as an operator claim above a receipt does ("Payer's check of an operator claim"): it arrived sealed under the turn's response key, which no relay holds, so the node sent it. A bad signature bars no node, since it shows nothing about who produced the receipt, and neither does an opened ticket whose own `ticket_id` is not canonical, since that is the payer's input. The contract cannot always catch this. Algorand's `protest()` verifies only the signature over the digest, and on a pending claim that the digest is the claim's, so it can freeze the ticket over another ticket's receipt; Solana's `protest` reads the ticket id from the receipt bytes and refuses one for another ticket (`ReceiptNotForTicket`).
 2. `amount_charged ≤ ticket.max_price`. `amount_charged` is the operator's base (net) take, which the node clamps to the base ceiling `baseMax`, itself `≤ max_price`. At settle the contract separately asserts `amount_charged + grossFee ≤ max_price`, so base plus fee fits the escrow.
 3. `body_hash` equals the sha256 of the reconstructed plaintext. For non-stream responses that is the full body. For streams it is the decrypted **content** frames concatenated in `frame_index` order, including any sealed § 5.3.1 tool-round status frames. The `zs-receipt` frame takes the next `frame_index` but is not part of the hash it carries.
 
@@ -650,7 +652,7 @@ Verified receipts feed `escrow.protest()`, ledger reconciliation against on-chai
 
 ```json
 {
-  "ticket_id":            "<base64 16 bytes — same form as Ticket.ticket_id>",
+  "ticket_id":            "<the ticket's ticket_id, in the same canonical spelling>",
   "actual_input_count":  842,
   "actual_output_count": 487,
   "amount_charged":       418200,
@@ -1283,9 +1285,9 @@ Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the 
 
 **What the reference proxy does.** Slashing arbitration (the arbiter for cases (a)–(d)) lives outside this spec, and the reference proxy keeps **no** local dispute buffer. It handles evidence only at detection time:
 
-- Receipt verification (signature, `amount_charged ≤ max_price`, `body_hash`) and the `commit_k` check run inline on every response (§ 3a "Settlement receipt", § 5.2 / § 5.3).
+- Receipt verification (signature and `ticket_id`, `amount_charged ≤ max_price`, `body_hash`) and the `commit_k` check run inline on every response (§ 3a "Settlement receipt", § 5.2 / § 5.3).
 - A `body_hash` mismatch fires `escrow.protest()` **immediately**, attaching a head-truncated excerpt of the reconstructed plaintext (no larger than the contract's dispute-excerpt cap) as on-chain dispute material, and freezes the ticket. One case does not freeze by protest: if the node has already posted a pending claim whose digest differs from the protested receipt's, the contract refuses the protest (`receiptDigest must match the pending claim`). If that claim exceeds the receipt and the escrow has `resolveFrozen`, the payer's settle at the receipt's values freezes the ticket instead, without the excerpt (§ 3a "Payer's check of an operator claim"). Otherwise each reference SDK logs the failure, and the pending claim lapses to the node at the deadline. A protest refused for arriving after `expires_at + settlement_grace_seconds` gets no settle either, since the same deadline bars it. The durable evidence is that protest transaction, which carries the receipt's `amountCharged`, `receiptDigest` and node signature `receiptSig` (verified on chain; the full receipt, including `body_hash`, is not recoverable from chain), together with any node-signed pending claim the frozen ticket already held.
-- Signature and amount violations are only logged, not protested, because the contract's own checks would reject such a protest on chain. AEAD failures and `commit_k` mismatches fail the request closed and are logged with ticket and operator ids.
+- Signature and amount violations are only logged, not protested, because the contract's own checks would reject such a protest on chain. A receipt naming another ticket is a signature violation too: Solana's program refuses that protest, and Algorand's refuses it against a pending claim with another digest and otherwise freezes the ticket over a receipt that is no evidence about it. Each reference SDK bars its node instead of protesting (§ 3a "Settlement receipt"). AEAD failures and `commit_k` mismatches fail the request closed and are logged with ticket and operator ids.
 - The ephemeral X25519 key is wiped unconditionally when the handler returns. Nothing decryptable outlives the request. Reference: `wire.ZeroEphemeralIdentity`.
 
 **What a dispute-filing proxy would need to retain.** A proxy that files the § 3b cases with an arbiter after the fact, instead of protesting inline, must copy this material **before** its handler returns and hold it until `ticket.expires_at + settlement_grace_seconds`. Disputes are inadmissible after that.

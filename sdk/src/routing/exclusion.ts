@@ -10,7 +10,9 @@
 // not a fault: the node composed a settle group that contradicts its own
 // signed receipt, or that would rekey the payer's account or bypass the
 // approval program. It authored both halves, so the mismatch can't be honest
-// desync.
+// desync. The receipt check bars a node on the same footing when the claim it
+// posted on chain takes more than its receipt, or when the receipt it signed
+// names another ticket (EXCLUSION_REASONS in receipt-check.ts).
 
 import { type NodeRef, nodeRefString } from '../types.js'
 
@@ -19,8 +21,9 @@ export class NodeExclusionStore {
 
     /**
      * excludeNode bars the node from candidate selection and the relay pool for
-     * the store's lifetime. Call it only on proof of settle-group fraud; a
-     * transient failure belongs in TargetBackoffStore, which heals.
+     * the store's lifetime. Call it only on proof of misbehaviour under the
+     * node's own signature; a transient failure belongs in TargetBackoffStore,
+     * which heals.
      */
     excludeNode(target: NodeRef): void {
         this.#excluded.add(nodeRefString(target))

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -258,6 +260,92 @@ func TestCheckReceipt_LateProtestTriesNoFreeze(t *testing.T) {
 	}
 }
 
+// forAnotherTicket hands the payer a receipt the node validly signed, for a
+// ticket other than the one the payer opened.
+func forAnotherTicket(f *settleFixture) { f.tkt.TicketID = "YW5vdGhlci10aWNrZXQhIQ==" }
+
+// A receipt the node validly signed for another ticket bars the node, as an
+// over-claim does, and the turn reports why. Only a signature that verified
+// shows the node wrote it, and a ticket id the payer holds in another
+// spelling is the payer's fault, so neither bars anyone. Barred or not, the
+// receipt stays a sig violation: released, with no submit and nothing pinned.
+func TestCheckReceipt_BarsANodeThatSignsAReceiptForAnotherTicket(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mutate   func(f *settleFixture)
+		matching bool
+		barred   bool
+	}{
+		{"receipt for another ticket", forAnotherTicket, true, true},
+		// The body_hash would have driven a protest.
+		{"receipt for another ticket over a body that doesn't match it", forAnotherTicket, false, true},
+		{"bad signature", func(f *settleFixture) { f.receipt.Sig = "" }, true, false},
+		{"bad signature on a receipt for another ticket", func(f *settleFixture) { forAnotherTicket(f); f.receipt.Sig = "" }, true, false},
+		{"signing key of the wrong length", func(f *settleFixture) { forAnotherTicket(f); f.op.TicketSigningKey = f.op.TicketSigningKey[:31] }, true, false},
+		// The fixture's id with non-zero padding bits: the same bytes, which
+		// the receipt names in their canonical spelling.
+		{"payer's ticket id not canonical", func(f *settleFixture) { f.tkt.TicketID = "dGlja2V0LXdhaXQtMDAwMB==" }, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSettleFixture(t)
+			tc.mutate(&f)
+			c := settleClient()
+			var logged bytes.Buffer
+			c.log = slog.New(slog.NewTextHandler(&logged, nil))
+			source := &ChainOperatorSource{}
+			c.nodeExcluder = source
+			guard := &outcomeGuard{}
+			c.spend = guard
+			c.refunds.track(f.tkt.TicketID, time.Now().Add(time.Hour), nil, nil, nil)
+			t.Cleanup(func() { c.refunds.Resolve(f.tkt.TicketID) })
+			computed := wire.BodyHashOfBody(f.plaintext)
+			if !tc.matching {
+				computed = wire.BodyHashOfBody([]byte("other content"))
+			}
+			ctx := withSettleSlot(context.Background(), newSettleSlot())
+			submit, check := c.checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op, &scriptedSettleHandle{}, f.receipt,
+				computed, f.plaintext, "", nil)
+
+			if submit != nil {
+				t.Error("a sig violation built a submit")
+			}
+			if got := source.NodeExcluded(RefOf(f.op)); got != tc.barred {
+				t.Errorf("node excluded = %v, want %v", got, tc.barred)
+			}
+			wantEvents := []Event{ReceiptViolated{Violation: "sig"}}
+			if tc.barred {
+				wantEvents = append(wantEvents, NodeExcluded{Node: RefOf(f.op), Reason: "receipt_names_other_ticket"})
+			}
+			u := &usageReport{receipt: f.receipt, ticket: f.tkt, op: f.op, check: *check}
+			if got := u.events(); !reflect.DeepEqual(got, wantEvents) {
+				t.Errorf("events %+v, want %+v", got, wantEvents)
+			}
+			if got := strings.Contains(logged.String(), "node excluded: it signed a receipt for another ticket"); got != tc.barred {
+				t.Errorf("logged the bar = %v, want %v", got, tc.barred)
+			}
+			if got, want := guard.seen(), []string{"release " + f.tkt.TicketID}; !slices.Equal(got, want) {
+				t.Errorf("spend guard heard %v, want %v", got, want)
+			}
+			if _, ok := c.refunds.signedAmount(f.tkt.TicketID); ok {
+				t.Error("pinned the figure of a receipt that failed its sig check")
+			}
+		})
+	}
+}
+
+// Without a NodeExcluder there is nothing to bar the node in, and the turn
+// reports no exclusion.
+func TestCheckReceipt_ReceiptForAnotherTicketWithoutAnExcluder(t *testing.T) {
+	f := newSettleFixture(t)
+	forAnotherTicket(&f)
+	ctx := withSettleSlot(context.Background(), newSettleSlot())
+	_, check := settleClient().checkReceipt(ctx, endpointChatCompletions, "m", f.tkt, f.op, &scriptedSettleHandle{}, f.receipt,
+		wire.BodyHashOfBody(f.plaintext), f.plaintext, "", nil)
+	if check.violation != "sig" || check.excluded || check.exclusion != "" {
+		t.Errorf("check %+v, want a sig violation and no exclusion", *check)
+	}
+}
+
 // The watchdog holds a later operator claim against the amount the node
 // signed. Only a receipt whose signature verified counts: a figure from an
 // unverified one could be anything, and one set too high would let every
@@ -273,6 +361,8 @@ func TestCheckReceipt_PinsTheSignedAmountForTheWatchdog(t *testing.T) {
 		{"body hash mismatch", nil, false, true},
 		{"amount above max price", func(f *settleFixture) { f.tkt.MaxPrice = f.receipt.AmountCharged - 1 }, true, true},
 		{"bad signature", func(f *settleFixture) { f.receipt.Sig = "" }, true, false},
+		// Its figure is for that other ticket.
+		{"receipt for another ticket", forAnotherTicket, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSettleFixture(t)
@@ -308,6 +398,7 @@ func TestCheckReceipt_JournalsTheSignedReceipt(t *testing.T) {
 		{"body hash mismatch", nil, false, TicketOpen, false, true},
 		{"amount above max price", func(f *settleFixture) { f.tkt.MaxPrice = f.receipt.AmountCharged - 1 }, true, TicketOpen, false, true},
 		{"bad signature", func(f *settleFixture) { f.receipt.Sig = "" }, true, "", false, false},
+		{"receipt for another ticket", forAnotherTicket, false, "", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSettleFixture(t)

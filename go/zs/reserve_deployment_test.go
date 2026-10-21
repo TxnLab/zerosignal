@@ -139,7 +139,7 @@ func TestVerifyReceipt_FollowsTicketBinding(t *testing.T) {
 	signer := rawKeyBytesSigner{addr: addr, priv: priv}
 	op := Operator{TicketSigningKey: pub}
 	receipt := func(d ticket.DeploymentID) *ticket.UsageReceipt {
-		r := &ticket.UsageReceipt{TicketID: "t", AmountCharged: 1, BodyHash: string(bytes.Repeat([]byte{'a'}, 64)), Deployment: d}
+		r := &ticket.UsageReceipt{TicketID: "AAAAAAAAAAAAAAAAAAAAAA==", AmountCharged: 1, BodyHash: string(bytes.Repeat([]byte{'a'}, 64)), Deployment: d}
 		if err := r.Sign(context.Background(), signer, addr); err != nil {
 			t.Fatal(err)
 		}
@@ -159,7 +159,7 @@ func TestVerifyReceipt_FollowsTicketBinding(t *testing.T) {
 	}
 	for _, c := range cases {
 		err := VerifyReceipt(ReceiptCheck{
-			Ticket:   &ticket.Ticket{MaxPrice: 10, Deployment: c.tkt},
+			Ticket:   &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA==", MaxPrice: 10, Deployment: c.tkt},
 			Operator: op,
 			Receipt:  receipt(c.rcpt),
 		})

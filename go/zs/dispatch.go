@@ -3921,7 +3921,11 @@ func checkSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticke
 //     which freezes the ticket too.
 //   - ReceiptViolationSig / ReceiptViolationAmount → log only; the
 //     contract refuses these on-chain, so re-submitting would just
-//     waste fees. Dispute evidence is still retained via logs.
+//     waste fees. A receipt naming another ticket is a Sig violation:
+//     where Algorand's protest would take it, it freezes this ticket on
+//     evidence about another. Its signature verified, though, so unlike
+//     the rest of the class it bars the node. Dispute evidence is still
+//     retained via logs.
 //
 // The handle is received via the settlementHandle interface (satisfied
 // by *OpenHandle in production and by test fakes); this keeps
@@ -3956,8 +3960,8 @@ type receiptCheck struct {
 	// violation names the failed check; empty when the receipt verified.
 	violation string
 	settled   Settlement
-	// excluded is set when the node was barred for contradicting its own
-	// receipt, and exclusion names how.
+	// excluded is set when the node was barred on its own signed word, and
+	// exclusion names how.
 	excluded  bool
 	exclusion string
 }
@@ -3969,7 +3973,20 @@ const (
 	// exclusionOverclaim: the node's settle claim on chain takes more than
 	// the receipt it signed.
 	exclusionOverclaim = "settle_claim_exceeds_receipt"
+	// exclusionReceiptForAnotherTicket: the node signed the receipt it handed
+	// over for another ticket.
+	exclusionReceiptForAnotherTicket = "receipt_names_other_ticket"
 )
+
+// receiptExclusion is the NodeExcluded reason VerifyReceipt's refusal alone
+// bars the node for, or "" when it bars none. Apart from checkReceipt so the
+// receipt vectors pin the same classification TS's receiptExclusion makes.
+func receiptExclusion(err error) string {
+	if errors.Is(err, errReceiptNamesOtherTicket) {
+		return exclusionReceiptForAnotherTicket
+	}
+	return ""
+}
 
 // overclaimFreezer is the protest's fallback, which *OpenHandle has and a
 // test's handle may not.
@@ -4207,12 +4224,26 @@ func (s *Client) checkReceipt(
 	if s.spend != nil {
 		recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
 	}
+	// The receipt arrived sealed under this turn's response key, which no
+	// relay holds, and its signature verified under the node's key, so the
+	// node itself handed over a receipt for another ticket: proof of its
+	// misbehaviour, as an over-claim is. In every other way it stays a sig
+	// violation: neither pinned, journaled nor protested.
+	if reason := receiptExclusion(err); reason != "" && s.nodeExcluder != nil {
+		s.nodeExcluder.ExcludeNode(RefOf(op))
+		check.excluded, check.exclusion = true, reason
+		s.log.Warn("node excluded: it signed a receipt for another ticket",
+			slog.String("ticket_id", ticket.TicketID),
+			opAttr(op),
+			slog.String("receipt_ticket_id", receipt.TicketID))
+	}
 	switch re.Violation {
 	case ReceiptViolationAmount, ReceiptViolationBodyHash:
 		// Both are found only after the signature verified, so the amount is
-		// still one the node signed. Named rather than "all but Sig": the
-		// ReceiptOK stand-in above has an unknown signature, and a pinned
-		// figure set too high would wave every later over-claim through. The
+		// still one the node signed for this ticket. Named rather than "all
+		// but Sig": the ReceiptOK stand-in above has an unknown signature, and
+		// a pinned figure set too high would wave every later over-claim
+		// through. The
 		// journal keeps it for the reconciler, which would otherwise lapse an
 		// over-claim the watchdog refused to.
 		s.refunds.recordReceipt(ticket.TicketID, RefOf(op), receipt.AmountCharged)

@@ -258,6 +258,14 @@ func (w *Wallet) open(ctx context.Context, tk *ticket.Ticket, op Operator, presi
 	if err != nil {
 		return nil, fmt.Errorf("wallet: decode ticket id: %w", err)
 	}
+	// VerifyReceipt refuses every receipt for a ticket id in any other
+	// spelling, so opening one would only lock the escrow for a turn that can't
+	// settle. TS's decoder already refuses it here. Checked at open only: the
+	// journal and the watchdog decode with decodeTicketID, and an escrow an
+	// older build opened under such an id must stay refundable.
+	if canonical := base64.StdEncoding.EncodeToString(ticketIDRaw); canonical != tk.TicketID {
+		return nil, fmt.Errorf("wallet: decode ticket id: %q is not the canonical spelling %q", tk.TicketID, canonical)
+	}
 
 	// Spec for the pre-sign verification of the node-composed group. Every
 	// field comes from the signature-verified ticket or the chain-resolved
