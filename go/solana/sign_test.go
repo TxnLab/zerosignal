@@ -178,6 +178,16 @@ func TestSignWithRefuses(t *testing.T) {
 	if err := short.SignWith(ctx, payer, s); !errors.Is(err, solana.ErrMessage) {
 		t.Errorf("one slot for two signers: %v", err)
 	}
+	// A slot past the signer count would go out with whatever it holds.
+	long := fresh()
+	long.Signatures = append(long.Signatures, solana.Signature{})
+	padded := slices.Clone(long.Signatures)
+	if err := long.SignWith(ctx, payer, s); !errors.Is(err, solana.ErrMessage) || len(s.asked) != 0 {
+		t.Errorf("three slots for two signers: %v, asked %v", err, s.asked)
+	}
+	if !slices.Equal(long.Signatures, padded) {
+		t.Error("three slots for two signers: a refused transaction changed the slots")
+	}
 
 	// The node's slot is left as given while the payer's is replaced.
 	got := fresh()
