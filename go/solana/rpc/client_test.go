@@ -504,6 +504,16 @@ func TestNewClientRefusesEndpoints(t *testing.T) {
 	}
 }
 
+// Each half of the userinfo is refused on its own.
+func TestNewClientRefusesEitherCredential(t *testing.T) {
+	for _, e := range []string{"https://:secret@rpc.example/", "https://secret@rpc.example/"} {
+		_, err := NewClient(e)
+		if err == nil || !strings.Contains(err.Error(), "carries credentials") || strings.Contains(err.Error(), "secret") {
+			t.Errorf("%q: err = %v", e, err)
+		}
+	}
+}
+
 // The public endpoints cap new connections per IP, so DefaultTransport must
 // speak HTTP/2 over TLS.
 func TestDefaultTransportSpeaksHTTP2(t *testing.T) {

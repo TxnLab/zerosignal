@@ -49,8 +49,9 @@ var ErrUnsubscribed = errors.New("solana rpc: unsubscribed")
 const pubsubMaxFrame = 1 << 20
 
 // pubsubWriteTimeout bounds one frame's write, so a peer that stopped reading
-// stalls neither a subscribe past its ctx nor Close.
-const pubsubWriteTimeout = 10 * time.Second
+// stalls neither a subscribe past its ctx nor Close. A variable only so a test
+// can wait out a shorter one.
+var pubsubWriteTimeout = 10 * time.Second
 
 // PubSubOptions tunes DialPubSub. The zero value is a plain dial.
 type PubSubOptions struct {

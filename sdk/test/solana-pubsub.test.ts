@@ -212,6 +212,21 @@ describe('SolanaPubSub', () => {
         },
     )
 
+    // Each half of the userinfo is refused on its own, before any socket: a
+    // dial would fail with another message.
+    it.each(['wss://:secret@rpc.example/', 'wss://secret@rpc.example/'])('refuses the credentials in %s without spelling them', async (endpoint) => {
+        class Unreachable extends FakeSocket {
+            constructor(url: string) {
+                super(url)
+                throw new Error('dialed')
+            }
+        }
+        const err = await SolanaPubSub.connect(endpoint, { webSocket: Unreachable }).catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(Error)
+        expect((err as Error).message).toContain('carries credentials')
+        expect((err as Error).message).not.toContain('secret')
+    })
+
     it('stops a dial on its signal', async () => {
         const ac = new AbortController()
         const pending = SolanaPubSub.connect('wss://rpc.example/ws', { webSocket: FakeSocket, signal: ac.signal })

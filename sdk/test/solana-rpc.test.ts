@@ -14,8 +14,10 @@ import { encodeBase58 } from '@txnlab/zs-proto/solana'
 import { describe, expect, it } from 'vitest'
 
 import {
+    type Account,
     type Commitment,
     type Filter,
+    type SignatureStatus,
     SOLANA_RPC_MAX_RETRIES,
     SOLANA_RPC_RETRY_WAIT_MAX_MS,
     SOLANA_RPC_RETRY_WAIT_MIN_MS,
@@ -50,6 +52,7 @@ const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_rpc_vecto
     now_unix_ms: number
     backoff: { attempt: number; retry_after: string; wait_ms: number }[]
     requests: { method: string; args: RequestArgs; params: unknown }[]
+    answers: { method: string; args: RequestArgs; result: unknown; refused: boolean; want: unknown }[]
 }
 
 // ---- a fake RPC behind an injected fetch ----
@@ -211,7 +214,45 @@ describe('solana_rpc vectors', () => {
         expect(f.seen[0]!.method).toBe(method)
         expect(f.seen[0]!.params).toEqual(params)
     })
+
+    it('has answer cases', () => expect(vectors.answers.length).toBeGreaterThan(0))
+
+    it.each(vectors.answers.map((c) => [c.method, c.result, c.args, c.refused, c.want] as const))(
+        '%s reads %j as Go does',
+        async (method, res, args, refused, want) => {
+            const call = issue(client(fakeRpc(result(res))), method, args)
+            if (refused) {
+                const err = await call.catch((e: unknown) => e)
+                expect(err).toBeInstanceOf(Error)
+                expect((err as Error).name).toBe('SolanaRpcMalformedAnswer')
+                return
+            }
+            expect(rendered(method, await call)).toEqual(want)
+        },
+    )
 })
+
+/** What a call decoded, in the vectors' want form. */
+function rendered(method: string, got: unknown): unknown {
+    switch (method) {
+        case 'getAccountInfo': {
+            const a = got as Account
+            return { lamports: Number(a.lamports), owner: a.owner, data_hex: hex.encode(a.data), executable: a.executable }
+        }
+        case 'getSignatureStatuses':
+            return (got as (SignatureStatus | null)[]).map((s) =>
+                s === null
+                    ? null
+                    : {
+                          slot: Number(s.slot),
+                          confirmations: s.confirmations === null ? null : Number(s.confirmations),
+                          err: s.err,
+                          confirmation_status: s.confirmationStatus ?? '',
+                      },
+            )
+    }
+    throw new Error(`no rendering for ${method}`)
+}
 
 // ---- the client ----
 
@@ -409,6 +450,19 @@ describe('SolanaRpcClient', () => {
             expect((err as Error).message).not.toContain('secret')
         },
     )
+
+    // Each half of the userinfo is refused on its own.
+    it.each(['https://:secret@rpc.example/', 'https://secret@rpc.example/'])('refuses the credentials in %s without spelling them', (endpoint) => {
+        let err: unknown
+        try {
+            new SolanaRpcClient({ endpoint })
+        } catch (e) {
+            err = e
+        }
+        expect(err).toBeInstanceOf(Error)
+        expect((err as Error).message).toContain('carries credentials')
+        expect((err as Error).message).not.toContain('secret')
+    })
 
     it('keeps the endpoint out of a failed call', async () => {
         const f = fakeRpc(noAnswer)

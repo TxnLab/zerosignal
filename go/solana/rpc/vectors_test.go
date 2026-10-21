@@ -7,8 +7,9 @@ package rpc
 
 // Generates / verifies proto/testdata/solana_rpc_vectors.json: DefaultRetry's
 // budget, which outcomes it retries, the wait before each retry, how a
-// TransactionError's variant is read, and the params each method sends. The
-// TS SDK's Solana RPC client (sdk/src/solana/rpc.ts) replays it.
+// TransactionError's variant is read, the params each method sends, and what
+// a call reads from an answer. The TS SDK's Solana RPC client
+// (sdk/src/solana/rpc.ts) replays it.
 //
 //	cd proto/go && go test ./solana/rpc -run TestSolanaRPCVectors -update
 
@@ -18,6 +19,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -144,6 +146,9 @@ func requestCases(t *testing.T) []requestCase {
 		{Method: "getProgramAccounts", Args: requestArgs{Key: program, Commitment: Confirmed, Filters: []filterArgs{
 			{DataSize: u64(880)}, {Offset: u64(0), BytesHex: hex.EncodeToString(disc)}, {Offset: u64(72), BytesHex: hex.EncodeToString(bytes.Repeat([]byte{7}, 32))},
 		}}},
+		// One filter is still sent.
+		{Method: "getProgramAccounts", Args: requestArgs{Key: program, Filters: []filterArgs{{DataSize: u64(165)}}}},
+		{Method: "getProgramAccounts", Args: requestArgs{Key: program, Filters: []filterArgs{{Offset: u64(8), BytesHex: hex.EncodeToString(disc)}}}},
 		{Method: "getBalance", Args: requestArgs{Key: key, Commitment: Processed}},
 		{Method: "getBalance", Args: requestArgs{Key: key}},
 		{Method: "getLatestBlockhash", Args: requestArgs{Commitment: Finalized}},
@@ -156,6 +161,151 @@ func requestCases(t *testing.T) []requestCase {
 		{Method: "getSignatureStatuses", Args: requestArgs{Signatures: []string{sig1, sig2}, SearchHistory: true}},
 		{Method: "getSignatureStatuses", Args: requestArgs{Signatures: []string{sig1}}},
 	}
+}
+
+// answerCase is a result as the RPC sends it and what the call reads from
+// it: Want in a form both suites can build, or Refused when the call fails
+// on it.
+type answerCase struct {
+	Method  string          `json:"method"`
+	Args    requestArgs     `json:"args"`
+	Result  json.RawMessage `json:"result"`
+	Refused bool            `json:"refused"`
+	Want    json.RawMessage `json:"want"`
+}
+
+type wantAccount struct {
+	Lamports   uint64 `json:"lamports"`
+	Owner      string `json:"owner"`
+	DataHex    string `json:"data_hex"`
+	Executable bool   `json:"executable"`
+}
+
+type wantStatus struct {
+	Slot               uint64          `json:"slot"`
+	Confirmations      *uint64         `json:"confirmations"`
+	Err                json.RawMessage `json:"err"`
+	ConfirmationStatus Commitment      `json:"confirmation_status"`
+}
+
+// answerTransport answers every call with one result.
+type answerTransport struct{ result string }
+
+func (a answerTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":1,"result":` + a.result + `}`)),
+	}, nil
+}
+
+// readAnswer makes the call a case names against its result and renders what
+// it decoded.
+func readAnswer(ctx context.Context, rc answerCase) (json.RawMessage, error) {
+	c, err := NewClient("http://rpc.invalid", WithTransport(answerTransport{string(rc.Result)}))
+	if err != nil {
+		return nil, err
+	}
+	a := rc.Args
+	switch rc.Method {
+	case "getAccountInfo":
+		acc, err := c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(wantAccount{acc.Lamports, acc.Owner.String(), hex.EncodeToString(acc.Data), acc.Executable})
+	case "getSignatureStatuses":
+		sigs := make([]solana.Signature, len(a.Signatures))
+		for i, s := range a.Signatures {
+			if sigs[i], err = solana.ParseSignature(s); err != nil {
+				return nil, err
+			}
+		}
+		got, err := c.GetSignatureStatuses(ctx, sigs, a.SearchHistory)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*wantStatus, len(got))
+		for i, s := range got {
+			if s != nil {
+				out[i] = &wantStatus{s.Slot, s.Confirmations, s.Err, s.ConfirmationStatus}
+			}
+		}
+		return json.Marshal(out)
+	}
+	panic("unknown method " + rc.Method)
+}
+
+// answerCases pairs each result with what it must read as, written out here
+// rather than taken from the code, so a regeneration cannot carry a changed
+// reading into the vectors. want "" is a refusal.
+func answerCases(t *testing.T) []answerCase {
+	t.Helper()
+	key := solana.PublicKey(bytes.Repeat([]byte{0x5a}, 32)).String()
+	owner := "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+	sig := solana.Signature(bytes.Repeat([]byte{0x11}, 64)).String()
+	account := func(executable string) string {
+		return `{"context":{"slot":9},"value":{"data":["AQID","base64"],` + executable + `"lamports":5,"owner":"` + owner + `","rentEpoch":0,"space":3}}`
+	}
+	accountWant := func(executable bool) string {
+		return fmt.Sprintf(`{"lamports":5,"owner":"%s","data_hex":"010203","executable":%v}`, owner, executable)
+	}
+	statuses := func(entries ...string) string {
+		return `{"context":{"slot":9},"value":[` + strings.Join(entries, ",") + `]}`
+	}
+	sigs := func(n int) []string {
+		s := make([]string, n)
+		for i := range s {
+			s[i] = sig
+		}
+		return s
+	}
+	specs := []struct {
+		method string
+		args   requestArgs
+		result string
+		want   string
+	}{
+		// An account the RPC sends without executable is not a program.
+		{"getAccountInfo", requestArgs{Key: key}, account(``), accountWant(false)},
+		{"getAccountInfo", requestArgs{Key: key}, account(`"executable":false,`), accountWant(false)},
+		{"getAccountInfo", requestArgs{Key: key}, account(`"executable":true,`), accountWant(true)},
+		// A confirmationStatus that is no commitment is a malformed answer,
+		// not a status to read as unconfirmed.
+		{"getSignatureStatuses", requestArgs{Signatures: sigs(1)}, statuses(`{"slot":7,"confirmations":null,"err":null,"confirmationStatus":"rooted"}`), ""},
+		{"getSignatureStatuses", requestArgs{Signatures: sigs(2)}, statuses(`null`, `{"slot":7,"confirmations":null,"err":null,"confirmationStatus":"Finalized"}`), ""},
+		{"getSignatureStatuses", requestArgs{Signatures: sigs(3)}, statuses(
+			`{"slot":7,"confirmations":2,"err":null}`,
+			`{"slot":8,"confirmations":null,"err":{"InstructionError":[1,{"Custom":6001}]},"confirmationStatus":null}`,
+			`{"slot":9,"confirmations":0,"err":null,"confirmationStatus":"processed"}`,
+		), `[{"slot":7,"confirmations":2,"err":null,"confirmation_status":""},` +
+			`{"slot":8,"confirmations":null,"err":{"InstructionError":[1,{"Custom":6001}]},"confirmation_status":""},` +
+			`{"slot":9,"confirmations":0,"err":null,"confirmation_status":"processed"}]`},
+	}
+	out := make([]answerCase, len(specs))
+	for i, s := range specs {
+		rc := answerCase{Method: s.method, Args: s.args, Result: json.RawMessage(s.result)}
+		got, err := readAnswer(t.Context(), rc)
+		switch {
+		case s.want == "" && err == nil:
+			t.Fatalf("%s %s: read %s, want a refusal", s.method, s.result, got)
+		case s.want == "":
+			rc.Refused = true
+		case err != nil:
+			t.Fatalf("%s %s: %v", s.method, s.result, err)
+		default:
+			var want bytes.Buffer
+			if err := json.Compact(&want, []byte(s.want)); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, want.Bytes()) {
+				t.Fatalf("%s %s: read %s, want %s", s.method, s.result, got, want.Bytes())
+			}
+			rc.Want = got
+		}
+		out[i] = rc
+	}
+	return out
 }
 
 // issue makes the call a case names on c.
@@ -352,13 +502,15 @@ func TestSolanaRPCVectors(t *testing.T) {
 		NowUnixMs    int64          `json:"now_unix_ms"`
 		Backoff      []backoffCase  `json:"backoff"`
 		Requests     []requestCase  `json:"requests"`
+		Answers      []answerCase   `json:"answers"`
 	}{
 		Comment: "Generated by proto/go/solana/rpc TestSolanaRPCVectors. DefaultRetry makes the first attempt and up to max_retries more. " +
 			"statuses: whether an answer with no JSON-RPC error is retried (status 0 is a transport error). " +
 			"rpc_errors: whether a JSON-RPC error in an answer of that status is retried, and the TransactionError variant read from its data (data null is absent). " +
 			"tx_error_names: the variant read from a TransactionError as sent. " +
 			"schedule_ms: the wait before retry n+1 with no Retry-After. backoff: the wait after attempt (0-based), with the answer's Retry-After read at now_unix_ms. " +
-			"requests: the params each call sends, from args.",
+			"requests: the params each call sends, from args. " +
+			"answers: what the call made from args reads from result, as want, or refused when it fails on it.",
 		MaxRetries:   p.MaxRetries,
 		WaitMinMs:    ms(p.WaitMin),
 		WaitMaxMs:    ms(p.WaitMax),
@@ -369,6 +521,7 @@ func TestSolanaRPCVectors(t *testing.T) {
 		NowUnixMs:    now.UnixMilli(),
 		Backoff:      backoff,
 		Requests:     requests,
+		Answers:      answerCases(t),
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

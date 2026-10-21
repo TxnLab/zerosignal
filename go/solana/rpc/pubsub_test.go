@@ -10,9 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -392,6 +396,186 @@ func TestAbandonedSubscribeIsDropped(t *testing.T) {
 	}
 }
 
+// trackedListener shrinks each accepted connection's receive buffer, so a
+// server that stops reading backs the client's writes up after less data, and
+// keeps the connections so a test can close them under a blocked write.
+type trackedListener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func (l *trackedListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if tc, ok := c.(*net.TCPConn); ok {
+		_ = tc.SetReadBuffer(4 << 10)
+	}
+	l.mu.Lock()
+	l.conns = append(l.conns, c)
+	l.mu.Unlock()
+	return c, nil
+}
+
+func (l *trackedListener) closeConns() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, c := range l.conns {
+		_ = c.Close()
+	}
+}
+
+// deafPubSub completes the handshake and never reads. With ping set it pings
+// without pause, so the client's reader answers each one until its pong
+// write blocks.
+type deafPubSub struct {
+	url   string
+	pings atomic.Int64
+}
+
+// dialDeaf returns a socket to a deaf server. A test that fails with a write
+// still blocked ends it by closing the server's side, before the socket's
+// own Close runs.
+func dialDeaf(t *testing.T, ping bool) (*PubSub, *deafPubSub) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl := &trackedListener{Listener: ln}
+	quit := make(chan struct{})
+	f := &deafPubSub{}
+	srv := httptest.NewUnstartedServer(websocket.Server{Handler: func(ws *websocket.Conn) {
+		if !ping {
+			<-quit
+			return
+		}
+		ws.PayloadType = websocket.PingFrame
+		payload := []byte(strings.Repeat("p", 125))
+		for {
+			if _, err := ws.Write(payload); err != nil {
+				return
+			}
+			f.pings.Add(1)
+		}
+	}})
+	srv.Listener = tl
+	srv.Start()
+	t.Cleanup(srv.Close)
+	f.url = "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	p, err := DialPubSub(t.Context(), f.url, PubSubOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	t.Cleanup(func() {
+		close(quit)
+		tl.closeConns()
+	})
+	return p, f
+}
+
+// shortWriteTimeout shortens pubsubWriteTimeout for one test.
+func shortWriteTimeout(t *testing.T) time.Duration {
+	t.Helper()
+	prev := pubsubWriteTimeout
+	pubsubWriteTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { pubsubWriteTimeout = prev })
+	return pubsubWriteTimeout
+}
+
+// writeMargin is how much past the write timeout a bounded call may take on
+// a loaded machine.
+const writeMargin = 2 * time.Second
+
+// A subscribe to a peer that stopped reading returns once its write times
+// out rather than holding its caller, whose ctx bounds only the wait for the
+// answer.
+func TestSubscribeToADeafPeerIsBounded(t *testing.T) {
+	timeout := shortWriteTimeout(t)
+	p, _ := dialDeaf(t, false)
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	type out struct {
+		err  error
+		took time.Duration
+	}
+	res := make(chan out, 1)
+	go func() {
+		// Each subscribe sends its frame before it sees its ended ctx, so the
+		// loop fills the socket until one write blocks.
+		for {
+			start := time.Now()
+			_, err := p.SignatureSubscribe(ended, testSig, Finalized)
+			if !errors.Is(err, context.Canceled) {
+				res <- out{err, time.Since(start)}
+				return
+			}
+		}
+	}()
+	select {
+	case o := <-res:
+		if !errors.Is(o.err, os.ErrDeadlineExceeded) {
+			t.Fatalf("err = %v, want a write deadline", o.err)
+		}
+		if o.took > timeout+writeMargin {
+			t.Fatalf("the blocked subscribe took %v, want about %v", o.took, timeout)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a subscribe to a peer that stopped reading never returned")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		_ = p.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(timeout + writeMargin):
+		t.Fatal("Close on a socket the peer stopped reading never returned")
+	}
+}
+
+// Close behind a write that no deadline bounds, the reader's answer to a
+// ping on a socket nothing was ever sent on, returns once the close frame
+// times out.
+func TestCloseBehindABlockedPongIsBounded(t *testing.T) {
+	timeout := shortWriteTimeout(t)
+	p, f := dialDeaf(t, true)
+
+	// The pings stall once the reader stops reading, stuck writing a pong.
+	last, still := int64(-1), time.Now()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the client's reader never stopped reading the pings")
+		}
+		if n := f.pings.Load(); n != last {
+			last, still = n, time.Now()
+		} else if time.Since(still) > 300*time.Millisecond {
+			break
+		}
+	}
+
+	closed := make(chan struct{})
+	start := time.Now()
+	go func() {
+		_ = p.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		if took := time.Since(start); took > timeout+writeMargin {
+			t.Fatalf("Close took %v, want about %v", took, timeout)
+		}
+	case <-time.After(timeout + writeMargin):
+		t.Fatal("Close behind a blocked pong never returned")
+	}
+}
+
 func TestDialPubSubRefusesEndpoints(t *testing.T) {
 	for _, e := range []string{
 		"http://rpc.example/?api-key=secret", "rpc.example/?api-key=secret", "://secret",
@@ -399,6 +583,17 @@ func TestDialPubSubRefusesEndpoints(t *testing.T) {
 	} {
 		_, err := DialPubSub(t.Context(), e, PubSubOptions{})
 		if err == nil || strings.Contains(err.Error(), "secret") {
+			t.Errorf("%q: err = %v", e, err)
+		}
+	}
+}
+
+// Each half of the userinfo is refused on its own, before any dial: one to
+// this closed port would fail with another message.
+func TestDialPubSubRefusesEitherCredential(t *testing.T) {
+	for _, e := range []string{"wss://:secret@127.0.0.1:1/", "wss://secret@127.0.0.1:1/"} {
+		_, err := DialPubSub(t.Context(), e, PubSubOptions{})
+		if err == nil || !strings.Contains(err.Error(), "carries credentials") || strings.Contains(err.Error(), "secret") {
 			t.Errorf("%q: err = %v", e, err)
 		}
 	}
