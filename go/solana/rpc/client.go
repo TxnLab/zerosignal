@@ -151,6 +151,7 @@ func NewClient(endpoint string, opts ...Option) (*HTTPClient, error) {
 	}
 	// Refused rather than sent as Basic auth, as Go's transport would: the
 	// TS twin's fetch refuses such a URL, and the two take the same endpoints.
+	// Also refuses an empty userinfo ("https://@h/"), which the TS twin accepts; it carries no secret.
 	if u.User != nil {
 		return nil, errors.New("solana rpc: endpoint carries credentials; pass them with WithHeader")
 	}

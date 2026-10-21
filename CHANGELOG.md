@@ -49,7 +49,17 @@ Neither client accepts an endpoint carrying `user:password` (pass credentials in
 no error either one returns spells the endpoint, since a provider's API key often rides in its
 query. Go's socket takes a header, TLS config and dialer (`PubSubOptions`) and never an HTTP
 proxy. Nothing in either notices an upstream that holds the socket open and stops sending, so
-the caller bounds each watch, by the blockhash's `lastValidBlockHeight` or a timer.
+the caller bounds each watch, by the blockhash's `lastValidBlockHeight` or a timer. A write that
+fails ends the socket as a drop does: every watch ends with `ErrPubSubClosed` ↔
+`PubSubClosedError`, later subscribes are refused with it, and the caller redials. In Go that
+includes a write past its 10 s deadline to a peer that stopped reading. A platform `WebSocket`
+never fails a send to such a peer (the frame waits in `bufferedAmount`), so in TS only a
+host-passed socket whose `send` throws ends this way.
+
+An account answer whose `lamports`, `owner` or `data` is missing, null or of another JSON type,
+or whose `executable` is null or not a boolean, is a malformed answer in both, never read as its
+zero value; a missing `executable` reads as false. A `getAccountInfo` answer with no `value` is
+malformed too, and only a null one is an account that does not exist.
 
 Every call retries a transport failure, a 429 and any 5xx, as algod's transport does, and two
 JSON-RPC answers that are weather: `-32005` (node behind) and, on `sendTransaction` only, a
@@ -60,7 +70,8 @@ time up to 10 s (18 s in all), or a longer `Retry-After` up to the same cap. The
 algod's, so Go's Retry-After parse moved to `httpx.LinearBackoff` / `httpx.RetryAfter`,
 unchanged, and the TS twin calls `algodBackoffMs`. The new `testdata/solana_rpc_vectors.json`
 (Go's `TestSolanaRPCVectors`) pins the budget, which outcomes retry, the wait before each retry,
-how a `TransactionError`'s variant is read, and the params each method sends.
+how a `TransactionError`'s variant is read, the params each method sends, and what
+`getAccountInfo`, `getProgramAccounts` and `getSignatureStatuses` read from an answer or refuse.
 
 ### 2026-10-21 — the payer's check of a relayed Solana ack, and its ack digest for a receipt (unreleased)
 

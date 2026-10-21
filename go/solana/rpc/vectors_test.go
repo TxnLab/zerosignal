@@ -18,11 +18,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +183,11 @@ type wantAccount struct {
 	Executable bool   `json:"executable"`
 }
 
+type wantKeyed struct {
+	Pubkey  string      `json:"pubkey"`
+	Account wantAccount `json:"account"`
+}
+
 type wantStatus struct {
 	Slot               uint64          `json:"slot"`
 	Confirmations      *uint64         `json:"confirmations"`
@@ -207,13 +214,29 @@ func readAnswer(ctx context.Context, rc answerCase) (json.RawMessage, error) {
 		return nil, err
 	}
 	a := rc.Args
+	render := func(acc Account) wantAccount {
+		return wantAccount{acc.Lamports, acc.Owner.String(), hex.EncodeToString(acc.Data), acc.Executable}
+	}
 	switch rc.Method {
 	case "getAccountInfo":
 		acc, err := c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
+		if errors.Is(err, ErrNotFound) {
+			return json.RawMessage(`null`), nil
+		}
 		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(wantAccount{acc.Lamports, acc.Owner.String(), hex.EncodeToString(acc.Data), acc.Executable})
+		return json.Marshal(render(*acc))
+	case "getProgramAccounts":
+		got, err := c.GetProgramAccounts(ctx, solana.MustPublicKey(a.Key), a.Commitment)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]wantKeyed, len(got))
+		for i, ka := range got {
+			out[i] = wantKeyed{ka.Key.String(), render(ka.Account)}
+		}
+		return json.Marshal(out)
 	case "getSignatureStatuses":
 		sigs := make([]solana.Signature, len(a.Signatures))
 		for i, s := range a.Signatures {
@@ -244,12 +267,22 @@ func answerCases(t *testing.T) []answerCase {
 	key := solana.PublicKey(bytes.Repeat([]byte{0x5a}, 32)).String()
 	owner := "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
 	sig := solana.Signature(bytes.Repeat([]byte{0x11}, 64)).String()
-	account := func(executable string) string {
-		return `{"context":{"slot":9},"value":{"data":["AQID","base64"],` + executable + `"lamports":5,"owner":"` + owner + `","rentEpoch":0,"space":3}}`
+	// An account's members as the RPC sends them, each one's absence a case.
+	const (
+		data     = `"data":["AQID","base64"]`
+		lamports = `"lamports":5`
+	)
+	ownerMember := `"owner":"` + owner + `"`
+	acct := func(members ...string) string {
+		return "{" + strings.Join(slices.Concat(members, []string{`"rentEpoch":0`, `"space":3`}), ",") + "}"
 	}
+	info := func(value string) string { return `{"context":{"slot":9},"value":` + value + `}` }
+	keyed := func(entries ...string) string { return "[" + strings.Join(entries, ",") + "]" }
+	entry := func(account string) string { return `{"pubkey":"` + key + `","account":` + account + `}` }
 	accountWant := func(executable bool) string {
 		return fmt.Sprintf(`{"lamports":5,"owner":"%s","data_hex":"010203","executable":%v}`, owner, executable)
 	}
+	const refused = ""
 	statuses := func(entries ...string) string {
 		return `{"context":{"slot":9},"value":[` + strings.Join(entries, ",") + `]}`
 	}
@@ -267,9 +300,44 @@ func answerCases(t *testing.T) []answerCase {
 		want   string
 	}{
 		// An account the RPC sends without executable is not a program.
-		{"getAccountInfo", requestArgs{Key: key}, account(``), accountWant(false)},
-		{"getAccountInfo", requestArgs{Key: key}, account(`"executable":false,`), accountWant(false)},
-		{"getAccountInfo", requestArgs{Key: key}, account(`"executable":true,`), accountWant(true)},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, lamports, ownerMember)), accountWant(false)},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"executable":false`, lamports, ownerMember)), accountWant(false)},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"executable":true`, lamports, ownerMember)), accountWant(true)},
+		// Only a null value is an account that does not exist; a missing one
+		// is a malformed answer.
+		{"getAccountInfo", requestArgs{Key: key}, info(`null`), `null`},
+		{"getAccountInfo", requestArgs{Key: key}, `{"context":{"slot":9}}`, refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(`5`), refused},
+		// A member the RPC always sends, null, missing or of another type, is
+		// a malformed answer rather than its zero value: no lamports, the
+		// system program as owner, no data, not a program.
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"executable":null`, lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"executable":"true"`, lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"executable":1`, lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"lamports":null`, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"lamports":"5"`, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, `"lamports":-1`, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, lamports, `"owner":null`)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, lamports)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(data, lamports, `"owner":5`)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(`"data":null`, lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(`"data":[null,"base64"]`, lamports, ownerMember)), refused},
+		{"getAccountInfo", requestArgs{Key: key}, info(acct(`"data":["AQID",null]`, lamports, ownerMember)), refused},
+		// getProgramAccounts reads its accounts the same way.
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(), `[]`},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(data, lamports, ownerMember))),
+			`[{"pubkey":"` + key + `","account":` + accountWant(false) + `}]`},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(`null`), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(`{"pubkey":null,"account":` + acct(data, lamports, ownerMember) + `}`), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(`{"account":` + acct(data, lamports, ownerMember) + `}`), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(`null`)), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(`{"pubkey":"` + key + `"}`), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(data, `"executable":null`, lamports, ownerMember))), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(data, `"lamports":null`, ownerMember))), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(data, lamports, `"owner":null`))), refused},
+		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(`"data":null`, lamports, ownerMember))), refused},
 		// A confirmationStatus that is no commitment is a malformed answer,
 		// not a status to read as unconfirmed.
 		{"getSignatureStatuses", requestArgs{Signatures: sigs(1)}, statuses(`{"slot":7,"confirmations":null,"err":null,"confirmationStatus":"rooted"}`), ""},
@@ -510,7 +578,8 @@ func TestSolanaRPCVectors(t *testing.T) {
 			"tx_error_names: the variant read from a TransactionError as sent. " +
 			"schedule_ms: the wait before retry n+1 with no Retry-After. backoff: the wait after attempt (0-based), with the answer's Retry-After read at now_unix_ms. " +
 			"requests: the params each call sends, from args. " +
-			"answers: what the call made from args reads from result, as want, or refused when it fails on it.",
+			"answers: what the call made from args reads from result, as want, or refused when it fails on it as a malformed answer; " +
+			"a getAccountInfo want of null is an account that does not exist.",
 		MaxRetries:   p.MaxRetries,
 		WaitMinMs:    ms(p.WaitMin),
 		WaitMaxMs:    ms(p.WaitMax),

@@ -24,8 +24,9 @@ import (
 
 // The confirmation watch is a signatureSubscribe push, not a getSignatureStatuses
 // poll: the public endpoints answer a poll with 429 after about ten calls,
-// while a subscription stays within their limits. A dropped socket ends every
-// watch on it with ErrPubSubClosed, and the caller polls from there. Nothing
+// while a subscription stays within their limits. A dropped socket, or one a
+// write fails on, ends every watch on it with ErrPubSubClosed, and the caller
+// polls from there. Nothing
 // here notices an upstream that keeps the socket open and stops sending, so a
 // watch can stay pending: the caller bounds it, by the blockhash's
 // lastValidBlockHeight or a timer, and polls once that passes.
@@ -94,6 +95,7 @@ func DialPubSub(ctx context.Context, endpoint string, o PubSubOptions) (*PubSub,
 	default:
 		return nil, errors.New("solana rpc: pubsub endpoint is not ws or wss")
 	}
+	// Also refuses an empty userinfo ("wss://@h/"), which the TS twin accepts; it carries no secret.
 	if u.User != nil {
 		return nil, errors.New("solana rpc: pubsub endpoint carries credentials; pass them in Header")
 	}
@@ -190,7 +192,8 @@ func (p *PubSub) SignatureSubscribe(ctx context.Context, sig solana.Signature, c
 		delete(p.pending, reqID)
 		closed := p.err
 		p.mu.Unlock()
-		// A socket that failed under the write says so as ErrPubSubClosed.
+		// A failed write ends the socket, so this is ErrPubSubClosed, wrapping
+		// the write's error or whatever ended the socket first.
 		if closed != nil {
 			return nil, closed
 		}
@@ -260,7 +263,15 @@ func (p *PubSub) send(id uint64, method string, params []any) error {
 	_ = p.ws.SetWriteDeadline(time.Now().Add(pubsubWriteTimeout))
 	// A string goes as a text frame, which is what the RPC reads.
 	if err := websocket.Message.Send(p.ws, string(b)); err != nil {
-		return fmt.Errorf("solana rpc %s: %w", method, err)
+		err = fmt.Errorf("solana rpc %s: %w", method, err)
+		// The library's buffered writer keeps a write's error and fails every
+		// later frame with it, and a timed-out write may have sent part of a
+		// frame, so the socket can carry nothing more. It ends as a dropped
+		// one does, so every watch ends and the caller redials rather than
+		// each later subscribe failing alone while the watches stay open.
+		p.fail(fmt.Errorf("%w: %w", ErrPubSubClosed, err))
+		_ = p.ws.Close()
+		return err
 	}
 	return nil
 }

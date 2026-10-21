@@ -17,6 +17,7 @@ import {
     type Account,
     type Commitment,
     type Filter,
+    type KeyedAccount,
     type SignatureStatus,
     SOLANA_RPC_MAX_RETRIES,
     SOLANA_RPC_RETRY_WAIT_MAX_MS,
@@ -234,11 +235,12 @@ describe('solana_rpc vectors', () => {
 
 /** What a call decoded, in the vectors' want form. */
 function rendered(method: string, got: unknown): unknown {
+    const account = (a: Account) => ({ lamports: Number(a.lamports), owner: a.owner, data_hex: hex.encode(a.data), executable: a.executable })
     switch (method) {
-        case 'getAccountInfo': {
-            const a = got as Account
-            return { lamports: Number(a.lamports), owner: a.owner, data_hex: hex.encode(a.data), executable: a.executable }
-        }
+        case 'getAccountInfo':
+            return got === null ? null : account(got as Account)
+        case 'getProgramAccounts':
+            return (got as KeyedAccount[]).map((k) => ({ pubkey: k.key, account: account(k.account) }))
         case 'getSignatureStatuses':
             return (got as (SignatureStatus | null)[]).map((s) =>
                 s === null

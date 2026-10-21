@@ -6,8 +6,9 @@
 // The confirmation watch: signatureSubscribe over one WebSocket, the twin of
 // go/solana/rpc pubsub.go. A push, not a getSignatureStatuses poll, because
 // the public endpoints answer a poll with 429 after about ten calls while a
-// subscription stays within their limits. A dropped socket ends every watch on
-// it with PubSubClosedError, and the caller polls from there. Nothing here
+// subscription stays within their limits. A dropped socket, or one a send
+// fails on, ends every watch on it with PubSubClosedError, and the caller
+// polls from there. Nothing here
 // notices an upstream that keeps the socket open and stops sending, so a watch
 // can stay pending: the caller bounds it, by the blockhash's
 // lastValidBlockHeight or a timer, and polls once that passes.
@@ -21,6 +22,9 @@
 //   - Frames are not size-capped, and a fragmented message is reassembled:
 //     the platform's WebSocket reads each message whole.
 //   - A subscription id or slot past 2^53 is refused, where Go reads any u64.
+//   - A peer that stops reading never fails a send: the frame waits in
+//     bufferedAmount and nothing ends the socket, where Go's write times out
+//     at 10 s and ends it. Only a host-passed socket that throws ends it here.
 
 import { type Commitment, SolanaRpcError } from './rpc.js'
 
@@ -231,8 +235,21 @@ export class SolanaPubSub {
         sub.finish(new UnsubscribedError())
     }
 
+    // A send that throws ends the socket as a drop does, as Go's failed write
+    // does, so every watch ends and the caller redials rather than each later
+    // subscribe failing alone while the watches stay open. A platform socket
+    // throws only while connecting, which this one never is; once closing it
+    // drops the frame without throwing, and its close event ends the socket.
     #send(id: number, method: string, params: unknown[]): void {
-        this.#ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+        try {
+            this.#ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+        } catch (e) {
+            this.#fail(`send failed: ${e instanceof Error ? e.message : String(e)}`)
+            try {
+                this.#ws.close()
+            } catch {}
+            throw this.#err
+        }
     }
 
     #unsubscribe(subId: number): void {

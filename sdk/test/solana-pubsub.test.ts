@@ -22,6 +22,8 @@ class FakeSocket implements WebSocketLike {
     readonly sent: { id: number; method: string; params: unknown }[] = []
     readonly #listeners = new Map<string, Listener[]>()
     closedByClient = false
+    /** Set, send throws as a socket that cannot take the frame. */
+    refuseSends = false
 
     constructor(readonly url: string) {
         FakeSocket.last = this
@@ -32,6 +34,7 @@ class FakeSocket implements WebSocketLike {
     }
 
     send(data: string): void {
+        if (this.refuseSends) throw new DOMException('Still in CONNECTING state.', 'InvalidStateError')
         this.sent.push(JSON.parse(data) as { id: number; method: string; params: unknown })
     }
 
@@ -115,6 +118,35 @@ describe('SolanaPubSub', () => {
         const pending = p.signatureSubscribe(SIG)
         ws.emit('error')
         await expect(pending).rejects.toBeInstanceOf(PubSubClosedError)
+    })
+
+    // A socket that cannot take a frame ends as a drop does, so the caller
+    // redials rather than each later subscribe failing alone.
+    it('ends every watch when a subscribe cannot be sent, and refuses later subscribes', async () => {
+        const { p, ws } = await connect()
+        const { sub } = await subscribe(p, ws, 3)
+        ws.refuseSends = true
+        const err = await p.signatureSubscribe(SIG).catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(PubSubClosedError)
+        expect((err as Error).message).toContain('send failed')
+        await expect(sub.result).rejects.toBeInstanceOf(PubSubClosedError)
+        expect(await p.closed).toBe(err)
+        expect(p.error).toBe(err)
+        expect(ws.closedByClient).toBe(true)
+        ws.refuseSends = false
+        await expect(p.signatureSubscribe(SIG)).rejects.toBe(err)
+        expect(ws.sent.filter((s) => s.method === 'signatureSubscribe')).toHaveLength(1)
+    })
+
+    it('ends every watch when an unsubscribe cannot be sent', async () => {
+        const { p, ws } = await connect()
+        const gone = await subscribe(p, ws, 3)
+        const other = await subscribe(p, ws, 4)
+        ws.refuseSends = true
+        gone.sub.unsubscribe()
+        await expect(gone.sub.result).rejects.toBeInstanceOf(UnsubscribedError)
+        await expect(other.sub.result).rejects.toBeInstanceOf(PubSubClosedError)
+        expect(p.error).toBeInstanceOf(PubSubClosedError)
     })
 
     it('ends every watch on close', async () => {

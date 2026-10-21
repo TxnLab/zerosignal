@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -110,35 +111,61 @@ type config struct {
 	SearchTransactionHistory bool       `json:"searchTransactionHistory,omitempty"`
 }
 
+// wireAccount holds each field so that a missing or null one is seen: read as
+// its zero value it would pass for a real answer (no lamports, the system
+// program as owner, no data), and the TS twin refuses it. Executable is raw,
+// not *bool: it may be absent (false) but not null, and a pointer reads both
+// as nil.
 type wireAccount struct {
-	Data       []string         `json:"data"`
-	Executable bool             `json:"executable"`
-	Lamports   uint64           `json:"lamports"`
-	Owner      solana.PublicKey `json:"owner"`
+	Data       []*string         `json:"data"`
+	Executable json.RawMessage   `json:"executable"`
+	Lamports   *uint64           `json:"lamports"`
+	Owner      *solana.PublicKey `json:"owner"`
 }
 
 func (w *wireAccount) account() (Account, error) {
-	if len(w.Data) != 2 || w.Data[1] != "base64" {
-		return Account{}, fmt.Errorf("account data is not [data, \"base64\"]")
+	if len(w.Data) != 2 || w.Data[0] == nil || w.Data[1] == nil || *w.Data[1] != "base64" {
+		return Account{}, errors.New("account data is not [data, \"base64\"]")
 	}
-	data, err := base64.StdEncoding.DecodeString(w.Data[0])
+	data, err := base64.StdEncoding.DecodeString(*w.Data[0])
 	if err != nil {
 		return Account{}, fmt.Errorf("account data: %w", err)
 	}
-	return Account{Lamports: w.Lamports, Owner: w.Owner, Data: data, Executable: w.Executable}, nil
+	if w.Lamports == nil {
+		return Account{}, errors.New("account lamports is missing or null")
+	}
+	if w.Owner == nil {
+		return Account{}, errors.New("account owner is missing or null")
+	}
+	// An account the RPC sends without executable is not a program; a null
+	// one is no boolean.
+	var executable bool
+	if w.Executable != nil && (string(w.Executable) == "null" || json.Unmarshal(w.Executable, &executable) != nil) {
+		return Account{}, errors.New("account executable is not a boolean")
+	}
+	return Account{Lamports: *w.Lamports, Owner: *w.Owner, Data: data, Executable: executable}, nil
 }
 
 func (c *HTTPClient) GetAccountInfo(ctx context.Context, key solana.PublicKey, cm Commitment) (*Account, error) {
 	var r struct {
-		Value *wireAccount `json:"value"`
+		// Raw, so a missing value is told from a null one: only null means
+		// the account does not exist.
+		Value json.RawMessage `json:"value"`
 	}
 	if err := c.call(ctx, "getAccountInfo", []any{key.String(), config{Encoding: "base64", Commitment: cm}}, &r); err != nil {
 		return nil, err
 	}
-	if r.Value == nil {
+	switch string(r.Value) {
+	case "":
+		return nil, fmt.Errorf("solana rpc getAccountInfo %s: answer has no value", key)
+	case "null":
 		return nil, ErrNotFound
 	}
-	a, err := r.Value.account()
+	var w wireAccount
+	if err := json.Unmarshal(r.Value, &w); err != nil {
+		return nil, fmt.Errorf("solana rpc getAccountInfo %s: decode account: %w", key, err)
+	}
+	a, err := w.account()
 	if err != nil {
 		return nil, fmt.Errorf("solana rpc getAccountInfo %s: %w", key, err)
 	}
@@ -146,20 +173,25 @@ func (c *HTTPClient) GetAccountInfo(ctx context.Context, key solana.PublicKey, c
 }
 
 func (c *HTTPClient) GetProgramAccounts(ctx context.Context, program solana.PublicKey, cm Commitment, filters ...Filter) ([]KeyedAccount, error) {
-	var r []struct {
-		Pubkey  solana.PublicKey `json:"pubkey"`
-		Account wireAccount      `json:"account"`
+	// Pointers, so a null or missing member is refused rather than read as
+	// the zero key or an empty account.
+	var r []*struct {
+		Pubkey  *solana.PublicKey `json:"pubkey"`
+		Account *wireAccount      `json:"account"`
 	}
 	if err := c.call(ctx, "getProgramAccounts", []any{program.String(), config{Encoding: "base64", Commitment: cm, Filters: filters}}, &r); err != nil {
 		return nil, err
 	}
 	out := make([]KeyedAccount, len(r))
 	for i, ka := range r {
+		if ka == nil || ka.Pubkey == nil || ka.Account == nil {
+			return nil, fmt.Errorf("solana rpc getProgramAccounts %s: entry %d is not {pubkey, account}", program, i)
+		}
 		a, err := ka.Account.account()
 		if err != nil {
-			return nil, fmt.Errorf("solana rpc getProgramAccounts %s: %w", ka.Pubkey, err)
+			return nil, fmt.Errorf("solana rpc getProgramAccounts %s: %w", *ka.Pubkey, err)
 		}
-		out[i] = KeyedAccount{Key: ka.Pubkey, Account: a}
+		out[i] = KeyedAccount{Key: *ka.Pubkey, Account: a}
 	}
 	return out, nil
 }

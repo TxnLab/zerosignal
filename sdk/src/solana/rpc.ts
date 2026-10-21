@@ -20,6 +20,9 @@
 //     Go returns ErrNotFound.
 //   - The answer's keys are read exactly; Go's encoding/json also matches
 //     them case-insensitively. An Agave node sends them in one case.
+//   - A lamports of 5.0 or 5e0 reads as 5, which Go refuses, and account data
+//     with a line break in its base64 is refused, which Go's decoder skips.
+//     An Agave node sends neither.
 //   - The transport is the runtime's. A browser's fetch speaks HTTP/2 where
 //     the endpoint offers it; Node's speaks HTTP/1.1, so there concurrent
 //     calls each hold a connection, against the public endpoints' cap of 40

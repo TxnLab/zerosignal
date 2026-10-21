@@ -427,9 +427,9 @@ func (l *trackedListener) closeConns() {
 	}
 }
 
-// deafPubSub completes the handshake and never reads. With ping set it pings
-// without pause, so the client's reader answers each one until its pong
-// write blocks.
+// deafPubSub completes the handshake, arms the first subscribe as id 1, and
+// never reads again. With ping set it instead pings without pause from the
+// start, so the client's reader answers each one until its pong write blocks.
 type deafPubSub struct {
 	url   string
 	pings atomic.Int64
@@ -449,6 +449,10 @@ func dialDeaf(t *testing.T, ping bool) (*PubSub, *deafPubSub) {
 	f := &deafPubSub{}
 	srv := httptest.NewUnstartedServer(websocket.Server{Handler: func(ws *websocket.Conn) {
 		if !ping {
+			var c wsCall
+			if websocket.JSON.Receive(ws, &c) == nil {
+				_ = websocket.Message.Send(ws, fmt.Sprintf(`{"jsonrpc":"2.0","result":1,"id":%d}`, c.ID))
+			}
 			<-quit
 			return
 		}
@@ -492,10 +496,16 @@ const writeMargin = 2 * time.Second
 
 // A subscribe to a peer that stopped reading returns once its write times
 // out rather than holding its caller, whose ctx bounds only the wait for the
-// answer.
+// answer. The timed-out write ends the socket as a drop does: the watch
+// already armed ends, and a later subscribe is refused as closed rather than
+// failing alone on the write error the library keeps.
 func TestSubscribeToADeafPeerIsBounded(t *testing.T) {
 	timeout := shortWriteTimeout(t)
 	p, _ := dialDeaf(t, false)
+	watch, err := p.SignatureSubscribe(t.Context(), testSig, Finalized)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ended, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -526,6 +536,21 @@ func TestSubscribeToADeafPeerIsBounded(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("a subscribe to a peer that stopped reading never returned")
+	}
+
+	if _, err := waitDone(t, watch); !errors.Is(err, ErrPubSubClosed) {
+		t.Fatalf("the armed watch ended with %v, want ErrPubSubClosed", err)
+	}
+	select {
+	case <-p.Done():
+	default:
+		t.Fatal("Done is open after the write failed")
+	}
+	if err := p.Err(); !errors.Is(err, ErrPubSubClosed) || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("Err = %v, want ErrPubSubClosed for the write deadline", err)
+	}
+	if _, err := p.SignatureSubscribe(t.Context(), testSig, Finalized); !errors.Is(err, ErrPubSubClosed) {
+		t.Fatalf("subscribe after the failed write: %v, want ErrPubSubClosed", err)
 	}
 
 	closed := make(chan struct{})
