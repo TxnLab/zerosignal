@@ -14,10 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -363,6 +365,114 @@ func TestStopsOnCancelMidWait(t *testing.T) {
 	}
 	if n := len(f.calls()); n != 1 {
 		t.Fatalf("%d calls, want 1", n)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// recordLog keeps each record's message.
+type recordLog struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (h *recordLog) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordLog) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *recordLog) WithGroup(string) slog.Handler            { return h }
+
+func (h *recordLog) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.msgs = append(h.msgs, r.Message)
+	return nil
+}
+
+// A caller that ended the call while an attempt was out gets that attempt's
+// failure, not context.Canceled, and no retry is logged or made.
+func TestCallerEndedReturnsTheAttemptsFailure(t *testing.T) {
+	logs := &recordLog{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var attempts atomic.Int32
+	rt := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		cancel()
+		return &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`busy`)), Request: r}, nil
+	})
+	c, err := NewClient("https://rpc.example/rpc", WithTransport(rt), WithRetry(RetryPolicy{MaxRetries: 5, WaitMin: time.Hour, WaitMax: time.Hour}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.GetBlockHeight(ctx, "")
+	if e, ok := errors.AsType[*HTTPError](err); !ok || e.Status != 503 {
+		t.Fatalf("err = %v, want the 503", err)
+	}
+	if n := attempts.Load(); n != 1 {
+		t.Fatalf("%d attempts, want 1", n)
+	}
+	logs.mu.Lock()
+	defer logs.mu.Unlock()
+	if len(logs.msgs) != 0 {
+		t.Fatalf("logged %q", logs.msgs)
+	}
+}
+
+// Literal expectations beside the generated vectors, which a regeneration
+// would rewrite to whatever the code says.
+func TestRetryClassificationLiterals(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		retry  bool
+	}{
+		{199, false}, {200, false}, {299, false}, {300, false}, {428, false}, {429, true},
+		{430, false}, {499, false}, {500, true}, {599, true}, {600, false},
+	} {
+		if got := shouldRetry("getAccountInfo", c.status, nil); got != c.retry {
+			t.Errorf("HTTP %d: retry = %v, want %v", c.status, got, c.retry)
+		}
+	}
+
+	for _, c := range []struct {
+		method string
+		code   int
+		data   string
+		retry  bool
+	}{
+		{"getAccountInfo", -32005, `{"numSlotsBehind":4}`, true},
+		{"getProgramAccounts", -32005, ``, true},
+		{"getBlockHeight", -32005, ``, true},
+		{"getSignatureStatuses", -32005, ``, true},
+		{"sendTransaction", -32005, ``, true},
+		{"sendTransaction", -32002, `{"err":"BlockhashNotFound","logs":[]}`, true},
+		{"getAccountInfo", -32002, `{"err":"BlockhashNotFound","logs":[]}`, false},
+		{"sendTransaction", -32002, `{"err":"AlreadyProcessed","logs":[]}`, false},
+		{"sendTransaction", -32002, `{"err":{"InstructionError":[0,{"Custom":1}]}}`, false},
+	} {
+		var data json.RawMessage
+		if c.data != "" {
+			data = json.RawMessage(c.data)
+		}
+		e := &Error{Method: c.method, Code: c.code, Message: "m", Data: data}
+		if got := shouldRetry(c.method, 200, e); got != c.retry {
+			t.Errorf("%s %d %s: retry = %v, want %v", c.method, c.code, c.data, got, c.retry)
+		}
+	}
+
+	for raw, name := range map[string]string{
+		`{"InstructionError":[0,{"Custom":1}]}`: "InstructionError",
+		`{"A":1,"B":2}`:                         "",
+		`"BlockhashNotFound"`:                   "BlockhashNotFound",
+		`null`:                                  "",
+	} {
+		if got := TxErrName(json.RawMessage(raw)); got != name {
+			t.Errorf("TxErrName(%s) = %q, want %q", raw, got, name)
+		}
 	}
 }
 

@@ -216,6 +216,108 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
+// The RPC reuses an id once its watch has notified. A handle to the watch that
+// ended must not end the one that now holds the id.
+func TestStaleUnsubscribeLeavesTheReusedID(t *testing.T) {
+	f := newFakePubSub(t)
+	p, ws := dial(t, f, nil)
+	first, _ := subscribe(t, p, f, ws, Finalized, 7)
+	sendFrame(t, ws, `{"jsonrpc":"2.0","method":"signatureNotification","params":{"result":{"context":{"slot":3},"value":{"err":null}},"subscription":7}}`)
+	if r, err := waitDone(t, first); err != nil || r.Slot != 3 {
+		t.Fatalf("first watch = %+v, %v", r, err)
+	}
+	second, _ := subscribe(t, p, f, ws, Finalized, 7)
+
+	first.Unsubscribe()
+	p.mu.Lock()
+	holder := p.subs[7]
+	p.mu.Unlock()
+	if holder != second {
+		t.Fatalf("id 7 is held by %p, want the second watch %p", holder, second)
+	}
+	// The next call the RPC sees is the next subscribe, not an unsubscribe of 7.
+	if _, call := subscribe(t, p, f, ws, Finalized, 8); call.Method != "signatureSubscribe" {
+		t.Fatalf("call = %s %s", call.Method, call.Params)
+	}
+	sendFrame(t, ws, `{"jsonrpc":"2.0","method":"signatureNotification","params":{"result":{"context":{"slot":4},"value":{"err":null}},"subscription":7}}`)
+	if r, err := waitDone(t, second); err != nil || r.Slot != 4 {
+		t.Fatalf("second watch = %+v, %v", r, err)
+	}
+	if r, err := first.Result(); err != nil || r.Slot != 3 {
+		t.Fatalf("first watch after its unsubscribe = %+v, %v", r, err)
+	}
+}
+
+// answeredCtx ends once the RPC's answer to every pending subscribe has been
+// read, so SignatureSubscribe's wait finds the answer and the ctx's end
+// together and may take either.
+type answeredCtx struct {
+	context.Context
+	p    *PubSub
+	done chan struct{}
+}
+
+func (c *answeredCtx) Done() <-chan struct{} {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		c.p.mu.Lock()
+		n := len(c.p.pending)
+		c.p.mu.Unlock()
+		if n == 0 {
+			break
+		}
+	}
+	return c.done
+}
+
+func (c *answeredCtx) Err() error { return context.Canceled }
+
+// A subscribe whose ctx ended as the RPC refused it unsubscribes its handle,
+// which never took an id and so reads as id 0. A live watch holding id 0 must
+// keep it.
+func TestFailedSubscribeLeavesTheWatchOnIDZero(t *testing.T) {
+	f := newFakePubSub(t)
+	p, ws := dial(t, f, nil)
+	live, _ := subscribe(t, p, f, ws, Finalized, 0)
+
+	ended := make(chan struct{})
+	close(ended)
+	// The wait picks between the refusal and the ctx's end at random; the
+	// handle is unsubscribed only on the second.
+	for i := 0; ; i++ {
+		if i == 64 {
+			t.Fatal("the subscribe never took its ctx's end")
+		}
+		errc := make(chan error, 1)
+		ctx := &answeredCtx{Context: t.Context(), p: p, done: ended}
+		go func() {
+			_, err := p.SignatureSubscribe(ctx, testSig, Finalized)
+			errc <- err
+		}()
+		sendFrame(t, ws, `{"jsonrpc":"2.0","error":{"code":-32602,"message":"Invalid params"},"id":%d}`, f.next(t).ID)
+		err := <-errc
+		if errors.Is(err, context.Canceled) {
+			break
+		}
+		if e, ok := errors.AsType[*Error](err); !ok || e.Code != -32602 {
+			t.Fatalf("err = %v", err)
+		}
+	}
+
+	p.mu.Lock()
+	holder := p.subs[0]
+	p.mu.Unlock()
+	if holder != live {
+		t.Fatalf("id 0 is held by %p, want the live watch %p", holder, live)
+	}
+	if _, call := subscribe(t, p, f, ws, Finalized, 1); call.Method != "signatureSubscribe" {
+		t.Fatalf("call = %s %s", call.Method, call.Params)
+	}
+	sendFrame(t, ws, `{"jsonrpc":"2.0","method":"signatureNotification","params":{"result":{"context":{"slot":5},"value":{"err":null}},"subscription":0}}`)
+	if r, err := waitDone(t, live); err != nil || r.Slot != 5 {
+		t.Fatalf("live watch = %+v, %v", r, err)
+	}
+}
+
 // The RPC answering two subscribes with one id would strand the first watch
 // past the socket's end; the second is refused instead.
 func TestRepeatedSubscriptionIDIsRefused(t *testing.T) {

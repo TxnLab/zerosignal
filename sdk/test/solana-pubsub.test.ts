@@ -136,6 +136,22 @@ describe('SolanaPubSub', () => {
         expect(ws.sent.filter((s) => s.method === 'signatureUnsubscribe')).toHaveLength(1)
     })
 
+    // The RPC reuses an id once its watch has notified. A handle to the watch
+    // that ended must not end the one that now holds the id.
+    it('leaves a reused id to its new watch when a stale handle unsubscribes', async () => {
+        const { p, ws } = await connect()
+        const first = await subscribe(p, ws, 7)
+        ws.push(notification(7, 3, { err: null }))
+        expect(await first.sub.result).toEqual({ slot: 3n, err: null })
+        const second = await subscribe(p, ws, 7)
+
+        first.sub.unsubscribe()
+        expect(ws.sent.filter((s) => s.method === 'signatureUnsubscribe')).toEqual([])
+        ws.push(notification(7, 4, { err: null }))
+        expect(await second.sub.result).toEqual({ slot: 4n, err: null })
+        expect(await first.sub.result).toEqual({ slot: 3n, err: null })
+    })
+
     // The RPC answering two subscribes with one id would strand the first
     // watch past the socket's end; the second is refused instead.
     it('refuses a repeated subscription id', async () => {

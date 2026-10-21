@@ -374,6 +374,28 @@ describe('SolanaRpcClient', () => {
         expect(f.seen).toHaveLength(1)
     })
 
+    // A caller that ended the call while an attempt was out gets that
+    // attempt's failure, not its signal's reason, and no retry is logged or made.
+    it("returns the attempt's failure once the caller has ended the call", async () => {
+        const ac = new AbortController()
+        let attempts = 0
+        // It ignores its signal, as a fetch whose answer was already in hand does.
+        const fetch = (async () => {
+            attempts++
+            ac.abort(new Error('caller left'))
+            return status(503)()
+        }) as typeof globalThis.fetch
+        const logged: string[] = []
+        const logger = { debug: (msg: string) => logged.push(msg), info: () => {}, warn: () => {}, error: () => {} }
+        const err = await client({ fetch }, { maxRetries: 5, retryWaitMinMs: 10_000, retryWaitMaxMs: 10_000, logger })
+            .getBlockHeight({ signal: ac.signal })
+            .catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(SolanaHttpError)
+        expect((err as SolanaHttpError).status).toBe(503)
+        expect(attempts).toBe(1)
+        expect(logged).toEqual([])
+    })
+
     it.each(['ws://rpc.example/?api-key=secret', 'rpc.example/?api-key=secret', 'https://user:secret@rpc.example/'])(
         'refuses the endpoint %s without spelling it',
         (endpoint) => {
