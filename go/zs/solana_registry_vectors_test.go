@@ -400,6 +400,17 @@ func TestSolanaRegistryVectors(t *testing.T) {
 	foreign := node1
 	foreign.Owner = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 	add("an account the program does not own is skipped", ringDay, fleet, []solanaRegistryAccount{foreign, node2})
+	// An operator account under another program, naming a real operator's id
+	// with another owner: read after the real one, it would replace it.
+	foreignOp := opAccount("operator_named", func(o *zsescrow.Operator) {
+		o.Owner = solana.MustPublicKey(fx.Context.Keys["owner2"].Pubkey)
+	})
+	foreignOp.Pubkey = fx.Context.Keys["owner2"].Pubkey
+	foreignOp.Owner = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+	add("an operator account the program does not own is skipped", ringDay,
+		[]solanaRegistryAccount{named, evicted, foreignOp}, []solanaRegistryAccount{node1})
+	add("an operator account the program does not own is no fleet", ringDay,
+		[]solanaRegistryAccount{foreignOp}, []solanaRegistryAccount{node1})
 	add("no operator accounts is an empty fleet", ringDay, []solanaRegistryAccount{}, []solanaRegistryAccount{node1})
 	add("an evicted operator alone is a fleet with no nodes", ringDay, []solanaRegistryAccount{evicted}, []solanaRegistryAccount{})
 	add("operator ids restrict the read", ringDay, []solanaRegistryAccount{named, evicted, operator3},
