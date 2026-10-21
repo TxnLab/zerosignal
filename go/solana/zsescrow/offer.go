@@ -6,9 +6,6 @@
 package zsescrow
 
 import (
-	"bytes"
-	"encoding/base64"
-	"fmt"
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -34,10 +31,6 @@ type OfferRejectedError struct {
 }
 
 func (e *OfferRejectedError) Error() string { return e.Detail }
-
-func offerReject(field, format string, a ...any) error {
-	return &OfferRejectedError{Field: field, Detail: "zsescrow: open offer: " + fmt.Sprintf(format, a...)}
-}
 
 // OpenOfferSpec is what the payer knows before it signs a node's open offer.
 // Every value comes from the payer's own state (its reserve, the ticket the
@@ -82,36 +75,12 @@ type FoldSpec struct {
 	Treasury solana.PublicKey
 }
 
-// ClaimFromReceipt is the claim a payer acks for a receipt: the values the
-// node signed, and the digest of the receipt's canonical bytes.
-func ClaimFromReceipt(r *ticket.UsageReceipt) ClaimFields {
-	return ClaimFields{
-		Amount:          r.AmountCharged,
-		ReceiptDigest:   ticket.ReceiptSigDigest(r),
-		TTFTMs:          r.TtftMs,
-		DecodeMs:        r.DecodeMs,
-		InputUnits:      r.ActualInputCount,
-		OutputUnits:     r.ActualOutputCount,
-		OutputUsageType: uint8(r.OutputUsageType),
-		AuxUsageType:    uint8(r.AuxOutputUsageType),
-		AuxCount:        r.AuxOutputCount,
-	}
-}
-
-// The compute-budget instructions an offer may carry, by tag, with their
-// data length: SetComputeUnitLimit and SetComputeUnitPrice. The fee payer
-// pays for both; the others size heap and loaded data, which an offer never
-// needs.
-var offerComputeBudget = map[byte]int{solana.ComputeBudgetSetComputeUnitLimit: 5, solana.ComputeBudgetSetComputeUnitPrice: 9}
-
 // VerifyOpenOffer checks the message of a node's open offer against spec
 // before the payer signs it. In order:
 //
-//  1. The message parses, and loads no address lookup table: a looked-up
-//     account is one the payer cannot see in the bytes it signs.
+//  1. The message parses, and loads no address lookup table.
 //  2. Exactly two signers: the node's signing key as fee payer, then the
-//     payer, read-only, so the payer's signature grants no write lock on
-//     its wallet and pays nothing.
+//     payer, read-only.
 //  3. Compute-budget instructions lead, at most one of each allowed kind,
 //     with no accounts.
 //  4. The rest is [settle_cooperative,] TransferChecked, open: no other
@@ -125,84 +94,58 @@ var offerComputeBudget = map[byte]int{solana.ComputeBudgetSetComputeUnitLimit: 5
 //     settle the payer's ticket for exactly the receipt's claim, the
 //     receipt naming that ticket.
 func VerifyOpenOffer(d Deployment, message []byte, spec OpenOfferSpec) error {
-	m, err := solana.ParseMessage(message)
-	if err != nil {
-		return offerReject("message.parse", "%v", err)
+	if r := verifyOpenOffer(d, message, spec); r != nil {
+		return &OfferRejectedError{Field: r.field, Detail: "zsescrow: open offer: " + r.detail}
 	}
-	if len(m.AddressTableLookups) != 0 {
-		return offerReject("message.lookups", "%d address lookup tables, want none", len(m.AddressTableLookups))
-	}
-	if n := m.Header.NumRequiredSignatures; n != 2 {
-		return offerReject("header.signers", "%d signers, want the node and the payer", n)
-	}
-	if m.AccountKeys[0] != spec.NodeSigning {
-		return offerReject("header.feePayer", "fee payer %s, want the node's signing key %s", m.AccountKeys[0], spec.NodeSigning)
-	}
-	if m.AccountKeys[1] != spec.Payer {
-		return offerReject("header.payer", "second signer %s, want the payer %s", m.AccountKeys[1], spec.Payer)
-	}
-	if m.IsWritable(1) {
-		return offerReject("header.payerWritable", "the payer's key is writable")
-	}
+	return nil
+}
 
-	ixs := make([]solana.Instruction, len(m.Instructions))
-	kinds := make([]string, len(m.Instructions))
-	budget := map[byte]bool{}
-	for i, ci := range m.Instructions {
-		ix := solana.Instruction{ProgramID: m.AccountKeys[ci.ProgramIDIndex], Data: ci.Data}
-		for _, a := range ci.Accounts {
-			ix.Accounts = append(ix.Accounts, solana.AccountMeta{PublicKey: m.AccountKeys[a]})
+func verifyOpenOffer(d Deployment, message []byte, spec OpenOfferSpec) *refusal {
+	feePayer := func(k solana.PublicKey) *refusal {
+		if k != spec.NodeSigning {
+			return refuse("header.feePayer", "fee payer %s, want the node's signing key %s", k, spec.NodeSigning)
 		}
-		ixs[i] = ix
+		return nil
+	}
+	kind := func(i int, ix solana.Instruction) (string, *refusal) {
 		switch ix.ProgramID {
-		case solana.ComputeBudgetProgramID:
-			kinds[i] = "computeBudget"
-			if i > 0 && kinds[i-1] != "computeBudget" {
-				return offerReject("computeBudget.order", "instruction %d: compute budget after another program's instruction", i)
-			}
-			if len(ix.Data) == 0 || len(ix.Accounts) != 0 || offerComputeBudget[ix.Data[0]] != len(ix.Data) {
-				return offerReject("computeBudget.instruction", "instruction %d: compute-budget data %x with %d accounts", i, ix.Data, len(ix.Accounts))
-			}
-			if budget[ix.Data[0]] {
-				return offerReject("computeBudget.duplicate", "instruction %d: a second compute-budget instruction of tag %d", i, ix.Data[0])
-			}
-			budget[ix.Data[0]] = true
 		case solana.TokenProgramID:
 			if len(ix.Data) == 0 || ix.Data[0] != solana.TokenTransferChecked {
-				return offerReject("token.instruction", "instruction %d: a token instruction other than TransferChecked", i)
+				return "", refuse("token.instruction", "instruction %d: a token instruction other than TransferChecked", i)
 			}
-			kinds[i] = "transfer"
+			return "transfer", nil
 		case d.Program:
 			switch {
 			case hasDiscriminator(ix.Data, "open"):
-				kinds[i] = "open"
+				return "open", nil
 			case hasDiscriminator(ix.Data, "settle_cooperative"):
-				kinds[i] = "settle"
-			default:
-				return offerReject("escrow.instruction", "instruction %d: an escrow instruction other than open or settle_cooperative", i)
+				return "settle", nil
 			}
-		default:
-			return offerReject("instruction.program", "instruction %d: program %s, outside compute budget, SPL Token and the escrow", i, ix.ProgramID)
+			return "", refuse("escrow.instruction", "instruction %d: an escrow instruction other than open or settle_cooperative", i)
 		}
+		return "", refuse("instruction.program", "instruction %d: program %s, outside compute budget, SPL Token and the escrow", i, ix.ProgramID)
 	}
-	rest := kinds[len(budget):]
+	ixs, rest, r := payerMessage(message, spec.Payer, feePayer, kind)
+	if r != nil {
+		return r
+	}
 	var fold *solana.Instruction
 	switch strings.Join(rest, ",") {
 	case "transfer,open":
 	case "settle,transfer,open":
-		fold = &ixs[len(budget)]
+		fold = &ixs[len(ixs)-3]
 	default:
-		return offerReject("instructions.shape", "instructions [%s] after compute budget, want [settle,]transfer,open", strings.Join(rest, ","))
+		return refuse("instructions.shape", "instructions [%s] after compute budget, want [settle,]transfer,open", strings.Join(rest, ","))
 	}
 	transfer, open := ixs[len(ixs)-2], ixs[len(ixs)-1]
 
 	node := d.Node(spec.OperatorID, spec.NodeID)
-	if err := sameInstruction(transfer, solana.TransferChecked(spec.PayerUSDC, d.Mint, d.Vault(node), spec.Payer, spec.MaxPrice, spec.Decimals), "transfer"); err != nil {
-		return err
+	if r := sameInstruction(transfer, solana.TransferChecked(spec.PayerUSDC, d.Mint, d.Vault(node), spec.Payer, spec.MaxPrice, spec.Decimals), "transfer"); r != nil {
+		return r
 	}
 	want := d.Open(spec.NodeSigning, spec.OperatorID, spec.NodeID, OpenArgs{TicketID: spec.TicketID, Payer: spec.Payer, MaxPrice: spec.MaxPrice, ExpiresAt: spec.ExpiresAt})
-	if err := sameInstruction(open, want, "open"); err != nil {
-		return err
+	if r := sameInstruction(open, want, "open"); r != nil {
+		return r
 	}
 	if fold != nil {
 		return verifyFold(d, *fold, spec)
@@ -210,68 +153,15 @@ func VerifyOpenOffer(d Deployment, message []byte, spec OpenOfferSpec) error {
 	return nil
 }
 
-func verifyFold(d Deployment, ix solana.Instruction, spec OpenOfferSpec) error {
+func verifyFold(d Deployment, ix solana.Instruction, spec OpenOfferSpec) *refusal {
 	f := spec.Fold
 	if f == nil {
-		return offerReject("fold.unexpected", "a folded settle_cooperative, and no ticket to fold")
+		return refuse("fold.unexpected", "a folded settle_cooperative, and no ticket to fold")
 	}
-	if f.Receipt == nil {
-		return offerReject("fold.receipt", "no receipt for the ticket to fold")
+	claim, r := receiptClaim("fold.receipt", f.TicketID, f.Receipt)
+	if r != nil {
+		return r
 	}
-	// Compared as the string the node signed, so no base64 decoder's
-	// leniency can make two spellings of one id agree.
-	if want := base64.StdEncoding.EncodeToString(f.TicketID[:]); f.Receipt.TicketID != want {
-		return offerReject("fold.receipt", "the receipt names ticket %q, not the payer's %q", f.Receipt.TicketID, want)
-	}
-	claim := ClaimFromReceipt(f.Receipt)
-	// The rent payer is whoever funded the ticket, which the program checks
-	// against the ticket itself, so the offer's own is taken. Each fallback
-	// shape is one the program may be handed for the same settle.
-	const rentPayerAt = 5
-	if len(ix.Accounts) <= rentPayerAt {
-		return offerReject("fold.accounts", "settle_cooperative names %d accounts", len(ix.Accounts))
-	}
-	e := Ending{Submitter: spec.NodeSigning, OperatorID: f.OperatorID, NodeID: f.NodeID, TicketID: f.TicketID,
-		RentPayer: ix.Accounts[rentPayerAt].PublicKey, Payer: spec.Payer, Treasury: f.Treasury}
-	fallbacks := []RefundFallback{NoFallback}
-	if !f.Treasury.IsZero() {
-		fallbacks = append(fallbacks, FallbackReadonly)
-	}
-	for _, fb := range fallbacks {
-		e.Fallback = fb
-		want := d.SettleCooperative(e, claim)
-		if sameKeys(ix.Accounts, want.Accounts) {
-			return sameInstruction(ix, want, "fold")
-		}
-	}
-	return offerReject("fold.accounts", "settle_cooperative's accounts are not the payer's ticket %x at node %d/%d", f.TicketID, f.OperatorID, f.NodeID)
-}
-
-func hasDiscriminator(data []byte, name string) bool {
-	disc := discriminator("global", name)
-	return len(data) >= 8 && bytes.Equal(data[:8], disc[:])
-}
-
-// sameInstruction compares the program, the account keys in order and the
-// data. Privileges are the message's, checked once in the header.
-func sameInstruction(got, want solana.Instruction, field string) error {
-	if got.ProgramID != want.ProgramID || !sameKeys(got.Accounts, want.Accounts) {
-		return offerReject(field+".accounts", "%s's accounts are not the payer's", field)
-	}
-	if !bytes.Equal(got.Data, want.Data) {
-		return offerReject(field+".data", "%s's data %x, want %x", field, got.Data, want.Data)
-	}
-	return nil
-}
-
-func sameKeys(a, b []solana.AccountMeta) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].PublicKey != b[i].PublicKey {
-			return false
-		}
-	}
-	return true
+	e := Ending{Submitter: spec.NodeSigning, OperatorID: f.OperatorID, NodeID: f.NodeID, TicketID: f.TicketID, Payer: spec.Payer, Treasury: f.Treasury}
+	return matchEnding("fold", ix, d.SettleCooperative, e, claim)
 }

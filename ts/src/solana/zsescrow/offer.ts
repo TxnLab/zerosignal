@@ -17,16 +17,13 @@
 // handed; an instruction beside them (an Approve of the payer's token account,
 // a second transfer) runs under the payer's signature unchecked.
 
-import { base64 } from '@scure/base'
-
-import { type UsageReceipt, receiptSigDigest } from '../../ticket/receipt.js'
-import { equalBytes } from '../../util/bytes.js'
-import { COMPUTE_BUDGET_SET_COMPUTE_UNIT_LIMIT, COMPUTE_BUDGET_SET_COMPUTE_UNIT_PRICE } from '../computebudget.js'
-import { COMPUTE_BUDGET_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from '../key.js'
-import { type AccountMeta, type Instruction, isWritable, parseMessage } from '../message.js'
+import type { UsageReceipt } from '../../ticket/receipt.js'
+import { TOKEN_PROGRAM_ID, type PublicKey } from '../key.js'
+import type { Instruction } from '../message.js'
 import { TOKEN_TRANSFER_CHECKED, transferChecked } from '../token.js'
-import { type ClaimFields, type Deployment, type Ending, type RefundFallback } from './instructions.js'
+import type { Deployment } from './instructions.js'
 import { discriminator } from './program.js'
+import { type Fail, hasPrefix, matchEnding, payerMessage, receiptClaim, sameInstruction } from './signed.js'
 
 /** The error verifyOpenOffer throws. field is a stable slug naming the check that refused, shared with the Go twin. */
 export class OfferRejectedError extends Error {
@@ -79,34 +76,14 @@ export interface FoldSpec {
     treasury?: PublicKey
 }
 
-/**
- * The claim a payer acks for a receipt: the values the node signed, and the
- * digest of the receipt's canonical bytes.
- */
-export function claimFromReceipt(r: UsageReceipt): ClaimFields {
-    return {
-        amount: BigInt(r.amount_charged),
-        receiptDigest: receiptSigDigest(r),
-        ttftMs: BigInt(r.ttft_ms),
-        decodeMs: BigInt(r.decode_ms),
-        inputUnits: BigInt(r.actual_input_count),
-        outputUnits: BigInt(r.actual_output_count),
-        outputUsageType: r.output_usage_type,
-        auxUsageType: r.aux_output_usage_type,
-        auxCount: BigInt(r.aux_output_count),
-    }
-}
-
-// SetComputeUnitLimit and SetComputeUnitPrice, by tag, with their data
-// length. The fee payer pays for both; the others size heap and loaded data,
-// which an offer never needs.
-const OFFER_COMPUTE_BUDGET = new Map([
-    [COMPUTE_BUDGET_SET_COMPUTE_UNIT_LIMIT, 5],
-    [COMPUTE_BUDGET_SET_COMPUTE_UNIT_PRICE, 9],
-])
+export { claimFromReceipt } from './signed.js'
 
 const OPEN = discriminator('global', 'open')
 const SETTLE_COOPERATIVE = discriminator('global', 'settle_cooperative')
+
+const offerFail: Fail = (field, detail) => {
+    throw new OfferRejectedError(field, detail)
+}
 
 /**
  * Checks the message of a node's open offer against spec before the payer
@@ -117,98 +94,41 @@ const SETTLE_COOPERATIVE = discriminator('global', 'settle_cooperative')
  */
 export function verifyOpenOffer(d: Deployment, message: Uint8Array, spec: OpenOfferSpec): void {
     if (spec.ticketId.length !== 16 || (spec.fold && spec.fold.ticketId.length !== 16)) throw new RangeError('zsescrow: an open offer spec ticket id is not 16 bytes')
-    let m
-    try {
-        m = parseMessage(message)
-    } catch (err) {
-        throw new OfferRejectedError('message.parse', err instanceof Error ? err.message : String(err))
+    const fail = offerFail
+    const feePayer = (k: PublicKey): void => {
+        if (k !== spec.nodeSigning) fail('header.feePayer', `fee payer ${k}, want the node's signing key ${spec.nodeSigning}`)
     }
-    if (m.addressTableLookups.length !== 0) throw new OfferRejectedError('message.lookups', `${m.addressTableLookups.length} address lookup tables, want none`)
-    if (m.header.numRequiredSignatures !== 2) throw new OfferRejectedError('header.signers', `${m.header.numRequiredSignatures} signers, want the node and the payer`)
-    if (m.accountKeys[0] !== spec.nodeSigning) throw new OfferRejectedError('header.feePayer', `fee payer ${m.accountKeys[0]}, want the node's signing key ${spec.nodeSigning}`)
-    if (m.accountKeys[1] !== spec.payer) throw new OfferRejectedError('header.payer', `second signer ${m.accountKeys[1]}, want the payer ${spec.payer}`)
-    if (isWritable(m, 1)) throw new OfferRejectedError('header.payerWritable', "the payer's key is writable")
-
-    const keys = m.accountKeys
-    const ixs: Instruction[] = []
-    const kinds: string[] = []
-    const budget = new Set<number>()
-    m.instructions.forEach((ci, i) => {
-        const ix: Instruction = {
-            programId: keys[ci.programIdIndex]!,
-            accounts: ci.accounts.map((a) => ({ publicKey: keys[a]!, isSigner: false, isWritable: false })),
-            data: ci.data,
+    const kind = (i: number, ix: Instruction): string => {
+        if (ix.programId === TOKEN_PROGRAM_ID) {
+            if (ix.data[0] !== TOKEN_TRANSFER_CHECKED) fail('token.instruction', `instruction ${i}: a token instruction other than TransferChecked`)
+            return 'transfer'
         }
-        ixs.push(ix)
-        if (ix.programId === COMPUTE_BUDGET_PROGRAM_ID) {
-            if (i > 0 && kinds[i - 1] !== 'computeBudget') throw new OfferRejectedError('computeBudget.order', `instruction ${i}: compute budget after another program's instruction`)
-            const tag = ix.data[0]
-            if (tag === undefined || ix.accounts.length !== 0 || OFFER_COMPUTE_BUDGET.get(tag) !== ix.data.length) {
-                throw new OfferRejectedError('computeBudget.instruction', `instruction ${i}: compute-budget data with ${ix.accounts.length} accounts`)
-            }
-            if (budget.has(tag)) throw new OfferRejectedError('computeBudget.duplicate', `instruction ${i}: a second compute-budget instruction of tag ${tag}`)
-            budget.add(tag)
-            kinds.push('computeBudget')
-        } else if (ix.programId === TOKEN_PROGRAM_ID) {
-            if (ix.data[0] !== TOKEN_TRANSFER_CHECKED) throw new OfferRejectedError('token.instruction', `instruction ${i}: a token instruction other than TransferChecked`)
-            kinds.push('transfer')
-        } else if (ix.programId === d.program) {
-            if (hasPrefix(ix.data, OPEN)) kinds.push('open')
-            else if (hasPrefix(ix.data, SETTLE_COOPERATIVE)) kinds.push('settle')
-            else throw new OfferRejectedError('escrow.instruction', `instruction ${i}: an escrow instruction other than open or settle_cooperative`)
-        } else {
-            throw new OfferRejectedError('instruction.program', `instruction ${i}: program ${ix.programId}, outside compute budget, SPL Token and the escrow`)
+        if (ix.programId === d.program) {
+            if (hasPrefix(ix.data, OPEN)) return 'open'
+            if (hasPrefix(ix.data, SETTLE_COOPERATIVE)) return 'settle'
+            return fail('escrow.instruction', `instruction ${i}: an escrow instruction other than open or settle_cooperative`)
         }
-    })
-    const rest = kinds.slice(budget.size).join(',')
+        return fail('instruction.program', `instruction ${i}: program ${ix.programId}, outside compute budget, SPL Token and the escrow`)
+    }
+    const { ixs, rest } = payerMessage(message, spec.payer, fail, feePayer, kind)
+    const shape = rest.join(',')
     let fold: Instruction | undefined
-    if (rest === 'settle,transfer,open') fold = ixs[budget.size]
-    else if (rest !== 'transfer,open') throw new OfferRejectedError('instructions.shape', `instructions [${rest}] after compute budget, want [settle,]transfer,open`)
+    if (shape === 'settle,transfer,open') fold = ixs[ixs.length - 3]
+    else if (shape !== 'transfer,open') fail('instructions.shape', `instructions [${shape}] after compute budget, want [settle,]transfer,open`)
     const transfer = ixs[ixs.length - 2]!
     const open = ixs[ixs.length - 1]!
 
     const node = d.node(spec.operatorId, spec.nodeId)
-    sameInstruction(transfer, transferChecked(spec.payerUsdc, d.mint, d.vault(node), spec.payer, spec.maxPrice, spec.decimals), 'transfer')
+    sameInstruction(transfer, transferChecked(spec.payerUsdc, d.mint, d.vault(node), spec.payer, spec.maxPrice, spec.decimals), 'transfer', fail)
     const want = d.open(spec.nodeSigning, spec.operatorId, spec.nodeId, { ticketId: spec.ticketId, payer: spec.payer, maxPrice: spec.maxPrice, expiresAt: spec.expiresAt, grace: 0 })
-    sameInstruction(open, want, 'open')
+    sameInstruction(open, want, 'open', fail)
     if (fold) verifyFold(d, fold, spec)
 }
 
 function verifyFold(d: Deployment, ix: Instruction, spec: OpenOfferSpec): void {
     const f = spec.fold
-    if (!f) throw new OfferRejectedError('fold.unexpected', 'a folded settle_cooperative, and no ticket to fold')
-    if (!f.receipt) throw new OfferRejectedError('fold.receipt', 'no receipt for the ticket to fold')
-    // Compared as the string the node signed, so no base64 decoder's leniency
-    // can make two spellings of one id agree.
-    const want = base64.encode(f.ticketId)
-    if (f.receipt.ticket_id !== want) throw new OfferRejectedError('fold.receipt', `the receipt names ticket ${JSON.stringify(f.receipt.ticket_id)}, not the payer's ${JSON.stringify(want)}`)
-    const claim = claimFromReceipt(f.receipt)
-    // The rent payer is whoever funded the ticket, which the program checks
-    // against the ticket itself, so the offer's own is taken. Each fallback
-    // shape is one the program may be handed for the same settle.
-    const rentPayer = ix.accounts[5]
-    if (!rentPayer) throw new OfferRejectedError('fold.accounts', `settle_cooperative names ${ix.accounts.length} accounts`)
-    const treasury = f.treasury === SYSTEM_PROGRAM_ID ? undefined : f.treasury
-    const e: Ending = { submitter: spec.nodeSigning, operatorId: f.operatorId, nodeId: f.nodeId, ticketId: f.ticketId, rentPayer: rentPayer.publicKey, payer: spec.payer, treasury }
-    const fallbacks: RefundFallback[] = treasury ? ['none', 'readonly'] : ['none']
-    for (const fallback of fallbacks) {
-        const want = d.settleCooperative({ ...e, fallback }, claim)
-        if (sameKeys(ix.accounts, want.accounts)) return sameInstruction(ix, want, 'fold')
-    }
-    throw new OfferRejectedError('fold.accounts', `settle_cooperative's accounts are not the payer's ticket at node ${f.operatorId}/${f.nodeId}`)
-}
-
-function hasPrefix(data: Uint8Array, prefix: Uint8Array): boolean {
-    return data.length >= prefix.length && equalBytes(data.subarray(0, prefix.length), prefix)
-}
-
-// Compares the program, the account keys in order and the data. Privileges
-// are the message's, checked once in the header.
-function sameInstruction(got: Instruction, want: Instruction, field: string): void {
-    if (got.programId !== want.programId || !sameKeys(got.accounts, want.accounts)) throw new OfferRejectedError(`${field}.accounts`, `${field}'s accounts are not the payer's`)
-    if (!equalBytes(got.data, want.data)) throw new OfferRejectedError(`${field}.data`, `${field}'s data differs from the payer's`)
-}
-
-function sameKeys(a: AccountMeta[], b: AccountMeta[]): boolean {
-    return a.length === b.length && a.every((m, i) => m.publicKey === b[i]!.publicKey)
+    if (!f) return offerFail('fold.unexpected', 'a folded settle_cooperative, and no ticket to fold')
+    const claim = receiptClaim('fold.receipt', f.ticketId, f.receipt, offerFail)
+    const e = { submitter: spec.nodeSigning, operatorId: f.operatorId, nodeId: f.nodeId, ticketId: f.ticketId, payer: spec.payer, treasury: f.treasury }
+    matchEnding('fold', ix, (e, c) => d.settleCooperative(e, c), e, claim, offerFail)
 }

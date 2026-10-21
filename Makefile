@@ -146,6 +146,7 @@ update-vectors:
 	cd go && $(GO) test ./solana     -run TestCodecVectors          -update
 	cd go && $(GO) test ./solana/zsescrow -run TestZsEscrowVectors  -update
 	cd go && $(GO) test ./solana/zsescrow -run TestOpenOfferVectors -update
+	cd go && $(GO) test ./solana/zsescrow -run TestAckVectors       -update
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update
 	cd go && $(GO) test ./zs         -run TestRetryVectors          -update
 	cd go && $(GO) test ./zs         -run TestReconcileVectors      -update

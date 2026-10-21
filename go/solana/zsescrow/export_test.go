@@ -6,3 +6,5 @@
 package zsescrow
 
 var Discriminator = discriminator
+
+var HasDiscriminator = hasDiscriminator

@@ -871,6 +871,24 @@
       "verdict": "open.accounts"
     },
     {
+      "name": "open_extra_account",
+      "about": "open with one more account after its last",
+      "source": "built",
+      "message_base64": "AgEJDwvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHsVbTULt7ylM3GOIdpXMQna5JzR/Whb/h3kfwayWvncHxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAGp9UXGHvRZjXa1ARV/cLAwSTGjyFWdaXbustfCAAAAAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpG8zgR8QzDhcOZMNHGBl41zxQeQ8Jo55OZlHNMgBcNEgggov1xb3Ky2hIYzNsIC+1WZ2ki+VZZhV0IXBwW+yp9yplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9grUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCBAcABQJg6gAABwAJA+gDAAAAAAAACQQCDQQBCgyQ0AMAAAAAAAYKCAAMDgUDCAYLTOTcm0fHvTwtAQEBAQEBAQEBAQEBAQEBAdBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3kNADAAAAAACsPLFqAAAAAAAAAAA=",
+      "spec": {
+        "node_signing": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
+        "operator_id": "1",
+        "node_id": "1",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "payer_usdc": "LWbRsKvxwnbop8VEDUXCuwS3GFRrHMYxWPPJF8MR1fb",
+        "decimals": 6,
+        "ticket_id": "01010101010101010101010101010101",
+        "max_price": "250000",
+        "expires_at": "1790000300"
+      },
+      "verdict": "open.accounts"
+    },
+    {
       "name": "open_discriminator_only",
       "about": "open's discriminator with no arguments",
       "source": "built",

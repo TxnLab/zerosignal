@@ -31,6 +31,39 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — the payer's check of a relayed Solana ack, and its ack digest for a receipt (unreleased)
+
+`@txnlab/zs-proto/solana/zsescrow` and Go's `solana/zsescrow` add the payer's two ways to ack a
+`zs_escrow` ticket's claim. Nothing calls them yet; the SDKs' Solana rail will.
+
+`VerifyRelayedAck` ↔ `verifyRelayedAck` checks an `ack` transaction that a relayer (the node, or
+anyone paying the fee for a payer that holds no SOL) built, before the payer signs it. The
+program counts the payer's signature on a transaction as its ack of every `settle_cooperative`
+of the payer's tickets in it, so the check accepts the `ack` alone: any fee payer, the payer as
+the read-only second signer, compute budget leading as in the open offer, then exactly one
+`ack`, which must post the payer's half of its own ticket at exactly its receipt's claim, the
+receipt naming that ticket. It refuses an address lookup table, a third signer, a write lock on
+the payer's wallet, any program but the compute budget and the escrow, any other escrow
+instruction (a `settle_cooperative` or a `claim` beside the ack), a second ack, and an ack for
+another ticket, another node or another claim. A refusal is an `AckRejectedError` whose `field`
+slug matches `OfferRejectedError`'s where the check is the same.
+
+`ReceiptAckDigest` ↔ `receiptAckDigest` is the off-chain ack: the program's settle-ack digest
+(`AckDigest` ↔ `ackDigest`, unchanged) over the claim hash of the receipt's claim, refused with
+`ack.receipt` unless the receipt names the payer's ticket. The caller passes the ticket
+account's `open_seq`.
+
+The open offer's verifier now shares its message checks with the ack's; its verdicts are
+unchanged, and `solana_open_offer_vectors.json` gains one case, an `open` with an account past
+its last. The new `testdata/solana_ack_vectors.json` (Go's `TestAckVectors`) pins both for the
+two languages, over the program's own ack transactions and acks built in Go. Each of the
+program's acks claims a real receipt, which its fixture records and the vectors' spec carries,
+so the program's `ack_relayed` is accepted as it ran. `ack_extra_settle` is refused as
+`escrow.instruction` because of the `settle_cooperative` beside its ack; the ack alone is
+accepted (`extra_settle_ack_alone`). The payer-paid `ack`,
+`ack_first_half` and `ack_mismatch` are refused as `header.signers`: they have one signer, and
+a payer that builds its own ack has no relayer's transaction to check.
+
 ### 2026-10-21 — the payer refuses a receipt for another ticket and bars its node (unreleased)
 
 Both SDKs' receipt check (`zs.VerifyReceipt`, `verifyReceipt`) now refuses a receipt whose
