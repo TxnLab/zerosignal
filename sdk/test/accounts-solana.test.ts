@@ -95,6 +95,16 @@ describe('solanaSigner', () => {
         expect(hex.encode(await signer.signBytes(c.address!, hex.decode(msg)))).toBe(sig)
     })
 
+    it('signs a transaction message only as its own address', async () => {
+        const k = solanaKeyFromPhrase(c.phrase)
+        const signer = solanaSigner(k)
+        const { msg, sig } = c.signatures![0]!
+        expect(hex.encode(await signer.signTransactionMessage(c.address!, hex.decode(msg)))).toBe(sig)
+        await expect(signer.signTransactionMessage(solana.find((v) => v.name === 'client vector')!.address!, hex.decode(msg))).rejects.toThrow(
+            SignerAddressError,
+        )
+    })
+
     it("refuses a key whose address isn't its seed's", () => {
         const k = solanaKeyFromPhrase(c.phrase)
         const other = solana.find((v) => v.name === 'client vector')!.address!

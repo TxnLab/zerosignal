@@ -157,12 +157,60 @@ func (k *SolanaKeys) Addresses() []string {
 	return out
 }
 
-// SignBytes signs msg verbatim with addr's key: a Solana transaction's
-// signature is Ed25519 over its message bytes.
+// SignBytes signs msg verbatim with addr's key, the ticket.BytesSigner
+// contract the reserve request is signed through.
 func (k *SolanaKeys) SignBytes(_ context.Context, addr string, msg []byte) ([]byte, error) {
+	return k.sign(addr, msg)
+}
+
+// SignTransactionMessage signs a Solana transaction's message with addr's
+// key, the solana.TransactionSigner contract. The signature is the same raw
+// Ed25519 as SignBytes; the two stay separate methods so a host can keep its
+// own policy on each.
+func (k *SolanaKeys) SignTransactionMessage(_ context.Context, addr string, message []byte) ([]byte, error) {
+	return k.sign(addr, message)
+}
+
+func (k *SolanaKeys) sign(addr string, msg []byte) ([]byte, error) {
 	priv, ok := k.keys[addr]
 	if !ok {
 		return nil, fmt.Errorf("keystore: no Solana key for address %s", addr)
 	}
 	return ed25519.Sign(priv, msg), nil
+}
+
+// SolanaAccountSigner is a SolanaKeys with one of its addresses chosen as the
+// signer, the shape zs.SolanaSigner takes. It signs as that address only, as
+// the TS SDK's solanaSigner does: a spec naming another account the store
+// holds would otherwise be signed with that account's key.
+type SolanaAccountSigner struct {
+	*SolanaKeys
+	addr string
+}
+
+// Address is the chosen address. The store may not hold it: a caller checks
+// with HasAccount.
+func (s SolanaAccountSigner) Address() string { return s.addr }
+
+// SignBytes is SolanaKeys.SignBytes for the chosen address alone.
+func (s SolanaAccountSigner) SignBytes(_ context.Context, addr string, msg []byte) ([]byte, error) {
+	return s.signAs(addr, msg)
+}
+
+// SignTransactionMessage is SolanaKeys.SignTransactionMessage for the chosen
+// address alone.
+func (s SolanaAccountSigner) SignTransactionMessage(_ context.Context, addr string, message []byte) ([]byte, error) {
+	return s.signAs(addr, message)
+}
+
+func (s SolanaAccountSigner) signAs(addr string, msg []byte) ([]byte, error) {
+	if addr != s.addr {
+		return nil, fmt.Errorf("keystore: signer holds %s, asked to sign for %s", s.addr, addr)
+	}
+	return s.sign(addr, msg)
+}
+
+// Signer chooses addr as the signing address.
+func (k *SolanaKeys) Signer(addr string) SolanaAccountSigner {
+	return SolanaAccountSigner{SolanaKeys: k, addr: addr}
 }

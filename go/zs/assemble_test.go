@@ -22,8 +22,12 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs/tee"
 )
 
-// A keystore is a Signer once an address is chosen.
-var _ Signer = keystore.AccountSigner{}
+// A keystore is a Signer once an address is chosen, and a Solana one a
+// SolanaSigner.
+var (
+	_ Signer       = keystore.AccountSigner{}
+	_ SolanaSigner = keystore.SolanaAccountSigner{}
+)
 
 // The SDK reads no proxy variables unless UseEnvProxy: http.DefaultTransport
 // does, and both clients start from a clone of it.

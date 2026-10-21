@@ -186,6 +186,36 @@ func TestNewSolanaKeys(t *testing.T) {
 	if _, err := ks.SignBytes(ctx, keygen12Addr, nil); err == nil {
 		t.Fatal("signed for an address it doesn't hold")
 	}
+	if _, err := ks.SignTransactionMessage(ctx, keygen12Addr, nil); err == nil {
+		t.Fatal("signed a transaction for an address it doesn't hold")
+	}
+	// A transaction's signature is the same raw Ed25519 over its message.
+	priv, err := SolanaKeyFromPhrase(keygen24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := ks.Signer(keygen24Addr)
+	msg := []byte("a message")
+	sig, err := signer.SignTransactionMessage(ctx, signer.Address(), msg)
+	if err != nil || !bytes.Equal(sig, ed25519.Sign(priv, msg)) {
+		t.Fatalf("transaction signature %x, %v", sig, err)
+	}
+
+	// A chosen signer signs as its own address alone, even one the store holds.
+	both, err := NewSolanaKeys(ctx, staticProvider{entries: []MnemonicEntry{{Name: "A", Mnemonic: keygen24}, {Name: "B", Mnemonic: keygen12}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := both.Signer(keygen24Addr)
+	if _, err := one.SignTransactionMessage(ctx, keygen12Addr, msg); err == nil {
+		t.Fatal("signed a transaction as another held account")
+	}
+	if _, err := one.SignBytes(ctx, keygen12Addr, msg); err == nil {
+		t.Fatal("signed bytes as another held account")
+	}
+	if _, err := one.SignBytes(ctx, keygen24Addr, msg); err != nil {
+		t.Fatal(err)
+	}
 	_, err = NewSolanaKeys(ctx, staticProvider{entries: []MnemonicEntry{{Name: "B", Mnemonic: swapLast(keygen12, "zoo")}}})
 	if err == nil || strings.Contains(err.Error(), "obey") || strings.Count(err.Error(), "keystore:") != 1 {
 		t.Fatalf("a bad phrase: %v", err)
