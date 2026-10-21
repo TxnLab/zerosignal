@@ -330,6 +330,27 @@ describe('checkReceipt', () => {
         expect(await check.submit!()).toMatchObject({ txid: 'GROUPTX', kind: 'atomic', excluded: false })
     })
 
+    // Go's settledAtomically: a group that failed to submit and was followed
+    // by the payer's own settle, the freeze or the half, is the payer's ack.
+    it.each([
+        ['a freeze of a claim above the receipt', { claim: 'overclaims', freeze: 'ok' }, 'FREEZETX', true],
+        ["the payer's half on an open box", { claim: 'open', half: 'ok' }, 'HALFTX', false],
+    ] as const)('reports %s after a failed group as the payer ack', async (_name, ports, txid, frozen) => {
+        const { r, pub } = await signedReceipt()
+        const calls: string[] = []
+        const check = checkReceipt({
+            receipt: r,
+            ticket: TICKET,
+            signingKey: pub,
+            computedHash: sha256(body),
+            ack: { atomic: true, ...scripted({ spec: 'ok', group: 'error', standalone: 'ok', resolves_frozen: true, ...ports }, calls) },
+        })
+        const settled = await check.submit!()
+        expect(settled).toMatchObject({ txid, kind: 'payer_ack', payerSettle: true, frozen, groupRejected: false })
+        expect(settled.err).toBeUndefined()
+        expect(calls).toEqual(['spec', 'group', 'claim', frozen ? 'freeze' : 'half'])
+    })
+
     it('bars the node after the ack when its group was refused', async () => {
         const { r, pub } = await signedReceipt()
         const order: string[] = []

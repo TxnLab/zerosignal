@@ -461,6 +461,61 @@ func TestRefundWatchdog_RefusesToLapseAnOverclaim(t *testing.T) {
 	}
 }
 
+// lapseChain is an ackChain that also records each settleLapsed.
+type lapseChain struct {
+	ackChain
+	lapses atomic.Int32
+}
+
+func (c *lapseChain) ComposeSettleLapsed(context.Context, escrow.SettleLapsedArgs, transaction.TransactionSigner, string) (escrow.CallResult, error) {
+	c.lapses.Add(1)
+	return escrow.CallResult{TxID: "LAPSETX"}, nil
+}
+
+// Track's own probe reads the claimed amount off the box, so a real handle's
+// watchdog holds an operator claim against the receipt the same way the
+// scripted probes do: above it, no settleLapsed and the node barred; at it,
+// the stalled claim is lapsed.
+func TestRefundWatchdog_TrackReadsTheClaimedAmount(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		claim     uint64
+		wantLapse bool
+	}{
+		{"claim above the receipt", 101, false},
+		{"claim at the receipt", 100, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			past := uint64(time.Now().Add(-time.Minute).Unix())
+			chain := &lapseChain{ackChain: ackChain{box: &escrow.TicketRecord{
+				Status: escrow.StatusPendingSettle, PendingBy: escrow.PendingByOperator, PendingAmount: tc.claim, ExpiresAt: past,
+			}}}
+			h := ackHandle(t, &chain.ackChain, nil)
+			h.wallet.chain = chain
+			rw := testWatchdog()
+			var barred atomic.Int32
+			rw.overclaimed = func(string, NodeRef) { barred.Add(1) }
+			// Track takes whole seconds, so +2 fires at least a second out,
+			// after the receipt is pinned.
+			rw.Track(h, time.Now().Unix()+2)
+			rw.recordReceipt(h.TicketID, RefOf(h.Operator), 100)
+			// waitFor's 2s is shorter than the arming above.
+			for end := time.Now().Add(5 * time.Second); rw.watching(h.TicketID); time.Sleep(5 * time.Millisecond) {
+				if time.Now().After(end) {
+					t.Fatal("timed out waiting for the ticket's driver to finish")
+				}
+			}
+			if got := chain.lapses.Load() == 1; got != tc.wantLapse {
+				t.Errorf("lapsed %v, want %v", got, tc.wantLapse)
+			}
+			if got := barred.Load() == 1; got == tc.wantLapse {
+				t.Errorf("node barred %v, want %v", got, !tc.wantLapse)
+			}
+		})
+	}
+}
+
 // ackChain is an EscrowChain for one ack: it completes the node's group, reads
 // box, and records each standalone settle. A read or a settle on a context
 // already done fails, as algod's would.
@@ -539,8 +594,24 @@ func TestOpenHandle_AckAfterAStalledDeliveryStillPostsTheHalf(t *testing.T) {
 	})
 }
 
+// The protest's fallback on a real handle: a claim above the receipt gets the
+// payer's settle at the receipt's values, paying for the outer call alone,
+// since the freeze branch fires no inner transaction.
+func TestOpenHandle_FreezeOverclaimSettlesAtTheReceiptForOneFee(t *testing.T) {
+	r := &ticket.UsageReceipt{AmountCharged: 11, TtftMs: 2}
+	chain := &ackChain{box: &escrow.TicketRecord{Status: escrow.StatusPendingSettle, PendingBy: escrow.PendingByOperator, PendingAmount: 12}}
+	txid, fee, claim, err := ackHandle(t, chain, nil).freezeOverclaim(context.Background(), r)
+	if err != nil || claim != ClaimOverclaims || txid != "HALFTX" || fee != 1000 {
+		t.Fatalf("freezeOverclaim = %q, %d, %s, %v; want the freeze sent", txid, fee, claim, err)
+	}
+	if len(chain.sent) != 1 || !chain.sent[0].OuterFeeOnly || chain.sent[0].AsOperator || chain.sent[0].AmountCharged != 11 || chain.sent[0].TtftMs != 2 {
+		t.Errorf("settles sent %+v, want one payer settle at the receipt paying the outer call alone", chain.sent)
+	}
+}
+
 // On an escrow without resolveFrozen the ack sends neither the half on an open
-// box after a failed group nor a freeze of a claim above the receipt. The claim is still read and reported.
+// box after a failed group nor a freeze of a claim above the receipt. The
+// claim is still read and reported.
 func TestOpenHandle_AckSendsNoFreezeWithoutResolveFrozen(t *testing.T) {
 	r := &ticket.UsageReceipt{AmountCharged: 11}
 	failed := func(context.Context, wire.SettleAck) error { return errors.New("node answered 503") }
