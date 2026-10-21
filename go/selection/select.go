@@ -220,8 +220,9 @@ type Diagnostics struct {
 	// (enable allow_staging to reach them).
 	StagingBlocked bool `json:"staging_blocked"`
 	// SignerUnderfundedBlocked ⇒ every otherwise-eligible node serving the model
-	// has a signing account known to hold less than MinSignerSpendableMicroAlgos
-	// spendable — it could not pay the fees of the open/settle it would be asked
+	// has a signing account known to hold less than its rail's floor
+	// (MinSignerSpendableMicroAlgos, MinSignerSpendableLamports) spendable — it
+	// could not pay the fees of the open/settle it would be asked
 	// to sign. Also set when strict affinity pins to such a node. A pool-
 	// availability failure (it clears when the operator tops up), distinct from
 	// AffinityBlocked, which the proxy reports as a sizing conflict.

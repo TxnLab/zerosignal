@@ -555,7 +555,9 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 		// one place a payer can see why a node's models left the catalog — the
 		// same reasoning that keeps wire-incompatible nodes listed.
 		SignerSpendableMicroAlgos *uint64 `json:"signer_spendable_microalgos,omitempty"`
-		SignerUnderfunded         bool    `json:"signer_underfunded,omitempty"`
+		// SignerSpendableLamports is the same reading for a Solana node.
+		SignerSpendableLamports *uint64 `json:"signer_spendable_lamports,omitempty"`
+		SignerUnderfunded       bool    `json:"signer_underfunded,omitempty"`
 	}
 	type listResponse struct {
 		Operators []operatorEntry `json:"operators"`
@@ -652,6 +654,7 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 			Models:                    models,
 			BuiltinTools:              tools,
 			SignerSpendableMicroAlgos: op.SignerSpendableMicroAlgos,
+			SignerSpendableLamports:   op.SignerSpendableLamports,
 			SignerUnderfunded:         op.SignerUnderfunded(),
 		})
 	}

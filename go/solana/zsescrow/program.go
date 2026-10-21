@@ -119,6 +119,11 @@ func (d Deployment) RefundBumps(payer solana.PublicKey) RefundBumps {
 	return RefundBumps{PayerATA: ata}
 }
 
+// AccountDiscriminator is the 8 bytes every account of the named type (say
+// "Node") starts with: what a getProgramAccounts memcmp filter matches to read
+// one type of the program's accounts.
+func AccountDiscriminator(name string) [8]byte { return discriminator("account", name) }
+
 // discriminator is Anchor's: the first 8 bytes of sha256 of a namespaced name.
 func discriminator(namespace, name string) [8]byte {
 	h := sha256.Sum256([]byte(namespace + ":" + name))

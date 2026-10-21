@@ -62,10 +62,13 @@ export {
     CATALOG_STORAGE_KEY,
     ChainOperatorSource,
     type ChainOperatorSourceOptions,
+    type ChainReader,
     DiscoveryRegistry,
     type DiscoveryRegistryOptions,
     type OperatorSource,
     type RegistrySnapshot,
+    SolanaChainReader,
+    type SolanaChainReaderOptions,
 } from './registry/index.js'
 export * from './request-parse.js'
 export * from './reserve.js'

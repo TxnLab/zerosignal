@@ -9,6 +9,8 @@
 // fetchers (operators.go, nodes.go), and the chain read of go/zs's
 // ChainOperatorSource (fetcher.go, signer_balance.go). The chain_nodes block of
 // testdata/operator_vectors.json pins box bytes to the operator Go resolves.
+// ChainOperatorSource runs that read unless it is handed a ChainReader, such
+// as solana.ts's SolanaChainReader.
 //
 // Differences from Go:
 //   - The readonly nextOperatorIdValue call is simulated from the application
@@ -104,10 +106,31 @@ export class BoxValuesUnsupportedError extends Error {
  * the doctor reports as an empty fleet rather than as a failed read.
  */
 export class NoOperatorsError extends Error {
-    constructor(appId: bigint) {
-        super(`no operators found on chain for escrow app ${appId}`)
+    /** escrow is the Algorand app id, or the escrow named as text on another rail. */
+    constructor(escrow: bigint | string) {
+        super(`no operators found on chain for ${typeof escrow === 'bigint' ? `escrow app ${escrow}` : escrow}`)
         this.name = 'NoOperatorsError'
     }
+}
+
+/**
+ * ChainReader is the chain half of discovery on one rail: one unprobed
+ * Operator per routable node, and the deployment id a node's bound signatures
+ * must name. ChainOperatorSource runs the probes over what it reads, so every
+ * rail shares one probe pass, one set of routing stores and one registry.
+ * Go's ChainReader (go/zs/fetcher.go).
+ */
+export interface ChainReader {
+    /** Throws when the read fails or the escrow has no operators; one node that won't resolve is skipped and logged. */
+    readChain(signal?: AbortSignal): Promise<Operator[]>
+    readDeployment(signal?: AbortSignal): Promise<Uint8Array>
+    /**
+     * Reads a node signer's spendable lamports, on a reader over Solana, so
+     * the source runs its signer-balance pass over it as it runs it over algod
+     * for the Algorand read. A reader without it leaves every signer unread,
+     * which routes. Go's SignerLamportsReader.
+     */
+    readSignerSpendableLamports?(addr: string, signal: AbortSignal): Promise<bigint>
 }
 
 /**
@@ -356,12 +379,12 @@ export function resolveOperatorNode(op: OperatorRecord, node: NodeRecord, curren
 }
 
 // An id is a routing key, so it may not round the way a display figure may.
-function safeId(id: bigint, what: string): number {
+export function safeId(id: bigint, what: string): number {
     if (id > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError(`${what} id ${id} exceeds Number.MAX_SAFE_INTEGER`)
     return Number(id)
 }
 
-/** SIGNER_BALANCE_CONCURRENCY bounds the account reads in flight, for public algod rate limits. */
+/** SIGNER_BALANCE_CONCURRENCY bounds the account reads in flight, for public algod and RPC rate limits. */
 export const SIGNER_BALANCE_CONCURRENCY = 8
 
 /**
@@ -409,9 +432,20 @@ export async function deploymentOrFail(
  */
 export const SIGNER_BALANCE_TIMEOUT_MS = 10_000
 
-export interface ChainOperatorSourceOptions extends ProbeOptions {
-    algod: algosdk.Algodv2
-    escrowAppId: bigint
+/**
+ * The chain a ChainOperatorSource reads: the ZeroSignalEscrow app on Algorand
+ * from algod and escrowAppId, or another rail through a ChainReader such as
+ * SolanaChainReader, each with its signer-balance pass. With a chain, the
+ * Algorand read's options (operatorIds, requestTimeoutMs) are unused; a
+ * restriction to some operators goes on the reader.
+ */
+export type ChainOperatorSourceOptions = ChainSourceCommonOptions &
+    (
+        | { chain?: undefined; algod: algosdk.Algodv2; escrowAppId: bigint }
+        | { chain: ChainReader; algod?: undefined; escrowAppId?: undefined }
+    )
+
+interface ChainSourceCommonOptions extends ProbeOptions {
     /** Restricts the read to these operators, each of which must exist. Empty reads every one. */
     operatorIds?: readonly bigint[] | undefined
     /** The most one algod request may take; absent, zero or negative is 30 s. */
@@ -441,7 +475,8 @@ export interface ChainOperatorSourceOptions extends ProbeOptions {
  * ahead of it (SPEC § 3f "Signer-funding gate").
  */
 export class ChainOperatorSource {
-    readonly #algod: algosdk.Algodv2
+    readonly #reader: ChainReader | undefined
+    readonly #algod: algosdk.Algodv2 | undefined
     readonly #appId: bigint
     readonly #operatorIds: readonly bigint[]
     readonly #timeoutMs: number
@@ -452,8 +487,9 @@ export class ChainOperatorSource {
     readonly #prober: NodeProber
 
     constructor(o: ChainOperatorSourceOptions) {
+        this.#reader = o.chain
         this.#algod = o.algod
-        this.#appId = o.escrowAppId
+        this.#appId = o.escrowAppId ?? 0n
         this.#operatorIds = o.operatorIds ?? []
         this.#timeoutMs = requestTimeoutOrDefault(o.requestTimeoutMs)
         this.#log = o.logger ?? discardLogger
@@ -496,17 +532,49 @@ export class ChainOperatorSource {
     }
 
     /**
-     * fetchChain returns one Operator per live node, with its signing
-     * account's spendable ALGO, unprobed. It fails when algod or the app id is
-     * missing, a read fails, or the app has no operators; one node that won't
-     * resolve is skipped and logged instead.
+     * fetchChain returns one Operator per live node, unprobed, with its
+     * signing account's spendable ALGO, or lamports on Solana. It fails when
+     * the chain read is not configured, a read fails, or the escrow has no
+     * operators; one node that won't resolve is skipped and logged instead.
      */
     async fetchChain(signal?: AbortSignal): Promise<Operator[]> {
-        const ops = await this.#readChainNodes(signal)
+        const reader = this.#reader
+        const ops = reader ? await reader.readChain(signal) : await this.#readChainNodes(signal)
         // Before the probes, which every refresh path runs after this call.
         await this.#deriveDeployment(signal)
-        await this.#fillSignerBalances(ops, signal)
+        // algod can judge only an Algorand signer, so another rail's reader
+        // supplies its own read. A reader with none leaves every reading
+        // undefined, which routes, as a signer never read successfully does.
+        if (!reader) {
+            const algod = this.#algodOrThrow()
+            await this.#fillSignerReadings(
+                ops,
+                (addr, pass) => this.#readSpendable(algod, addr, pass),
+                (op, v) => {
+                    op.signerSpendableMicroAlgos = v
+                },
+                signal,
+            )
+        } else {
+            const readLamports = reader.readSignerSpendableLamports?.bind(reader)
+            if (readLamports !== undefined) {
+                await this.#fillSignerReadings(
+                    ops,
+                    readLamports,
+                    (op, v) => {
+                        op.signerSpendableLamports = v
+                    },
+                    signal,
+                )
+            }
+        }
         return ops
+    }
+
+    // A JavaScript caller can leave out what the type requires.
+    #algodOrThrow(): algosdk.Algodv2 {
+        if (this.#algod === undefined || this.#algod === null) throw new Error('ChainOperatorSource.algod is not set')
+        return this.#algod
     }
 
     // Reads the genesis hash once when no deployment was supplied, as Go's
@@ -515,8 +583,15 @@ export class ChainOperatorSource {
     // is retried on the next chain read.
     async #deriveDeployment(signal?: AbortSignal): Promise<void> {
         if (this.#prober.deployment !== undefined) return
+        const reader = this.#reader
+        const algod = this.#algod
+        let read: () => Promise<Uint8Array>
+        if (reader) read = () => reader.readDeployment(signal)
+        else if (algod !== undefined && algod !== null && this.#appId !== 0n)
+            read = () => readDeploymentId(algod, this.#appId, this.#timeoutMs, signal)
+        else return
         try {
-            this.#prober.deployment = await readDeploymentId(this.#algod, this.#appId, this.#timeoutMs, signal)
+            this.#prober.deployment = await read()
         } catch (err) {
             if (signal?.aborted) throw err
             this.#log.warn('could not derive the escrow deployment; checking ephemeral signatures on the legacy layout', {
@@ -526,10 +601,9 @@ export class ChainOperatorSource {
     }
 
     async #readChainNodes(signal?: AbortSignal): Promise<Operator[]> {
-        // A JavaScript caller can leave out what the type requires.
-        if (this.#algod === undefined || this.#algod === null) throw new Error('ChainOperatorSource.algod is not set')
+        const algod = this.#algodOrThrow()
         if (this.#appId === 0n) throw new Error('ChainOperatorSource.escrowAppId is 0')
-        const c = this.#chain()
+        const c = this.#chainRead(algod)
         let records: OperatorRecord[]
         try {
             records =
@@ -569,12 +643,17 @@ export class ChainOperatorSource {
         return out
     }
 
-    // Sets signerSpendableMicroAlgos on every op from a fresh read of each
-    // distinct signing address, or the last successful reading when this one
-    // fails. An address never read successfully stays undefined, which routes.
+    // Sets each op's reading, through set, from a fresh read of each distinct
+    // signing address, or the last successful reading when this one fails. An
+    // address never read successfully stays undefined, which routes.
     // Addresses no longer in ops are forgotten, so a signer that returns is not
     // judged on a reading from before it left.
-    async #fillSignerBalances(ops: Operator[], signal?: AbortSignal): Promise<void> {
+    async #fillSignerReadings(
+        ops: Operator[],
+        read: (addr: string, signal: AbortSignal) => Promise<bigint>,
+        set: (op: Operator, v: number) => void,
+        signal?: AbortSignal,
+    ): Promise<void> {
         const live = new Set<string>()
         for (const op of ops) if (op.signingAddr !== '') live.add(op.signingAddr)
         if (live.size === 0) return
@@ -595,7 +674,7 @@ export class ChainOperatorSource {
                     continue
                 }
                 try {
-                    results[i] = { spendable: await this.#readSpendable(addrs[i]!, pass) }
+                    results[i] = { spendable: await read(addrs[i]!, pass) }
                 } catch (err) {
                     results[i] = { err }
                 }
@@ -620,7 +699,7 @@ export class ChainOperatorSource {
         for (const addr of this.#signerSpendable.keys()) if (!live.has(addr)) this.#signerSpendable.delete(addr)
         for (const op of ops) {
             const v = this.#signerSpendable.get(op.signingAddr)
-            if (v !== undefined) op.signerSpendableMicroAlgos = Number(v)
+            if (v !== undefined) set(op, Number(v))
         }
         // One line per pass: a rate-limited algod fails a fraction of reads
         // every pass, and those signers route on stale values.
@@ -635,17 +714,17 @@ export class ChainOperatorSource {
 
     // exclude=all drops the asset and app lists; algod still computes
     // min-balance from the account totals, so the figure is exact.
-    async #readSpendable(addr: string, signal: AbortSignal): Promise<bigint> {
+    async #readSpendable(algod: algosdk.Algodv2, addr: string, signal: AbortSignal): Promise<bigint> {
         try {
-            const acct = await this.#algod.accountInformation(addr).exclude('all').do(undefined, requestOptions(this.#timeoutMs, signal))
+            const acct = await algod.accountInformation(addr).exclude('all').do(undefined, requestOptions(this.#timeoutMs, signal))
             return spendableOf(BigInt(acct.amount), BigInt(acct.minBalance))
         } catch (err) {
             throw new Error(`account info ${addr}: ${message(err)}`, { cause: err })
         }
     }
 
-    #chain(): ChainReadOptions {
-        return { algod: this.#algod, appId: this.#appId, requestTimeoutMs: this.#timeoutMs, logger: this.#log }
+    #chainRead(algod: algosdk.Algodv2): ChainReadOptions {
+        return { algod, appId: this.#appId, requestTimeoutMs: this.#timeoutMs, logger: this.#log }
     }
 }
 

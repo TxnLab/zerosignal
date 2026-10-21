@@ -43,17 +43,45 @@ type OperatorSource interface {
 	Fetch(ctx context.Context) ([]Operator, error)
 }
 
-// ChainOperatorSource loads operators from the ZeroSignalEscrow contract on
-// Algorand and enriches them with capability data from each operator's
-// /v1/zs/details endpoint. It's the production OperatorSource used
-// by the proxy; tests should inject a fake OperatorSource instead.
+// ChainReader is the chain half of discovery on one rail: one unprobed
+// Operator per routable node, and the deployment id a node's bound signatures
+// must name. ChainOperatorSource runs the probes over what it reads, so every
+// rail shares one probe pass, one set of routing stores and one registry. The
+// TS SDK's ChainReader (sdk/src/registry/chain.ts) is the twin.
+type ChainReader interface {
+	// ReadChain fails when the read fails or the escrow has no operators;
+	// one node that won't resolve is skipped and logged instead.
+	ReadChain(ctx context.Context) ([]Operator, error)
+	ReadDeployment(ctx context.Context) (ticket.DeploymentID, error)
+}
+
+// SignerLamportsReader reads a Solana node signer's spendable lamports. When
+// ChainOperatorSource's Chain also implements it, the source runs the
+// signer-balance pass over it as it runs it over algod for the Algorand read.
+// The TS SDK's ChainReader.readSignerSpendableLamports is the twin.
+type SignerLamportsReader interface {
+	ReadSignerSpendableLamports(ctx context.Context, addr string) (uint64, error)
+}
+
+// ChainOperatorSource loads operators from the escrow on chain and enriches
+// them with capability data from each operator's /v1/zs/details endpoint. It's
+// the production OperatorSource used by the proxy; tests should inject a fake
+// OperatorSource instead.
 type ChainOperatorSource struct {
-	// EscrowAppID is the ZeroSignalEscrow application id — required.
+	// Chain reads the operator and node set. Nil reads the ZeroSignalEscrow
+	// app on Algorand from Algod and EscrowAppID; a SolanaChainReader reads the
+	// zs_escrow program. When it is set, EscrowAppID, OperatorIDs,
+	// ProxyPayerAddr and Algod are unused: a restriction to some operators
+	// goes on the reader (SolanaChainReader.OperatorIDs).
+	Chain ChainReader
+
+	// EscrowAppID is the ZeroSignalEscrow application id — required when
+	// Chain is nil.
 	EscrowAppID uint64
 
 	// Deployment is this payer's own deployment id, which a node's bound
 	// ephemeral signature must name. Zero has the chain read derive it from
-	// algod's genesis hash.
+	// the chain's genesis hash.
 	Deployment ticket.DeploymentID
 
 	// OperatorIDs, when non-empty, restricts which operator IDs are
@@ -217,8 +245,9 @@ type ChainOperatorSource struct {
 
 	// signerMu guards signerSpendable.
 	signerMu sync.Mutex
-	// signerSpendable is the last SUCCESSFUL spendable-ALGO reading per signing
-	// address — see signer_balance.go. It outlives the per-cycle Operator values
+	// signerSpendable is the last SUCCESSFUL spendable reading per signing
+	// address, in its rail's unit — see signer_balance.go. It outlives the
+	// per-cycle Operator values
 	// so a failed read keeps the previous verdict instead of reverting to
 	// "unknown", which would re-admit a node last seen broke. Pruned to the
 	// current fleet every pass, so it is bounded by fleet size.
@@ -234,7 +263,7 @@ type ChainOperatorSource struct {
 	chainClock func() time.Time
 
 	// derivedMu guards derivedDeployment, the id the chain read derives from
-	// algod's genesis hash when Deployment is unset. A host that builds its
+	// the chain's genesis hash when Deployment is unset. A host that builds its
 	// own source would otherwise leave every node's ephemeral checked on the
 	// legacy signature alone.
 	derivedMu         sync.Mutex
@@ -256,10 +285,19 @@ func (s *ChainOperatorSource) deployment() ticket.DeploymentID {
 // failure is retried on the next chain read; until one succeeds the probes
 // accept legacy signatures, which is what a source with no id did before.
 func (s *ChainOperatorSource) deriveDeployment(ctx context.Context) {
-	if !s.deployment().IsZero() || s.Algod == nil || s.EscrowAppID == 0 {
+	if !s.deployment().IsZero() {
 		return
 	}
-	d, err := readDeploymentID(ctx, s.Algod, s.EscrowAppID)
+	var d ticket.DeploymentID
+	var err error
+	switch {
+	case s.Chain != nil:
+		d, err = s.Chain.ReadDeployment(ctx)
+	case s.Algod != nil && s.EscrowAppID != 0:
+		d, err = readDeploymentID(ctx, s.Algod, s.EscrowAppID)
+	default:
+		return
+	}
 	if err != nil {
 		log := s.Log
 		if log == nil {
@@ -308,8 +346,8 @@ func (s *ChainOperatorSource) Fetch(ctx context.Context) ([]Operator, error) {
 
 // FetchChain reads the on-chain operator + node set WITHOUT probing any
 // /v1/zs/details endpoint. Each returned Operator carries its ids, owner,
-// signing key, base URL, staging flag, signing-account spendable ALGO, and
-// on-chain reliability metrics (LatencyEwmaMs / TokensPerSecEwma), but
+// signing key, base URL, staging flag, signing-account spendable ALGO (or
+// lamports, on Solana), and on-chain reliability metrics (LatencyEwmaMs / TokensPerSecEwma), but
 // Reachable=false and empty capabilities until a probe lands. The balance
 // pass lives here rather than beside the probes because every refresh path —
 // the startup Fetch, the unbounded fallback, the bounded split — starts with
@@ -318,7 +356,11 @@ func (s *ChainOperatorSource) Fetch(ctx context.Context) ([]Operator, error) {
 // the prior snapshot, pick a bounded probe set, then probe only that subset.
 func (s *ChainOperatorSource) FetchChain(ctx context.Context) ([]Operator, error) {
 	read := s.readChain
-	if read == nil {
+	switch {
+	case read != nil:
+	case s.Chain != nil:
+		read = s.Chain.ReadChain
+	default:
 		read = s.readChainNodes
 	}
 	ops, err := read(ctx)
@@ -327,7 +369,17 @@ func (s *ChainOperatorSource) FetchChain(ctx context.Context) ([]Operator, error
 	}
 	// Before the probes, which every refresh path runs after this call.
 	s.deriveDeployment(ctx)
-	s.fillSignerBalances(ctx, ops)
+	// algod can judge only an Algorand signer, so another rail's reader
+	// supplies its own read. A reader with none leaves every reading nil,
+	// which routes, as a signer never read successfully does.
+	lamports, ok := s.Chain.(SignerLamportsReader)
+	switch {
+	case s.Chain == nil:
+		s.fillSignerBalances(ctx, ops)
+	case ok:
+		s.fillSignerReadings(ctx, ops, lamports.ReadSignerSpendableLamports,
+			func(op *Operator, v *uint64) { op.SignerSpendableLamports = v })
+	}
 	return ops, nil
 }
 

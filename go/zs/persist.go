@@ -29,7 +29,8 @@ const catalogFormatVersion = 1
 //     Pubkey / Expiry / IssuedAt) — it would be expired on restart and must be
 //     re-probed; persisting it would risk a stale/downgraded seal target;
 //   - the TEE verdict (re-verified on the next attestation probe);
-//   - the signing account's spendable ALGO (SignerSpendableMicroAlgos). It moves
+//   - the signing account's spendable ALGO (SignerSpendableMicroAlgos), or
+//     lamports on Solana (SignerSpendableLamports). It moves
 //     on every settle, so persisting it would defeat the unchanged-catalog write
 //     skip, and nothing would read it: the catalog seeds routing only when the
 //     startup chain read FAILED, and FetchChain re-reads balances whenever that

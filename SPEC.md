@@ -1637,7 +1637,7 @@ Details is **non-binding**. A field on this endpoint expresses the operator's cu
   - Non-binding does **not** mean unbounded. Before escrowing, a payer-side peer bounds the signed ticket against this rate card and the ticket's own internal consistency (§ 3a "Payer-side price verification"). The bound is a generous abuse multiple because an advertised value is a snapshot that may have aged: a legitimate reprice passes, an inflated ticket does not.
   - A `0` advertised rate (a free model) is also just a snapshot of what the operator offers now; the binding price is still the ticket. A client expecting a free reserve that gets non-zero `input_rate` / `output_rate` back (the operator changed config between probe and reserve) is seeing an aged advertisement like any other divergence below, not misbehavior.
 - **Capacity**: the advertised `context_window` and `max_output_tokens` are the values the node consults when accepting a reserve, but the node may change config between the discovery probe and the reserve call. The reserve endpoint is the binding gate: a request that fits at probe time may be rejected if the operator tightens its limits, and vice versa.
-- **Identity**: the reference SDKs never take `operator_id`, `owner_addr` or `signing_addr` from this endpoint. They read all three from the on-chain `ZeroSignalEscrow` registry and verify tickets and the ephemeral advertisement against the chain's signing key. (The on-chain record carries no encryption key; envelope encryption targets the signed ephemeral recipient, § 4.) An advertised value that differs from the chain is ignored. It is a misconfiguration, not a slashable offense; a node whose signatures fail against the chain key is unusable either way.
+- **Identity**: the reference SDKs never take `operator_id`, `owner_addr` or `signing_addr` from this endpoint. They read all three from the on-chain registry (on Algorand the `ZeroSignalEscrow` app's operator and node boxes, on Solana the `zs_escrow` program's `Operator` and `Node` accounts, both read into the same per-node record) and verify tickets and the ephemeral advertisement against the chain's signing key. (The on-chain record carries no encryption key; envelope encryption targets the signed ephemeral recipient, § 4.) An advertised value that differs from the chain is ignored. It is a misconfiguration, not a slashable offense; a node whose signatures fail against the chain key is unusable either way.
 
 A divergence between an advertised value and the eventual ticket is therefore not evidence of misbehavior under § 3b; it is a snapshot that aged. Clients that pre-check capacity through this endpoint should expect occasional reserve rejections and fall through to the next candidate operator.
 
@@ -2586,6 +2586,21 @@ app pick identically.
     demand-independent and adds no channel.
   - The floor doubles as the staleness budget. At ~7,000 µALGO of pooled fees
     per paid request, 5 ALGO covers ~700 requests between reads.
+  - **On Solana** the node's signing key is the open offer's fee payer and the
+    Ticket account's rent payer. Its reading is
+    `selection.Operator.signer_spendable_lamports`: the `getBalance` balance at
+    `confirmed` less an upper bound on the account's own rent-exempt minimum
+    (890,880 lamports), below which the runtime refuses a transaction that
+    leaves a fee payer above zero. The floor, `MinSignerSpendableLamports`
+    (2,522,680), is one open: two signatures at 5,000 lamports, a 120-lamport
+    priority fee, and the rent-exempt minimum of the 233-byte Ticket plus the
+    128-byte account overhead. Both price rent at 6,960 lamports a byte, the
+    ceiling SIMD-0437's lower steps fall from, so they hold out a node that a
+    lower current rate would admit rather than route to one that can't pay.
+    The floor is no staleness budget. Every other rule above applies
+    unchanged, and a node carries the reading of its own rail only. The
+    lamports gate is pinned by `solana_registry_vectors.json`, not the
+    `selection_vectors.json` cases below.
   - Both continuation pins re-check it, because a pinned node can drain
     mid-conversation. The tool-affinity pin: under `prefer` it yields, under
     `strict` the result is `signer_underfunded_blocked` — after the caller's
