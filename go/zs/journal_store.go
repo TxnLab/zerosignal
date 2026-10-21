@@ -114,6 +114,9 @@ type fileJournalRow struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 	Settle      *fileSettleArgs `json:"settle,omitempty"`
+	// Signed is new in the same file version: a binary from before it
+	// ignores the field, and only loses the over-claim check it feeds.
+	Signed *fileSettleArgs `json:"signed,omitempty"`
 }
 
 type fileSettleArgs struct {
@@ -134,14 +137,20 @@ func rowOf(r TicketRecord) fileJournalRow {
 		OperatorID: r.Target.Op, NodeID: r.Target.Node, Payer: r.Payer, MaxPrice: r.MaxPrice,
 		ExpiresAt: r.ExpiresAt, Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
-	if a := r.Settle; a != nil {
-		row.Settle = &fileSettleArgs{
-			AmountCharged: a.AmountCharged, ReceiptDigest: hex.EncodeToString(a.ReceiptDigest[:]),
-			TtftMs: a.TtftMs, DecodeMs: a.DecodeMs, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
-			OutputUsageType: a.OutputUsageType, AuxOutputUsageType: a.AuxOutputUsageType, AuxOutputCount: a.AuxOutputCount,
-		}
-	}
+	row.Settle = fileSettleArgsOf(r.Settle)
+	row.Signed = fileSettleArgsOf(r.Signed)
 	return row
+}
+
+func fileSettleArgsOf(a *SettleArgs) *fileSettleArgs {
+	if a == nil {
+		return nil
+	}
+	return &fileSettleArgs{
+		AmountCharged: a.AmountCharged, ReceiptDigest: hex.EncodeToString(a.ReceiptDigest[:]),
+		TtftMs: a.TtftMs, DecodeMs: a.DecodeMs, InputTokens: a.InputTokens, OutputTokens: a.OutputTokens,
+		OutputUsageType: a.OutputUsageType, AuxOutputUsageType: a.AuxOutputUsageType, AuxOutputCount: a.AuxOutputCount,
+	}
 }
 
 func (row fileJournalRow) record() (TicketRecord, error) {
@@ -150,20 +159,32 @@ func (row fileJournalRow) record() (TicketRecord, error) {
 		Target: NodeRef{Op: row.OperatorID, Node: row.NodeID}, Payer: row.Payer, MaxPrice: row.MaxPrice,
 		ExpiresAt: row.ExpiresAt, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
-	if s := row.Settle; s != nil {
-		a := SettleArgs{
-			AmountCharged: s.AmountCharged, TtftMs: s.TtftMs, DecodeMs: s.DecodeMs,
-			InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
-			OutputUsageType: s.OutputUsageType, AuxOutputUsageType: s.AuxOutputUsageType, AuxOutputCount: s.AuxOutputCount,
-		}
-		d, err := hex.DecodeString(s.ReceiptDigest)
-		if err != nil || len(d) != len(a.ReceiptDigest) {
-			return r, fmt.Errorf("ticket %s: bad receipt_digest %q", row.TicketID, s.ReceiptDigest)
-		}
-		copy(a.ReceiptDigest[:], d)
-		r.Settle = &a
+	var err error
+	if r.Settle, err = row.Settle.args(row.TicketID); err != nil {
+		return r, err
+	}
+	if r.Signed, err = row.Signed.args(row.TicketID); err != nil {
+		return r, err
 	}
 	return r, nil
+}
+
+// args is s decoded, nil for none.
+func (s *fileSettleArgs) args(ticketID string) (*SettleArgs, error) {
+	if s == nil {
+		return nil, nil
+	}
+	a := SettleArgs{
+		AmountCharged: s.AmountCharged, TtftMs: s.TtftMs, DecodeMs: s.DecodeMs,
+		InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
+		OutputUsageType: s.OutputUsageType, AuxOutputUsageType: s.AuxOutputUsageType, AuxOutputCount: s.AuxOutputCount,
+	}
+	d, err := hex.DecodeString(s.ReceiptDigest)
+	if err != nil || len(d) != len(a.ReceiptDigest) {
+		return nil, fmt.Errorf("ticket %s: bad receipt_digest %q", ticketID, s.ReceiptDigest)
+	}
+	copy(a.ReceiptDigest[:], d)
+	return &a, nil
 }
 
 // Version 1 still, though rows gained deployment: a rolled-back binary refuses

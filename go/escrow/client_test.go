@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/algorand/go-algorand-sdk/v2/abi"
 	sdkalgod "github.com/algorand/go-algorand-sdk/v2/client/v2/algod"
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
@@ -1466,6 +1468,41 @@ func TestComposeSettleStandalone_IncludesTreasuryRef(t *testing.T) {
 	}
 }
 
+// A settle sent to freeze an operator claim pays for its own outer call only:
+// the contract's freeze branch fires no disbursement and no op-up.
+func TestComposeSettleStandalone_FreezePaysTheOuterCallOnly(t *testing.T) {
+	payer := crypto.GenerateAccount()
+	opOwner := crypto.GenerateAccount()
+	algod, _ := newFakeAlgodForCompose(t)
+	client, err := NewClient(1234, algod)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client.UsdcAssetID = 31566704
+	client.Treasury = crypto.GenerateAccount().Address.String()
+	ticketIDRaw := make([]byte, 16)
+	copy(ticketIDRaw, "ticket-id-16byte")
+	args := SettleArgs{
+		TicketIDRaw: ticketIDRaw, AmountCharged: 50_000, MaxPrice: 80_000, OutputUsageType: 1,
+		PayerAddr: payer.Address.String(), OperatorOwnerAddr: opOwner.Address.String(), OperatorID: 7,
+	}
+	signer := transaction.BasicAccountTransactionSigner{Account: payer}
+	settle, err := client.ComposeSettleStandalone(context.Background(), args, signer, payer.Address.String())
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	args.OuterFeeOnly = true
+	freeze, err := client.ComposeSettleStandalone(context.Background(), args, signer, payer.Address.String())
+	if err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	// The fake algod serves no node or operator box, so the settle funds no
+	// ring catch-up: its disbursements and finalize's op-up on top of itself.
+	if want := freeze.FeeMicroalgos * (2 + SettleInnerCount(args.AmountCharged, args.MaxPrice)); settle.FeeMicroalgos != want || freeze.FeeMicroalgos == 0 {
+		t.Errorf("fees: settle %d, freeze %d; want the settle at %d", settle.FeeMicroalgos, freeze.FeeMicroalgos, want)
+	}
+}
+
 // TestComposeSettleLapsed_IncludesTreasuryRef asserts settleLapsed's
 // txn carries treasury in its AppAccounts (same finalizeSettlement
 // path as settle).
@@ -1702,6 +1739,103 @@ func TestRefreshTreasury_MissingGlobal(t *testing.T) {
 	err = client.RefreshTreasury(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "treasury global not found") {
 		t.Errorf("expected treasury-not-found error, got %v", err)
+	}
+}
+
+// The selector is pinned as a literal, since the TS twin derives its own from
+// the same signature and a derived constant is checked against nothing.
+func TestResolveFrozenSelector(t *testing.T) {
+	m, err := abi.MethodFromSignature(ResolveFrozenSignature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(m.GetSelector()); got != "5825a047" {
+		t.Errorf("resolveFrozen selector = %s, want 5825a047", got)
+	}
+}
+
+// The probe finds resolveFrozen in the approval program of the embedded
+// ARC-56, which is the deployed program, compiled as it ships rather than
+// assembled by hand.
+func TestProgramHasMethod_EmbeddedApprovalRoutesResolveFrozen(t *testing.T) {
+	var spec struct {
+		ByteCode struct {
+			Approval []byte `json:"approval"`
+		} `json:"byteCode"`
+	}
+	if err := json.Unmarshal(ZeroSignalEscrowARC56, &spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.ByteCode.Approval) == 0 {
+		t.Fatal("embedded ARC-56 has no approval byteCode")
+	}
+	if !ProgramHasMethod(spec.ByteCode.Approval, ResolveFrozenSignature) {
+		t.Error("embedded approval program does not route resolveFrozen")
+	}
+}
+
+// The globals read reports resolveFrozen from the approval program the same
+// fetch returns: present when the program carries its selector, absent when
+// it carries other selectors only, or no program came back.
+func TestReadGlobals_ProbesResolveFrozen(t *testing.T) {
+	treasury := crypto.GenerateAccount()
+	sel := func(sig string) []byte {
+		m, err := abi.MethodFromSignature(sig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.GetSelector()
+	}
+	settle := sel("settle(byte[],uint64,byte[],uint64,uint64,uint64,uint64,uint64,uint64,uint64,bool)void")
+	program := func(selectors ...[]byte) []byte {
+		p := []byte{0x0a, 0x31, 0x1b, 0x41}
+		for _, s := range selectors {
+			p = append(append(p, 0x80, 0x04), s...)
+		}
+		return p
+	}
+	for _, tc := range []struct {
+		name    string
+		program []byte
+		want    bool
+	}{
+		{"routes resolveFrozen", program(settle, sel(ResolveFrozenSignature)), true},
+		{"routes other methods only", program(settle), false},
+		{"no program", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/v2/applications/4242") {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id": 4242, "params": {
+					"approval-program": "`+base64.StdEncoding.EncodeToString(tc.program)+`",
+					"clear-state-program": "",
+					"creator": "`+treasury.Address.String()+`",
+					"global-state": [
+						{"key":"dXNkYw==","value":{"type":2,"bytes":"","uint":31566704}},
+						{"key":"dHJlYQ==","value":{"type":1,"bytes":"`+base64.StdEncoding.EncodeToString(treasury.Address[:])+`","uint":0}}
+					]}}`)
+			}))
+			t.Cleanup(srv.Close)
+			algod, err := protoalgod.NewClient(srv.URL, "test-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, err := NewClient(4242, algod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g, err := client.readGlobals(context.Background())
+			if err != nil {
+				t.Fatalf("readGlobals: %v", err)
+			}
+			if g.resolvesFrozen != tc.want {
+				t.Errorf("resolvesFrozen = %v, want %v", g.resolvesFrozen, tc.want)
+			}
+		})
 	}
 }
 

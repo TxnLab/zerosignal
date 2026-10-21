@@ -30,6 +30,8 @@ import {
 } from '../src/index.js'
 import { FeeRateCache } from '../src/fee-rate.js'
 import type { Watchdog } from '../src/refund-watchdog.js'
+import { NodeExclusionStore } from '../src/routing/exclusion.js'
+import { PENDING_BY_OPERATOR, STATUS_PENDING_SETTLE } from '@txnlab/zs-proto/escrow'
 import { partsOf } from '../src/client-parts.js'
 import { turnOf } from '../src/turn.js'
 
@@ -498,6 +500,61 @@ describe('Client.create', () => {
             await vi.waitFor(() => expect(released).toEqual([CLOSED]))
             expect(refunds).toEqual([])
             expect(partsOf.get(c)!.reconciler!.remedy).toBe('ask the operator')
+            await c.close()
+        })
+
+        // Go's TestNew_BackgroundDriversBarAnOverclaimingNode: the sweep and
+        // the watchdog bar an over-claiming node in the Client's own
+        // exclusion store, the one routing reads.
+        it('bars an over-claiming node from the sweep and the watchdog', async () => {
+            const nodeExclusions = new NodeExclusionStore()
+            const inAnHour = BigInt(Math.floor(Date.now() / 1000) + 3600)
+            const sweepChain = {
+                protocolFeeBps: async () => 0,
+                config: async () => ({ resolvesFrozen: true }),
+                readTicketBox: async () => ({
+                    status: STATUS_PENDING_SETTLE,
+                    pendingBy: PENDING_BY_OPERATOR,
+                    expiresAt: inAnHour,
+                    settlementGraceSeconds: 0n,
+                    pendingAmount: 100n,
+                    pendingDigest: new Uint8Array(32),
+                }),
+                settleStandalone: async () => ({ txid: 'FREEZETX', payerFeeMicroalgos: 1000n }),
+            } as unknown as EscrowChain
+            const journal = memoryJournal()
+            await journal.put({
+                ticketId: 'NkImzFiSJz3WK6cx7PFU1Q==',
+                openTxId: '',
+                escrowAppId: resolveConfig(base).network.escrowAppId,
+                target: { op: 3, node: 4 },
+                payer: 'PAYER',
+                maxPrice: 200n,
+                expiresAt: 0,
+                status: 'settle_pending',
+                settle: {
+                    amountCharged: 1n,
+                    receiptDigest: new Uint8Array(32),
+                    ttftMs: 0n,
+                    decodeMs: 0n,
+                    inputTokens: 0n,
+                    outputTokens: 0n,
+                    outputUsageType: 0,
+                    auxOutputUsageType: 0,
+                    auxOutputCount: 0n,
+                },
+                createdAt: 0,
+                updatedAt: 0,
+            })
+            const c = await Client.create({ ...base, wallet: new Wallet({ chain: sweepChain, signer }), stores: { journal, nodeExclusions } })
+            await vi.waitFor(() => expect(nodeExclusions.nodeExcluded({ op: 3, node: 4 })).toBe(true))
+
+            const rw = c.refunds as Watchdog
+            rw.lapseFallbackMs = 1
+            const claim = async () => ({ exists: true, verdict: 'settleLapsed' as const, deadlineMs: 0, pendingAmount: 101n })
+            rw.arm('W', Date.now() + 20, claim, async () => '', async () => 'TX')
+            rw.recordReceipt('W', { op: 5, node: 6 }, 100n)
+            await vi.waitFor(() => expect(nodeExclusions.nodeExcluded({ op: 5, node: 6 })).toBe(true))
             await c.close()
         })
 

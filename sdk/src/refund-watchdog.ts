@@ -9,6 +9,7 @@
 import { type TicketRecord, type Verdict, classify, settlementDeadline } from '@txnlab/zs-proto/escrow'
 
 import type { OpenHandle } from './parts.js'
+import type { NodeRef } from './types.js'
 import { type Clock, type Logger, discardLogger } from './ports.js'
 import { idle } from './sleep.js'
 
@@ -73,6 +74,12 @@ export interface TicketProbe {
     verdict: Verdict
     /** The box's own deadline D, unix ms. */
     deadlineMs: number
+    /**
+     * The amount on whichever side's claim the box carries. driveLapse reads
+     * it only beside settleLapsed, an operator claim: a payer claim's amount
+     * is the payer's own receipt.
+     */
+    pendingAmount?: bigint
 }
 
 type Probe = (signal: AbortSignal) => Promise<TicketProbe>
@@ -95,6 +102,12 @@ export interface WatchdogOptions {
      * operator claim, so no charge can land after it.
      */
     refunded?: ((ticketId: string) => void) | undefined
+    /**
+     * Hears of each node whose claim on a tracked ticket exceeds the receipt
+     * it signed, so the node is barred though the live ack never saw the
+     * claim. Go's RefundWatchdog.overclaimed.
+     */
+    overclaimed?: ((ticketId: string, node: NodeRef) => void) | undefined
 }
 
 /** The RefundWatchdog a Client runs. */
@@ -120,7 +133,15 @@ export class Watchdog implements RefundWatchdog {
     readonly #clock: Clock
     readonly #remedy: string
     readonly #refunded: ((ticketId: string) => void) | undefined
+    readonly #overclaimed: ((ticketId: string, node: NodeRef) => void) | undefined
     #pending = new Map<string, AbortController>()
+    /**
+     * The amount the node signed for each tracked ticket this process saw a
+     * receipt for, and the node that signed it: the one figure an operator
+     * claim found on the box later can be held against. Dropped with the
+     * ticket's driver.
+     */
+    readonly #receipts = new Map<string, { amount: bigint; node: NodeRef }>()
     /** Set by handOff: track arms nothing more. */
     #handedOff = false
     /** The per-ticket runs, which handOff waits out. */
@@ -131,6 +152,7 @@ export class Watchdog implements RefundWatchdog {
         this.#clock = o.clock ?? Date.now
         this.#remedy = o.remedy
         this.#refunded = o.refunded
+        this.#overclaimed = o.overclaimed
     }
 
     track(h: OpenHandle | null | undefined, expiresAt: number): void {
@@ -144,6 +166,7 @@ export class Watchdog implements RefundWatchdog {
                 exists: true,
                 verdict: classify(rec, new Date(this.#clock())),
                 deadlineMs: Number(settlementDeadline(rec)) * 1000,
+                pendingAmount: rec.pendingAmount,
             }
         }
         this.arm(
@@ -153,6 +176,24 @@ export class Watchdog implements RefundWatchdog {
             (signal) => h.refundInactive(signal),
             (signal) => h.settleLapsed(signal),
         )
+    }
+
+    /**
+     * Pins the amount node signed for a ticket, so driveLapse can tell a
+     * stalled honest claim from one that contradicts the receipt. An untracked
+     * ticket records nothing: no driver would read the entry or delete it.
+     * track runs at open and resolve only after the ack that follows the
+     * receipt, so a live ticket is always still tracked here. Go's
+     * recordReceipt.
+     */
+    recordReceipt(ticketId: string, node: NodeRef, amountCharged: bigint): void {
+        if (!this.#pending.has(ticketId)) return
+        this.#receipts.set(ticketId, { amount: amountCharged, node })
+    }
+
+    /** The amount recordReceipt pinned for ticketId, if any. */
+    signedAmount(ticketId: string): bigint | undefined {
+        return this.#receipts.get(ticketId)?.amount
     }
 
     resolve(ticketId: string): void {
@@ -275,6 +316,7 @@ export class Watchdog implements RefundWatchdog {
             }
         } finally {
             this.#pending.delete(ticketId)
+            this.#receipts.delete(ticketId)
         }
     }
 
@@ -286,8 +328,9 @@ export class Watchdog implements RefundWatchdog {
      * stalled, and nobody else will move it, so the payer posts the
      * permissionless settleLapsed itself. It does so even when the claim takes
      * all of max_price: finalizing frees the payer's pool slot and unblocks
-     * closeDeposit, so the ALGO is what's recovered then. Shares the refund
-     * path's attempt bound.
+     * closeDeposit, so the ALGO is what's recovered then. The one claim it
+     * will not finalize is one above the amount the node signed for the ticket
+     * (recordReceipt). Shares the refund path's attempt bound.
      */
     async #driveLapse(ticketId: string, cancel: AbortSignal, probe: Probe, lapse: Call): Promise<void> {
         if (!(await idle(this.lapseFallbackMs, cancel))) return
@@ -295,6 +338,10 @@ export class Watchdog implements RefundWatchdog {
             // No re-arm, unlike the refund loop: classify says settleLapsed only
             // past the box's deadline, which can no longer move.
             const p = await this.#probeOnce(cancel, probe)
+            // Read per attempt: the receipt can be pinned while this waits out
+            // lapseFallbackMs.
+            const receipt = this.#receipts.get(ticketId)
+            const signed = receipt?.amount
             if (p.ok) {
                 if (!p.res.exists) {
                     this.#log.debug('refund watchdog: operator-pending ticket finalized by the node', { ticket_id: ticketId })
@@ -311,8 +358,32 @@ export class Watchdog implements RefundWatchdog {
                     )
                     return
                 }
+                const claimed = p.res.pendingAmount
+                if (p.res.verdict === 'settleLapsed' && signed !== undefined && claimed !== undefined && claimed > signed) {
+                    // Refusing is no defense: settleLapsed is permissionless and
+                    // pays the operator, who can post it and collect either way.
+                    // It keeps the payer from paying the fee for a payout its
+                    // own receipt contradicts, and gives the event a warning
+                    // instead of a success line. The pool slot stays held until
+                    // someone lapses the ticket.
+                    this.#log.warn("refund watchdog: operator's settle claim exceeds the receipt it signed; not finalizing it with settleLapsed", {
+                        ticket_id: ticketId,
+                        claimed_microusdc: Number(claimed),
+                        receipt_microusdc: Number(signed),
+                        remedy: this.#remedy,
+                    })
+                    if (receipt !== undefined) this.#overclaimed?.(ticketId, receipt.node)
+                    return
+                }
             }
-            const r = await this.#callOnce(cancel, lapse)
+            // With a receipt held, a box that can't be read could carry a claim
+            // above it, which a blind settleLapsed would pay in full: counted
+            // as a failed attempt instead. With none, a revert is cheap and the
+            // error may be transient, so the lapse goes ahead.
+            const r: CallResult =
+                !p.ok && receipt !== undefined
+                    ? { ok: false, err: new Error(`box unreadable, so not lapsing a claim the receipt may contradict: ${message(p.err)}`, { cause: p.err }) }
+                    : await this.#callOnce(cancel, lapse)
             if (r.ok) {
                 this.#log.info('refund watchdog: finalized a stalled operator claim via settleLapsed', { ticket_id: ticketId, txid: r.txid })
                 return

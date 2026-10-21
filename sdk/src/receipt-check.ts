@@ -12,6 +12,7 @@
 
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
+import { NoResolveFrozenError } from './ack.js'
 import type { SpendGuard } from './config.js'
 import { findError } from './errors.js'
 import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
@@ -23,7 +24,7 @@ import type { LogAttrs, Logger } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
 import type { RelayHop } from './routing/relay.js'
-import type { Settlement, SettleKind } from './types.js'
+import type { NodeRef, Settlement, SettleKind } from './types.js'
 import { ReceiptError, type ReceiptViolation, verifyReceipt } from './verify.js'
 
 /**
@@ -103,9 +104,19 @@ export interface TurnCheck {
     /** The failed check, or '' when the receipt verified. */
     violation: string
     settled: Settlement
-    /** Set when the node's settle group failed verification and the node was barred. */
+    /** Set when the node was barred for contradicting its own receipt. */
     excluded: boolean
+    /** How it contradicted it, the NodeExcluded reason: one of EXCLUSION_REASONS. */
+    exclusion?: string
 }
+
+/** The NodeExcluded reasons a receipt check reports, Go's exclusionSettleGroup and exclusionOverclaim. */
+export const EXCLUSION_REASONS = {
+    /** The node's settle group failed verification. */
+    settleGroup: 'settle_group_rejected',
+    /** The node's settle claim on chain takes more than the receipt it signed. */
+    overclaim: 'settle_claim_exceeds_receipt',
+} as const
 
 /** What the receipt check reads off the Client. */
 export interface ReceiptCheckDeps {
@@ -118,10 +129,21 @@ export interface ReceiptCheckDeps {
      * journalTimeoutMs; a failure is logged and the ack goes ahead.
      */
     journalReceipt?(handle: OpenHandle, receipt: UsageReceipt): Promise<void> | void
+    /**
+     * Journals a receipt whose signature verified but that failed a later
+     * check, so the reconciler holds an operator claim against it after a
+     * restart. Bounded and logged as journalReceipt is.
+     */
+    journalSigned?(handle: OpenHandle, receipt: UsageReceipt): Promise<void> | void
     /** Overrides JOURNAL_TIMEOUT_MS. */
     journalTimeoutMs?: number | undefined
     /** Stops the refund watchdog tracking a ticket the submit finished. */
     resolveRefund?(ticketId: string): void
+    /**
+     * Pins the amount the node signed for a ticket on the refund watchdog: the
+     * only figure it can hold a later operator claim against.
+     */
+    recordReceipt?(ticketId: string, node: NodeRef, amountCharged: bigint): void
     /** Watches an atomic settle until it lands, then drops the ticket's journal row. */
     confirmSettled?(ticketId: string, txId: string, handle: OpenHandle): void
     /** The coin the deployment's network fees are paid in. */
@@ -217,6 +239,9 @@ export async function checkTurnReceipt(
         // journal: the reconciler reads a journaled receipt as counted.
         const guard = deps.spendGuard
         if (guard) guardRecords(log, 'settle', ticketId, () => guard.settle(ticketId, receipt.amount_charged))
+        // The signed amount is the only figure the watchdog can hold a later
+        // operator claim against, should the ack below not land.
+        deps.recordReceipt?.(ticketId, refOf(op), BigInt(receipt.amount_charged))
         if (handle === null) return { submit: null, check }
         await journal(deps, handle, receipt)
         return {
@@ -230,16 +255,54 @@ export async function checkTurnReceipt(
                     // receipt. The payment is unaffected; the ack went standalone.
                     deps.nodeExclusions.excludeNode(refOf(op))
                     check.excluded = true
+                    check.exclusion = EXCLUSION_REASONS.settleGroup
                     log.warn('node excluded: handed a fraudulent settle group', {
                         ticket_id: ticketId,
                         operator_id: op.id,
                         node_id: op.nodeId,
                     })
                 }
+                if (res.claim === 'overclaims') {
+                    // The node signed the receipt and posted the claim under one
+                    // registered key, so this is the same self-contradiction the
+                    // settle-group check bars a node for, whether or not the
+                    // freeze went out.
+                    excludeOverclaim(deps, check, op)
+                    const attrs = { ticket_id: ticketId, ...opAttrs(op), receipt_microusdc: receipt.amount_charged }
+                    if (res.frozen === true) {
+                        log.warn('node excluded: its on-chain settle claim exceeds the receipt it signed; acked with the receipt to freeze the ticket', attrs)
+                    } else if (res.err !== undefined && res.payerSettle === true) {
+                        log.warn('node excluded: its on-chain settle claim exceeds the receipt it signed; the settle to freeze the ticket failed', {
+                            ...attrs,
+                            err: errText(res.err),
+                        })
+                    } else if (res.err !== undefined) {
+                        // The node's group failed to submit and no settle followed it.
+                        log.warn(
+                            'node excluded: its on-chain settle claim exceeds the receipt it signed; its settle group failed to submit, and no freeze was sent, since the deployed escrow has no resolveFrozen',
+                            { ...attrs, err: errText(res.err) },
+                        )
+                    } else {
+                        // Nothing went out, so the turn reports no submit.
+                        log.warn(
+                            "node excluded: its on-chain settle claim exceeds the receipt it signed; not freezing it, since the deployed escrow has no resolveFrozen and would lock the escrow for good — the claim lapses at the operator's figure",
+                            attrs,
+                        )
+                        return { settlement: emptySettlement(ticketId) }
+                    }
+                } else if (res.claim === 'contradicts' && res.err === undefined) {
+                    log.warn(
+                        "operator's settle claim contradicts its own receipt but takes no more; not acking, since that would only freeze the payer's escrow — the claim lapses at the operator's figure",
+                        { ticket_id: ticketId, ...opAttrs(op), receipt_microusdc: receipt.amount_charged },
+                    )
+                    return { settlement: emptySettlement(ticketId) }
+                }
                 // Only a group that wasn't refused finalized the ticket; the
                 // standalone fallback leaves a pending payer claim the watchdog
-                // must keep tracking.
-                const settledAtomically = atomic && !res.groupRejected
+                // must keep tracking. A freeze, or the payer's half on an open
+                // box, is the payer's own settle, sent in the group's place when
+                // it failed to submit.
+                const settledAtomically = atomic && !res.groupRejected && res.payerSettle !== true
                 const kind: SettleKind = settledAtomically ? 'atomic' : 'payer_ack'
                 if (res.err !== undefined) {
                     log.warn('ack-settle failed', {
@@ -264,7 +327,7 @@ export async function checkTurnReceipt(
                     deps.resolveRefund?.(ticketId)
                     deps.confirmSettled?.(ticketId, res.txid, handle)
                 }
-                return { settlement: settlementOf(deps, ticketId, kind, res.txid, res.feeMicroalgos) }
+                return { settlement: settlementOf(deps, ticketId, kind, res.txid, res.feeMicroalgos, res.frozen === true) }
             }),
             check,
         }
@@ -286,6 +349,16 @@ export async function checkTurnReceipt(
     // protested, or refunds or lapses on chain.
     const guard = deps.spendGuard
     if (guard) guardRecords(log, 'release', ticketId, () => guard.release(ticketId))
+    // Both are found only after the signature verified, so the amount is
+    // still one the node signed. Named rather than "all but sig": a violation
+    // of no known kind has an unknown signature, and a pinned figure set too
+    // high would wave every later over-claim through.
+    // The journal keeps it for the reconciler, which would otherwise lapse an
+    // over-claim the watchdog refused to.
+    if (violation === 'amount' || violation === 'body_hash') {
+        deps.recordReceipt?.(ticketId, refOf(op), BigInt(receipt.amount_charged))
+        if (handle !== null) await journalSigned(deps, handle, receipt)
+    }
     // The contract refuses a protest over the signature or the amount.
     if (handle === null || violation !== 'body_hash') return { submit: null, check }
     const excerpt = t.plaintext.slice(0, DISPUTE_EXCERPT_CAP)
@@ -297,24 +370,28 @@ export async function checkTurnReceipt(
             } catch (perr) {
                 // A turn that outlived expires_at + grace can no longer freeze
                 // the ticket, and no retry changes that. The same deadline bars
-                // settle, so the ticket goes to settleLapsed if the operator has
-                // a pending claim and to refundInactive if not; the refund
-                // watchdog stays armed and drives whichever applies. Logged
-                // apart from a submit fault so it doesn't read as one.
+                // settle, so no freeze fallback either: the ticket goes to
+                // settleLapsed if the operator has a pending claim and to
+                // refundInactive if not; the refund watchdog stays armed and
+                // drives whichever applies. Logged apart from a submit fault so
+                // it doesn't read as one.
                 if (findError(perr, ApprovalError)?.assert === APPROVAL_ASSERT.protestAfterDeadline) {
                     log.warn('protest window closed; the ticket lapses on chain', {
                         ticket_id: ticketId,
                         reason: violation,
                         verification_err: errText(verifyErr),
                     })
-                } else {
-                    log.warn('protest failed', {
-                        ticket_id: ticketId,
-                        reason: violation,
-                        verification_err: errText(verifyErr),
-                        submit_err: errText(perr),
-                    })
+                    return { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: perr }
                 }
+                const fallback = await freezeOverclaim(deps, t, check, perr, signal)
+                if ('settled' in fallback) return fallback.settled
+                log.warn('protest failed', {
+                    ticket_id: ticketId,
+                    reason: violation,
+                    verification_err: errText(verifyErr),
+                    submit_err: errText(perr),
+                    ...(fallback.claimErr !== undefined ? { claim_err: errText(fallback.claimErr) } : {}),
+                })
                 return { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: perr }
             }
             log.warn('protest submitted', {
@@ -325,10 +402,79 @@ export async function checkTurnReceipt(
             })
             // A frozen ticket can't be refunded; arbitration resolves it.
             deps.resolveRefund?.(ticketId)
-            return { settlement: settlementOf(deps, ticketId, 'protest', call.txId, call.feeMicroalgos) }
+            return { settlement: settlementOf(deps, ticketId, 'protest', call.txId, call.feeMicroalgos, true) }
         }),
         check,
     }
+}
+
+/**
+ * excludeOverclaim bars the node whose claim on chain takes more than the
+ * receipt it signed, and names the exclusion on check unless an earlier one
+ * this turn already did: Go's Client.excludeOverclaim.
+ */
+function excludeOverclaim(deps: ReceiptCheckDeps, check: TurnCheck, op: Operator): void {
+    if (!deps.nodeExclusions) return
+    deps.nodeExclusions.excludeNode(refOf(op))
+    if (!check.excluded) {
+        check.excluded = true
+        check.exclusion = EXCLUSION_REASONS.overclaim
+    }
+}
+
+/**
+ * After a refused protest: freezes the ticket with the receipt's settle when
+ * the operator's claim on it takes more than the receipt, through the handle's
+ * freezeOverclaim, and bars the node as the ack path does. Without a settled
+ * outcome, when the handle has no fallback or the claim is anything else, the
+ * protest's own failure stands; claimErr is then a box read that failed.
+ */
+async function freezeOverclaim(
+    deps: ReceiptCheckDeps,
+    t: TurnReceipt,
+    check: TurnCheck,
+    protestErr: unknown,
+    signal: AbortSignal,
+): Promise<{ settled: SettleResult } | { claimErr?: unknown }> {
+    const { handle, op, receipt } = t
+    const ticketId = t.ticket.ticket_id
+    if (handle === null || !handle.freezeOverclaim) return {}
+    const res = await handle.freezeOverclaim(receipt, signal)
+    // A failed read is no evidence of an over-claim.
+    if (res.claim !== 'overclaims') return res.err !== undefined ? { claimErr: res.err } : {}
+    // Same self-contradiction as on the ack path.
+    excludeOverclaim(deps, check, op)
+    const log = deps.logger
+    if (res.err instanceof NoResolveFrozenError) {
+        // The protest's own failure stands.
+        log.warn(
+            "protest refused; the operator's claim exceeds the receipt it signed, but the deployed escrow has no resolveFrozen, so no freeze was sent",
+            { ticket_id: ticketId, ...opAttrs(op), protest_err: errText(protestErr) },
+        )
+        return { settled: { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: protestErr } }
+    }
+    if (res.call === undefined) {
+        const err = res.err ?? new Error('freeze: no settle sent')
+        log.warn('protest refused, and the settle to freeze an operator claim above the receipt failed', {
+            ticket_id: ticketId,
+            ...opAttrs(op),
+            protest_err: errText(protestErr),
+            submit_err: errText(err),
+        })
+        return { settled: { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err } }
+    }
+    log.warn(
+        "protest refused; the operator's claim exceeds the receipt it signed, so submitted the payer's settle at the receipt to freeze the ticket instead",
+        {
+            ticket_id: ticketId,
+            ...opAttrs(op),
+            txid: res.call.txid,
+            receipt_microusdc: receipt.amount_charged,
+            protest_err: errText(protestErr),
+        },
+    )
+    deps.resolveRefund?.(ticketId)
+    return { settled: { settlement: settlementOf(deps, ticketId, 'protest', res.call.txid, Number(res.call.payerFeeMicroalgos), true) } }
 }
 
 /** protestReasonFor is the reason code a protest of violation carries. */
@@ -350,16 +496,33 @@ function emptySettlement(ticketId: string): Settlement {
 }
 
 // A submit's Settlement, its fee under both names: Go's Client.settlement.
-function settlementOf(deps: ReceiptCheckDeps, ticketId: string, kind: SettleKind, txId: string, fee: number): Settlement {
-    return { ticketId, kind, txId, feesMicroAlgos: algoOnly(deps.feeUnit, fee), networkFees: fee }
+function settlementOf(deps: ReceiptCheckDeps, ticketId: string, kind: SettleKind, txId: string, fee: number, frozen = false): Settlement {
+    const s: Settlement = { ticketId, kind, txId, feesMicroAlgos: algoOnly(deps.feeUnit, fee), networkFees: fee }
+    if (frozen) s.frozen = true
+    return s
 }
 
 // journal runs the hook, bounded, and never rejects, so a journal failure
 // can't stop the ack.
 async function journal(deps: ReceiptCheckDeps, handle: OpenHandle, receipt: UsageReceipt): Promise<void> {
-    if (!deps.journalReceipt) return
+    await journalWith(deps, deps.journalReceipt, handle, receipt)
+}
+
+// journalSigned is journal for a receipt that failed a check after its
+// signature verified.
+async function journalSigned(deps: ReceiptCheckDeps, handle: OpenHandle, receipt: UsageReceipt): Promise<void> {
+    await journalWith(deps, deps.journalSigned, handle, receipt)
+}
+
+async function journalWith(
+    deps: ReceiptCheckDeps,
+    write: ((handle: OpenHandle, receipt: UsageReceipt) => Promise<void> | void) | undefined,
+    handle: OpenHandle,
+    receipt: UsageReceipt,
+): Promise<void> {
+    if (!write) return
     try {
-        await withJournalTimeout(deps.journalReceipt(handle, receipt), deps.journalTimeoutMs)
+        await withJournalTimeout(write.call(deps, handle, receipt), deps.journalTimeoutMs)
     } catch (err) {
         deps.logger.warn('ticket journal write failed; a restart before this ticket settles leaves it to its refund deadline', {
             ticket_id: receipt.ticket_id,

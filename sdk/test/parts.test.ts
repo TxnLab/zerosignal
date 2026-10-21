@@ -80,11 +80,13 @@ describe('memoryJournal', () => {
 
     // Go's journal holds values: a caller editing a record it put or listed
     // must not rewrite the journal's copy.
-    it('copies records in and out', async () => {
+    // Both receipts a row can carry are copied: the one the reconciler
+    // re-fires and the signed one it holds a claim against.
+    it.each(['settle', 'signed'] as const)('copies records in and out, %s included', async (field) => {
         const j = memoryJournal()
         const digest = new Uint8Array(32).fill(1)
         const rec = record({
-            settle: {
+            [field]: {
                 amountCharged: 5n,
                 receiptDigest: digest,
                 ttftMs: 0n,
@@ -100,15 +102,19 @@ describe('memoryJournal', () => {
         rec.status = 'settle_pending'
         rec.target.node = 9
         digest.fill(2)
+        rec[field]!.amountCharged = 6n
         const [listed] = await j.list('PAYER', app1)
         expect(listed!.status).toBe('open')
         expect(listed!.target.node).toBe(2)
-        expect(listed!.settle!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
+        expect(listed![field]!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
+        expect(listed![field]!.amountCharged).toBe(5n)
         listed!.target.node = 9
-        listed!.settle!.receiptDigest.fill(3)
+        listed![field]!.receiptDigest.fill(3)
+        listed![field]!.amountCharged = 7n
         const [again] = await j.list('PAYER', app1)
         expect(again!.target.node).toBe(2)
-        expect(again!.settle!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
+        expect(again![field]!.receiptDigest).toEqual(new Uint8Array(32).fill(1))
+        expect(again![field]!.amountCharged).toBe(5n)
     })
 })
 

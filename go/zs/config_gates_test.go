@@ -16,6 +16,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	neturl "net/url"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -25,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/algorand/go-algorand-sdk/v2/abi"
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
 	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
@@ -361,10 +364,11 @@ func TestOpenHandle_StandaloneAckSubmitsTheReceipt(t *testing.T) {
 	h, submitted := walletHandle(t)
 	r := &ticket.UsageReceipt{AmountCharged: 11, TtftMs: 12, DecodeMs: 13, ActualInputCount: 14, ActualOutputCount: 15,
 		OutputUsageType: 16, AuxOutputUsageType: 17, AuxOutputCount: 18}
-	_, fee, _, err := h.AckSettle(context.Background(), r, "")
+	ack, err := h.AckSettle(context.Background(), r, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	fee := ack.FeeMicroalgos
 	calls := escrowCalls(t, submitted(), "settle")
 	if len(calls) != 1 {
 		t.Fatalf("%d settle calls submitted, want 1", len(calls))
@@ -411,10 +415,11 @@ func TestOpenHandle_AckHandedToNode(t *testing.T) {
 	var got wire.SettleAck
 	h.deliverAck = func(_ context.Context, ack wire.SettleAck) error { got = ack; return nil }
 
-	txid, _, rejected, err := h.AckSettle(context.Background(), r, encoded)
-	if err != nil || rejected {
-		t.Fatalf("err %v, rejected %v", err, rejected)
+	ack, err := h.AckSettle(context.Background(), r, encoded)
+	if err != nil || ack.GroupRejected {
+		t.Fatalf("err %v, rejected %v", err, ack.GroupRejected)
 	}
+	txid := ack.TxID
 	if n := len(escrowCalls(t, submitted(), "settle")); n != 0 {
 		t.Errorf("payer broadcast %d settle calls, want 0", n)
 	}
@@ -451,7 +456,7 @@ func TestOpenHandle_AckDeliveryFailures(t *testing.T) {
 			_, encoded := settleGroupFor(t, h, r)
 			h.deliverAck = func(context.Context, wire.SettleAck) error { return tc.deliverErr }
 
-			_, _, _, err := h.AckSettle(context.Background(), r, encoded)
+			_, err := h.AckSettle(context.Background(), r, encoded)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
 			}
@@ -497,9 +502,9 @@ func refsNode3_4(tx types.Transaction) bool {
 func TestOpenHandle_NoSettleGroupIsNotARejectedGroup(t *testing.T) {
 	h, submitted := walletHandle(t)
 	h.Operator.SigningAddr = crypto.GenerateAccount().Address.String()
-	_, _, rejected, err := h.AckSettle(context.Background(), &ticket.UsageReceipt{AmountCharged: 11}, "")
-	if err != nil || rejected {
-		t.Errorf("err %v, groupRejected %v; want a plain standalone settle", err, rejected)
+	ack, err := h.AckSettle(context.Background(), &ticket.UsageReceipt{AmountCharged: 11}, "")
+	if err != nil || ack.GroupRejected {
+		t.Errorf("err %v, groupRejected %v; want a plain standalone settle", err, ack.GroupRejected)
 	}
 	if n := len(escrowCalls(t, submitted(), "settle")); n != 1 {
 		t.Errorf("%d settle calls, want 1", n)
@@ -553,7 +558,8 @@ func TestOpenHandle_RefundAndLapseReferenceTheTicketsNode(t *testing.T) {
 
 // The reconciler's calls reach the chain as the contract methods they name,
 // with the box's owner: without it the call cannot name the account the
-// contract pays, and fails. A re-settle carries the journaled receipt values.
+// contract pays, and fails. A re-settle carries the journaled receipt values,
+// and a freeze the values it is handed.
 func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	url, _, submitted := fakeEscrowAlgod(t, 123_400)
 	payer := crypto.GenerateAccount().Address.String()
@@ -570,6 +576,9 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	rec := TicketRecord{TicketID: "NkImzFiSJz3WK6cx7PFU1Q==", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99, Settle: &settled}
 	box := &escrow.TicketRecord{OperatorOwnerAddr: crypto.GenerateAccount().Address.String()}
 	ctx := context.Background()
+	// A freeze sends the args it is given, not the row's.
+	frozeAt := settled
+	frozeAt.AmountCharged++
 	for _, step := range []struct {
 		method string
 		call   func() (string, error)
@@ -577,6 +586,7 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 		{"settleLapsed", func() (string, error) { return chain.lapse(ctx, rec, box) }},
 		{"refundInactive", func() (string, error) { return chain.refund(ctx, rec) }},
 		{"settle", func() (string, error) { return chain.resettle(ctx, rec, box) }},
+		{"settle", func() (string, error) { return chain.freeze(ctx, rec, box, frozeAt) }},
 	} {
 		before := len(submitted())
 		if _, err := step.call(); err != nil {
@@ -588,11 +598,102 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 		}
 	}
 	calls := escrowCalls(t, submitted(), "settle")
-	if len(calls) != 1 {
-		t.Fatalf("%d settle calls, want the re-settle's 1", len(calls))
+	if len(calls) != 2 {
+		t.Fatalf("%d settle calls, want the re-settle's and the freeze's", len(calls))
 	}
 	if got, asOperator := settleCallArgs(t, calls[0]); got != settled || asOperator {
 		t.Errorf("re-settle carried\n  %+v (asOperator %v)\nwant the journaled\n  %+v as the payer", got, asOperator, settled)
+	}
+	if got, asOperator := settleCallArgs(t, calls[1]); got != frozeAt || asOperator {
+		t.Errorf("freeze carried\n  %+v (asOperator %v)\nwant\n  %+v as the payer", got, asOperator, frozeAt)
+	}
+	// The freeze fires no disbursement and no op-up, so it pays the fake's
+	// 1000 minimum for its own call; the re-settle pays for what finalize fires.
+	if calls[1].Fee != 1000 || calls[0].Fee <= calls[1].Fee {
+		t.Errorf("fees: re-settle %d, freeze %d; want the freeze at the 1000 minimum and the re-settle above it", calls[0].Fee, calls[1].Fee)
+	}
+}
+
+// The watchdog and the reconciler of the Client New builds bar an
+// over-claiming node in the Client's own exclusion store, the one routing
+// reads.
+func TestNew_BackgroundDriversBarAnOverclaimingNode(t *testing.T) {
+	url, _, _ := fakeEscrowAlgod(t, 123_400)
+	cfg := suppliedParts(t)
+	cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: url}
+	cfg.Wallet = nil
+	exclusions := &ChainOperatorSource{}
+	cfg.Stores.NodeExclusions = exclusions
+	c, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if c.refunds.overclaimed == nil || c.reconcile == nil || c.reconcile.overclaimed == nil {
+		t.Fatal("a background driver has no way to bar an over-claiming node")
+	}
+	byWatchdog, byReconciler := NodeRef{Op: 3, Node: 4}, NodeRef{Op: 5, Node: 6}
+	c.refunds.overclaimed("T1", byWatchdog)
+	c.reconcile.overclaimed(TicketRecord{TicketID: "T2", Target: byReconciler})
+	if !exclusions.NodeExcluded(byWatchdog) || !exclusions.NodeExcluded(byReconciler) {
+		t.Error("an over-claiming node a background driver found is still routable")
+	}
+}
+
+// New's startup read of the escrow finds resolveFrozen in the deployed
+// approval program, and the wallet it builds acts on what it found: without
+// it, no freeze.
+func TestNew_ProbesTheEscrowForResolveFrozen(t *testing.T) {
+	sel, err := abi.MethodFromSignature(escrow.ResolveFrozenSignature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		program []byte
+		want    bool
+	}{
+		{"routes resolveFrozen", append([]byte{0x0a, 0x80, 0x04}, sel.GetSelector()...), true},
+		{"does not", []byte{0x0a, 0x80, 0x04, 1, 2, 3, 4}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			url, _, _ := fakeEscrowAlgod(t, 123_400)
+			target, err := neturl.Parse(url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v2/applications/") && !strings.Contains(r.URL.Path, "/box") {
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(models.Application{Id: 1, Params: models.ApplicationParams{
+						ApprovalProgram: tc.program,
+						GlobalState: []models.TealKeyValue{
+							{Key: base64.StdEncoding.EncodeToString([]byte("usdc")), Value: models.TealValue{Type: 2, Uint: 31566704}},
+							{Key: base64.StdEncoding.EncodeToString([]byte("trea")), Value: models.TealValue{Type: 1, Bytes: base64.StdEncoding.EncodeToString(make([]byte, 32))}},
+						},
+					}})
+					return
+				}
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			cfg := suppliedParts(t)
+			cfg.Network.Algod = algod.Config{Network: "testnet", Endpoint: srv.URL}
+			cfg.Wallet = nil
+			c, err := New(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			w := c.Config().Wallet.(*Wallet)
+			if got := w.resolvesFrozen(); got != tc.want {
+				t.Errorf("resolvesFrozen = %v, want %v", got, tc.want)
+			}
+			if got := (walletChain{w}).freezes(); got != tc.want {
+				t.Errorf("the reconciler's freezes = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

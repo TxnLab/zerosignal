@@ -6,6 +6,7 @@
 package escrow
 
 import (
+	"bytes"
 	"context"
 	"encoding/base32"
 	"encoding/base64"
@@ -13,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/algorand/go-algorand-sdk/v2/abi"
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 	"github.com/algorand/go-algorand-sdk/v2/crypto"
 	"github.com/algorand/go-algorand-sdk/v2/encoding/msgpack"
@@ -128,6 +130,13 @@ type Client struct {
 	// should treat their computed deadline as a lower bound and tolerate a
 	// "refund before deadline" revert.
 	SettlementGraceDefault uint64
+
+	// ResolvesFrozen is whether the deployed approval program routes
+	// resolveFrozen (ProgramHasMethod), read by RefreshConfig from the same
+	// application fetch as the globals. A frozen ticket on an app without it
+	// keeps its escrow locked for good, so the payer sends no settle that can
+	// freeze a ticket unless this is set.
+	ResolvesFrozen bool
 }
 
 // NewClient constructs a Client for the given app id against the
@@ -184,6 +193,7 @@ func (c *Client) RefreshConfig(ctx context.Context, senderAddr string) error {
 	c.HayOracleAppID = g.hayOracleAppId
 	c.StakingAppID = g.stakingAppId
 	c.SettlementGraceDefault = g.settlementGraceDefault
+	c.ResolvesFrozen = g.resolvesFrozen
 	c.TicketMbr = mbr
 	// Free-quota box MBR. An app predating the free-ticket quota has no such
 	// method, which is not a config error — there is simply no quota box to
@@ -218,6 +228,7 @@ type escrowGlobals struct {
 	hayOracleAppId         uint64
 	stakingAppId           uint64
 	settlementGraceDefault uint64
+	resolvesFrozen         bool
 }
 
 // readGlobals fetches the application once and extracts every global-state
@@ -302,7 +313,27 @@ func (c *Client) readGlobals(ctx context.Context) (escrowGlobals, error) {
 	if !foundTreasury {
 		return escrowGlobals{}, fmt.Errorf("escrow: treasury global not found on app %d", c.AppID)
 	}
+	g.resolvesFrozen = ProgramHasMethod(app.Params.ApprovalProgram, ResolveFrozenSignature)
 	return g, nil
+}
+
+// ResolveFrozenSignature is the ARC-4 signature of the admin call that ends a
+// frozen ticket. No payer calls it, so it is absent from the ABI these
+// bindings carry; the payer only needs to know whether the deployed app has it.
+const ResolveFrozenSignature = "resolveFrozen(byte[],uint64,byte[])void"
+
+// ProgramHasMethod reports whether an approval program carries the ARC-4
+// selector of signature. An ARC-4 router matches each call's first
+// application argument against its methods' selectors, so a method the program
+// routes has its 4-byte selector somewhere in the bytecode. A chance match in
+// other bytes is possible but unlikely at these program sizes, and a program
+// without the selector cannot route the method.
+func ProgramHasMethod(program []byte, signature string) bool {
+	m, err := abi.MethodFromSignature(signature)
+	if err != nil || len(program) == 0 {
+		return false
+	}
+	return bytes.Contains(program, m.GetSelector())
 }
 
 // RefreshAssetIDs loads UsdcAssetID and HayAssetID from the contract's
@@ -1819,6 +1850,14 @@ type SettleArgs struct {
 	// that doesn't know should pass 1 for headroom. Ignored by the
 	// single-app-call composers, which read the real box days themselves.
 	GapOpUps uint64
+	// OuterFeeOnly is set by a caller that read the box and expects this call
+	// not to finalize the ticket: a first half on an open box, or a half that
+	// mismatches an operator claim and so takes the contract's freeze branch.
+	// Neither fires a disbursement or an op-up, so ComposeSettleStandalone
+	// pays for the outer call alone. A call that does reach finalize with it
+	// set, because a matching node half landed after the read, reverts for
+	// want of fee, which commits nothing.
+	OuterFeeOnly bool
 }
 
 // ProtestReasonCode is the payer-asserted reason carried as a
@@ -1957,6 +1996,10 @@ func (c *Client) ComposeSettleStandalone(ctx context.Context, args SettleArgs, s
 	if _, err := types.DecodeAddress(args.OperatorOwnerAddr); err != nil {
 		return CallResult{}, fmt.Errorf("escrow: settle operator owner addr: %w", err)
 	}
+	var inners uint64
+	if !args.OuterFeeOnly {
+		inners = SettleInnerCount(args.AmountCharged, args.MaxPrice) + 1 + c.gapSettleOpUps(ctx, args.OperatorID, args.NodeID)
+	}
 	return c.submitSingle(ctx, "settle", signer, signerAddr,
 		[]any{
 			args.TicketIDRaw,
@@ -1999,7 +2042,7 @@ func (c *Client) ComposeSettleStandalone(ctx context.Context, args SettleArgs, s
 		// revenue-ring gap so a long-idle node's settle finalizes instead of
 		// reverting for want of fee (see proto/SPEC.md "Atomic settle group").
 		// No on-chain ed25519verify_bare in settle().
-		SettleInnerCount(args.AmountCharged, args.MaxPrice)+1+c.gapSettleOpUps(ctx, args.OperatorID, args.NodeID),
+		inners,
 	)
 }
 

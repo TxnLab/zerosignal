@@ -17,7 +17,15 @@ import { refOf } from './operator.js'
 import type { OpenHandle, TicketJournal } from './parts.js'
 import { type Clock, type Logger, discardLogger } from './ports.js'
 import { withJournalTimeout } from './receipt-check.js'
-import { DEFAULT_LAPSE_FALLBACK_MS, type ReconcileAction, type TicketRecord, decideTicket } from './reconcile.js'
+import {
+    DEFAULT_LAPSE_FALLBACK_MS,
+    type ReconcileAction,
+    type SettleArgs,
+    type TicketRecord,
+    decideTicket,
+    judgeClaim,
+    signedArgs,
+} from './reconcile.js'
 import { idle } from './sleep.js'
 import { guardRecords } from './spend-guard.js'
 import { decodeTicketId } from './wallet.js'
@@ -39,6 +47,14 @@ export interface TicketChain {
     refund(rec: TicketRecord, signal: AbortSignal): Promise<string>
     lapse(rec: TicketRecord, box: TicketBox | null, signal: AbortSignal): Promise<string>
     resettle(rec: TicketRecord, box: TicketBox | null, signal: AbortSignal): Promise<string>
+    /** Sends the payer's settle at args, against an operator claim on box that takes more. */
+    freeze(rec: TicketRecord, box: TicketBox | null, args: SettleArgs, signal: AbortSignal): Promise<string>
+    /**
+     * Whether the deployed escrow has resolveFrozen. Without it freeze is never
+     * called: the frozen escrow would be locked for good. A rejection reads as
+     * false. Go's ticketChain.freezes.
+     */
+    freezes(signal: AbortSignal): Promise<boolean>
 }
 
 /**
@@ -56,6 +72,22 @@ export function walletChain(wallet: object): TicketChain | undefined {
         operatorId: BigInt(rec.target.op),
         nodeId: BigInt(rec.target.node),
     })
+    const settleAt = async (what: string, rec: TicketRecord, box: TicketBox | null, args: SettleArgs, outerFeeOnly: boolean, signal: AbortSignal) => {
+        const r = await wrap(what, async () =>
+            chain.settleStandalone(
+                {
+                    ...ids(rec),
+                    args,
+                    maxPrice: rec.maxPrice,
+                    payer,
+                    operatorOwnerAddr: box?.operatorOwnerAddr ?? '',
+                    ...(outerFeeOnly ? { outerFeeOnly } : {}),
+                },
+                signal,
+            ),
+        )
+        return r.txid
+    }
     return {
         readBox: async (ticketId, signal) => chain.readTicketBox(decodeTicketId(ticketId), signal),
         refund: (rec, signal) => wrap('refund-inactive', async () => chain.refundInactive({ ...ids(rec), payer }, signal)),
@@ -66,19 +98,15 @@ export function walletChain(wallet: object): TicketChain | undefined {
         resettle: async (rec, box, signal) => {
             const settle = rec.settle
             if (settle === undefined) throw new Error('wallet: re-settle without a recorded receipt')
-            const r = await wrap('re-settle', async () =>
-                chain.settleStandalone(
-                    {
-                        ...ids(rec),
-                        args: settle,
-                        maxPrice: rec.maxPrice,
-                        payer,
-                        operatorOwnerAddr: box?.operatorOwnerAddr ?? '',
-                    },
-                    signal,
-                ),
-            )
-            return r.txid
+            return settleAt('re-settle', rec, box, settle, false, signal)
+        },
+        freeze: (rec, box, args, signal) => settleAt('freeze', rec, box, args, true, signal),
+        freezes: async (signal) => {
+            try {
+                return (await chain.config(signal)).resolvesFrozen === true
+            } catch {
+                return false
+            }
         },
     }
 }
@@ -97,6 +125,13 @@ export interface ReconcilerOptions {
      * what a restart left behind.
      */
     spend?: SpendGuard | undefined
+    /**
+     * Hears of each ticket whose box carries an operator claim above the
+     * receipt its row records, every sweep that reads one, so the node is
+     * barred though the live ack never saw the claim: posted after its read,
+     * or after a restart. Go's reconciler.overclaimed.
+     */
+    overclaimed?: ((rec: TicketRecord) => void) | undefined
     logger?: Logger | undefined
     clock?: Clock | undefined
 }
@@ -104,7 +139,10 @@ export interface ReconcilerOptions {
 /**
  * Reconciler finishes journaled tickets this process is not watching: those
  * left by an earlier run, and those whose refund watchdog gave up. Each
- * ticket has one driver at a time; a live ticket stays with the watchdog.
+ * ticket has one driver at a time; a live ticket stays with the watchdog,
+ * except for a freeze. The watchdog acts only past the deadline and the live
+ * ack reads the box once, so an over-claim the node posts after that read, or
+ * after the ack failed, would otherwise lapse.
  */
 export class Reconciler {
     interval = RECONCILE_INTERVAL_MS
@@ -126,6 +164,7 @@ export class Reconciler {
     readonly #deployment: ResolvedNetwork
     readonly #watching: (ticketId: string) => boolean
     readonly #spend: SpendGuard | undefined
+    readonly #overclaimed: ((rec: TicketRecord) => void) | undefined
     readonly #log: Logger
     readonly #clock: Clock
     readonly #failures = new Map<string, number>()
@@ -140,6 +179,7 @@ export class Reconciler {
         this.#deployment = o.deployment
         this.#watching = o.watching
         this.#spend = o.spend
+        this.#overclaimed = o.overclaimed
         this.#log = o.logger ?? discardLogger
         this.#clock = o.clock ?? Date.now
     }
@@ -186,14 +226,22 @@ export class Reconciler {
             if (!this.#stopped()) this.#log.warn('ticket reconciler: journal read failed', { err: message(err) })
             return
         }
+        // Asked once a sweep: the answer is the deployment's.
+        let freezes: boolean | undefined
+        const canFreeze = async () => (freezes ??= await this.#bounded((signal) => this.#chain.freezes(signal)).catch(() => false))
         for (const rec of recs) {
             if (this.#stopped()) return
-            if (this.#watching(rec.ticketId) || this.#exhausted(rec.ticketId)) continue
+            if (this.#exhausted(rec.ticketId)) continue
+            // A watched row is read only when it records a receipt, the one
+            // case a freeze can come of, and only on an escrow that can
+            // resolve one.
+            const watched = this.#watching(rec.ticketId)
+            if (watched && (signedArgs(rec) === undefined || !(await canFreeze()))) continue
             // A row that throws, a box it can't decide say, must not end the
             // sweep loop for the rows after it. It counts as a failed
             // attempt, so a row that always throws is given up on.
             try {
-                await this.#reconcile(rec)
+                await this.#reconcile(rec, watched, canFreeze)
             } catch (err) {
                 this.#failed(rec, 'reconcile', err)
             }
@@ -204,7 +252,9 @@ export class Reconciler {
         return (this.#failures.get(ticketId) ?? 0) >= RECONCILE_MAX_FAILURES
     }
 
-    async #reconcile(rec: TicketRecord): Promise<void> {
+    // A watched ticket gets a freeze or nothing: every other call is its
+    // watchdog's.
+    async #reconcile(rec: TicketRecord, watched: boolean, canFreeze: () => Promise<boolean>): Promise<void> {
         let box: TicketBox | null
         try {
             box = await this.#bounded((signal) => this.#chain.readBox(rec.ticketId, signal))
@@ -212,7 +262,13 @@ export class Reconciler {
             this.#log.debug('ticket reconciler: box read failed; retrying next sweep', { ticket_id: rec.ticketId, err: message(err) })
             return
         }
-        const action = decideTicket(rec, box, { nowMs: this.#clock() }, this.lapseFallbackMs)
+        let action = decideTicket(rec, box, { nowMs: this.#clock() }, this.lapseFallbackMs)
+        const signed = signedArgs(rec)
+        if (signed !== undefined && this.#overclaimed && judgeClaim(signed, box) === 'overclaims') this.#overclaimed(rec)
+        // No freeze, and still no lapse: decideSettlement never lapses an
+        // over-claim, which the operator can lapse itself.
+        if (action === 'freeze' && !(await canFreeze())) action = 'wait'
+        if (watched && action !== 'freeze') return
         let submit: (signal: AbortSignal) => Promise<string>
         switch (action) {
             case 'wait':
@@ -229,6 +285,13 @@ export class Reconciler {
             case 'settle':
                 submit = (signal) => this.#chain.resettle(rec, box, signal)
                 break
+            case 'freeze': {
+                // The receipt's values, not the box's: settling at the claim's
+                // own figure would match it and pay it.
+                const args = signedArgs(rec)!
+                submit = (signal) => this.#chain.freeze(rec, box, args, signal)
+                break
+            }
         }
         let txid: string
         try {
@@ -240,6 +303,17 @@ export class Reconciler {
         }
         // Kept until a later sweep finds the box gone: a submitted call is not
         // a confirmed one.
+        if (action === 'freeze') {
+            // Warn: the escrow now goes to arbitration rather than settlement,
+            // on the operator's doing.
+            this.#log.warn("ticket reconciler: operator's settle claim exceeds its signed receipt; submitted the receipt's settle to freeze the ticket", {
+                ticket_id: rec.ticketId,
+                txid,
+                claimed_microusdc: Number(box?.pendingAmount ?? 0n),
+                receipt_microusdc: Number(signedArgs(rec)?.amountCharged ?? 0n),
+            })
+            return
+        }
         this.#log.info(`ticket reconciler: submitted ${action}`, { ticket_id: rec.ticketId, txid })
         const spend = this.#spend
         if (spend === undefined) return
@@ -378,6 +452,18 @@ export async function journalReceipt(d: JournalDeps, h: OpenHandle, receipt: Usa
     const opened = journaled.get(h)
     if (d.journal === undefined || opened === undefined) return
     await d.journal.put({ ...opened, status: 'settle_pending', settle: settleArgsOf(receipt), updatedAt: d.clock() })
+}
+
+/**
+ * journalSigned records a receipt whose signature verified but that failed a
+ * later check, on the row's open status: the payer settles nothing from it,
+ * but a sweep holds an operator claim against its amount, after a restart as
+ * before one. Go's journalSigned. The caller bounds and logs the write.
+ */
+export async function journalSigned(d: JournalDeps, h: OpenHandle, receipt: UsageReceipt): Promise<void> {
+    const opened = journaled.get(h)
+    if (d.journal === undefined || opened === undefined) return
+    await d.journal.put({ ...opened, signed: settleArgsOf(receipt), updatedAt: d.clock() })
 }
 
 async function wrap<T>(what: string, call: () => Promise<T>): Promise<T> {

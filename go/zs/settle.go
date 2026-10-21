@@ -17,10 +17,12 @@ type SettleKind string
 
 const (
 	// SettleNone: the turn opened no escrow, no receipt arrived, or the
-	// receipt called for nothing on chain (a violation the contract would not
-	// accept a protest for). An escrow opened without a submit is the refund
-	// watchdog's and the journal's to recover. A submit that panicked also
-	// reports SettleNone, with an error.
+	// receipt called for nothing on chain: a violation the contract would not
+	// accept a protest for, or an operator claim already on the ticket that
+	// contradicts the receipt without taking more, which the payer leaves to
+	// lapse rather than freeze. An escrow opened without a submit is the
+	// refund watchdog's and the journal's to recover. A submit that panicked
+	// also reports SettleNone, with an error.
 	SettleNone SettleKind = ""
 	// SettleAtomic: the node's pre-signed group with the payer's half, which
 	// finishes the ticket once it lands.
@@ -32,7 +34,9 @@ const (
 	SettlePayerAck SettleKind = "payer_ack"
 	// SettleProtest: the receipt's body hash did not match the content, so
 	// the payer protested, which freezes the ticket for arbitration once it
-	// lands.
+	// lands. When the contract refused the protest and the operator's claim
+	// on the ticket takes more than the receipt, the submit is instead the
+	// payer's settle at the receipt's values, which freezes it as well.
 	SettleProtest SettleKind = "protest"
 )
 
@@ -47,6 +51,10 @@ type Settlement struct {
 	// NetworkFees is the payer's fee for the submit, in base units of the
 	// deployment's FeeUnit.
 	NetworkFees uint64
+	// Frozen is set when the submit freezes the ticket once it lands, leaving
+	// its escrow to arbitration: a protest, or the payer's settle against an
+	// operator claim above the receipt, under any Kind.
+	Frozen bool
 }
 
 // settlement is a submit's Settlement, its fee under both names.

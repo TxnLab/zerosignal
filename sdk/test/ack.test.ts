@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// ackSettle, checked against testdata/ack_settle_vectors.json, which Go's
-// ackSettle generates; then checkReceipt, settleArgsOf and settleGroupSpecOf.
+// ackSettle and judgeClaim, checked against testdata/ack_settle_vectors.json,
+// which Go's ackSettle and judgeClaim generate; then checkReceipt, settleArgsOf
+// and settleGroupSpecOf.
 
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -16,11 +17,14 @@ import { type Ticket, type UsageReceipt, receiptSigDigest, signReceipt } from '@
 
 import {
     type AckSettlePorts,
+    type ClaimVerdict,
     discardLogger,
     SettleGroupRejectedError,
     type SettleGroupSpec,
+    type TicketBoxView,
     ackSettle,
     checkReceipt,
+    judgeClaim,
     settleArgsOf,
     settleGroupSpecOf,
 } from '../src/index.js'
@@ -30,26 +34,99 @@ interface Scenario {
     atomic: boolean
     spec: string
     group: string
+    claim: string
     standalone: string
+    freeze: string
+    half: string
+    resolves_frozen: boolean
     want: {
         calls: string[]
         txid: string
         fee_microalgos: number
         group_rejected: boolean
+        claim: ClaimVerdict
+        payer_settle: boolean
+        frozen: boolean
         result: string
     }
 }
 
+interface VectorSettle {
+    amount_charged: number
+    receipt_digest: string
+    ttft_ms: number
+    decode_ms: number
+    input_tokens: number
+    output_tokens: number
+    output_usage_type: number
+    aux_output_usage_type: number
+    aux_output_count: number
+}
+
+interface VectorBox {
+    status: number
+    pending_by: number
+    expires_at: number
+    settlement_grace_seconds: number
+    pending_amount: number
+    pending_digest: string
+    pending_ttft_ms: number
+    pending_decode_ms: number
+    pending_input_count: number
+    pending_output_count: number
+    pending_output_usage_type: number
+    pending_aux_output_usage_type: number
+    pending_aux_output_count: number
+}
+
+interface Claim {
+    name: string
+    settle: VectorSettle
+    box: VectorBox | null
+    verdict: ClaimVerdict
+}
+
 const vectors = JSON.parse(
     readFileSync(new URL('../../testdata/ack_settle_vectors.json', import.meta.url), 'utf8'),
-) as { scenarios: Scenario[] }
+) as { scenarios: Scenario[]; claims: Claim[] }
 
 const groupErr = new Error('group submit')
 const standaloneErr = new Error('standalone submit')
+const freezeErr = new Error('freeze submit')
+const halfErr = new Error('half submit')
 
-// The same scripted ports as Go's runAckSettleScenario.
-function scripted(sc: Pick<Scenario, 'spec' | 'group' | 'standalone'>, calls: string[]): AckSettlePorts {
+// The same scripted ports as Go's runAckSettleScenario. A scenario without a
+// claim scripts no claim port, which reads nothing, one without a freeze no
+// freeze port, which freezes through standalone, and one without
+// resolves_frozen no resolvesFrozen port, which sends no freeze and no half.
+function scripted(
+    sc: Pick<Scenario, 'spec' | 'group' | 'standalone'> & { claim?: string; freeze?: string; half?: string; resolves_frozen?: boolean },
+    calls: string[],
+): AckSettlePorts {
+    const { claim, freeze, half, resolves_frozen: resolves } = sc
     return {
+        ...(freeze !== undefined && {
+            freeze: async () => {
+                calls.push('freeze')
+                if (freeze === 'error') throw freezeErr
+                return { txid: 'FREEZETX', payerFeeMicroalgos: 1000n }
+            },
+        }),
+        ...(half !== undefined && {
+            half: async () => {
+                calls.push('half')
+                if (half === 'error') throw halfErr
+                return { txid: 'HALFTX', payerFeeMicroalgos: 1000n }
+            },
+        }),
+        ...(resolves !== undefined && { resolvesFrozen: async () => resolves }),
+        ...(claim !== undefined && {
+            claim: async () => {
+                calls.push('claim')
+                if (claim === 'error') throw new Error('box read')
+                return claim as ClaimVerdict
+            },
+        }),
         spec: async () => {
             calls.push('spec')
             if (sc.spec === 'error') throw new Error('spec')
@@ -76,14 +153,107 @@ describe('ackSettle vectors', () => {
     it.each(vectors.scenarios.map((s) => [s.name, s] as const))('%s', async (_name, sc) => {
         const calls: string[] = []
         const res = await ackSettle({ atomic: sc.atomic, ...scripted(sc, calls) })
-        const result = res.err === undefined ? 'ok' : res.err === groupErr ? 'group' : res.err === standaloneErr ? 'standalone' : 'other'
+        const errs = new Map<unknown, string>([
+            [groupErr, 'group'],
+            [standaloneErr, 'standalone'],
+            [freezeErr, 'freeze'],
+            [halfErr, 'half'],
+        ])
+        const result = res.err === undefined ? 'ok' : (errs.get(res.err) ?? 'other')
         expect({
             calls,
             txid: res.txid,
             fee_microalgos: res.feeMicroalgos,
             group_rejected: res.groupRejected,
+            claim: res.claim ?? '',
+            payer_settle: res.payerSettle ?? false,
+            frozen: res.frozen ?? false,
             result,
         }).toEqual(sc.want)
+    })
+})
+
+const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
+
+function boxOf(b: VectorBox): TicketBoxView {
+    return {
+        status: b.status,
+        pendingBy: b.pending_by,
+        expiresAt: BigInt(b.expires_at),
+        settlementGraceSeconds: BigInt(b.settlement_grace_seconds),
+        pendingAmount: BigInt(b.pending_amount),
+        pendingDigest: b64(b.pending_digest),
+        pendingTtftMs: BigInt(b.pending_ttft_ms),
+        pendingDecodeMs: BigInt(b.pending_decode_ms),
+        pendingInputCount: BigInt(b.pending_input_count),
+        pendingOutputCount: BigInt(b.pending_output_count),
+        pendingOutputUsageType: b.pending_output_usage_type,
+        pendingAuxOutputUsageType: b.pending_aux_output_usage_type,
+        pendingAuxOutputCount: BigInt(b.pending_aux_output_count),
+    }
+}
+
+describe('judgeClaim vectors', () => {
+    it('covers every verdict a box can give', () => {
+        expect(new Set(vectors.claims.map((c) => c.verdict))).toEqual(new Set(['none', 'open', 'agrees', 'overclaims', 'contradicts']))
+    })
+    it.each(vectors.claims.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+        const s = c.settle
+        const args = {
+            amountCharged: BigInt(s.amount_charged),
+            receiptDigest: b64(s.receipt_digest),
+            ttftMs: BigInt(s.ttft_ms),
+            decodeMs: BigInt(s.decode_ms),
+            inputTokens: BigInt(s.input_tokens),
+            outputTokens: BigInt(s.output_tokens),
+            outputUsageType: s.output_usage_type,
+            auxOutputUsageType: s.aux_output_usage_type,
+            auxOutputCount: BigInt(s.aux_output_count),
+        }
+        expect(judgeClaim(args, c.box === null ? null : boxOf(c.box))).toBe(c.verdict)
+    })
+})
+
+describe('ackSettle without a claim port', () => {
+    // A host's own ports may not read the box: the ack then goes out as before.
+    it('acks standalone and reports no claim', async () => {
+        const calls: string[] = []
+        const res = await ackSettle({ atomic: false, ...scripted({ spec: 'ok', group: 'ok', standalone: 'ok' }, calls) })
+        expect(calls).toEqual(['standalone'])
+        expect(res).toMatchObject({ txid: 'STANDALONETX', claim: '' })
+    })
+
+    // Nor may they size a freeze: an over-claim is then frozen through the
+    // plain standalone settle, which overpays but still freezes.
+    it('freezes through standalone without a freeze port', async () => {
+        const calls: string[] = []
+        const res = await ackSettle({
+            atomic: false,
+            ...scripted({ spec: 'ok', group: 'ok', claim: 'overclaims', standalone: 'ok', resolves_frozen: true }, calls),
+        })
+        expect(calls).toEqual(['claim', 'standalone'])
+        expect(res).toMatchObject({ txid: 'STANDALONETX', claim: 'overclaims', frozen: true })
+    })
+
+    // Ports that can't say whether the escrow resolves a frozen ticket send
+    // neither a freeze nor the half after a failed group, as on an escrow
+    // without resolveFrozen.
+    it.each([
+        ['no resolvesFrozen port', undefined],
+        ['a resolvesFrozen port that rejects', 'rejects'],
+    ] as const)('sends no freeze and no half with %s', async (_name, how) => {
+        for (const [atomic, group, claim] of [
+            [false, 'ok', 'overclaims'],
+            [true, 'error', 'overclaims'],
+            [true, 'error', 'open'],
+        ] as const) {
+            const calls: string[] = []
+            const ports = scripted({ spec: 'ok', group, claim, standalone: 'ok', freeze: 'ok', half: 'ok' }, calls)
+            if (how === 'rejects') ports.resolvesFrozen = async () => Promise.reject(new Error('algod down'))
+            const res = await ackSettle({ atomic, ...ports })
+            expect(calls.filter((c) => c === 'freeze' || c === 'half' || c === 'standalone'), `${group} ${claim}`).toEqual([])
+            expect(res.payerSettle ?? false).toBe(false)
+        }
     })
 })
 

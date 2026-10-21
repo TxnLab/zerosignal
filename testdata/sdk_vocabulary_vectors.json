@@ -117,7 +117,8 @@
       "txId",
       "feesMicroAlgos",
       "atomic",
-      "networkFees"
+      "networkFees",
+      "frozen"
     ],
     "tool.status": [
       "itemId",
@@ -179,7 +180,8 @@
       "kind",
       "txId",
       "feesMicroAlgos",
-      "networkFees"
+      "networkFees",
+      "frozen"
     ],
     "Ticket": [
       "id",
@@ -198,7 +200,8 @@
       "status",
       "createdAt",
       "updatedAt",
-      "settle"
+      "settle",
+      "signed"
     ]
   },
   "enums": {

@@ -16,8 +16,9 @@ import { bodyHashOfBody } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult } from '../src/ack.js'
 import { feeUnitOf } from '../src/network.js'
-import type { OpenHandle, SettleOutcome } from '../src/parts.js'
+import type { OpenHandle, OverclaimFreeze, SettleOutcome } from '../src/parts.js'
 import type { LogAttrs, Logger } from '../src/ports.js'
+import type { ClaimVerdict } from '../src/reconcile.js'
 import { testOperator } from './fixtures.js'
 
 const groupVectors = JSON.parse(
@@ -98,9 +99,16 @@ export interface Scripted {
     txid?: string
     fee?: number
     groupRejected?: boolean
+    /** The claim verdict the ack reports. */
+    claim?: ClaimVerdict
+    /** AckSettleResult's payerSettle and frozen. */
+    payerSettle?: boolean
+    frozen?: boolean
     err?: unknown
     throws?: unknown
     outcomes?: (SettleOutcome | Error)[]
+    /** Gives the handle a freezeOverclaim answering this. */
+    freeze?: OverclaimFreeze
 }
 
 /** An OpenHandle whose ack and protest answer from s, Go's scriptedSettleHandle. */
@@ -121,6 +129,9 @@ export function handleOf(s: Scripted = {}) {
             if (s.throws !== undefined) throw s.throws
             const res: AckSettleResult = { txid: s.err ? '' : (s.txid ?? ''), feeMicroalgos: s.err ? 0 : (s.fee ?? 0), groupRejected: s.groupRejected ?? false }
             if (s.err) res.err = s.err
+            if (s.claim !== undefined) res.claim = s.claim
+            if (s.payerSettle !== undefined) res.payerSettle = s.payerSettle
+            if (s.frozen !== undefined) res.frozen = s.frozen
             return res
         },
         async protest(r: UsageReceipt, excerpt: Uint8Array, reason: number, signal?: AbortSignal) {
@@ -135,6 +146,10 @@ export function handleOf(s: Scripted = {}) {
         async settleLapsed() {
             return ''
         },
+    }
+    if (s.freeze !== undefined) {
+        const freeze = s.freeze
+        Object.assign(h, { freezeOverclaim: async (): Promise<OverclaimFreeze> => freeze })
     }
     if (s.outcomes !== undefined) {
         const script = s.outcomes

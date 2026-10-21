@@ -33,11 +33,11 @@ type fakeSettlementHandle struct {
 	protestCalls  int
 }
 
-func (f *fakeSettlementHandle) AckSettle(_ context.Context, _ *ticket.UsageReceipt, _ string) (string, uint64, bool, error) {
+func (f *fakeSettlementHandle) AckSettle(_ context.Context, _ *ticket.UsageReceipt, _ string) (AckResult, error) {
 	f.ackCalls++
 	// err=nil, so the dispatcher takes the success branch — the exact path where
 	// the Resolve-gate must NOT un-track a rejected-then-standalone settle.
-	return "STANDALONE_ACK_TXID", 5000, f.groupRejected, nil
+	return AckResult{TxID: "STANDALONE_ACK_TXID", FeeMicroalgos: 5000, GroupRejected: f.groupRejected}, nil
 }
 
 func (f *fakeSettlementHandle) Protest(_ context.Context, _ *ticket.UsageReceipt, _ []byte, _ escrow.ProtestReasonCode) (string, uint64, error) {

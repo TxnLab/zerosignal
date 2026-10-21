@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import algosdk from 'algosdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { PENDING_BY_OPERATOR, STATUS_OPEN, STATUS_PENDING_SETTLE, type TicketRecord } from '@txnlab/zs-proto/escrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 
@@ -33,6 +34,7 @@ vi.mock('../src/escrow/settle.js', async (importOriginal) => {
 const {
     BelowTargetError,
     MbrDepositUnaffordableError,
+    NoResolveFrozenError,
     NoSettleAckRouteError,
     OpenGroupRejectedError,
     OpenTopUpError,
@@ -128,9 +130,11 @@ class FakeChain implements EscrowChain {
             appAddress: s.app_address,
             usdcAssetId: BigInt(s.usdc_asset_id),
             settlementGraceDefault: this.grace,
+            resolvesFrozen: this.resolvesFrozen,
         }
     }
     grace = 300n
+    resolvesFrozen = true
     protocolFeeBps = async (signal?: AbortSignal) => {
         this.signals.protocolFeeBps = signal
         return 250
@@ -177,7 +181,8 @@ class FakeChain implements EscrowChain {
     withdrawMbr = (payer: string, amount: bigint, signal?: AbortSignal) =>
         this.#record('withdrawMbr', [payer, amount], 'WITHDRAW', signal)
     closeDeposit = (payer: string, signal?: AbortSignal) => this.#record('closeDeposit', payer, 'CLOSE', signal)
-    readTicketBox = (ticketIdRaw: Uint8Array, signal?: AbortSignal) => this.#record('readTicketBox', ticketIdRaw, null, signal)
+    readTicketBox = (ticketIdRaw: Uint8Array, signal?: AbortSignal) =>
+        this.#record<TicketRecord | null>('readTicketBox', ticketIdRaw, null, signal)
 }
 
 class SendRevert extends Error {}
@@ -808,15 +813,90 @@ describe('OpenHandle', () => {
         nodeId: BigInt(s.node_id),
     }
 
+    const acked = { txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false, claim: 'none', payerSettle: true, frozen: false }
+
     it('acks standalone when the node sent no group', async () => {
         const r = await (await open()).ackSettle(receipt, null)
-        expect(r).toEqual({ txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false })
+        expect(r).toEqual(acked)
         expect(chain.calls.settleStandalone).toEqual([standaloneCall])
+        expect(chain.calls.readTicketBox).toEqual([decodeTicketId(s.ticket_id_b64)])
     })
 
     it('reads an empty group as none', async () => {
         const r = await (await open()).ackSettle(receipt, '')
-        expect(r).toEqual({ txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false })
+        expect(r).toEqual(acked)
+    })
+
+    // The box read before a standalone ack is the operator's claim as the
+    // contract holds it, judged against the receipt.
+    describe('reads the operator claim on the box', () => {
+        const a = settleArgsOf(receipt)
+        const claimBox = (amount: bigint, digest = a.receiptDigest) =>
+            ({
+                status: STATUS_PENDING_SETTLE,
+                pendingBy: PENDING_BY_OPERATOR,
+                expiresAt: 0n,
+                settlementGraceSeconds: 0n,
+                pendingAmount: amount,
+                pendingDigest: digest,
+                pendingTtftMs: a.ttftMs,
+                pendingDecodeMs: a.decodeMs,
+                pendingInputCount: a.inputTokens,
+                pendingOutputCount: a.outputTokens,
+                pendingOutputUsageType: a.outputUsageType,
+                pendingAuxOutputUsageType: a.auxOutputUsageType,
+                pendingAuxOutputCount: a.auxOutputCount,
+            }) as unknown as TicketRecord
+        const other = new Uint8Array(32).fill(7)
+
+        // An over-claim's ack is sized for the freeze it causes.
+        it.each([
+            ['matching the receipt', claimBox(a.amountCharged), 'agrees', [standaloneCall]],
+            ['above the receipt', claimBox(a.amountCharged + 1n, other), 'overclaims', [{ ...standaloneCall, outerFeeOnly: true }]],
+            ['below the receipt', claimBox(a.amountCharged - 1n, other), 'contradicts', undefined],
+        ] as const)('%s', async (_name, box, claim, sent) => {
+            chain.readTicketBox = async () => box
+            const r = await (await open()).ackSettle(receipt, null)
+            expect(r.claim).toBe(claim)
+            expect(chain.calls.settleStandalone).toEqual(sent)
+        })
+
+        it('acks anyway when the read fails', async () => {
+            chain.fail.readTicketBox = new Error('algod down')
+            const r = await (await open()).ackSettle(receipt, null)
+            expect(r).toMatchObject({ txid: 'STANDALONE', claim: 'unreadable' })
+        })
+
+        it('freezes only an over-claim, at the receipt', async () => {
+            const h = await open()
+            chain.readTicketBox = async () => claimBox(a.amountCharged - 1n, other)
+            expect(await h.freezeOverclaim!(receipt)).toEqual({ claim: 'contradicts' })
+            expect(chain.calls.settleStandalone).toBeUndefined()
+            chain.readTicketBox = async () => claimBox(a.amountCharged + 1n, other)
+            expect(await h.freezeOverclaim!(receipt)).toEqual({ claim: 'overclaims', call: { txid: 'STANDALONE', payerFeeMicroalgos: 5000n } })
+            // Sized for the freeze, which fires no disbursement.
+            expect(chain.calls.settleStandalone).toEqual([{ ...standaloneCall, outerFeeOnly: true }])
+            chain.fail.settleStandalone = new Error('algod down')
+            expect(await h.freezeOverclaim!(receipt)).toMatchObject({ claim: 'overclaims', err: expect.any(Error) })
+            chain.readTicketBox = async () => {
+                throw new Error('read')
+            }
+            expect(await h.freezeOverclaim!(receipt)).toMatchObject({ claim: 'unreadable', err: expect.any(Error) })
+        })
+
+        // Go's TestOpenHandle_AckSendsNoFreezeWithoutResolveFrozen: on an
+        // escrow without resolveFrozen neither the freeze nor the half after a
+        // failed group goes out, and the claim is still read and reported.
+        it('sends no freeze without resolveFrozen', async () => {
+            chain.resolvesFrozen = false
+            const h = await open()
+            chain.readTicketBox = async () => claimBox(a.amountCharged + 1n, other)
+            expect(await h.ackSettle(receipt, null)).toEqual({ txid: '', feeMicroalgos: 0, groupRejected: false, claim: 'overclaims' })
+            const f = await h.freezeOverclaim!(receipt)
+            expect(f.claim).toBe('overclaims')
+            expect(f.err).toBeInstanceOf(NoResolveFrozenError)
+            expect(chain.calls.settleStandalone).toBeUndefined()
+        })
     })
 
     // Without it the Client never sees an atomic settle land, and the journal
@@ -951,6 +1031,97 @@ describe('OpenHandle', () => {
             expect(String(r.err)).toMatch(/node answered 409/)
             expect(chain.sendMethods).toEqual(['open'])
             expect(chain.calls.settleStandalone).toBeUndefined()
+        })
+
+        // A node that pre-posted its half above the receipt can only see its
+        // group revert, so the failed delivery is no reason to wait: the
+        // payer freezes the claim before it can lapse.
+        it('freezes an operator claim above the receipt when the delivery fails', async () => {
+            atomic()
+            const h = await open()
+            const a = settleArgsOf(receipt)
+            chain.readTicketBox = async () =>
+                ({
+                    status: STATUS_PENDING_SETTLE,
+                    pendingBy: PENDING_BY_OPERATOR,
+                    expiresAt: 0n,
+                    settlementGraceSeconds: 0n,
+                    pendingAmount: a.amountCharged + 1n,
+                    pendingDigest: new Uint8Array(32).fill(7),
+                    pendingTtftMs: a.ttftMs,
+                    pendingDecodeMs: a.decodeMs,
+                    pendingInputCount: a.inputTokens,
+                    pendingOutputCount: a.outputTokens,
+                    pendingOutputUsageType: a.outputUsageType,
+                    pendingAuxOutputUsageType: a.auxOutputUsageType,
+                    pendingAuxOutputCount: a.auxOutputCount,
+                }) as unknown as TicketRecord
+            h.deliverAck = () => Promise.reject(new Error('zs: settle ack: node answered 500 '))
+            const r = await h.ackSettle(receipt, 'GROUP')
+            expect(r).toEqual({ txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false, claim: 'overclaims', payerSettle: true, frozen: true })
+            expect(chain.calls.settleStandalone).toEqual([{ ...standaloneCall, outerFeeOnly: true }])
+            expect(chain.sendMethods).toEqual(['open'])
+        })
+
+        const openBox = { status: STATUS_OPEN, pendingBy: 0, expiresAt: 0n, settlementGraceSeconds: 0n } as unknown as TicketRecord
+
+        // Over an open box the payer's half goes first, at the receipt and the
+        // outer call's fee, so a node half at another figure then freezes the
+        // ticket rather than lapsing. None goes to an escrow without
+        // resolveFrozen.
+        it.each([
+            ['resolveFrozen', true],
+            ['no resolveFrozen', false],
+        ] as const)("posts the payer's half on an open box when the delivery fails: %s", async (_name, resolves) => {
+            atomic()
+            chain.resolvesFrozen = resolves
+            const h = await open()
+            chain.readTicketBox = async () => openBox
+            h.deliverAck = () => Promise.reject(new Error('zs: settle ack: node answered 500 '))
+            const r = await h.ackSettle(receipt, 'GROUP')
+            if (resolves) {
+                expect(r).toEqual({ txid: 'STANDALONE', feeMicroalgos: 5000, groupRejected: false, claim: 'open', payerSettle: true, frozen: false })
+                expect(chain.calls.settleStandalone).toEqual([{ ...standaloneCall, outerFeeOnly: true }])
+            } else {
+                expect(r).toMatchObject({ txid: '', claim: 'open' })
+                expect(String(r.err)).toMatch(/node answered 500/)
+                expect(chain.calls.settleStandalone).toBeUndefined()
+            }
+            expect(chain.sendMethods).toEqual(['open'])
+        })
+
+        // Go's TestOpenHandle_AckAfterAStalledDeliveryStillPostsTheHalf: a
+        // delivery the node holds open spends the ack's whole signal. The box
+        // read after it, and the half it calls for, run on a budget of their
+        // own. A caller that aborts outright stops them too.
+        it.each([
+            ['timeout spent', () => AbortSignal.timeout(30), true],
+            [
+                'caller aborted',
+                () => {
+                    const c = new AbortController()
+                    setTimeout(() => c.abort(new Error('caller left')), 20)
+                    return c.signal
+                },
+                false,
+            ],
+        ] as const)("posts the half after a stalled delivery: %s", async (_name, signalOf, posted) => {
+            atomic()
+            const h = await open()
+            chain.readTicketBox = async (_raw: Uint8Array, signal?: AbortSignal) => {
+                signal?.throwIfAborted()
+                return openBox
+            }
+            h.deliverAck = (_ack, signal) =>
+                new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }))
+            const r = await h.ackSettle(receipt, 'GROUP', signalOf())
+            if (posted) {
+                expect(r).toMatchObject({ txid: 'STANDALONE', claim: 'open', payerSettle: true })
+                expect(chain.calls.settleStandalone).toEqual([{ ...standaloneCall, outerFeeOnly: true }])
+            } else {
+                expect(r).toMatchObject({ txid: '', claim: 'unreadable' })
+                expect(chain.calls.settleStandalone).toBeUndefined()
+            }
         })
 
         // The checks run before any hand-off, so a node contradicting its own

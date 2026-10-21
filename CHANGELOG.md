@@ -31,6 +31,68 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-20 — the payer freezes an operator claim above its receipt
+
+The payer now answers an operator's settle claim that it can see on the ticket box, by the
+rule in [`SPEC.md` §3a "Payer's check of an operator claim"](./SPEC.md): a claim above a
+receipt the node signed is frozen with the payer's settle at the receipt's values, and any
+other disagreement is left to lapse.
+
+**Only on a contract that has `resolveFrozen`.** A freeze locks the ticket's escrow until the
+admin's `resolveFrozen` decides the split. On a contract without it, a frozen ticket's
+escrow is locked for good, so a freeze would cost the payer the whole `max_price`. So the payer checks the deployed approval program for
+`resolveFrozen`'s ARC-4 selector when it loads the escrow config (`escrow.Client.ResolvesFrozen`,
+`EscrowChainConfig.ResolvesFrozen` / `resolvesFrozen`). Without it the payer sends no freeze:
+it does not ack an over-claim, which then lapses at the operator's figure, and it posts no half
+of its own after a failed ack. It still never lapses an over-claim itself, and still bars the
+node. The check does not cover the payer's first half from a standalone ack on an open or
+unreadable box, or the reconciler's resettle on an open box. Those go out as before, so a node
+half that lands after one at another figure still freezes the ticket.
+
+- **Ack:** before a standalone ack, and after the node's settle group fails to submit, the
+  payer reads the box. An over-claim gets the payer's settle at the receipt, which freezes the
+  ticket. Its node is excluded with `NodeExcluded` reason `settle_claim_exceeds_receipt`, and
+  the turn's `Settlement.Frozen` / `frozen` and `SettleSubmitted.Frozen` / `frozen` are set
+  when the freeze went out. After a failed group submit an `OPEN` box gets the payer's own half
+  at the receipt, so a node half posted later at any other value, a lower one included,
+  freezes the ticket instead of lapsing. Any other claim leaves the error standing, and
+  nothing is sent. The box read and that settle run on a time budget of their own, so an ack
+  delivery the node holds open cannot use theirs up. A claim that differs without taking more
+  is not acked: the turn's `Settlement` has kind `SettleNone` / `''` and no error.
+- **Protest:** a refused `body_hash` protest over an over-claim falls back to the payer's
+  settle at the receipt, reported as `SettleProtest` / `'protest'` with that settle's txid,
+  `Frozen` set, and a `NodeExcluded` after `ReceiptViolated`. A landed protest also reports
+  `Frozen`.
+- **Reconciler:** it freezes such a claim inside the window, including on a ticket the refund
+  watchdog still drives, and never lapses it. A receipt that failed its `body_hash` or amount
+  check after its signature verified is journaled as `TicketRecord.Signed` / `signed` on the
+  open row, so the reconciler holds the claim against it too. Every sweep that reads such a
+  claim bars the node.
+- **Refund watchdog:** it never posts `settleLapsed` for a claim above the receipt it saw, and
+  bars the node when it finds one. While it holds a receipt it does not post `settleLapsed`
+  after a box read that failed.
+- **Fees:** a freeze, and the payer's half on an `OPEN` box, pay for the outer call alone
+  (`escrow.SettleArgs.OuterFeeOnly`, `PayerSettleCall.outerFeeOnly`), since neither can
+  finalize: the contract's freeze branch and a first half fire no disbursement or op-up. The
+  half after a failed ack costs the payer one minimum fee and one algod submit from its IP.
+
+**Consumer-visible.**
+- Go's `OpenHandle.AckSettle` returns `(AckResult, error)`, with the claim's `ClaimVerdict`,
+  `PayerSettle` and `Frozen` on it.
+- `ClaimVerdict` gains `open` (`ClaimOpen`), for an `OPEN` box.
+- TS `AckSettleResult` gains optional `claim`, `payerSettle` and `frozen`, and
+  `AckSettlePorts` optional `claim()`, `freeze()`, `half()` and `resolvesFrozen()` ports.
+  `OpenHandle` gains an optional `freezeOverclaim`. A host's own handle without them behaves as
+  before, except that without `freeze()` an over-claim is frozen through `standalone()`, and
+  without `resolvesFrozen()` neither a freeze nor the half after a failed group submit is sent.
+- TS `ReconcileAction` gains `'freeze'`. A host with an exhaustive switch over reconciler
+  actions must handle it. TS `TicketChain` gains `freezes()`.
+- `TicketRecord` gains `Signed` / `signed`. A host journal must persist it as it persists
+  `Settle` / `settle`. Go's `FileJournal` writes it as `signed` in the same file version. An
+  older binary reads such a file, but its next journal write rewrites the whole file without
+  `signed` on any row.
+- `Settlement` and `SettleSubmitted` gain `Frozen` / `frozen`.
+
 ### 2026-10-19 — network fees are reported in the rail's coin (0.8.0)
 
 A payer's network fees now have names that do not assume ALGO, so a Solana rail can report

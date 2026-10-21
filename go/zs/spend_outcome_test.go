@@ -54,13 +54,15 @@ func (g *outcomeGuard) seen() []string {
 // ticket is only released. Where the outcome is still open, or unknown, it
 // says nothing.
 func TestReconciler_TellsTheSpendGuardHowATicketEnded(t *testing.T) {
-	claimed := func() *escrow.TicketRecord {
+	claimedAt := func(amount uint64) *escrow.TicketRecord {
 		b := box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute)
-		b.PendingAmount = 9
+		b.PendingAmount = amount
 		return b
 	}
-	// A receipt past the settle window, whose operator claim (9, not 7)
-	// the payer's settle would contradict.
+	claimed := func() *escrow.TicketRecord { return claimedAt(9) }
+	// A receipt past the settle window, whose operator claim (5, not 7) the
+	// payer's settle would contradict. A claim above the receipt is never
+	// lapsed by the payer, so it would report nothing.
 	receiptThenClaim := pendingRec(time.Hour)
 	for _, tc := range []struct {
 		name    string
@@ -73,7 +75,8 @@ func TestReconciler_TellsTheSpendGuardHowATicketEnded(t *testing.T) {
 		{"refund refused", openRec(), box(escrow.StatusOpen, 0, -time.Minute), errors.New("rejected"), nil},
 		{"lapse submitted", openRec(), claimed(), nil, []string{"settle T 9"}},
 		{"lapse refused", openRec(), claimed(), errors.New("rejected"), nil},
-		{"lapse submitted, receipt already counted", receiptThenClaim, claimed(), nil, []string{"release T"}},
+		{"lapse submitted, receipt already counted", receiptThenClaim, claimedAt(5), nil, []string{"release T"}},
+		{"claim above the receipt, never lapsed", receiptThenClaim, claimed(), nil, nil},
 		{"inside the window", openRec(), box(escrow.StatusOpen, 0, time.Hour), nil, nil},
 		{"re-settle submitted", pendingRec(time.Hour), box(escrow.StatusOpen, 0, time.Hour), nil, nil},
 		{"box gone, with a receipt", pendingRec(time.Hour), nil, nil, []string{"release T"}},

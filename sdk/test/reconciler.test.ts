@@ -109,6 +109,15 @@ class FakeChain implements TicketChain {
     refund = (rec: TicketRecord) => this.#record(`refund ${rec.ticketId}`)
     lapse = (rec: TicketRecord) => this.#record(`lapse ${rec.ticketId}`)
     resettle = (rec: TicketRecord) => this.#record(`settle ${rec.ticketId}`)
+    /** Each freeze's args, in order. */
+    frozeWith: SettleArgs[] = []
+    freeze = (rec: TicketRecord, _box: TicketBox | null, args: SettleArgs) => {
+        this.frozeWith.push(args)
+        return this.#record(`freeze ${rec.ticketId}`)
+    }
+    /** Fakes an escrow without resolveFrozen. */
+    noResolveFrozen = false
+    freezes = async () => !this.noResolveFrozen
 }
 
 // Owns the rows openRec writes, which name only app 7, as a row from before
@@ -282,6 +291,134 @@ describe('Reconciler', () => {
         expect(chain.calls.at(-1)).toBe('refund U')
     })
 
+    // The freeze goes out as the payer's settle at the journaled receipt, never
+    // the claim's own values, which would match the claim and pay it, and says
+    // so at warn. A receipt that failed a check is held against the claim the
+    // same way.
+    const overclaimBox = (deadlineIn = HOUR) =>
+        ({
+            ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, deadlineIn),
+            pendingAmount: settled.amountCharged + 100n,
+            pendingDigest: settled.receiptDigest,
+        }) as TicketBox
+    for (const [name, rec] of [
+        ['verified', pendingRec(HOUR)],
+        ['failed a check', openRec({ signed: settled })],
+    ] as const) {
+        it(`freezes an operator claim above the receipt with the receipt: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, rec)
+            const chain = new FakeChain()
+            chain.boxes.set('T', overclaimBox())
+            const { r, log } = testReconciler(j, chain)
+            await r.sweep()
+            expect([chain.calls, chain.frozeWith]).toEqual([['freeze T'], [settled]])
+            expect(log.logged).toEqual([
+                {
+                    level: 'warn',
+                    msg: "ticket reconciler: operator's settle claim exceeds its signed receipt; submitted the receipt's settle to freeze the ticket",
+                    attrs: { ticket_id: 'T', txid: 'TX', claimed_microusdc: 107, receipt_microusdc: 7 },
+                },
+            ])
+        })
+    }
+
+    // A ticket the watchdog drives is the sweep's for a freeze alone: the
+    // watchdog acts only past the deadline, so an over-claim the node posts
+    // after the live ack read the box, or after the ack failed, has nobody
+    // else to freeze it inside the window.
+    for (const [name, rec, b, want] of [
+        ['claim above a verified receipt', pendingRec(HOUR), overclaimBox(), ['freeze T']],
+        ['claim above a receipt that failed a check', openRec({ signed: settled }), overclaimBox(), ['freeze T']],
+        ['stranded receipt', pendingRec(HOUR), box(STATUS_OPEN, 0, HOUR), []],
+        ['claim above the receipt, past the lapse fallback', pendingRec(HOUR), overclaimBox(-11 * MIN), []],
+        ['open past the deadline', pendingRec(HOUR), box(STATUS_OPEN, 0, -MIN), []],
+        ['frozen', pendingRec(HOUR), box(STATUS_FROZEN, PENDING_BY_OPERATOR, HOUR), []],
+        ['gone', pendingRec(HOUR), null, []],
+    ] as const) {
+        it(`acts on a watched ticket only to freeze it: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, rec)
+            const chain = new FakeChain()
+            chain.boxes.set('T', b)
+            await testReconciler(j, chain, ['T']).r.sweep()
+            expect(chain.calls).toEqual(want)
+            expect(await ids(j)).toEqual(['T'])
+        })
+    }
+
+    // On an escrow without resolveFrozen a freeze would lock the ticket's
+    // escrow for good, so the sweep sends none: an unwatched over-claim is
+    // left to the operator's lapse, still never lapsed by the payer, and a
+    // watched row is not read at all. Go's
+    // TestReconciler_SendsNoFreezeWithoutResolveFrozen.
+    for (const [name, b, watched] of [
+        ['unwatched, inside the window', overclaimBox(), false],
+        ['unwatched, past the lapse fallback', overclaimBox(-11 * MIN), false],
+        ['watched', overclaimBox(), true],
+    ] as const) {
+        it(`sends no freeze without resolveFrozen: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, pendingRec(HOUR))
+            const chain = new FakeChain()
+            chain.noResolveFrozen = true
+            chain.boxes.set('T', b)
+            let reads = 0
+            const read = chain.readBox
+            chain.readBox = async (id: string) => (reads++, read(id))
+            await testReconciler(j, chain, watched ? ['T'] : []).r.sweep()
+            expect(chain.calls).toEqual([])
+            if (watched) expect(reads).toBe(0)
+        })
+    }
+
+    // Every sweep that reads an operator claim above the row's receipt bars
+    // the node, watched or not, inside the window or past it, and on an escrow
+    // without resolveFrozen too. No other claim does. Go's
+    // TestReconciler_BarsAnOverclaimingNode.
+    for (const [name, b, watched, noResolveFrozen, want] of [
+        ['claim above the receipt', overclaimBox(), false, false, true],
+        ['claim above the receipt, watched', overclaimBox(), true, false, true],
+        ['claim above the receipt, past the lapse fallback', overclaimBox(-11 * MIN), false, false, true],
+        ['claim above the receipt, no resolveFrozen', overclaimBox(), false, true, true],
+        ['claim matching the receipt', { ...overclaimBox(), pendingAmount: settled.amountCharged } as TicketBox, false, false, false],
+        ['claim below the receipt', { ...overclaimBox(), pendingAmount: settled.amountCharged - 1n } as TicketBox, false, false, false],
+        ['open', box(STATUS_OPEN, 0, HOUR), false, false, false],
+    ] as const) {
+        it(`bars a node claiming above its receipt: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, pendingRec(HOUR, { target: { op: 3, node: 4 } }))
+            const chain = new FakeChain()
+            chain.noResolveFrozen = noResolveFrozen
+            chain.boxes.set('T', b)
+            const barred: unknown[] = []
+            const r = new Reconciler({
+                journal: j,
+                chain,
+                payer: 'PAYER',
+                deployment: app7,
+                watching: (id) => watched && id === 'T',
+                overclaimed: (rec) => void barred.push(rec.target),
+                clock: () => NOW,
+            })
+            await r.sweep()
+            expect(barred).toEqual(want ? [{ op: 3, node: 4 }] : [])
+        })
+    }
+
+    it('never reads a watched row with no receipt', async () => {
+        const j = memoryJournal()
+        await put(j, openRec())
+        const chain = new FakeChain()
+        let reads = 0
+        chain.readBox = async () => {
+            reads++
+            return null
+        }
+        await testReconciler(j, chain, ['T']).r.sweep()
+        expect([reads, chain.calls]).toEqual([0, []])
+    })
+
     it('logs each submit it made', async () => {
         const j = memoryJournal()
         await put(j, openRec())
@@ -298,13 +435,19 @@ describe('Reconciler', () => {
     // its ticket is only released. Where the outcome is open or unknown it
     // hears nothing.
     describe('tells the SpendGuard how a ticket ended', () => {
-        const claimed = () => ({ ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, -11 * MIN), pendingAmount: 9n }) as TicketBox
+        const claimedAt = (amount: bigint) =>
+            ({ ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, -11 * MIN), pendingAmount: amount }) as TicketBox
+        const claimed = () => claimedAt(9n)
+        // A receipt past the settle window, whose operator claim (5, not 7)
+        // the payer's settle would contradict. A claim above the receipt is
+        // never lapsed by the payer, so it would report nothing.
         for (const [name, rec, b, callErr, want] of [
             ['refund submitted', openRec(), box(STATUS_OPEN, 0, -MIN), undefined, ['release T']],
             ['refund refused', openRec(), box(STATUS_OPEN, 0, -MIN), new Error('rejected'), []],
             ['lapse submitted', openRec(), claimed(), undefined, ['settle T 9']],
             ['lapse refused', openRec(), claimed(), new Error('rejected'), []],
-            ['lapse submitted, receipt already counted', pendingRec(HOUR), claimed(), undefined, ['release T']],
+            ['lapse submitted, receipt already counted', pendingRec(HOUR), claimedAt(5n), undefined, ['release T']],
+            ['claim above the receipt, never lapsed', pendingRec(HOUR), claimed(), undefined, []],
             ['inside the window', openRec(), box(STATUS_OPEN, 0, HOUR), undefined, []],
             ['re-settle submitted', pendingRec(HOUR), box(STATUS_OPEN, 0, HOUR), undefined, []],
             ['box gone, with a receipt', pendingRec(HOUR), null, undefined, ['release T']],
@@ -648,6 +791,38 @@ describe('walletChain', () => {
             readTicketBox: [decodeTicketId(TICKET_ID)],
         })
         for (const name of Object.keys(calls)) expect(signals[name], name).toBe(signal)
+    })
+
+    // A freeze sends the args it is handed, not the row's, and takes the
+    // contract's freeze branch, which pays for the outer call alone; a
+    // re-settle pays for the finalize it causes. Go's
+    // TestWalletChain_LapseAndResettleSubmit.
+    it('freezes with the args it is handed, paying the outer call alone', async () => {
+        const { w, calls } = wallet()
+        const chain = walletChain(w)!
+        const frozeAt = { ...settled, amountCharged: settled.amountCharged + 1n }
+        const signal = new AbortController().signal
+        expect(await chain.resettle(rec, owned, signal)).toBe('SETTLE')
+        expect(await chain.freeze(rec, owned, frozeAt, signal)).toBe('SETTLE')
+        expect(calls.settleStandalone).toEqual([
+            { ...ids, args: settled, maxPrice: 99n, payer: PAYER, operatorOwnerAddr: 'BOXOWNER' },
+            { ...ids, args: frozeAt, maxPrice: 99n, payer: PAYER, operatorOwnerAddr: 'BOXOWNER', outerFeeOnly: true },
+        ])
+    })
+
+    // The sweep's freezes reads the deployment's resolveFrozen, and a config
+    // it can't read is no evidence of one.
+    it('reports whether the escrow resolves a frozen ticket', async () => {
+        for (const [config, want] of [
+            [async () => ({ resolvesFrozen: true }), true],
+            [async () => ({ resolvesFrozen: false }), false],
+            [async () => ({}), false],
+            [async () => Promise.reject(new Error('algod down')), false],
+        ] as const) {
+            const chain = { config } as unknown as EscrowChain
+            const c = walletChain(new Wallet({ chain, signer: { address: PAYER } as Signer }))!
+            expect(await c.freezes(new AbortController().signal)).toBe(want)
+        }
     })
 
     it('refuses a re-settle with no recorded receipt, and names each failed call', async () => {

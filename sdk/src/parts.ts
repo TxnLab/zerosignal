@@ -19,13 +19,13 @@ import {
 } from '@txnlab/zs-proto/ticket'
 import { type SettleAck, usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 
-import type { AckSettleResult } from './ack.js'
+import type { AckSettleResult, SettleSubmission } from './ack.js'
 import type { AffinityStore } from './affinity.js'
 import { decodeOpenGroup } from './escrow/open.js'
 import { type ResolvedNetwork, ownsRecord } from './network.js'
 import { type Operator, refOf, sealRecipientOf } from './operator.js'
 import type { Clock, Fetch } from './ports.js'
-import type { SettleArgs, TicketRecord } from './reconcile.js'
+import type { ClaimVerdict, SettleArgs, TicketRecord } from './reconcile.js'
 import { type ReserveCall, type Reservation, reserve } from './reserve.js'
 import type { TargetBackoffStore } from './routing/backoff.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
@@ -223,6 +223,22 @@ export interface OpenHandle {
     ackSettle(receipt: UsageReceipt, settleGroup: string | null, signal?: AbortSignal): Promise<AckSettleResult>
     /** Freezes the ticket. The payer signs and pays for it. */
     protest(receipt: UsageReceipt, excerpt: Uint8Array, reason: ProtestReasonCode, signal?: AbortSignal): Promise<EscrowCall>
+    /**
+     * The protest's fallback, Go's freezeOverclaim: reads the operator's claim
+     * on the box and, only when it takes more than the receipt charges, sends
+     * the payer's settle at the receipt's values, which freezes the ticket. A
+     * contract that binds a protest to the operator's pending claim refuses one
+     * whose receipt digest differs from it, which is exactly the receipt a node
+     * over-claiming against its own receipt has handed out. Optional: without
+     * it a refused protest has no fallback.
+     *
+     * It never rejects, as ackSettle doesn't: call is the settle when one was
+     * sent, and err the failure, a read's (claim 'unreadable') or a send's
+     * (claim 'overclaims'), so the claim survives a send that failed. On an
+     * escrow without resolveFrozen it sends nothing, and err is a
+     * NoResolveFrozenError beside claim 'overclaims'.
+     */
+    freezeOverclaim?(receipt: UsageReceipt, signal?: AbortSignal): Promise<OverclaimFreeze>
     refundInactive(signal?: AbortSignal): Promise<string>
     settleLapsed(signal?: AbortSignal): Promise<string>
     /**
@@ -230,6 +246,14 @@ export interface OpenHandle {
      * confirm an atomic settle landed, and leaves the journal row to the sweep.
      */
     settleOutcome?(txId: string, signal?: AbortSignal): Promise<SettleOutcome>
+}
+
+/** What OpenHandle.freezeOverclaim found and did. */
+export interface OverclaimFreeze {
+    claim: ClaimVerdict
+    /** The settle sent to freeze the ticket; only with claim 'overclaims'. */
+    call?: SettleSubmission
+    err?: unknown
 }
 
 /** WalletOpener is the escrow side of the payer. */
@@ -291,11 +315,13 @@ export interface TicketJournal {
 
 function cloneRecord(r: TicketRecord): TicketRecord {
     const out: TicketRecord = { ...r, target: { ...r.target } }
-    if (r.settle) {
-        const s: SettleArgs = { ...r.settle, receiptDigest: r.settle.receiptDigest.slice() }
-        out.settle = s
-    }
+    if (r.settle) out.settle = cloneArgs(r.settle)
+    if (r.signed) out.signed = cloneArgs(r.signed)
     return out
+}
+
+function cloneArgs(a: SettleArgs): SettleArgs {
+    return { ...a, receiptDigest: a.receiptDigest.slice() }
 }
 
 /**

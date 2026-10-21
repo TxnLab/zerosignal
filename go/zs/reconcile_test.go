@@ -63,6 +63,19 @@ func TestDecideTicket(t *testing.T) {
 	const lapse = 10 * time.Minute
 	mismatched := settled
 	mismatched.TtftMs++
+	over, under := settled, settled
+	over.AmountCharged, over.ReceiptDigest = settled.AmountCharged+1, [32]byte{9}
+	under.AmountCharged, under.ReceiptDigest = settled.AmountCharged-1, [32]byte{9}
+	withSettle := func(r TicketRecord) TicketRecord {
+		a := settled
+		r.Settle = &a
+		return r
+	}
+	withSigned := func(r TicketRecord) TicketRecord {
+		a := settled
+		r.Signed = &a
+		return r
+	}
 	expiring := func(in time.Duration) TicketRecord {
 		r := openRec()
 		r.ExpiresAt = reconcileNow.Add(in)
@@ -105,6 +118,24 @@ func TestDecideTicket(t *testing.T) {
 		{"payer's own claim matching the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByPayer, time.Hour), settled), reconcileWait},
 		{"settle_pending row without values", TicketRecord{TicketID: "T", Status: TicketSettlePending, UpdatedAt: reconcileNow.Add(-time.Hour)},
 			withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), settled), reconcileWait},
+		// An operator claim above the receipt is frozen with the receipt's
+		// settle while the window is open, even inside the grace, and never
+		// lapsed by the payer after it. One below the receipt is left alone.
+		{"claim above the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), reconcileFreeze},
+		{"claim above a young receipt", pendingRec(time.Minute), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), reconcileFreeze},
+		{"claim above the receipt, inside the skew", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, reconcileSkew-time.Second), over), reconcileWait},
+		{"claim above the receipt, past the node's lapse", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -lapse-time.Second), over), reconcileWait},
+		{"claim above values on an open row, past the node's lapse", withSettle(openRec()), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -lapse-time.Second), over), reconcileLapse},
+		{"claim below the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), under), reconcileWait},
+		{"claim below the receipt, past the node's lapse", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -lapse-time.Second), under), reconcileLapse},
+		{"payer's own claim above the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByPayer, time.Hour), over), reconcileWait},
+		// A receipt that failed a check is held against a claim the same way,
+		// and is never re-fired.
+		{"claim above a failed receipt", withSigned(openRec()), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), reconcileFreeze},
+		{"claim above a failed receipt, past the node's lapse", withSigned(openRec()), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -lapse-time.Second), over), reconcileWait},
+		{"claim matching a failed receipt", withSigned(openRec()), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), settled), reconcileWait},
+		{"claim below a failed receipt, past the node's lapse", withSigned(openRec()), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -lapse-time.Second), under), reconcileLapse},
+		{"failed receipt, open box in window", withSigned(openRec()), box(escrow.StatusOpen, 0, time.Hour), reconcileWait},
 	} {
 		if got := decideTicket(tc.rec, tc.box, reconcileNow, lapse); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
@@ -145,7 +176,11 @@ type fakeChain struct {
 	readErr error
 	callErr error
 	calls   []string
+	// noResolveFrozen fakes an escrow without resolveFrozen.
+	noResolveFrozen bool
 }
+
+func (f *fakeChain) freezes() bool { return !f.noResolveFrozen }
 
 func (f *fakeChain) readBox(_ context.Context, id string) (*escrow.TicketRecord, error) {
 	f.mu.Lock()
@@ -168,6 +203,9 @@ func (f *fakeChain) lapse(_ context.Context, rec TicketRecord, _ *escrow.TicketR
 }
 func (f *fakeChain) resettle(_ context.Context, rec TicketRecord, _ *escrow.TicketRecord) (string, error) {
 	return f.record("settle " + rec.TicketID)
+}
+func (f *fakeChain) freeze(_ context.Context, rec TicketRecord, _ *escrow.TicketRecord, _ SettleArgs) (string, error) {
+	return f.record("freeze " + rec.TicketID)
 }
 
 func (f *fakeChain) seen() []string {
@@ -266,6 +304,173 @@ func TestReconciler_SubmitsTheVerdictsCall(t *testing.T) {
 			t.Errorf("%s: calls %v, want %v", tc.name, got, tc.want)
 		}
 	}
+}
+
+// The freeze goes out as the payer's settle at the journaled receipt, never
+// the claim's own values, which would match the claim and pay it, and says so
+// at Warn. A receipt that failed a check is held against the claim the same
+// way.
+func TestReconciler_FreezesAnOverclaimWithTheReceipt(t *testing.T) {
+	over := settled
+	over.AmountCharged += 100
+	failed := openRec()
+	failed.Signed = &settled
+	for name, rec := range map[string]TicketRecord{"verified": pendingRec(time.Hour), "failed a check": failed} {
+		j := newMemJournal()
+		put(t, j, rec)
+		chain := &argsChain{fakeChain: fakeChain{boxes: map[string]*escrow.TicketRecord{
+			"T": withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over),
+		}}}
+		r := testReconciler(j, chain)
+		var logs bytes.Buffer
+		r.log = slog.New(slog.NewTextHandler(&logs, nil))
+		r.sweep()
+		if len(chain.sent) != 1 || chain.sent[0] != settled {
+			t.Fatalf("%s: freezes sent %+v, want one at the receipt %+v", name, chain.sent, settled)
+		}
+		if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "freeze") {
+			t.Errorf("%s: log %q, want a warning naming the freeze", name, logs.String())
+		}
+	}
+}
+
+// A ticket the watchdog drives is the reconciler's for a freeze alone: the
+// watchdog acts only past the deadline, so an over-claim the node posts after
+// the live ack read the box, or after the ack failed, has nobody else to
+// freeze it inside the window.
+func TestReconciler_FreezesAWatchedOverclaimOnly(t *testing.T) {
+	over := settled
+	over.AmountCharged += 100
+	failed := openRec()
+	failed.Signed = &settled
+	for _, tc := range []struct {
+		name string
+		rec  TicketRecord
+		box  *escrow.TicketRecord
+		want []string
+	}{
+		{"claim above a verified receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), []string{"freeze T"}},
+		{"claim above a receipt that failed a check", failed, withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), []string{"freeze T"}},
+		{"stranded receipt", pendingRec(time.Hour), box(escrow.StatusOpen, 0, time.Hour), nil},
+		{"claim matching the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), settled), nil},
+		{"claim matching the receipt, past the lapse fallback", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute), settled), nil},
+		{"open past the deadline", pendingRec(time.Hour), box(escrow.StatusOpen, 0, -time.Minute), nil},
+		{"frozen", pendingRec(time.Hour), box(escrow.StatusFrozen, escrow.PendingByOperator, time.Hour), nil},
+		{"gone", pendingRec(time.Hour), nil, nil},
+	} {
+		j := newMemJournal()
+		put(t, j, tc.rec)
+		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}}
+		testReconciler(j, chain, "T").sweep()
+		if got := chain.seen(); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: calls %v, want %v", tc.name, got, tc.want)
+		}
+		if got := ids(t, j); !slices.Equal(got, []string{"T"}) {
+			t.Errorf("%s: journal %v, want the watched row kept", tc.name, got)
+		}
+	}
+	// A watched row with no receipt is never read.
+	j := newMemJournal()
+	put(t, j, openRec())
+	chain := &fakeChain{readErr: errors.New("read")}
+	r := testReconciler(j, chain, "T")
+	r.sweep()
+	if r.exhausted("T") || len(chain.seen()) != 0 {
+		t.Error("a watched row without a receipt was acted on")
+	}
+}
+
+// On an escrow without resolveFrozen a freeze would lock the ticket's escrow
+// for good, so the sweep sends none: an unwatched over-claim is left to the
+// operator's lapse, still never lapsed by the payer, and a watched row is not
+// read at all.
+func TestReconciler_SendsNoFreezeWithoutResolveFrozen(t *testing.T) {
+	over := settled
+	over.AmountCharged += 100
+	for _, tc := range []struct {
+		name    string
+		box     *escrow.TicketRecord
+		watched bool
+	}{
+		{"unwatched, inside the window", withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), false},
+		{"unwatched, past the lapse fallback", withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute), over), false},
+		{"watched", withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), true},
+	} {
+		j := newMemJournal()
+		put(t, j, pendingRec(time.Hour))
+		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}, noResolveFrozen: true}
+		var watching []string
+		if tc.watched {
+			watching = []string{"T"}
+		}
+		r := testReconciler(j, chain, watching...)
+		var reads int
+		r.overclaimed = func(TicketRecord) { reads++ }
+		r.sweep()
+		if got := chain.seen(); len(got) != 0 {
+			t.Errorf("%s: calls %v, want none", tc.name, got)
+		}
+		if tc.watched && reads != 0 {
+			t.Errorf("%s: a watched row was read on an escrow that cannot resolve a freeze", tc.name)
+		}
+	}
+}
+
+// Every sweep that reads an operator claim above the row's receipt bars the
+// node, on a row the watchdog drives or not, inside the window or past it, and
+// on an escrow without resolveFrozen too: the claim is the node's own
+// contradiction either way. No other claim does.
+func TestReconciler_BarsAnOverclaimingNode(t *testing.T) {
+	over := settled
+	over.AmountCharged += 100
+	under := settled
+	under.AmountCharged--
+	pending := func(d time.Duration, a SettleArgs) *escrow.TicketRecord {
+		return withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, d), a)
+	}
+	for _, tc := range []struct {
+		name            string
+		box             *escrow.TicketRecord
+		watched         bool
+		noResolveFrozen bool
+		want            bool
+	}{
+		{"claim above the receipt", pending(time.Hour, over), false, false, true},
+		{"claim above the receipt, watched", pending(time.Hour, over), true, false, true},
+		{"claim above the receipt, past the lapse fallback", pending(-11*time.Minute, over), false, false, true},
+		{"claim above the receipt, no resolveFrozen", pending(time.Hour, over), false, true, true},
+		{"claim matching the receipt", pending(time.Hour, settled), false, false, false},
+		{"claim below the receipt", pending(time.Hour, under), false, false, false},
+		{"open", box(escrow.StatusOpen, 0, time.Hour), false, false, false},
+	} {
+		j := newMemJournal()
+		rec := pendingRec(time.Hour)
+		rec.Target = NodeRef{Op: 3, Node: 4}
+		put(t, j, rec)
+		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}, noResolveFrozen: tc.noResolveFrozen}
+		var watching []string
+		if tc.watched {
+			watching = []string{"T"}
+		}
+		r := testReconciler(j, chain, watching...)
+		var barred []NodeRef
+		r.overclaimed = func(rec TicketRecord) { barred = append(barred, rec.Target) }
+		r.sweep()
+		if got := len(barred) == 1 && barred[0] == rec.Target; got != tc.want || len(barred) > 1 {
+			t.Errorf("%s: barred %v, want %v", tc.name, barred, tc.want)
+		}
+	}
+}
+
+// argsChain is fakeChain recording the settle args each freeze sends.
+type argsChain struct {
+	fakeChain
+	sent []SettleArgs
+}
+
+func (c *argsChain) freeze(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error) {
+	c.sent = append(c.sent, a)
+	return c.fakeChain.freeze(ctx, rec, box, a)
 }
 
 // A frozen ticket is the admin's, and no call the payer can make touches it, so the sweep
@@ -530,6 +735,10 @@ func TestFileJournal(t *testing.T) {
 	other := openRec()
 	other.TicketID, other.EscrowAppID, other.Payer = "C", 8, "PAYER"
 	b.Target, b.OpenTxID, b.MaxPrice, b.ExpiresAt = NodeRef{Op: 3, Node: 4}, "OPENTX", 99, reconcileNow.Add(time.Minute)
+	// A receipt that failed a check stays on an open row.
+	signed := settled
+	signed.AmountCharged++
+	b.Signed = &signed
 	put(t, j, other, b)
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
@@ -554,7 +763,8 @@ func TestFileJournal(t *testing.T) {
 	want.Payer, want.EscrowAppID = "PAYER", 7
 	if got := recs[0]; got.Target != want.Target || got.OpenTxID != want.OpenTxID || got.MaxPrice != want.MaxPrice ||
 		!got.ExpiresAt.Equal(want.ExpiresAt) || !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) ||
-		got.Status != want.Status || got.Payer != want.Payer || got.EscrowAppID != want.EscrowAppID || got.Settle != nil {
+		got.Status != want.Status || got.Payer != want.Payer || got.EscrowAppID != want.EscrowAppID || got.Settle != nil ||
+		got.Signed == nil || *got.Signed != signed {
 		t.Errorf("B came back as %+v, want %+v", got, want)
 	}
 	if err := j2.Delete(context.Background(), "B"); err != nil {

@@ -64,10 +64,72 @@ export interface TicketRecord {
     updatedAt: number
     /** Set with settle_pending. */
     settle?: SettleArgs
+    /**
+     * Set on an open row whose receipt the node signed but that failed a
+     * later check (its amount or its body hash). The payer co-signs none of
+     * it; a sweep holds an operator claim against its amount, to freeze one
+     * that takes more and never lapse it. A host journal must keep it as it
+     * keeps settle.
+     */
+    signed?: SettleArgs
 }
 
-/** ReconcileAction is named for the escrow call it makes; wait and forget make none. */
-export type ReconcileAction = 'wait' | 'forget' | 'refundInactive' | 'settleLapsed' | 'settle'
+/**
+ * The receipt a sweep holds an operator claim against: a verified one on a
+ * settle_pending row, else one the node signed that failed a check, else
+ * none. Go's TicketRecord.signedArgs.
+ */
+export function signedArgs(rec: Pick<TicketRecord, 'status' | 'settle' | 'signed'>): SettleArgs | undefined {
+    if (rec.status === 'settle_pending' && rec.settle !== undefined) return rec.settle
+    return rec.signed
+}
+
+/**
+ * ReconcileAction is named for the escrow call it makes; wait and forget make
+ * none. freeze is the payer's settle() at the row's receipt, sent because it
+ * will mismatch the operator's claim, and paid for the freeze it causes.
+ */
+export type ReconcileAction = 'wait' | 'forget' | 'refundInactive' | 'settleLapsed' | 'settle' | 'freeze'
+
+/**
+ * ClaimVerdict is how the operator's pending settle claim on a ticket stands
+ * against the payer's own verified receipt for it, Go's ClaimVerdict:
+ *
+ *   - '' (unread): the ack went through the node's settle group, whose checks
+ *     already compare the node's half with the receipt.
+ *   - unreadable: the box read failed. The ack goes out anyway, since a failed
+ *     read is no evidence against the claim.
+ *   - none: no operator claim stands, and none can be answered. The box is
+ *     gone, frozen, or carries the payer's own half.
+ *   - open: the box is open, with neither side's half on it. The payer's half
+ *     at the receipt is the first, and an operator half that differs from it
+ *     then freezes the ticket instead of lapsing at the operator's figure.
+ *   - agrees: the claim carries every value the payer's settle sends, so that
+ *     settle finalizes the ticket.
+ *   - overclaims: the claim takes more than the receipt charges. The payer's
+ *     settle freezes the ticket. Left alone, the claim is paid in full by
+ *     settleLapsed after the deadline.
+ *   - contradicts: the claim differs from the receipt but takes no more than
+ *     it. A settle would freeze the payer's own escrow and pool slot for
+ *     nothing, so the payer leaves the claim to lapse at the operator's figure.
+ */
+export type ClaimVerdict = '' | 'unreadable' | 'none' | 'open' | 'agrees' | 'overclaims' | 'contradicts'
+
+/**
+ * judgeClaim compares the operator's pending claim on box (null when gone)
+ * with the payer's settle args. Only the amount separates an over-claim from a
+ * contradiction: a timing or usage difference moves the operator's own
+ * on-chain aggregates, not the payer's money. Mirrors Go's judgeClaim;
+ * testdata/ack_settle_vectors.json pins it.
+ */
+export function judgeClaim(a: SettleArgs, box: TicketBoxView | null): ClaimVerdict {
+    if (box === null) return 'none'
+    const status = ticketView(box).status
+    if (status === SettleStatus.Open) return 'open'
+    if (status !== SettleStatus.PendingOperator) return 'none'
+    if (box.pendingAmount > a.amountCharged) return 'overclaims'
+    return claimMatches(a, box) ? 'agrees' : 'contradicts'
+}
 
 /**
  * How long a ticket must sit in settle_pending before a sweep re-fires the
@@ -91,11 +153,15 @@ const RECONCILE_SKEW_MS = 15_000
  * decideTicket is what a sweep does about one journaled ticket, given its box
  * (null when gone) and the time:
  *
- *   - A settle is legal only inside the window, so a recorded receipt is
+ *   - A settle is legal only inside the window, so a verified receipt is
  *     re-fired there: against an OPEN box, or a box carrying the operator's
- *     claim when the claim matches the receipt (a mismatch would freeze it).
- *   - Past the window an operator claim goes to settleLapsed, but only once
- *     lapseFallbackMs has passed, since the node's own driver normally does it.
+ *     claim when the claim matches the receipt.
+ *   - A claim that takes more than a receipt the node signed, verified or
+ *     not, is frozen with the receipt's settle inside the window, and the
+ *     payer never lapses it after.
+ *   - Past the window any other operator claim goes to settleLapsed, but only
+ *     once lapseFallbackMs has passed, since the node's own driver normally
+ *     does it.
  *   - A missing box is finished only once the ticket has expired: the open is
  *     submitted without waiting for confirmation, and the contract accepts it
  *     until expires_at.
@@ -110,25 +176,26 @@ const RECONCILE_SKEW_MS = 15_000
  * old clock.
  */
 export function decideTicket(
-    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle'>,
+    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle' | 'signed'>,
     box: TicketBoxView | null,
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
-    if (box === null) return decideSettlement(rec, null, false, clock, lapseFallbackMs)
-    const matched = rec.settle !== undefined && claimMatches(rec.settle, box)
-    return decideSettlement(rec, ticketView(box), matched, clock, lapseFallbackMs)
+    if (box === null) return decideSettlement(rec, null, '', clock, lapseFallbackMs)
+    const a = signedArgs(rec)
+    const claim = a !== undefined ? judgeClaim(a, box) : ''
+    return decideSettlement(rec, ticketView(box), claim, clock, lapseFallbackMs)
 }
 
 // decideSettlement is decideTicket over the rail-neutral view of the ticket
-// (null when gone), with the rail's answer to whether the operator's pending
-// claim carries the payer's recorded receipt. Module-private, like Go's: a
+// (null when gone), with the rail's answer to how the operator's pending claim
+// stands against the payer's recorded receipt. Module-private, like Go's: a
 // second rail's wrapper calls it from inside the SDK, and exporting it would
 // make it semver surface before that rail exists.
 function decideSettlement(
-    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle'>,
+    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle' | 'signed'>,
     view: TicketView | null,
-    claimMatched: boolean,
+    claim: ClaimVerdict,
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
@@ -154,19 +221,23 @@ function decideSettlement(
         case 'refundInactive':
             return 'refundInactive'
         case 'settleLapsed':
+            // The operator can still lapse it, since settleLapsed is
+            // permissionless; the payer only declines to pay the fee for a
+            // payout its receipt contradicts.
+            if (claim === 'overclaims') return 'wait'
             return BigInt(chainMs) > deadlineMs + BigInt(Math.floor(lapseFallbackMs)) ? 'settleLapsed' : 'wait'
         case 'wait': {
-            const s = rec.settle
-            if (
-                rec.status !== 'settle_pending' ||
-                s === undefined ||
-                nowMs - updatedAt < SETTLE_PENDING_GRACE_MS ||
-                BigInt(chainMs + RECONCILE_SKEW_MS) > deadlineMs
-            ) {
+            if (BigInt(chainMs + RECONCILE_SKEW_MS) > deadlineMs) return 'wait'
+            // Ahead of the grace: the grace waits out a live ack still
+            // confirming, and every half the payer signs carries the receipt's
+            // amount, so no such ack can be what left an over-claim on the
+            // box. Waiting would only spend window the freeze has to land in.
+            if (view.status === SettleStatus.PendingOperator && claim === 'overclaims') return 'freeze'
+            if (rec.status !== 'settle_pending' || rec.settle === undefined || nowMs - updatedAt < SETTLE_PENDING_GRACE_MS) {
                 return 'wait'
             }
             if (view.status === SettleStatus.Open) return 'settle'
-            if (view.status === SettleStatus.PendingOperator && claimMatched) return 'settle'
+            if (view.status === SettleStatus.PendingOperator && claim === 'agrees') return 'settle'
             return 'wait'
         }
     }

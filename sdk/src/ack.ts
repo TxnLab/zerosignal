@@ -17,7 +17,7 @@ import { type UsageReceipt, receiptSigDigest } from '@txnlab/zs-proto/ticket'
 import type { SettleGroupSpec } from './escrow/settle.js'
 import { SettleGroupRejectedError } from './escrow/settle.js'
 import { type Logger, discardLogger } from './ports.js'
-import type { SettleArgs } from './reconcile.js'
+import type { ClaimVerdict, SettleArgs } from './reconcile.js'
 import type { SettleKind } from './types.js'
 import { ReceiptError, type ReceiptViolation, verifyReceipt } from './verify.js'
 
@@ -97,8 +97,44 @@ export interface AckSettlePorts {
      * refuse the group.
      */
     submitGroup(spec: SettleGroupSpec): Promise<SettleSubmission>
+    /**
+     * How the operator's claim on the ticket's box stands against the
+     * receipt (judgeClaim), read before a standalone ack and after the node's
+     * group fails to submit. Without it the ack reads nothing and reports
+     * claim ''.
+     */
+    claim?(): Promise<ClaimVerdict>
     /** The payer's own settle(), signed and paid by the payer. */
     standalone(): Promise<SettleSubmission>
+    /**
+     * standalone paid for the freeze an over-claim turns it into: the outer
+     * call alone. Without it an over-claim is frozen through standalone.
+     */
+    freeze?(): Promise<SettleSubmission>
+    /**
+     * The payer's half on an open box after the node's group failed, paid the
+     * same way: a first half finalizes nothing. Without it none is sent.
+     */
+    half?(): Promise<SettleSubmission>
+    /**
+     * Whether the deployed escrow has resolveFrozen, asked only before a
+     * freeze or the half after a failed group submit. Without it, or
+     * when it rejects, neither is sent, since a frozen ticket's escrow would be
+     * locked for good. Go's ackSettleDeps.freezes.
+     */
+    resolvesFrozen?(): Promise<boolean>
+}
+
+/**
+ * NoResolveFrozenError is why a freeze was not sent: the deployed escrow has no
+ * resolveFrozen, so a frozen ticket's escrow would be locked for good. Go's
+ * errNoResolveFrozen.
+ */
+export class NoResolveFrozenError extends Error {
+    override readonly name = 'NoResolveFrozenError'
+    constructor() {
+        super('wallet: freeze not sent: the deployed escrow has no resolveFrozen')
+    }
 }
 
 export interface AckSettleCall extends AckSettlePorts {
@@ -123,6 +159,22 @@ export interface AckSettleResult {
     groupRejected: boolean
     /** The refusal, when groupRejected: which check the node's group failed. */
     rejection?: SettleGroupRejectedError
+    /**
+     * How the operator's claim on the box stood when the payer read it: before
+     * a standalone ack, or after the node's group failed to submit. '' or
+     * absent when none was read. On contradicts nothing was sent. On
+     * overclaims the payer's settle was sent to freeze the ticket, unless the
+     * deployed escrow has no resolveFrozen, when nothing was sent.
+     */
+    claim?: ClaimVerdict
+    /**
+     * Set when the payer's own settle was sent, or failed to send, in place of
+     * the node's group: standalone, to freeze an over-claim, or as its half on
+     * an open box after the group failed.
+     */
+    payerSettle?: boolean
+    /** Set when the payer's settle went out to freeze an over-claim. */
+    frozen?: boolean
     err?: unknown
 }
 
@@ -131,10 +183,48 @@ export interface AckSettleResult {
  * and the group passes the payer's checks, standalone when it sent none, its
  * spec can't be built, or the checks refuse it. A group that passes but fails
  * to submit is returned as the error, never re-sent standalone at the payer's
- * expense: the sweep re-fires or refunds the ticket. Mirrors Go's ackSettle.
+ * expense: the sweep re-fires or refunds the ticket. The exceptions, on an
+ * escrow with resolveFrozen, are an operator claim above the receipt, which
+ * the payer then freezes, and an open box, where it posts its own half.
+ *
+ * Before a standalone ack it reads the operator's claim on the box, which no
+ * check has compared with the receipt on that path. A claim that contradicts
+ * the receipt without taking more is not acked. Mirrors Go's ackSettle.
  */
 export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
     const log = call.log ?? discardLogger
+    const readClaim = async (): Promise<ClaimVerdict> => {
+        if (!call.claim) return ''
+        try {
+            return await call.claim()
+        } catch (err) {
+            log.debug('ack-settle: operator claim unreadable', { err: message(err) })
+            return 'unreadable'
+        }
+    }
+    // frozen: the settle freezes the ticket once it lands.
+    const send = async (
+        submit: () => Promise<SettleSubmission>,
+        rejected: { groupRejected: boolean; rejection?: SettleGroupRejectedError },
+        claim: ClaimVerdict,
+        frozen = false,
+    ): Promise<AckSettleResult> => {
+        try {
+            const res = await submit()
+            return { txid: res.txid, feeMicroalgos: Number(res.payerFeeMicroalgos), ...rejected, claim, payerSettle: true, frozen }
+        } catch (err) {
+            return { txid: '', feeMicroalgos: 0, ...rejected, claim, payerSettle: true, frozen: false, err }
+        }
+    }
+    const freezes = async (): Promise<boolean> => {
+        if (!call.resolvesFrozen) return false
+        try {
+            return await call.resolvesFrozen()
+        } catch {
+            return false
+        }
+    }
+    const freeze = () => (call.freeze ? call.freeze() : call.standalone())
     let rejection: SettleGroupRejectedError | undefined
     if (call.atomic) {
         let spec: SettleGroupSpec | undefined
@@ -149,7 +239,34 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
                 return { txid: res.txid, feeMicroalgos: Number(res.payerFeeMicroalgos), groupRejected: false }
             } catch (err) {
                 rejection = rejectionOf(err)
-                if (rejection === undefined) return { txid: '', feeMicroalgos: 0, groupRejected: false, err }
+                if (rejection === undefined) {
+                    // The node may still land the group, so no settle that
+                    // could finalize goes out in its place. Two box states call
+                    // for the payer's settle at one fee, as Go's ackSettle
+                    // has it: an over-claim, which the node's group can then
+                    // only revert against, and which lapses unless frozen; and
+                    // an open box, where the payer's half at the receipt goes
+                    // first, so a node half at another figure freezes the
+                    // ticket instead of lapsing. Both can freeze the ticket, so
+                    // neither goes to an escrow that cannot resolve one.
+                    const claim = await readClaim()
+                    if ((claim === 'overclaims' || claim === 'open') && (await freezes())) {
+                        if (claim === 'overclaims') {
+                            log.warn('ack-settle: settle group failed to submit over an operator claim above the receipt; freezing the ticket', {
+                                err: message(err),
+                            })
+                            return send(freeze, { groupRejected: false }, claim, true)
+                        }
+                        const half = call.half
+                        if (half) {
+                            log.warn("ack-settle: settle group failed to submit over an open ticket; posting the payer's half at the receipt", {
+                                err: message(err),
+                            })
+                            return send(() => half(), { groupRejected: false }, claim)
+                        }
+                    }
+                    return { txid: '', feeMicroalgos: 0, groupRejected: false, claim, err }
+                }
                 // The node authored both halves and the receipt, so a refused
                 // group is proven misbehaviour. The standalone ack still settles
                 // the turn; groupRejected lets the caller bar the node.
@@ -161,12 +278,22 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
         }
     }
     const rejected = rejection !== undefined ? { groupRejected: true, rejection } : { groupRejected: false }
-    try {
-        const res = await call.standalone()
-        return { txid: res.txid, feeMicroalgos: Number(res.payerFeeMicroalgos), ...rejected }
-    } catch (err) {
-        return { txid: '', feeMicroalgos: 0, ...rejected, err }
+    // The standalone ack is checked against nothing else: the node's group is
+    // verified before the payer signs it, but a node that posts its own first
+    // half and then sends no group, or one the checks refuse, has the payer
+    // settle into a claim nobody compared with the receipt. So read it.
+    const claim = await readClaim()
+    // The settle would freeze a ticket whose claim takes no more than the
+    // receipt. Nothing is sent, so the refund watchdog keeps the ticket.
+    if (claim === 'contradicts') return { txid: '', feeMicroalgos: 0, ...rejected, claim }
+    if (claim === 'overclaims') {
+        // On an escrow without resolveFrozen the freeze would keep max_price
+        // locked for good: the claim's lapse costs the payer less. Nothing is
+        // sent.
+        if (!(await freezes())) return { txid: '', feeMicroalgos: 0, ...rejected, claim }
+        return send(freeze, rejected, claim, true)
     }
+    return send(() => call.standalone(), rejected, claim)
 }
 
 // rejectionOf finds a SettleGroupRejectedError in err's cause chain, as Go's
@@ -246,8 +373,9 @@ export function checkReceipt(call: CheckReceiptCall): ReceiptCheck {
                     log.warn('node exclusion failed', { err: message(err) })
                 }
             }
-            // As Go reports it: atomic whenever a group came and wasn't refused.
-            const kind: SettleKind = ack.atomic && !res.groupRejected ? 'atomic' : 'payer_ack'
+            // As Go reports it: atomic whenever a group came and wasn't refused,
+            // nor replaced by the payer's own settle.
+            const kind: SettleKind = ack.atomic && !res.groupRejected && res.payerSettle !== true ? 'atomic' : 'payer_ack'
             return { ...res, kind, excluded }
         },
     }
