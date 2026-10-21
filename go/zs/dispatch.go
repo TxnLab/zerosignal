@@ -3921,7 +3921,9 @@ func checkSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticke
 //     which freezes the ticket too.
 //   - ReceiptViolationSig / ReceiptViolationAmount → log only; the
 //     contract refuses these on-chain, so re-submitting would just
-//     waste fees. Dispute evidence is still retained via logs.
+//     waste fees. A receipt naming another ticket is a Sig violation:
+//     where Algorand's protest would take it, it freezes this ticket on
+//     evidence about another. Dispute evidence is still retained via logs.
 //
 // The handle is received via the settlementHandle interface (satisfied
 // by *OpenHandle in production and by test fakes); this keeps
@@ -4210,9 +4212,10 @@ func (s *Client) checkReceipt(
 	switch re.Violation {
 	case ReceiptViolationAmount, ReceiptViolationBodyHash:
 		// Both are found only after the signature verified, so the amount is
-		// still one the node signed. Named rather than "all but Sig": the
-		// ReceiptOK stand-in above has an unknown signature, and a pinned
-		// figure set too high would wave every later over-claim through. The
+		// still one the node signed for this ticket. Named rather than "all
+		// but Sig": the ReceiptOK stand-in above has an unknown signature, and
+		// a pinned figure set too high would wave every later over-claim
+		// through. The
 		// journal keeps it for the reconciler, which would otherwise lapse an
 		// over-claim the watchdog refused to.
 		s.refunds.recordReceipt(ticket.TicketID, RefOf(op), receipt.AmountCharged)

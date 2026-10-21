@@ -215,6 +215,16 @@ describe('checkTurnReceipt', () => {
         const over = await check(depsOf().deps, f, handleOf())
         expect(over.check.violation).toBe('amount')
         expect(over.submit).toBeNull()
+
+        // And a receipt naming another ticket, even over a body that doesn't
+        // match its hash.
+        f = await fixture()
+        f.ticket.ticket_id = 'YW5vdGhlci10aWNrZXQhIQ=='
+        slot = new SettleSlot()
+        const another = await check(depsOf().deps, f, handleOf(), { slot, matching: false })
+        expect(another.check.violation).toBe('sig')
+        expect(another.submit).toBeNull()
+        expect(slot.expected).toBe(false)
     })
 
     it('finishes the slot when the submit throws, and rethrows', async () => {

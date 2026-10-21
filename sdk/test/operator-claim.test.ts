@@ -54,6 +54,21 @@ function run(deps: ReceiptCheckDeps, f: Fixture, handle: OpenHandle, o: { matchi
 }
 
 const NODE = { op: 7, node: 3 }
+
+/**
+ * A ticket other than the fixture receipt's: the payer holds a receipt the node
+ * validly signed for another ticket.
+ */
+const ANOTHER_TICKET = 'YW5vdGhlci10aWNrZXQhIQ=='
+
+type Override = { maxPrice?: number; sig?: string; ticketId?: string }
+
+function applyOverride(f: Fixture, over: Override): void {
+    if (over.maxPrice !== undefined) f.ticket.max_price = over.maxPrice
+    if (over.sig !== undefined) f.receipt.sig = over.sig
+    if (over.ticketId !== undefined) f.ticket.ticket_id = over.ticketId
+}
+
 const empty = { ticketId: TICKET_ID, kind: '', txId: '', feesMicroAlgos: 0, networkFees: 0 }
 
 describe('the ack and the operator claim', () => {
@@ -220,10 +235,11 @@ describe('the amount the watchdog is handed', () => {
         ['body hash mismatch', {}, false, true],
         ['amount above max price', { maxPrice: 49_999 }, true, true],
         ['bad signature', { sig: '' }, true, false],
-    ] as [string, { maxPrice?: number; sig?: string }, boolean, boolean][])('%s', async (_name, over, matching, pinned) => {
+        // Its figure is for that other ticket.
+        ['receipt for another ticket', { ticketId: ANOTHER_TICKET }, false, false],
+    ] as [string, Override, boolean, boolean][])('%s', async (_name, over, matching, pinned) => {
         const f = await fixture()
-        if (over.maxPrice !== undefined) f.ticket.max_price = over.maxPrice
-        if (over.sig !== undefined) f.receipt.sig = over.sig
+        applyOverride(f, over)
         const { deps, recorded } = depsOf()
         await run(deps, f, handleOf({}), { matching })
         expect(recorded).toEqual(pinned ? [[TICKET_ID, NODE, 50_000n]] : [])
@@ -240,10 +256,10 @@ describe('the receipt the journal is handed', () => {
         ['body hash mismatch', {}, false, 'signed'],
         ['amount above max price', { maxPrice: 49_999 }, true, 'signed'],
         ['bad signature', { sig: '' }, true, null],
-    ] as [string, { maxPrice?: number; sig?: string }, boolean, string | null][])('%s', async (_name, over, matching, want) => {
+        ['receipt for another ticket', { ticketId: ANOTHER_TICKET }, false, null],
+    ] as [string, Override, boolean, string | null][])('%s', async (_name, over, matching, want) => {
         const f = await fixture()
-        if (over.maxPrice !== undefined) f.ticket.max_price = over.maxPrice
-        if (over.sig !== undefined) f.receipt.sig = over.sig
+        applyOverride(f, over)
         const writes: string[] = []
         const { deps } = depsOf({
             journalReceipt: () => void writes.push('receipt'),

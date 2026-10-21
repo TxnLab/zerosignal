@@ -7,6 +7,7 @@ package zs
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -19,7 +20,8 @@ import (
 // and produce consistent error surfaces (and the same dispute
 // trigger).
 //
-//   - Sig verifies under the operator's SigningAddr ed25519 pubkey.
+//   - Sig verifies under the operator's SigningAddr ed25519 pubkey, and
+//     the receipt names the payer's ticket.
 //   - AmountCharged ≤ ticket.MaxPrice (the contract enforces this too,
 //     but we fail fast and with a clean error).
 //   - BodyHash equals sha256 of the plaintext the proxy just
@@ -40,7 +42,7 @@ type ReceiptViolation int
 
 const (
 	ReceiptOK                ReceiptViolation = iota // no violation
-	ReceiptViolationSig                              // signature invalid
+	ReceiptViolationSig                              // signature invalid, or the receipt names another ticket
 	ReceiptViolationAmount                           // amount_charged > max_price, or a self-inconsistent billing count (cached_input_count > actual_input_count)
 	ReceiptViolationBodyHash                         // body_hash != computed
 )
@@ -92,19 +94,33 @@ func VerifyReceipt(c ReceiptCheck) error {
 			Err:       fmt.Errorf("operator signing key length %d, want %d", len(c.Operator.TicketSigningKey), ed25519.PublicKeySize),
 		}
 	}
+	if c.Ticket == nil {
+		return &ReceiptError{
+			Violation: ReceiptViolationSig,
+			Err:       errors.New("no ticket to bind the receipt to"),
+		}
+	}
 	// A receipt is bound exactly when its ticket is, and to the same
 	// deployment; the ticket's binding was checked against ours at reserve.
-	var want ticket.DeploymentID
-	if c.Ticket != nil {
-		want = c.Ticket.Deployment
-	}
+	want := c.Ticket.Deployment
 	if err := c.Receipt.VerifyFor(c.Operator.TicketSigningKey, want, want.IsZero()); err != nil {
 		return &ReceiptError{
 			Violation: ReceiptViolationSig,
 			Err:       fmt.Errorf("receipt signature verify: %w", err),
 		}
 	}
-	if c.Ticket != nil && c.Receipt.AmountCharged > c.Ticket.MaxPrice {
+	// The signature holds for whichever ticket the receipt names, so a node can
+	// hand over one it signed for another ticket. Classed with the signature,
+	// as the node signed nothing for this ticket: none of the receipt's figures
+	// is pinned or journaled, and no protest goes out. Solana's program refuses
+	// a protest over another ticket's receipt; Algorand's refuses it against a
+	// pending claim with another digest, and otherwise freezes this ticket on
+	// evidence about another. Ahead of the amount and body_hash checks, which
+	// would otherwise pin the figure or protest.
+	if err := receiptNamesTicket(c.Receipt.TicketID, c.Ticket.TicketID); err != nil {
+		return &ReceiptError{Violation: ReceiptViolationSig, Err: err}
+	}
+	if c.Receipt.AmountCharged > c.Ticket.MaxPrice {
 		return &ReceiptError{
 			Violation: ReceiptViolationAmount,
 			Err:       fmt.Errorf("receipt amount_charged %d exceeds ticket max_price %d", c.Receipt.AmountCharged, c.Ticket.MaxPrice),
@@ -134,6 +150,28 @@ func VerifyReceipt(c ReceiptCheck) error {
 			Violation: ReceiptViolationBodyHash,
 			Err:       fmt.Errorf("receipt body_hash mismatch (got %x want %x)", gotHash, c.ComputedHash),
 		}
+	}
+	return nil
+}
+
+// receiptNamesTicket refuses a receipt that doesn't name the payer's ticket.
+// The receipt's id is compared as the string the node signed against the
+// canonical spelling of the bytes the payer opened, as the open offer's fold
+// compares, so no decoder's leniency makes two spellings of one id agree. The
+// ticket's own id must be that spelling too: Go's decoder takes non-zero
+// padding bits and TS's doesn't, so without it the two SDKs would accept
+// different receipts for one ticket.
+func receiptNamesTicket(receiptID, ticketID string) error {
+	raw, err := decodeTicketID(ticketID)
+	if err != nil {
+		return fmt.Errorf("the payer's ticket id: %w", err)
+	}
+	want := base64.StdEncoding.EncodeToString(raw)
+	if ticketID != want {
+		return fmt.Errorf("the payer's ticket id %q is not the canonical spelling %q", ticketID, want)
+	}
+	if receiptID != want {
+		return fmt.Errorf("the receipt names ticket %q, not the payer's %q", receiptID, want)
 	}
 	return nil
 }

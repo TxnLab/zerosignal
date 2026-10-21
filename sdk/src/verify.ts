@@ -7,6 +7,7 @@
 // receipt at the end of a turn. They mirror proto/go/zs's reserve checks and
 // VerifyReceipt; the canonical bytes and signatures are @txnlab/zs-proto's.
 
+import { base64 as scureBase64 } from '@scure/base'
 import {
     type Ticket,
     type UsageReceipt,
@@ -98,10 +99,10 @@ export const receiptViolations = ['sig', 'amount', 'body_hash'] as const satisfi
 
 /**
  * verifyReceipt runs Go's checks in Go's order and throws a ReceiptError on the
- * first that fails: the signature under signingKey; amount_charged at most the
- * ticket's max_price and cached_input_count at most actual_input_count; then
- * body_hash against computedHash, the sha256 of the body or the concatenated
- * stream frames.
+ * first that fails: the signature under signingKey, and the receipt naming the
+ * ticket; amount_charged at most the ticket's max_price and cached_input_count
+ * at most actual_input_count; then body_hash against computedHash, the sha256
+ * of the body or the concatenated stream frames.
  *
  * A charge below min_price is accepted. The floor is the node's to apply in
  * its own favour (SPEC §3a); a lower charge costs only the node.
@@ -115,6 +116,16 @@ export function verifyReceipt(r: UsageReceipt, t: Ticket, signingKey: Uint8Array
     } catch (err) {
         throw new ReceiptError('sig', `receipt signature verify: ${message(err)}`, err)
     }
+    // The signature holds for whichever ticket the receipt names, so a node can
+    // hand over one it signed for another ticket. Classed with the signature,
+    // as the node signed nothing for this ticket: none of the receipt's figures
+    // is pinned or journaled, and no protest goes out. Solana's program refuses
+    // a protest over another ticket's receipt; Algorand's refuses it against a
+    // pending claim with another digest, and otherwise freezes this ticket on
+    // evidence about another. Ahead of the amount and body_hash checks, which
+    // would otherwise pin the figure or protest.
+    const mismatch = receiptTicketMismatch(r.ticket_id, t.ticket_id)
+    if (mismatch !== undefined) throw new ReceiptError('sig', mismatch)
     if (r.amount_charged > t.max_price) {
         throw new ReceiptError(
             'amount',
@@ -147,6 +158,33 @@ export function verifyReceipt(r: UsageReceipt, t: Ticket, signingKey: Uint8Array
  * node sign 2^64-1 and send -1 past the amount check.
  */
 export { decodeReceiptHeader, parseReceiptJSON } from '@txnlab/zs-proto/ticket'
+
+const TICKET_ID_LEN = 16
+
+/**
+ * Why the receipt doesn't name the payer's ticket, or undefined when it does:
+ * Go's receiptNamesTicket. The receipt's id is compared as the string the node
+ * signed against the canonical spelling of the bytes the payer opened, as the
+ * open offer's fold compares, so no decoder's leniency makes two spellings of
+ * one id agree. The ticket's own id must be that spelling too: Go's decoder
+ * takes non-zero padding bits and this one doesn't, so without it the two SDKs
+ * would accept different receipts for one ticket. This decoder already refuses
+ * every other spelling, so the ticket comparison below can't fail today; it
+ * stays so the check holds should the decoder ever loosen.
+ */
+function receiptTicketMismatch(receiptId: string, ticketId: string): string | undefined {
+    let raw: Uint8Array
+    try {
+        raw = scureBase64.decode(ticketId)
+    } catch (err) {
+        return `the payer's ticket id: ${message(err)}`
+    }
+    if (raw.length !== TICKET_ID_LEN) return `the payer's ticket id decodes to ${raw.length} bytes, want ${TICKET_ID_LEN}`
+    const want = scureBase64.encode(raw)
+    if (ticketId !== want) return `the payer's ticket id ${JSON.stringify(ticketId)} is not the canonical spelling ${JSON.stringify(want)}`
+    if (receiptId !== want) return `the receipt names ticket ${JSON.stringify(receiptId)}, not the payer's ${JSON.stringify(want)}`
+    return undefined
+}
 
 function base64(b: Uint8Array): string {
     let s = ''

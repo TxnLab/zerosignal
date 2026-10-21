@@ -837,6 +837,24 @@ func TestOpen_SubmitsAndCarriesNoGroup(t *testing.T) {
 	}
 }
 
+// A ticket id Go's decoder reads but not in its canonical spelling is refused
+// before anything is sent, as TS's decoder refuses it: every receipt for it
+// would fail VerifyReceipt.
+func TestOpen_RefusesANonCanonicalTicketID(t *testing.T) {
+	pool := &fakePool{ticketMbr: testTicketMbr}
+	w := newPoolWallet(pool)
+	w.depositReady = true
+	tk := validTicket()
+	// 16 zero bytes, with a padding bit set.
+	tk.TicketID = "AAAAAAAAAAAAAAAAAAAAAB=="
+	if _, err := w.Open(context.Background(), tk, validOperator(), testOpenGroup); err == nil || !strings.Contains(err.Error(), "canonical spelling") {
+		t.Fatalf("Open = %v, want the non-canonical id refused", err)
+	}
+	if pool.submitCalls != 0 || pool.completeCalls != 0 {
+		t.Errorf("submit calls = %d, complete calls = %d; want none", pool.submitCalls, pool.completeCalls)
+	}
+}
+
 func TestOpen_DepositRevert_NoTopUpSurfacesOriginal(t *testing.T) {
 	ctx := context.Background()
 	// Pool already covers the working set, so the revert re-ensure no-ops

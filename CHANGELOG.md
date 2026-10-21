@@ -31,6 +31,32 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — the payer refuses a receipt for another ticket (unreleased)
+
+Both SDKs' receipt check (`zs.VerifyReceipt`, `verifyReceipt`) now refuses a receipt whose
+`ticket_id` is not the ticket the payer opened, by the rule in [`SPEC.md` §3a "Settlement
+receipt"](./SPEC.md). The receipt's id must be the canonical padded standard base64 of the
+ticket's 16 bytes, and so must the ticket's own id; the comparison is on the string, as the
+Solana open offer's fold compares. An honest node always echoes the ticket's id, so only a
+misbehaving node is refused.
+
+The refusal is a `sig` violation and takes that path unchanged: `ReceiptViolated` with
+violation `sig`, the spend guard's reservation released, no protest, no settle, no node
+exclusion, and the receipt's figures neither pinned on the refund watchdog nor journaled as
+`Signed` / `signed`. Before this, such a receipt that matched the delivered body was acked at
+its own figure, and one that failed its `body_hash` drove a protest, which Solana's program
+refuses (`ReceiptNotForTicket`) and Algorand's would take on an open ticket, freezing it over
+a receipt about another ticket.
+
+Go's wallet now also refuses to open a ticket whose id is not in that canonical spelling, as
+the TS wallet's decoder already did, so it no longer locks an escrow for a turn whose every
+receipt it would refuse. The journal and the refund watchdog still decode such an id, so an
+escrow an older build opened under one stays refundable.
+
+`testdata/receipt_check_vectors.json` (Go's `TestReceiptCheckVectors`) pins the verdict for
+both SDKs. Go's `VerifyReceipt` also refuses a nil `ReceiptCheck.Ticket` now, where it
+skipped the deployment and amount checks before.
+
 ### 2026-10-20 — the payer freezes an operator claim above its receipt (0.9.0)
 
 The payer now answers an operator's settle claim that it can see on the ticket box, by the

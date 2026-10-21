@@ -38,6 +38,7 @@ Go and TS are twins. Where a pair is pinned, the pin is a fixture in [`testdata/
 | `zs/sizing.go`, `reserveInputCount` in `zs/dispatch.go` | `sdk/src/sizing.ts` | `reserve_sizing_vectors.json` |
 | `zs/reserve.go` `BusyError.Retryable` → `transient.RetryableBusyCode` | `sdk/src/reserve.ts` → `retryableBusyCode` (`ts/src/transient/busy.ts`) | `transient_vectors.json` |
 | `reservePriceViolation` (`zs/dispatch.go`) | `sdk/src/reserve-price.ts` `verifyReservePrice` | `reserve_price_vectors.json` |
+| `zs/receipt.go` `VerifyReceipt`: the signature, the ticket-id and deployment bindings, the amount and count checks, `body_hash`, and which fails first | `sdk/src/verify.ts` `verifyReceipt` | `receipt_check_vectors.json` (the nil-ticket refusal Go's types allow is tested in Go) |
 | `zs/transient_retry.go` `reserveWithTransientRetry` | `sdk/src/reserve-retry.ts` | `reserve_retry_vectors.json` |
 | `attributeRelayHop` (`zs/dispatch.go`, called from `forward.go` / `sse.go`) | `sdk/src/sealed.ts` `attributeRelayHop`, `sdk/src/routing/attribution.ts` | `relay_attribution_vectors.json` |
 | `zs/relay_reputation.go`, `target_backoff.go` | `sdk/src/routing/{reputation,backoff}.ts` | `steering_vectors.json` (the shared arithmetic only) |

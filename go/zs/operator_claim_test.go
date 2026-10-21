@@ -258,6 +258,10 @@ func TestCheckReceipt_LateProtestTriesNoFreeze(t *testing.T) {
 	}
 }
 
+// forAnotherTicket hands the payer a receipt the node validly signed, for a
+// ticket other than the one the payer opened.
+func forAnotherTicket(f *settleFixture) { f.tkt.TicketID = "YW5vdGhlci10aWNrZXQhIQ==" }
+
 // The watchdog holds a later operator claim against the amount the node
 // signed. Only a receipt whose signature verified counts: a figure from an
 // unverified one could be anything, and one set too high would let every
@@ -273,6 +277,8 @@ func TestCheckReceipt_PinsTheSignedAmountForTheWatchdog(t *testing.T) {
 		{"body hash mismatch", nil, false, true},
 		{"amount above max price", func(f *settleFixture) { f.tkt.MaxPrice = f.receipt.AmountCharged - 1 }, true, true},
 		{"bad signature", func(f *settleFixture) { f.receipt.Sig = "" }, true, false},
+		// Its figure is for that other ticket.
+		{"receipt for another ticket", forAnotherTicket, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSettleFixture(t)
@@ -308,6 +314,7 @@ func TestCheckReceipt_JournalsTheSignedReceipt(t *testing.T) {
 		{"body hash mismatch", nil, false, TicketOpen, false, true},
 		{"amount above max price", func(f *settleFixture) { f.tkt.MaxPrice = f.receipt.AmountCharged - 1 }, true, TicketOpen, false, true},
 		{"bad signature", func(f *settleFixture) { f.receipt.Sig = "" }, true, "", false, false},
+		{"receipt for another ticket", forAnotherTicket, false, "", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newSettleFixture(t)

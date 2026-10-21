@@ -350,16 +350,18 @@ export async function checkTurnReceipt(
     const guard = deps.spendGuard
     if (guard) guardRecords(log, 'release', ticketId, () => guard.release(ticketId))
     // Both are found only after the signature verified, so the amount is
-    // still one the node signed. Named rather than "all but sig": a violation
-    // of no known kind has an unknown signature, and a pinned figure set too
-    // high would wave every later over-claim through.
+    // still one the node signed for this ticket. Named rather than "all but
+    // sig": a violation of no known kind has an unknown signature, and a
+    // pinned figure set too high would wave every later over-claim through.
     // The journal keeps it for the reconciler, which would otherwise lapse an
     // over-claim the watchdog refused to.
     if (violation === 'amount' || violation === 'body_hash') {
         deps.recordReceipt?.(ticketId, refOf(op), BigInt(receipt.amount_charged))
         if (handle !== null) await journalSigned(deps, handle, receipt)
     }
-    // The contract refuses a protest over the signature or the amount.
+    // The contract refuses a protest over the signature or the amount. A
+    // receipt naming another ticket is a sig violation: where Algorand's
+    // protest would take it, it freezes this ticket on evidence about another.
     if (handle === null || violation !== 'body_hash') return { submit: null, check }
     const excerpt = t.plaintext.slice(0, DISPUTE_EXCERPT_CAP)
     return {
