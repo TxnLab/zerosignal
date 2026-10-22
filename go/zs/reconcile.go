@@ -16,6 +16,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/settle"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -115,7 +116,24 @@ func judgeClaim(a SettleArgs, box *escrow.TicketRecord) ClaimVerdict {
 	if box == nil {
 		return ClaimNone
 	}
-	switch box.View().Status {
+	return weighClaim(box.View().Status, box.PendingAmount, a.AmountCharged, claimMatches(a, box))
+}
+
+// judgeSolanaClaim is judgeClaim for a Solana ticket account (nil when
+// closed). The account keeps the first half's hash, not its fields, so a
+// claim matches when the payer's own fields hash to it.
+func judgeSolanaClaim(a SettleArgs, t *zsescrow.Ticket) ClaimVerdict {
+	if t == nil {
+		return ClaimNone
+	}
+	return weighClaim(t.View().Status, t.PendingAmount, a.AmountCharged, zsescrow.ClaimHash(solanaClaimFields(a)) == t.ClaimHash)
+}
+
+// weighClaim is the verdict on a ticket of status carrying an operator claim
+// of pending, against a receipt charging charged that the claim matches in
+// full or not.
+func weighClaim(status settle.Status, pending, charged uint64, matches bool) ClaimVerdict {
+	switch status {
 	case settle.StatusOpen:
 		return ClaimOpen
 	case settle.StatusPendingOperator:
@@ -123,12 +141,27 @@ func judgeClaim(a SettleArgs, box *escrow.TicketRecord) ClaimVerdict {
 		return ClaimNone
 	}
 	switch {
-	case box.PendingAmount > a.AmountCharged:
+	case pending > charged:
 		return ClaimOverclaims
-	case claimMatches(a, box):
+	case matches:
 		return ClaimAgrees
 	}
 	return ClaimContradicts
+}
+
+// solanaClaimFields are the claim fields the payer's half carries for a.
+func solanaClaimFields(a SettleArgs) zsescrow.ClaimFields {
+	return zsescrow.ClaimFields{
+		Amount:          a.AmountCharged,
+		ReceiptDigest:   a.ReceiptDigest,
+		TTFTMs:          a.TtftMs,
+		DecodeMs:        a.DecodeMs,
+		InputUnits:      a.InputTokens,
+		OutputUnits:     a.OutputTokens,
+		OutputUsageType: uint8(a.OutputUsageType),
+		AuxUsageType:    uint8(a.AuxOutputUsageType),
+		AuxCount:        a.AuxOutputCount,
+	}
 }
 
 // decideTicket is decideSettlement for a ZeroSignalEscrow box (nil when gone).

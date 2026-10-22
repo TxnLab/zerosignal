@@ -283,7 +283,7 @@ export interface Ticket {
 const I64_MAX = (1n << 63n) - 1n
 
 /** The last moment either half, a cooperative settle or a protest is accepted; settle_lapsed and refund_inactive open after it. */
-export function ticketDeadline(t: Ticket): bigint {
+export function ticketDeadline(t: Pick<Ticket, 'expiresAt' | 'grace'>): bigint {
     const d = t.expiresAt + BigInt(t.grace)
     return d > I64_MAX ? I64_MAX : d
 }

@@ -11,6 +11,7 @@
 export * from './program.js'
 export * from './instructions.js'
 export * from './accounts.js'
+export * from './classify.js'
 export * from './events.js'
 export * from './offer.js'
 export * from './ack.js'

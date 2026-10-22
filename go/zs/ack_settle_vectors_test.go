@@ -11,13 +11,15 @@ package zs
 // group's spec, submitting the node's group, reading the operator's claim,
 // the standalone ack) and records which were tried and what the ack reports.
 // The claims block pins judgeClaim, which reads that claim off a ticket box
-// for the ack, the protest's fallback and the reconciler alike.
+// for the ack, the protest's fallback and the reconciler alike, and the
+// solana_claims block judgeSolanaClaim, its twin for a Solana ticket account.
 //
 //	cd proto/go && go test ./zs -run TestAckSettleVectors -update
 
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
 
 const ackSettleVectorsPath = "../../testdata/ack_settle_vectors.json"
@@ -297,6 +300,95 @@ func runClaimVector(t *testing.T, c claimVectorCase) ClaimVerdict {
 	return judgeClaim(*rec.Settle, box)
 }
 
+// solanaClaimTicket is the part of a Solana ticket account judgeSolanaClaim
+// reads: claim_hash is hex.
+type solanaClaimTicket struct {
+	Status        uint8  `json:"status"`
+	PendingAmount uint64 `json:"pending_amount"`
+	ClaimHash     string `json:"claim_hash"`
+}
+
+// solanaClaimVectorCase is claimVectorCase for a Solana ticket (null when
+// closed), with the verdict judgeSolanaClaim gives.
+type solanaClaimVectorCase struct {
+	Name    string                `json:"name"`
+	Settle  reconcileVectorSettle `json:"settle"`
+	Ticket  *solanaClaimTicket    `json:"ticket"`
+	Verdict ClaimVerdict          `json:"verdict"`
+}
+
+func solanaClaimVectorInputs(t *testing.T) []solanaClaimVectorCase {
+	// A ticket whose first half hashes s with amount changed by f, and
+	// claims pending.
+	ticketOf := func(status zsescrow.TicketStatus, pending uint64, s reconcileVectorSettle, f func(*zsescrow.ClaimFields)) *solanaClaimTicket {
+		fields := solanaClaimFields(*rvArgs(t, &s))
+		if f != nil {
+			f(&fields)
+		}
+		h := zsescrow.ClaimHash(fields)
+		return &solanaClaimTicket{Status: uint8(status), PendingAmount: pending, ClaimHash: hex.EncodeToString(h[:])}
+	}
+	s := rvSettle()
+	at := func(status zsescrow.TicketStatus, f func(*zsescrow.ClaimFields)) *solanaClaimTicket {
+		return ticketOf(status, s.AmountCharged, s, f)
+	}
+	op := func(pending uint64, f func(*zsescrow.ClaimFields)) *solanaClaimTicket {
+		return ticketOf(zsescrow.TicketPendingByOperator, pending, s, func(c *zsescrow.ClaimFields) {
+			c.Amount = pending
+			if f != nil {
+				f(c)
+			}
+		})
+	}
+	otherDigest := func(c *zsescrow.ClaimFields) { c.ReceiptDigest[0] ^= 0xff }
+	cases := []solanaClaimVectorCase{
+		{Name: "no ticket", Ticket: nil},
+		{Name: "open ticket", Ticket: &solanaClaimTicket{Status: uint8(zsescrow.TicketOpen), ClaimHash: hex.EncodeToString(make([]byte, 32))}},
+		{Name: "payer-side claim matching the receipt", Ticket: at(zsescrow.TicketPendingByPayer, nil)},
+		{Name: "payer-side claim above the receipt", Ticket: ticketOf(zsescrow.TicketPendingByPayer, s.AmountCharged+1000, s, func(c *zsescrow.ClaimFields) { c.Amount += 1000 })},
+		{Name: "frozen ticket over an operator claim above the receipt", Ticket: ticketOf(zsescrow.TicketFrozen, s.AmountCharged+1000, s, func(c *zsescrow.ClaimFields) { c.Amount += 1000 })},
+		{Name: "unrecognized status over an operator claim above the receipt", Ticket: ticketOf(4, s.AmountCharged+1000, s, func(c *zsescrow.ClaimFields) { c.Amount += 1000 })},
+		{Name: "operator claim equal to the receipt", Ticket: op(s.AmountCharged, nil)},
+		{Name: "operator claim one below the receipt", Ticket: op(s.AmountCharged-1, nil)},
+		{Name: "operator claim below the receipt with another digest", Ticket: op(s.AmountCharged-1000, otherDigest)},
+		{Name: "operator claim of zero", Ticket: op(0, otherDigest)},
+		{Name: "operator claim one above the receipt", Ticket: op(s.AmountCharged+1, nil)},
+		{Name: "operator claim above the receipt with another digest", Ticket: op(s.AmountCharged+1000, otherDigest)},
+		{Name: "operator claim at the receipt's amount with another digest", Ticket: op(s.AmountCharged, otherDigest)},
+		{Name: "operator claim at the receipt's amount with another ttft", Ticket: op(s.AmountCharged, func(c *zsescrow.ClaimFields) { c.TTFTMs++ })},
+		{Name: "operator claim at the receipt's amount with another output count", Ticket: op(s.AmountCharged, func(c *zsescrow.ClaimFields) { c.OutputUnits++ })},
+		{Name: "operator claim at the receipt's amount with another aux usage type", Ticket: op(s.AmountCharged, func(c *zsescrow.ClaimFields) { c.AuxUsageType = 0 })},
+		// The account's pending amount is the program's copy of the claim's;
+		// the two never differ on chain, but the amount alone decides an
+		// over-claim, and the hash alone a match.
+		{Name: "pending amount above the receipt under the receipt's own hash", Ticket: ticketOf(zsescrow.TicketPendingByOperator, s.AmountCharged+1, s, nil)},
+		{Name: "pending amount below the receipt under the receipt's own hash", Ticket: ticketOf(zsescrow.TicketPendingByOperator, s.AmountCharged-1, s, nil)},
+	}
+	for i := range cases {
+		cases[i].Settle = s
+	}
+	zero := rvSettle()
+	zero.AmountCharged = 0
+	cases = append(cases,
+		solanaClaimVectorCase{Name: "zero receipt, operator claim of zero", Settle: zero, Ticket: ticketOf(zsescrow.TicketPendingByOperator, 0, zero, nil)},
+		solanaClaimVectorCase{Name: "zero receipt, operator claim of one", Settle: zero, Ticket: ticketOf(zsescrow.TicketPendingByOperator, 1, zero, func(c *zsescrow.ClaimFields) { c.Amount = 1 })},
+	)
+	return cases
+}
+
+func runSolanaClaimVector(t *testing.T, c solanaClaimVectorCase) ClaimVerdict {
+	t.Helper()
+	var tk *zsescrow.Ticket
+	if c.Ticket != nil {
+		h, err := hex.DecodeString(c.Ticket.ClaimHash)
+		if err != nil || len(h) != 32 {
+			t.Fatalf("%s: claim hash %q", c.Name, c.Ticket.ClaimHash)
+		}
+		tk = &zsescrow.Ticket{Status: zsescrow.TicketStatus(c.Ticket.Status), PendingAmount: c.Ticket.PendingAmount, ClaimHash: [32]byte(h)}
+	}
+	return judgeSolanaClaim(*rvArgs(t, &c.Settle), tk)
+}
+
 func TestAckSettleVectors(t *testing.T) {
 	scenarios := ackSettleScenarios()
 	for i := range scenarios {
@@ -306,14 +398,20 @@ func TestAckSettleVectors(t *testing.T) {
 	for i := range claims {
 		claims[i].Verdict = runClaimVector(t, claims[i])
 	}
+	solanaClaims := solanaClaimVectorInputs(t)
+	for i := range solanaClaims {
+		solanaClaims[i].Verdict = runSolanaClaimVector(t, solanaClaims[i])
+	}
 	f := struct {
-		Comment   string              `json:"comment"`
-		Scenarios []ackSettleScenario `json:"scenarios"`
-		Claims    []claimVectorCase   `json:"claims"`
+		Comment      string                  `json:"comment"`
+		Scenarios    []ackSettleScenario     `json:"scenarios"`
+		Claims       []claimVectorCase       `json:"claims"`
+		SolanaClaims []solanaClaimVectorCase `json:"solana_claims"`
 	}{
-		Comment:   "Generated by proto/go/zs TestAckSettleVectors. Compare want and verdict exactly.",
-		Scenarios: scenarios,
-		Claims:    claims,
+		Comment:      "Generated by proto/go/zs TestAckSettleVectors. Compare want and verdict exactly. solana_claims: judgeSolanaClaim on a Solana ticket account; claim_hash is hex.",
+		Scenarios:    scenarios,
+		Claims:       claims,
+		SolanaClaims: solanaClaims,
 	}
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

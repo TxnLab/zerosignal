@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// ackSettle and judgeClaim, checked against testdata/ack_settle_vectors.json,
-// which Go's ackSettle and judgeClaim generate; then checkReceipt, settleArgsOf
-// and settleGroupSpecOf.
+// ackSettle, judgeClaim and judgeSolanaClaim, checked against
+// testdata/ack_settle_vectors.json, which Go's twins generate; then
+// checkReceipt, settleArgsOf and settleGroupSpecOf.
 
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest'
 
 import algosdk from 'algosdk'
 
+import { hex } from '@scure/base'
+import { TICKET_PENDING_BY_OPERATOR, claimFromReceipt, claimHash } from '@txnlab/zs-proto/solana/zsescrow'
 import { type Ticket, type UsageReceipt, receiptSigDigest, signReceipt } from '@txnlab/zs-proto/ticket'
 
 import {
@@ -20,11 +22,13 @@ import {
     type ClaimVerdict,
     discardLogger,
     SettleGroupRejectedError,
+    type SettleArgs,
     type SettleGroupSpec,
     type TicketBoxView,
     ackSettle,
     checkReceipt,
     judgeClaim,
+    judgeSolanaClaim,
     settleArgsOf,
     settleGroupSpecOf,
 } from '../src/index.js'
@@ -86,9 +90,16 @@ interface Claim {
     verdict: ClaimVerdict
 }
 
+interface SolanaClaim {
+    name: string
+    settle: VectorSettle
+    ticket: { status: number; pending_amount: number; claim_hash: string } | null
+    verdict: ClaimVerdict
+}
+
 const vectors = JSON.parse(
     readFileSync(new URL('../../testdata/ack_settle_vectors.json', import.meta.url), 'utf8'),
-) as { scenarios: Scenario[]; claims: Claim[] }
+) as { scenarios: Scenario[]; claims: Claim[]; solana_claims: SolanaClaim[] }
 
 const groupErr = new Error('group submit')
 const standaloneErr = new Error('standalone submit')
@@ -198,19 +209,62 @@ describe('judgeClaim vectors', () => {
         expect(new Set(vectors.claims.map((c) => c.verdict))).toEqual(new Set(['none', 'open', 'agrees', 'overclaims', 'contradicts']))
     })
     it.each(vectors.claims.map((c) => [c.name, c] as const))('%s', (_name, c) => {
-        const s = c.settle
-        const args = {
-            amountCharged: BigInt(s.amount_charged),
-            receiptDigest: b64(s.receipt_digest),
-            ttftMs: BigInt(s.ttft_ms),
-            decodeMs: BigInt(s.decode_ms),
-            inputTokens: BigInt(s.input_tokens),
-            outputTokens: BigInt(s.output_tokens),
-            outputUsageType: s.output_usage_type,
-            auxOutputUsageType: s.aux_output_usage_type,
-            auxOutputCount: BigInt(s.aux_output_count),
+        expect(judgeClaim(argsOf(c.settle), c.box === null ? null : boxOf(c.box))).toBe(c.verdict)
+    })
+})
+
+function argsOf(s: VectorSettle): SettleArgs {
+    return {
+        amountCharged: BigInt(s.amount_charged),
+        receiptDigest: b64(s.receipt_digest),
+        ttftMs: BigInt(s.ttft_ms),
+        decodeMs: BigInt(s.decode_ms),
+        inputTokens: BigInt(s.input_tokens),
+        outputTokens: BigInt(s.output_tokens),
+        outputUsageType: s.output_usage_type,
+        auxOutputUsageType: s.aux_output_usage_type,
+        auxOutputCount: BigInt(s.aux_output_count),
+    }
+}
+
+describe('judgeSolanaClaim vectors', () => {
+    it('covers every verdict a ticket can give', () => {
+        expect(new Set(vectors.solana_claims.map((c) => c.verdict))).toEqual(new Set(['none', 'open', 'agrees', 'overclaims', 'contradicts']))
+    })
+    it.each(vectors.solana_claims.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+        const t = c.ticket === null ? null : { status: c.ticket.status, pendingAmount: BigInt(c.ticket.pending_amount), claimHash: hex.decode(c.ticket.claim_hash) }
+        expect(judgeSolanaClaim(argsOf(c.settle), t)).toBe(c.verdict)
+    })
+
+    // Go's types rule these out; a host journal's JSON doesn't.
+    it('reads args it cannot hash as contradicting the claim', () => {
+        const c = vectors.solana_claims.find((c) => c.verdict === 'agrees')!
+        const t = { status: c.ticket!.status, pendingAmount: BigInt(c.ticket!.pending_amount), claimHash: hex.decode(c.ticket!.claim_hash) }
+        const a = argsOf(c.settle)
+        expect(judgeSolanaClaim({ ...a, receiptDigest: a.receiptDigest.subarray(0, 31) }, t)).toBe('contradicts')
+        expect(judgeSolanaClaim({ ...a, ttftMs: 1n << 64n }, t)).toBe('contradicts')
+    })
+
+    // The claim the payer judges must be the one the node's first half
+    // hashes, which zs-proto builds from the receipt; a field swapped in the
+    // mapping would read every honest claim as a contradiction.
+    it('agrees with the claim the node hashes from the receipt', () => {
+        const r: UsageReceipt = {
+            ticket_id: 'AAAAAAAAAAAAAAAAAAAAAA==',
+            actual_input_count: 11,
+            actual_output_count: 13,
+            amount_charged: 17,
+            ttft_ms: 19,
+            decode_ms: 23,
+            body_hash: 'a'.repeat(64),
+            input_usage_type: 1,
+            output_usage_type: 1,
+            aux_output_usage_type: 2,
+            aux_output_count: 29,
+            cached_input_count: 0,
         }
-        expect(judgeClaim(args, c.box === null ? null : boxOf(c.box))).toBe(c.verdict)
+        const t = { status: TICKET_PENDING_BY_OPERATOR, pendingAmount: 17n, claimHash: claimHash(claimFromReceipt(r)) }
+        expect(judgeSolanaClaim(settleArgsOf(r), t)).toBe('agrees')
     })
 })
 
