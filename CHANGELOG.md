@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-22 — funding the Solana rent pool (unreleased)
+### 2026-10-22 — funding the Solana rent pool (0.9.2)
 
 Both SDKs can top up a payer's Solana rent pool, the program's form of Algorand's prepaid MBR
 pool. No host calls it yet: the Solana wallet that will is still to come, and the TS side is
@@ -66,7 +66,7 @@ internal to the SDK (`sdk/src/solana` is not in the package's exports).
   the confirmed block height passes its blockhash's `lastValidBlockHeight`, read once more
   past that height.
 
-### 2026-10-21 — Solana ticket rent from the payer's pool (unreleased)
+### 2026-10-21 — Solana ticket rent from the payer's pool (0.9.2)
 
 The `zs_escrow` program takes each Ticket's rent from a per-payer `RentPool`, as Algorand's
 `open()` draws box MBR from the payer's prepaid pool, instead of from the node's signer
@@ -87,7 +87,7 @@ The `zs_escrow` program takes each Ticket's rent from a per-payer `RentPool`, as
 
 Neither SDK funds a pool yet: no Solana open path exists in either.
 
-### 2026-10-21 — the Solana registry read (unreleased)
+### 2026-10-21 — the Solana registry read (0.9.2)
 
 Discovery can read its operators and nodes from the `zs_escrow` program, read-only. Nothing
 in either SDK builds it by default: `ResolveNetwork` ↔ `resolveNetwork` still refuse the Solana
@@ -149,7 +149,7 @@ funded, exactly-at-floor, one-below, below-reserve and unreadable balances, a si
 share, the `getBalance` params each pass sends, each node's reading and whether the selection
 rule holds it out, and the floor and reserve as literals.
 
-### 2026-10-21 — the payer's Solana transaction signer (unreleased)
+### 2026-10-21 — the payer's Solana transaction signer (0.9.2)
 
 The Solana rail gets its transaction half of the signer port, in the shape of Algorand's: the
 port signs whatever message it is handed, and the verifier gate sits one layer up, in functions
@@ -194,7 +194,7 @@ through `keystore.SolanaKeys`. The SDK reproduces them by deriving each key from
 which must refuse with the case's field slug before the signer is asked, and sign an accepted one
 exactly once, as its payer, over the message given.
 
-### 2026-10-21 — a Solana RPC client and its retry policy (unreleased)
+### 2026-10-21 — a Solana RPC client and its retry policy (0.9.2)
 
 Go's new `solana/rpc` and the TS SDK's `sdk/src/solana/rpc.ts` and `pubsub.ts` are a thin
 JSON-RPC client for the Solana rail, hand-rolled rather than `solana-go` or `@solana/kit`.
@@ -236,7 +236,7 @@ unchanged, and the TS twin calls `algodBackoffMs`. The new `testdata/solana_rpc_
 how a `TransactionError`'s variant is read, the params each method sends, and what
 `getAccountInfo`, `getProgramAccounts` and `getSignatureStatuses` read from an answer or refuse.
 
-### 2026-10-21 — the payer's check of a relayed Solana ack, and its ack digest for a receipt (unreleased)
+### 2026-10-21 — the payer's check of a relayed Solana ack, and its ack digest for a receipt (0.9.2)
 
 `@txnlab/zs-proto/solana/zsescrow` and Go's `solana/zsescrow` add the payer's two ways to ack a
 `zs_escrow` ticket's claim. Nothing calls them yet; the SDKs' Solana rail will.
@@ -269,7 +269,7 @@ accepted (`extra_settle_ack_alone`). The payer-paid `ack`,
 `ack_first_half` and `ack_mismatch` are refused as `header.signers`: they have one signer, and
 a payer that builds its own ack has no relayer's transaction to check.
 
-### 2026-10-21 — the payer refuses a receipt for another ticket and bars its node (unreleased)
+### 2026-10-21 — the payer refuses a receipt for another ticket and bars its node (0.9.2)
 
 Both SDKs' receipt check (`zs.VerifyReceipt`, `verifyReceipt`) now refuses a receipt whose
 `ticket_id` is not the ticket the payer opened, by the rule in [`SPEC.md` §3a "Settlement
