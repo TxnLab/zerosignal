@@ -181,15 +181,16 @@ func decodeAs(typ string, data []byte) (any, error) {
 // The offsets of the fields the cases change, read off the program's
 // layouts: the 8-byte discriminator, then the fields in order.
 const (
-	configPausedAt   = 8 + 5
-	nodeBaseURLLenAt = 8 + 5
-	nodeBaseURLAt    = 8 + 8 + 3*32
-	ticketStatusAt   = 8 + 1
-	tokenDelegateAt  = 32 + 32 + 8
-	tokenStateAt     = tokenDelegateAt + 4 + 32
-	tokenIsNativeAt  = tokenStateAt + 1
-	tokenDelegatedAt = tokenIsNativeAt + 4 + 8
-	tokenCloseAuthAt = tokenDelegatedAt + 8
+	configPausedAt    = 8 + 5
+	nodeBaseURLLenAt  = 8 + 5
+	nodeBaseURLAt     = 8 + 8 + 3*32
+	ticketStatusAt    = 8 + 1
+	rentPoolReserveAt = 8 + 2 + 8 + 32
+	tokenDelegateAt   = 32 + 32 + 8
+	tokenStateAt      = tokenDelegateAt + 4 + 32
+	tokenIsNativeAt   = tokenStateAt + 1
+	tokenDelegatedAt  = tokenIsNativeAt + 4 + 8
+	tokenCloseAuthAt  = tokenDelegatedAt + 8
 )
 
 func buildZsVectors(t *testing.T) zsVectors {
@@ -253,6 +254,14 @@ func buildZsVectors(t *testing.T) zsVectors {
 	b = bytes.Clone(ticket)
 	b[ticketStatusAt] = 7
 	accept("ticket_status_unknown", "Ticket", "a status a later program might add, read as unknown", b)
+
+	// The program's pools hold a zero reserve; one that doesn't shows the
+	// decoder reads those bytes rather than assuming them.
+	b = account(t, f, "rent_pool")
+	for i := range zsescrow.RentPoolSize - rentPoolReserveAt {
+		b[rentPoolReserveAt+i] = byte(i + 1)
+	}
+	accept("rent_pool_reserve_set", "RentPool", "reserve bytes a later layout might write, read as written", b)
 
 	vault := account(t, f, "node_vault")
 	refuse("token_account_short", "TokenAccount", "164 bytes", vault[:len(vault)-1])
