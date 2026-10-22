@@ -678,7 +678,7 @@ function followUpSignal(signal: AbortSignal | undefined): AbortSignal {
  * pool.
  */
 export class BelowTargetError extends Error {
-    override readonly name = 'BelowTargetError'
+    override readonly name: string = 'BelowTargetError'
 
     constructor(readonly deposited: bigint) {
         super(`wallet: prepaid MBR pool funded below the configured working set (deposited ${deposited} µALGO)`)
@@ -716,9 +716,11 @@ export class OpenTopUpError extends AggregateError {
     }
 }
 
-// A slot count from a number: anything but a positive finite count is 0, the
-// default working set.
-function slotCount(n: number | undefined): bigint {
+/**
+ * A slot count from a number: anything but a positive finite count is 0, the
+ * default working set.
+ */
+export function slotCount(n: number | undefined): bigint {
     return n !== undefined && Number.isFinite(n) && n >= 1 ? BigInt(Math.floor(n)) : 0n
 }
 

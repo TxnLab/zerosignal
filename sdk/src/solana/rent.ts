@@ -16,6 +16,7 @@ import { MbrDepositUnaffordableError } from '../mbr.js'
 import { type PoolDepositPlan, planPoolDeposit, poolTarget } from '../pool.js'
 import type { SolanaSigner } from '../ports.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../registry/solana.js'
+import { BelowTargetError } from '../wallet.js'
 import { type ConfirmOptions, confirmSignature } from './confirm.js'
 import { type SolanaRpc, txErrorName } from './rpc.js'
 
@@ -84,6 +85,20 @@ export class RentDepositUnaffordableError extends MbrDepositUnaffordableError {
             `insufficient SOL to fund the ticket rent pool: it backs ${backedSlots} of ${slots} slot(s); ` +
                 `one more slot needs ${need} lamports (${breakdown}), have ${spendable} lamports spendable — fund the wallet with more SOL`,
         )
+    }
+}
+
+/**
+ * A deposit landed but left the pool short of the working set, with no free
+ * slot to serve on (Go's ErrRentDepositBelowTarget). A BelowTargetError, so
+ * the serving path takes it as it takes Algorand's.
+ */
+export class RentDepositBelowTargetError extends BelowTargetError {
+    override readonly name = 'RentDepositBelowTargetError'
+
+    constructor(deposited: bigint) {
+        super(deposited)
+        this.message = `wallet: ticket rent pool funded below the configured working set (deposited ${deposited} lamports)`
     }
 }
 

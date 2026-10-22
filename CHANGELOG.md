@@ -31,6 +31,30 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the Solana wallet's open (unreleased)
+
+Both SDKs can open a ticket on Solana: `zs.SolanaWallet` ↔ `SolanaWallet`
+(`sdk/src/solana/wallet.ts`, not in the package's exports). No host builds one yet, since the
+Solana rail can't be configured.
+
+- **Building.** `NewSolanaWallet` ↔ `SolanaWallet.create` read the program's Config for the
+  mint's decimals, and refuse a Config that is missing or names another mint than the
+  deployment's.
+- **The open.** `OpenForNode` ↔ `openForNode` check the node's offer against the ticket, the
+  node's registered signing key and the Config (`CompleteOpenOffer` ↔ `completeOpenOffer`),
+  top up the rent pool first (`SolanaRentPool`), and sign. Nothing is submitted: the handle
+  carries `payment_open` as `OpenGroup` ↔ `openGroup` and `payment_ref` as `AppCallTxID` ↔
+  `appCallTxId`, for the node to submit. A pool the payer can't fund serves while it has a
+  free slot, as on Algorand.
+- **What it refuses.** A node below 9.13, which can't read `payment_open`; `Open` ↔ `open`,
+  which dispatch calls only for a node that doesn't submit opens; and a second open for a
+  ticket it has already signed one for, which SPEC § 3a now states. It remembers signed
+  tickets in memory until ten minutes past their `expires_at`.
+- **Settling.** A Solana handle's ack, protest, refund and lapse fail with "on Solana is not
+  supported yet", and the refund watchdog in either SDK leaves the handle untracked.
+- **`RentDepositBelowTargetError`** extends `BelowTargetError`, Go's
+  `ErrRentDepositBelowTarget`. `BelowTargetError.name` is now typed `string`, not its literal.
+
 ### 2026-10-22 — the Solana payer chooses the ticket id (unreleased)
 
 SPEC § 3a "The open and the ack on Solana" closes the precondition the entry below left open:

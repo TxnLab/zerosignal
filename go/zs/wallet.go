@@ -153,7 +153,8 @@ type OpenHandle struct {
 	// call — position 1 of the submitted payment+app-call group, in
 	// its wire form (base32, 52 chars). This is what gets threaded
 	// into the envelope's algorand_tx_id so the node can look it up
-	// directly via algod's PendingTransactionInformation(txid).
+	// directly via algod's PendingTransactionInformation(txid). On Solana
+	// it is payment_ref, the open transaction's id.
 	AppCallTxID string
 	// journaled is the ticket's journal row, set once it is written, so the
 	// receipt update rewrites the same row.
@@ -193,7 +194,8 @@ type OpenHandle struct {
 	SignedGroup [][]byte
 	// OpenGroup is the completed group in escrow.EncodeOpenGroup's form, set
 	// only by OpenForNode: nothing has been broadcast, and the sealed request
-	// carries it for the node to submit.
+	// carries it for the node to submit. On Solana it is payment_open, the
+	// signed offer, and SignedGroup holds its bytes.
 	OpenGroup string
 
 	// deliverAck hands the completed settle group to the node instead of
@@ -202,6 +204,18 @@ type OpenHandle struct {
 	deliverAck func(ctx context.Context, ack wire.SettleAck) error
 
 	wallet *Wallet
+	// solana is the wallet that signed a Solana open, whose handle has no
+	// settle path yet; nil on Algorand.
+	solana *SolanaWallet
+}
+
+// detached is the error of a settle path called on a handle without an
+// Algorand wallet.
+func (h *OpenHandle) detached(what string) error {
+	if h.solana != nil {
+		return fmt.Errorf("wallet: %s on Solana is not supported yet", what)
+	}
+	return fmt.Errorf("wallet: %s on detached OpenHandle (test-only or misconstructed)", what)
 }
 
 // errNoSettleAckRoute is a deliverAck failure that sent nothing: no relay can
@@ -418,7 +432,7 @@ func (w *Wallet) handleFor(tk *ticket.Ticket, op Operator, result escrow.OpenRes
 // receipt on either path (AckResult.Claim).
 func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (AckResult, error) {
 	if h.wallet == nil {
-		return AckResult{}, errors.New("wallet: ack-settle on detached OpenHandle (test-only or misconstructed)")
+		return AckResult{}, h.detached("ack-settle")
 	}
 	signer := algo.SignWithAccountForATC(h.wallet.keystore, h.wallet.payerAddr)
 	// Whatever runs after the node's group failed runs on followCtx: the box
@@ -698,7 +712,7 @@ func (h *OpenHandle) readClaim(ctx context.Context, a SettleArgs) (ClaimVerdict,
 // nothing is sent.
 func (h *OpenHandle) freezeOverclaim(ctx context.Context, receipt *ticket.UsageReceipt) (txid string, feeMicroalgos uint64, claim ClaimVerdict, err error) {
 	if h.wallet == nil {
-		return "", 0, ClaimUnreadable, errors.New("wallet: freeze on detached OpenHandle (test-only or misconstructed)")
+		return "", 0, ClaimUnreadable, h.detached("freeze")
 	}
 	a := settleArgsOf(receipt)
 	claim, err = h.readClaim(ctx, a)
@@ -888,7 +902,7 @@ func (h *OpenHandle) settleGroupSpec(receipt *ticket.UsageReceipt) (escrow.Settl
 // receipt-vs-plaintext comparisons; the contract rejects 0.
 func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, uint64, error) {
 	if h.wallet == nil {
-		return "", 0, errors.New("wallet: protest on detached OpenHandle (test-only or misconstructed)")
+		return "", 0, h.detached("protest")
 	}
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
@@ -923,7 +937,7 @@ func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, 
 // ticket id.
 func (h *OpenHandle) RefundInactive(ctx context.Context) (string, error) {
 	if h.wallet == nil {
-		return "", errors.New("wallet: refund-inactive on detached OpenHandle (test-only or misconstructed)")
+		return "", h.detached("refund-inactive")
 	}
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
@@ -968,7 +982,7 @@ func (h *OpenHandle) RefundInactive(ctx context.Context) (string, error) {
 // deleted box, and a reverted app call commits nothing.
 func (h *OpenHandle) SettleLapsed(ctx context.Context) (string, error) {
 	if h.wallet == nil {
-		return "", errors.New("wallet: settle-lapsed on detached OpenHandle (test-only or misconstructed)")
+		return "", h.detached("settle-lapsed")
 	}
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
