@@ -184,10 +184,12 @@ func Transport(opts Options) *http.Transport {
 	// IdleConnTimeout (90s, inherited from DefaultTransport).
 	t.MaxIdleConns = 0
 
-	// Enable HTTP/2 keepalive PINGs. ConfigureTransports switches this transport
-	// from the stdlib-bundled http2 (which exposes no ping knobs) to
-	// golang.org/x/net/http2 and returns the *http2.Transport so we can set
-	// them. It only affects connections where h2 is negotiated via ALPN over
+	// Enable HTTP/2 keepalive PINGs. ConfigureTransports returns the
+	// *http2.Transport whose ping knobs this transport's h2 connections then
+	// use; how it wires them differs by Go release (through TLSNextProto on
+	// 1.26, through the stdlib's own HTTP/2 on 1.27), and
+	// TestTransportSendsHTTP2Pings checks the pings on the wire on whichever
+	// builds it. It only affects connections where h2 is negotiated via ALPN over
 	// TLS; a plaintext http/1.1 target keeps using HTTP/1. A configure error is
 	// non-fatal — the transport still works over h2 (bundled) / h1, just
 	// without tuned pings.

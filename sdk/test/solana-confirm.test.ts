@@ -134,6 +134,12 @@ async function connect(): Promise<{ pubsub: SolanaPubSub; ws: FakeSocket }> {
     return { pubsub: await pending, ws }
 }
 
+// The height check for a test whose watch must arm. confirmSignature gives
+// the subscribe one height check to be answered, and a millisecond can pass
+// before the test answers it: the subscribe then times out and it polls, as it
+// should. Go's armWindow.
+const ARM_WINDOW_MS = 100
+
 async function until(f: () => boolean): Promise<void> {
     while (!f()) await new Promise((r) => setTimeout(r, 1))
 }
@@ -164,7 +170,7 @@ describe('confirmSignature with a watch', () => {
         // With a watch armed the ticks read only the height, so the read past it is the one that finds the landing.
         const { pubsub, ws } = await connect()
         const { rpc, n } = chain([null, at(100n, 'confirmed')], [90n, 101n])
-        const done = confirmSignature(rpc, SIG, 100n, 'confirmed', { pubsub, pollMs: 3_600_000, heightCheckMs: 1 })
+        const done = confirmSignature(rpc, SIG, 100n, 'confirmed', { pubsub, pollMs: 3_600_000, heightCheckMs: ARM_WINDOW_MS })
         await until(() => ws.sent.length > 0)
         ws.push({ jsonrpc: '2.0', result: 4, id: ws.sent[0]!.id })
         await expect(done).resolves.toEqual({ slot: 100n, err: null })
@@ -175,10 +181,10 @@ describe('confirmSignature with a watch', () => {
         const { pubsub, ws } = await connect()
         const { rpc, n } = chain([null], [1n])
         const ctl = new AbortController()
-        const done = confirmSignature(rpc, SIG, 100n, 'confirmed', { pubsub, pollMs: 1, heightCheckMs: 1, signal: ctl.signal })
+        const done = confirmSignature(rpc, SIG, 100n, 'confirmed', { pubsub, pollMs: 1, heightCheckMs: ARM_WINDOW_MS, signal: ctl.signal })
         await until(() => ws.sent.length > 0)
         ws.push({ jsonrpc: '2.0', result: 4, id: ws.sent[0]!.id })
-        await until(() => n.height >= 6)
+        await until(() => n.height >= 3)
         ctl.abort()
         await done.catch(() => {})
         // The status was read once, while arming: the watch is what saves the polls.

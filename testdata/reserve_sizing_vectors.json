@@ -2477,7 +2477,7 @@
       "name": "a model of invalid UTF-8",
       "content_type": "multipart/form-data; boundary=XyZ",
       "body_b64": "LS1YeVoNCkNvbnRlbnQtRGlzcG9zaXRpb246IGZvcm0tZGF0YTsgbmFtZT0ibW9kZWwiDQoNCm3wn5h4/w0KLS1YeVoNCkNvbnRlbnQtRGlzcG9zaXRpb246IGZvcm0tZGF0YTsgbmFtZT0iaW1hZ2UiOyBmaWxlbmFtZT0iYS5wbmciDQpDb250ZW50LVR5cGU6IGltYWdlL3BuZw0KDQqJUE5HDQoaCgD/LS1YeVp4DQotLVh5Wi15DQotLVh5Wi0tDQo=",
-      "model": "m\ufffd\ufffd\ufffdx\ufffd",
+      "model": "m���x�",
       "n": 1,
       "size": "",
       "quality": "",

@@ -579,7 +579,10 @@ func sizingImageEditCases() []sizingVecImageEdit {
 			c.Err = err.Error()
 			continue
 		}
-		c.Model, c.N, c.Size, c.Quality, c.Stream = m, n, size, quality, stream
+		// encoding/json replaces each invalid byte with U+FFFD, but Go 1.26
+		// spells it � and 1.27 writes the character, so the replacement
+		// is made here, where both write it the same.
+		c.Model, c.N, c.Size, c.Quality, c.Stream = string([]rune(m)), n, size, quality, stream
 	}
 	return cases
 }

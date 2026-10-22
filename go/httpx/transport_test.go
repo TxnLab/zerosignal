@@ -7,12 +7,16 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 func TestTransportDefaults(t *testing.T) {
@@ -44,22 +48,72 @@ func TestTransportDefaults(t *testing.T) {
 	}
 }
 
-func TestTransportHTTP2PingsConfigured(t *testing.T) {
-	// ConfigureTransports installs the "h2" ALPN handler on TLSNextProto (and
-	// switches the transport to golang.org/x/net/http2 so the ping knobs take
-	// effect). Its presence is the observable signal that h2 keepalive pings
-	// were wired; the ReadIdleTimeout/PingTimeout live on the returned
-	// *http2.Transport, which isn't reachable from *http.Transport.
-	tr := Transport(Options{})
-	if tr.TLSNextProto == nil || tr.TLSNextProto["h2"] == nil {
-		t.Fatal("expected HTTP/2 to be configured (TLSNextProto[\"h2\"] set)")
+func TestTransportSendsHTTP2Pings(t *testing.T) {
+	// Asserted on the wire, not on the transport's fields: how
+	// ConfigureTransports wires h2 differs by Go release (1.26 fills
+	// TLSNextProto; 1.27 hands it to the stdlib's own HTTP/2 and leaves
+	// TLSNextProto empty), and the ping knobs aren't readable from
+	// *http.Transport either way. The server answers the handshake and never
+	// the request, so only a keepalive PING can arrive.
+	cert := httptest.NewTLSServer(nil) // for its certificate
+	cert.Close()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: cert.TLS.Certificates, NextProtos: []string{"h2"}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer ln.Close()
+	pinged := make(chan struct{}, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		if _, err := io.ReadFull(c, make([]byte, len(http2.ClientPreface))); err != nil {
+			return
+		}
+		fr := http2.NewFramer(c, c)
+		if fr.WriteSettings() != nil {
+			return
+		}
+		for {
+			f, err := fr.ReadFrame()
+			if err != nil {
+				return
+			}
+			switch f := f.(type) {
+			case *http2.SettingsFrame:
+				if !f.IsAck() && fr.WriteSettingsAck() != nil {
+					return
+				}
+			case *http2.PingFrame:
+				if !f.IsAck() {
+					pinged <- struct{}{}
+					return
+				}
+			}
+		}
+	}()
 
-	// Custom (and non-default) ping values must not error out the configure
-	// path — the transport still comes back h2-configured.
-	tr2 := Transport(Options{H2ReadIdleTimeout: 7 * time.Second, H2PingTimeout: 3 * time.Second})
-	if tr2.TLSNextProto == nil || tr2.TLSNextProto["h2"] == nil {
-		t.Fatal("expected HTTP/2 configured with custom ping values")
+	tr := Transport(Options{H2ReadIdleTimeout: 100 * time.Millisecond, H2PingTimeout: time.Second})
+	// Amended, not replaced: the transport's TLS config carries the h2 ALPN
+	// entry on the releases that put it there.
+	if tr.TLSClientConfig == nil {
+		tr.TLSClientConfig = &tls.Config{}
+	}
+	tr.TLSClientConfig.InsecureSkipVerify = true
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+ln.Addr().String()+"/", nil)
+		if resp, err := tr.RoundTrip(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-pinged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no HTTP/2 PING with a 100ms read-idle timeout")
 	}
 }
 

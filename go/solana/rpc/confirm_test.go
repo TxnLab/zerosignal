@@ -200,6 +200,12 @@ func TestConfirmTakesTheWatchsAnswer(t *testing.T) {
 	}
 }
 
+// armWindow is the height check for a test whose watch must arm. Confirm
+// gives the subscribe one height check to be answered, and a millisecond is
+// shorter than the fake takes to answer when the whole suite runs at once:
+// the subscribe then times out and Confirm polls, as it should.
+const armWindow = 100 * time.Millisecond
+
 // armedConfirm runs Confirm with a watch the fake arms and never notifies.
 func armedConfirm(t *testing.T, c *confirmChain, o ConfirmOptions) <-chan error {
 	t.Helper()
@@ -232,7 +238,7 @@ func TestConfirmTakesALandingFoundPastTheHeightWithAWatch(t *testing.T) {
 	// With a watch armed the ticks read only the height, so the read past it
 	// is the one that finds the landing.
 	c := &confirmChain{statuses: []*SignatureStatus{nil, at(100, Confirmed)}, heights: []uint64{90, 101}}
-	waitConfirmed(t, armedConfirm(t, c, ConfirmOptions{Poll: time.Hour, HeightCheck: time.Millisecond}))
+	waitConfirmed(t, armedConfirm(t, c, ConfirmOptions{Poll: time.Hour, HeightCheck: armWindow}))
 	if s, _ := c.reads(); s != 2 {
 		t.Fatalf("%d status reads, want 2", s)
 	}
@@ -246,13 +252,13 @@ func TestConfirmReadsOnlyTheHeightWhileAWatchIsArmed(t *testing.T) {
 	p, ws := dial(t, f, nil)
 	done := make(chan error, 1)
 	go func() {
-		_, err := Confirm(ctx, c, testSig, 100, Confirmed, ConfirmOptions{PubSub: p, Poll: time.Millisecond, HeightCheck: time.Millisecond})
+		_, err := Confirm(ctx, c, testSig, 100, Confirmed, ConfirmOptions{PubSub: p, Poll: time.Millisecond, HeightCheck: armWindow})
 		done <- err
 	}()
 	call := f.next(t)
 	sendFrame(t, ws, `{"jsonrpc":"2.0","result":4,"id":%d}`, call.ID)
 	for {
-		if _, h := c.reads(); h >= 6 {
+		if _, h := c.reads(); h >= 3 {
 			break
 		}
 		time.Sleep(time.Millisecond)
