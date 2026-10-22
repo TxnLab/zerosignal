@@ -12,7 +12,7 @@ import * as ed25519 from '@noble/ed25519'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { base64 } from '@scure/base'
 import { encodeBase58, parseTransaction, publicKeyBytes, verifySignatures } from '@txnlab/zs-proto/solana'
-import { Deployment, OfferRejectedError, PROGRAM_ID, decodeOpenPayment } from '@txnlab/zs-proto/solana/zsescrow'
+import { Deployment, OfferRejectedError, PROGRAM_ID, decodeConfig, decodeOpenPayment } from '@txnlab/zs-proto/solana/zsescrow'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 import { RAIL_NEUTRAL_NAMES_MIN_VERSION } from '@txnlab/zs-proto/wire'
 import { describe, expect, it } from 'vitest'
@@ -22,9 +22,10 @@ import { findError } from '../src/errors.js'
 import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import type { SolanaSigner } from '../src/ports.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../src/registry/solana.js'
-import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
+import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
 import type { Account, SolanaRpc } from '../src/solana/rpc.js'
 import { SIGNED_OPEN_RETENTION_MS, SolanaWallet } from '../src/solana/wallet.js'
+import { BelowTargetError } from '../src/wallet.js'
 import { testOperator } from './fixtures.js'
 
 type Json = Record<string, any>
@@ -284,8 +285,48 @@ describe('SolanaWallet', () => {
     it('hands back a handle that settles nothing yet, and says so', async () => {
         const f = await fixture(1_000_000_000n, 3n)
         const h = await f.open()
+        const want = 'on Solana is not supported yet'
         const r = await h.ackSettle({} as never, null)
-        expect(String(r.err)).toContain('on Solana is not supported yet')
-        await expect(h.refundInactive()).rejects.toThrow('on Solana is not supported yet')
+        expect(String(r.err)).toContain(want)
+        await expect(h.refundInactive()).rejects.toThrow(want)
+        await expect(h.protest({} as never, new Uint8Array(), 1 as never)).rejects.toThrow(want)
+        await expect(h.settleLapsed()).rejects.toThrow(want)
+        const freeze = await h.freezeOverclaim!({} as never)
+        expect(freeze.claim).toBe('unreadable')
+        expect(String(freeze.err)).toContain(want)
+    })
+
+    // A ticket already signed for is refused before the pool is read, so a
+    // second offer for it costs no top-up even once the latch is cleared.
+    it('refuses a signed ticket before reading the pool', async () => {
+        const f = await fixture(1_000_000_000n, 3n)
+        await f.open()
+        f.wallet.recheckDeposit()
+        const reads = f.state.poolReads
+        await expect(f.open()).rejects.toThrow('already signed, or is signing')
+        expect(f.state.poolReads).toBe(reads)
+    })
+
+    // The offer's transfer must carry the Config's decimals, not an assumed
+    // 6: against a Config of 9 decimals, the program's 6-decimal offer is
+    // refused.
+    it("checks the offer at the Config's decimals", async () => {
+        const c = cluster(1_000_000_000n, 3n)
+        const data = CONFIG.slice()
+        data[12] = 9
+        expect(decodeConfig(data).usdcDecimals).toBe(9)
+        c.state.config = { lamports: 1n, owner: PROGRAM_ID, data, executable: false }
+        const signer = countingSigner()
+        const w = await SolanaWallet.create({ rpc: c.rpc, deployment: d, signer, depositSlots: 3 })
+        const err = await w.openForNode(ticket, op, OFFER.offer_base64).catch((e: unknown) => e)
+        expect(findError(err, OfferRejectedError)).toBeDefined()
+        expect(signer.asked).toBe(0)
+    })
+
+    it('reports a pool below target in lamports, with what it deposited', () => {
+        const err = new RentDepositBelowTargetError(2_512_560n)
+        expect(err).toBeInstanceOf(BelowTargetError)
+        expect(err.deposited).toBe(2_512_560n)
+        expect(err.message).toBe('wallet: ticket rent pool funded below the configured working set (deposited 2512560 lamports)')
     })
 })

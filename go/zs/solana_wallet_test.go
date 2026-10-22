@@ -404,7 +404,58 @@ func TestSolanaHandle_HasNoSettlePath(t *testing.T) {
 	if _, err := h.AckSettle(t.Context(), &ticket.UsageReceipt{}, ""); err == nil || !strings.Contains(err.Error(), "on Solana is not supported yet") {
 		t.Fatalf("AckSettle: err = %v", err)
 	}
-	if _, err := h.RefundInactive(t.Context()); err == nil || !strings.Contains(err.Error(), "on Solana") {
+	const want = "on Solana is not supported yet"
+	r := &ticket.UsageReceipt{}
+	if _, err := h.RefundInactive(t.Context()); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("RefundInactive: err = %v", err)
+	}
+	if _, _, err := h.Protest(t.Context(), r, nil, 1); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Protest: err = %v", err)
+	}
+	if _, err := h.SettleLapsed(t.Context()); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("SettleLapsed: err = %v", err)
+	}
+	if _, _, claim, err := h.freezeOverclaim(t.Context(), r); claim != ClaimUnreadable || err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("freezeOverclaim: %v, err = %v", claim, err)
+	}
+}
+
+// A ticket already signed for is refused before the pool is read, so a
+// second offer for it costs no top-up even once the latch is cleared.
+func TestSolanaWallet_RefusesASignedTicketBeforeThePool(t *testing.T) {
+	f := newSolanaOpenFixture(t, 1_000_000_000, 3)
+	if _, err := f.open(t); err != nil {
+		t.Fatal(err)
+	}
+	f.wallet.RecheckDeposit()
+	reads := f.cluster.poolReads
+	if _, err := f.open(t); err == nil {
+		t.Fatal("signed a second open")
+	}
+	if f.cluster.poolReads != reads {
+		t.Fatalf("read the pool %d more times for a refused ticket", f.cluster.poolReads-reads)
+	}
+}
+
+// The offer's transfer must carry the Config's decimals, not an assumed 6:
+// against a Config of 9 decimals, the program's 6-decimal offer is refused.
+func TestSolanaWallet_ChecksTheOfferAtTheConfigsDecimals(t *testing.T) {
+	f := newSolanaOpenFixture(t, 1_000_000_000, 3)
+	data := bytes.Clone(f.cluster.config.Data)
+	data[12] = 9
+	if c, err := zsescrow.DecodeConfig(data); err != nil || c.USDCDecimals != 9 {
+		t.Fatalf("decimals byte: %v, %v", c, err)
+	}
+	f.cluster.config = &rpc.Account{Owner: f.cluster.d.Program, Data: data}
+	w, err := NewSolanaWallet(t.Context(), SolanaWalletConfig{RPC: f.cluster, Deployment: f.cluster.d, Signer: f.signer, DepositSlots: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rej *zsescrow.OfferRejectedError
+	if _, err := w.OpenForNode(t.Context(), f.ticket, f.op, f.offer); !errors.As(err, &rej) {
+		t.Fatalf("err = %v, want the offer refused", err)
+	}
+	if n := f.signer.asked.Load(); n != 0 {
+		t.Fatalf("signed %d", n)
 	}
 }
