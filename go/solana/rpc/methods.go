@@ -243,6 +243,14 @@ func (c *HTTPClient) GetGenesisHash(ctx context.Context) (solana.Hash, error) {
 	return h, nil
 }
 
+func (c *HTTPClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataLen uint64, cm Commitment) (uint64, error) {
+	var lamports uint64
+	if err := c.call(ctx, "getMinimumBalanceForRentExemption", []any{dataLen, config{Commitment: cm}}, &lamports); err != nil {
+		return 0, err
+	}
+	return lamports, nil
+}
+
 // SendTransaction submits signed transaction bytes and returns the
 // signature the RPC reports. A simulation failure is an *Error whose
 // TxErrName names the TransactionError.

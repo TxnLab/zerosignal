@@ -900,6 +900,29 @@
       "params": []
     },
     {
+      "method": "getMinimumBalanceForRentExemption",
+      "args": {
+        "data_len": 233
+      },
+      "params": [
+        233,
+        {}
+      ]
+    },
+    {
+      "method": "getMinimumBalanceForRentExemption",
+      "args": {
+        "commitment": "confirmed",
+        "data_len": 0
+      },
+      "params": [
+        0,
+        {
+          "commitment": "confirmed"
+        }
+      ]
+    },
+    {
       "method": "sendTransaction",
       "args": {
         "tx_hex": "010203feff"

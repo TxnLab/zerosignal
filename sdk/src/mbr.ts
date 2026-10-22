@@ -9,6 +9,7 @@
 // through MbrPoolChain, as Go's arrives through its EscrowChain.
 
 import { defaults } from './config.js'
+import { planPoolDeposit, poolTarget } from './pool.js'
 
 /** PayerDeposit is the payer's pool as the escrow app reports it. */
 export interface PayerDeposit {
@@ -24,8 +25,6 @@ export interface PayerDeposit {
  * Recoverable on closeDeposit; never sent to the app.
  */
 export const DEPOSIT_OPT_IN_MBR = 100_000n + 6n * 28_500n
-
-const MAX_UINT64 = (1n << 64n) - 1n
 
 /** MbrDepositPlan is one funding pass, as planMbrDeposit sizes it. */
 export interface MbrDepositPlan {
@@ -67,48 +66,8 @@ export interface MbrDepositInputs {
  * testdata/deposit_plan_vectors.json. ticketMbr must be non-zero.
  */
 export function planMbrDeposit(i: MbrDepositInputs): MbrDepositPlan {
-    const none: MbrDepositPlan = { amount: 0n, belowTarget: false, unaffordable: false, need: 0n }
-    const bal = i.deposit.algoBalance
-    const target = poolTarget(i.slots, i.ticketMbr, i.quotaDue)
-    if (bal >= target) return none
-
     const overhead = 2n * i.minFee + (i.optedIn ? 0n : DEPOSIT_OPT_IN_MBR)
-    const net = i.spendable > overhead ? i.spendable - overhead : 0n
-    // The next slot costs only what the pool's part slot lacks.
-    const need = i.ticketMbr - (bal % i.ticketMbr) + overhead
-
-    const current = bal / i.ticketMbr
-    // The pool and the wallet together, so a part slot already in the pool
-    // counts toward the next one; saturating as Go's does.
-    const reach = bal + net > MAX_UINT64 ? MAX_UINT64 : bal + net
-    const affordable = reach / i.ticketMbr
-    const targetSlots = affordable < i.slots ? affordable : i.slots
-    if (targetSlots <= current) {
-        const quota = quotaOnlyShortfall(i.ticketMbr, i.quotaDue, bal)
-        if (current >= 1n && quota > 0n) {
-            return net >= quota
-                ? { ...none, amount: quota, belowTarget: bal + quota < target }
-                : { ...none, belowTarget: true, need: quota + overhead }
-        }
-        return current >= 1n ? { ...none, belowTarget: true, need } : { ...none, unaffordable: true, need }
-    }
-    let amount = targetSlots * i.ticketMbr - bal
-    if (net >= amount + i.quotaDue) amount += i.quotaDue
-    return { ...none, amount, belowTarget: bal + amount < target }
-}
-
-// slots × ticketMbr + quotaDue, saturating at the uint64 ceiling as Go's
-// poolTarget does, so a target past it reads as unaffordable, never as small.
-function poolTarget(slots: bigint, ticketMbr: bigint, quotaDue: bigint): bigint {
-    const t = slots * ticketMbr + quotaDue
-    return t > MAX_UINT64 ? MAX_UINT64 : t
-}
-
-// The quota term the pool's sub-slot remainder doesn't already cover.
-function quotaOnlyShortfall(ticketMbr: bigint, quotaDue: bigint, balance: bigint): bigint {
-    if (quotaDue === 0n || ticketMbr === 0n) return 0n
-    const remainder = balance % ticketMbr
-    return remainder >= quotaDue ? 0n : quotaDue - remainder
+    return planPoolDeposit(i.slots, i.ticketMbr, i.quotaDue, i.deposit.algoBalance, overhead, i.spendable)
 }
 
 /** MbrPoolState is the pool resolved for display and the withdraw controls. */
@@ -169,17 +128,21 @@ export interface MbrPoolChain {
  * can, while its tickets settle.
  */
 export class MbrDepositUnaffordableError extends Error {
-    override readonly name = 'MbrDepositUnaffordableError'
+    // string, so the Solana rail's RentDepositUnaffordableError can extend it.
+    override readonly name: string = 'MbrDepositUnaffordableError'
 
+    /** message replaces the ALGO wording, for another rail's pool. */
     constructor(
         readonly backedSlots: bigint,
         readonly slots: bigint,
         readonly need: bigint,
         readonly spendable: bigint,
+        message?: string,
     ) {
         super(
-            `insufficient ALGO to fund the prepaid MBR pool: it backs ${backedSlots} of ${slots} slot(s); ` +
-                `the next deposit needs ${need} µALGO, have ${spendable} spendable — add ALGO to the wallet`,
+            message ??
+                `insufficient ALGO to fund the prepaid MBR pool: it backs ${backedSlots} of ${slots} slot(s); ` +
+                    `the next deposit needs ${need} µALGO, have ${spendable} spendable — add ALGO to the wallet`,
         )
     }
 }

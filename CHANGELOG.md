@@ -31,6 +31,41 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — funding the Solana rent pool (unreleased)
+
+Both SDKs can top up a payer's Solana rent pool, the program's form of Algorand's prepaid MBR
+pool. No host calls it yet: the Solana wallet that will is still to come, and the TS side is
+internal to the SDK (`sdk/src/solana` is not in the package's exports).
+
+- **Sizing.** `planRentDeposit` (Go, unexported) ↔ `planRentDeposit` (`sdk/src/solana/rent.ts`)
+  size a top-up by Algorand's rule, through a shared core, `planPoolDeposit` ↔
+  `planPoolDeposit` (`sdk/src/pool.ts`, not re-exported), with one ticket's rent as the slot
+  and no quota term. The pool's gross is
+  its lamports above its own rent plus `open_tickets` × the ticket rent. A deposit costs the
+  wallet its 5,000-lamport fee and, on a first deposit, the pool's own rent; the wallet's
+  spendable lamports are its balance above the 890,880-lamport reserve. Pinned by the new
+  `rent_deposit_plan_vectors.json`; `deposit_plan_vectors.json` is unchanged.
+- **The top-up.** `zs.SolanaRentPool` ↔ `SolanaRentPool` read the rents
+  (`getMinimumBalanceForRentExemption`, new in both RPC clients), the pool and the balance at
+  `confirmed`, send `deposit_rent` signed and paid by the payer, and wait for it to confirm.
+  The outcomes are Algorand's: nothing sent for a covered pool, a below-target deposit
+  reported beside its signature, and an unaffordable one refused before signing.
+  `ErrRentDepositUnaffordable` / `ErrRentDepositBelowTarget` match `ErrDepositUnaffordable` /
+  `ErrDepositBelowTarget` under `errors.Is`, and `RentDepositUnaffordableError` extends
+  `MbrDepositUnaffordableError`, so the SDK's existing `instanceof` branches take them. Its
+  `name` is its own, so a host that matches the Algorand error by name (the chat app does,
+  for a second copy of the module) must add it. A deposit sent but not confirmed reports its
+  signature: beside the error in Go, as `RentDepositUnconfirmedError.signature` in TS.
+- **`getMinimumBalanceForRentExemption`** is a new method on the `rpc.Client` interface ↔
+  `SolanaRpc`, so a host's own implementation of either must add it.
+- **Confirming a transaction.** `rpc.Confirm` ↔ `confirmSignature` (`sdk/src/solana/confirm.ts`)
+  wait for a signature to reach a commitment: through the `signatureSubscribe` watch when
+  given one, polling `getSignatureStatuses` otherwise, once it drops, or when its subscribe
+  isn't answered within one height check. A transaction counts
+  as expired (`rpc.ErrExpired` ↔ `TransactionExpiredError`) only when it has no status after
+  the confirmed block height passes its blockhash's `lastValidBlockHeight`, read once more
+  past that height.
+
 ### 2026-10-21 — Solana ticket rent from the payer's pool (unreleased)
 
 The `zs_escrow` program takes each Ticket's rent from a per-payer `RentPool`, as Algorand's

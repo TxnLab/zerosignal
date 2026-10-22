@@ -832,6 +832,7 @@ Tickets escrow USDC, not ALGO. The proxy locks `max_price` microUSDC into the co
 - The lamports themselves move: a live ticket's rent sits in the ticket, and every ending returns it to the pool and decrements `open_tickets`. So `withdraw_rent` can take what the pool holds above its own rent-exempt minimum, the Solana form of `available`, and `close_rent_pool` returns everything and is refused while `open_tickets` is non-zero.
 - A ticket opened before pools existed names the node's signing key as its rent payer, and its ending returns the rent there. A settle passes the ticket's own `rent_payer`, never one derived from the payer.
 - A payer has as many tickets live at once as its pool holds rent for. One ticket's rent carries a payer turn after turn, because a settle folded into the next open offer returns the old rent before the open draws.
+- A payer sizes its top-ups by the Algorand pool's rule, with one ticket's rent as the slot and no quota term. The pool's gross is its lamports above its own rent-exempt minimum plus `open_tickets` × the ticket rent. A deposit costs the wallet its fee and, on the first deposit, the pool's own rent, which `deposit_rent` charges on top of the amount. The payer signs and pays for the deposit itself.
 
 Settlement inner transactions are not pre-funded: disbursement fees are pooled from the settle caller's outer fee at finalization.
 
