@@ -62,6 +62,7 @@ type rentChain struct {
 	land      func(amount uint64) *rpc.SignatureStatus // nil: lands, confirmed
 	height    uint64
 	statusFor map[solana.Signature]*rpc.SignatureStatus
+	blockhash solana.Hash // zero: {9}
 }
 
 func newRentChain(t *testing.T, s testSolanaSigner, balance uint64) *rentChain {
@@ -118,6 +119,9 @@ func (c *rentChain) GetBalance(_ context.Context, k solana.PublicKey, cm rpc.Com
 func (c *rentChain) GetLatestBlockhash(_ context.Context, cm rpc.Commitment) (rpc.Blockhash, error) {
 	if cm != rpc.Confirmed {
 		panic("blockhash at " + string(cm))
+	}
+	if c.blockhash != (solana.Hash{}) {
+		return rpc.Blockhash{Hash: c.blockhash, LastValidBlockHeight: 150}, nil
 	}
 	return rpc.Blockhash{Hash: solana.Hash{9}, LastValidBlockHeight: 150}, nil
 }

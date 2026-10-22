@@ -10,8 +10,20 @@
 // payment_open, so the wallet needs a node that reads the rail-neutral names.
 
 import { base64 } from '@scure/base'
-import { type PublicKey, publicKeyBytes } from '@txnlab/zs-proto/solana'
-import { type Deployment, type OpenOfferSpec, completeOpenOffer, decodeConfig, decodeOpenOffer, encodeOpenPayment } from '@txnlab/zs-proto/solana/zsescrow'
+import { type PublicKey, TOKEN_PROGRAM_ID, compileMessage, encodeTransaction, newTransaction, publicKeyBytes, signTransactionWith } from '@txnlab/zs-proto/solana'
+import {
+    type Deployment,
+    type Ending,
+    type OpenOfferSpec,
+    TOKEN_INITIALIZED,
+    type Ticket as TicketAccount,
+    completeOpenOffer,
+    decodeConfig,
+    decodeOpenOffer,
+    decodeTicket,
+    decodeTokenAccount,
+    encodeOpenPayment,
+} from '@txnlab/zs-proto/solana/zsescrow'
 import type { Ticket } from '@txnlab/zs-proto/ticket'
 import { RAIL_NEUTRAL_NAMES_MIN_VERSION, usesRailNeutralNames } from '@txnlab/zs-proto/wire'
 
@@ -19,11 +31,16 @@ import { MbrDepositUnaffordableError } from '../mbr.js'
 import type { Operator } from '../operator.js'
 import type { OpenHandle, WalletOpener } from '../parts.js'
 import type { SolanaSigner } from '../ports.js'
+import type { SettleArgs } from '../reconcile.js'
 import { untilAborted } from '../sleep.js'
 import { decodeTicketId, slotCount } from '../wallet.js'
-import type { ConfirmOptions } from './confirm.js'
-import { RentDepositBelowTargetError, SolanaRentPool } from './rent.js'
-import type { SolanaRpc } from './rpc.js'
+import { solanaClaimFields } from './claim.js'
+import { type ConfirmOptions, confirmSignature } from './confirm.js'
+import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE, SolanaRentPool } from './rent.js'
+import { type SolanaRpc, txErrorName } from './rpc.js'
+
+// Confirmed, as the rent pool reads and sends.
+const COMMITMENT = 'confirmed'
 
 /**
  * How long past a ticket's expires_at the wallet remembers signing its open.
@@ -39,7 +56,7 @@ export interface SolanaWalletOptions {
     signer: SolanaSigner
     /** The rent pool's working set; 0 or absent is the default. */
     depositSlots?: number
-    /** Tunes the wait for a rent deposit to land; absent polls. */
+    /** Tunes the wait for a rent deposit or an ack to land; absent polls. */
     confirm?: Omit<ConfirmOptions, 'signal'> | undefined
     /** Milliseconds since the epoch; Date.now by default. */
     clock?: () => number
@@ -50,6 +67,8 @@ export interface SolanaWalletOptions {
  * Go's zs.SolanaWallet.
  */
 export class SolanaWallet implements WalletOpener {
+    readonly #rpc: SolanaRpc
+    readonly #confirm: Omit<ConfirmOptions, 'signal'> | undefined
     readonly #deployment: Deployment
     readonly #signer: SolanaSigner
     readonly #payerUsdc: PublicKey
@@ -69,6 +88,8 @@ export class SolanaWallet implements WalletOpener {
     readonly #signed = new Map<string, number>()
 
     private constructor(o: SolanaWalletOptions, decimals: number) {
+        this.#rpc = o.rpc
+        this.#confirm = o.confirm
         this.#deployment = o.deployment
         this.#signer = o.signer
         this.#payerUsdc = o.deployment.tokenAccount(o.signer.address)
@@ -255,6 +276,110 @@ export class SolanaWallet implements WalletOpener {
     }
 
     /**
+     * Reads the ticket account for ticketId at the node, null when there is
+     * none: never opened, or ended and closed. An account the program doesn't
+     * own is no ticket either, since only the program can write one at the
+     * address. Go's readTicket.
+     */
+    async readTicket(operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, signal?: AbortSignal): Promise<TicketAccount | null> {
+        const d = this.#deployment
+        let acct
+        try {
+            acct = await this.#rpc.getAccountInfo(d.ticket(d.node(operatorId, nodeId), ticketId), { commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: read ticket: ${message(err)}`, { cause: err })
+        }
+        if (acct === null || acct.owner !== d.program) return null
+        try {
+            return decodeTicket(acct.data)
+        } catch (err) {
+            throw new Error(`solana wallet: read ticket: ${message(err)}`, { cause: err })
+        }
+    }
+
+    /**
+     * Sends the payer's half at a on t, the ticket account for ticketId at the
+     * node, and waits for it to confirm: Algorand's standalone settle. On a
+     * node's claim it settles the ticket when a matches and freezes it when
+     * not; on an open ticket it is the first half, which the node answers or
+     * refund_inactive refunds. What to send is the caller's decision; this
+     * only refuses a ticket that isn't the payer's before asking the signer,
+     * since the program refuses it. Once sent, a failure throws
+     * SolanaAckSendError, carrying the signature to look for, and the fee and
+     * program error of a transaction that landed and failed. Go's sendAck.
+     */
+    async sendAck(t: TicketAccount | null, operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, a: SettleArgs, signal?: AbortSignal): Promise<SolanaAck> {
+        if (t === null) throw new Error('solana wallet: ack: no ticket account')
+        const payer = this.#signer.address
+        if (t.payer !== payer) throw new Error(`solana wallet: ack: the ticket's payer is ${t.payer}, not this wallet's ${payer}`)
+        const e: Ending = { submitter: payer, operatorId, nodeId, ticketId, rentPayer: t.rentPayer, payer, ...(await this.#refundFallback(signal)) }
+        let bh
+        try {
+            bh = await this.#rpc.getLatestBlockhash({ commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: ack: blockhash: ${message(err)}`, { cause: err })
+        }
+        let tx
+        try {
+            tx = newTransaction(compileMessage(payer, bh.blockhash, [this.#deployment.ack(e, solanaClaimFields(a))], 'legacy'))
+            await signTransactionWith(tx, payer, this.#signer)
+        } catch (err) {
+            throw new Error(`solana wallet: ack: ${message(err)}`, { cause: err })
+        }
+        let signature: string
+        try {
+            // Preflight at the commitment the ticket was read at, which the
+            // RPC's finalized default may not have reached.
+            signature = await this.#rpc.sendTransaction(encodeTransaction(tx), { preflightCommitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: send ack: ${message(err)}`, { cause: err })
+        }
+        let r
+        try {
+            r = await confirmSignature(this.#rpc, signature, bh.lastValidBlockHeight, COMMITMENT, { ...this.#confirm, signal })
+        } catch (err) {
+            throw new SolanaAckSendError(signature, 0n, null, `solana wallet: ack ${signature}: ${message(err)}`, err)
+        }
+        // The payer's signature is the transaction's only one, and it sets no
+        // priority fee.
+        if (r.err !== null) {
+            throw new SolanaAckSendError(signature, SOLANA_SIGNATURE_FEE, r.err, `solana wallet: ack ${signature} failed: ${txErrorName(r.err)} ${JSON.stringify(r.err)}`)
+        }
+        return { signature, feeLamports: SOLANA_SIGNATURE_FEE }
+    }
+
+    // The treasury's USDC account, writable, when the payer's own token
+    // account can't take a refund the ack may pay, so the refund is forfeited
+    // to it as Algorand's payOrForfeit forfeits it. Otherwise the ack leaves it
+    // out: a write lock on the one protocol-wide account would put every
+    // settle in one lane. The treasury comes from the Config, which set_config
+    // can change. Go's refundFallback.
+    async #refundFallback(signal: AbortSignal | undefined): Promise<Pick<Ending, 'treasury' | 'fallback'>> {
+        const d = this.#deployment
+        let acct
+        try {
+            acct = await this.#rpc.getAccountInfo(this.#payerUsdc, { commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: ack: read the payer's token account: ${message(err)}`, { cause: err })
+        }
+        if (canReceiveRefund(acct, d.mint, this.#signer.address)) return {}
+        let cfg
+        try {
+            cfg = await this.#rpc.getAccountInfo(d.config(), { commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: ack: read config: ${message(err)}`, { cause: err })
+        }
+        if (cfg === null || cfg.owner !== d.program) throw new Error(`solana wallet: ack: program ${d.program} has no Config`)
+        let config
+        try {
+            config = decodeConfig(cfg.data)
+        } catch (err) {
+            throw new Error(`solana wallet: ack: ${message(err)}`, { cause: err })
+        }
+        return { treasury: config.treasury, fallback: 'writable' }
+    }
+
+    /**
      * Clears the ready latch, so the next open reads the pool again: a node
      * refused an open the wallet signed, perhaps for a pool emptied outside
      * this wallet. Go's RecheckDeposit, except that Go waits for a funding
@@ -263,6 +388,46 @@ export class SolanaWallet implements WalletOpener {
      */
     recheckDeposit(): void {
         this.#depositReady = false
+    }
+}
+
+/** The payer's own ack transaction once sent. Go's solanaAck. */
+export interface SolanaAck {
+    signature: string
+    /** What the payer paid for it. */
+    feeLamports: bigint
+}
+
+/**
+ * An ack sent that didn't settle: it landed and failed, having paid
+ * feeLamports, with txErr the TransactionError whose custom code tells a
+ * deadline the ack lost to apart from a refund it couldn't route; or it never
+ * confirmed (feeLamports 0, txErr null), and unless the cause is a
+ * TransactionExpiredError it may still land, so the signature lets the caller
+ * look before it sends another.
+ */
+export class SolanaAckSendError extends Error {
+    override readonly name = 'SolanaAckSendError'
+
+    constructor(
+        readonly signature: string,
+        readonly feeLamports: bigint,
+        readonly txErr: unknown,
+        msg: string,
+        cause?: unknown,
+    ) {
+        super(msg, cause === undefined ? undefined : { cause })
+    }
+}
+
+/** The program's can_receive: a token account of mint, owned by owner and not frozen, which the token program owns. Go's canReceiveRefund. */
+export function canReceiveRefund(acct: { owner: PublicKey; data: Uint8Array } | null, mint: PublicKey, owner: PublicKey): boolean {
+    if (acct === null || acct.owner !== TOKEN_PROGRAM_ID) return false
+    try {
+        const t = decodeTokenAccount(acct.data)
+        return t.mint === mint && t.owner === owner && t.state === TOKEN_INITIALIZED
+    } catch {
+        return false
     }
 }
 
