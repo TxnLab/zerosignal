@@ -1384,7 +1384,7 @@
   ],
   "signer_balance": {
     "comment": "ChainOperatorSource over SolanaChainReader, one source per case and one FetchChain per pass, over operators and the case's nodes. balances are getBalance's answers (null: an RPC error); sent is the getBalance params the pass sent, sorted; want is each node's signer_spendable_lamports (null: never read) and whether the shared selection rule holds it out. min_signer_spendable_lamports is that rule's floor and signer_reserve_lamports what a reading leaves out of the balance.",
-    "min_signer_spendable_lamports": 2522680,
+    "min_signer_spendable_lamports": 10120,
     "signer_reserve_lamports": 890880,
     "operators": [
       {
@@ -1483,7 +1483,7 @@
             "balances": [
               {
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "lamports": 3413560
+                "lamports": 901000
               },
               {
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
@@ -1509,7 +1509,7 @@
                 "operator_id": 1,
                 "node_id": 1,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522680,
+                "signer_spendable_lamports": 10120,
                 "underfunded": false
               },
               {
@@ -1544,7 +1544,7 @@
             "balances": [
               {
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "lamports": 3413559
+                "lamports": 900999
               },
               {
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
@@ -1570,7 +1570,7 @@
                 "operator_id": 1,
                 "node_id": 1,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               },
               {
@@ -1670,7 +1670,7 @@
               },
               {
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "lamports": 3413559
+                "lamports": 900999
               }
             ],
             "sent": [
@@ -1699,7 +1699,7 @@
                 "operator_id": 1,
                 "node_id": 2,
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               }
             ]
@@ -1727,11 +1727,11 @@
             "balances": [
               {
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "lamports": 3413559
+                "lamports": 900999
               },
               {
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "lamports": 3413560
+                "lamports": 901000
               }
             ],
             "sent": [
@@ -1753,14 +1753,14 @@
                 "operator_id": 1,
                 "node_id": 1,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               },
               {
                 "operator_id": 1,
                 "node_id": 2,
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "signer_spendable_lamports": 2522680,
+                "signer_spendable_lamports": 10120,
                 "underfunded": false
               }
             ]
@@ -1795,14 +1795,14 @@
                 "operator_id": 1,
                 "node_id": 1,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               },
               {
                 "operator_id": 1,
                 "node_id": 2,
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "signer_spendable_lamports": 2522680,
+                "signer_spendable_lamports": 10120,
                 "underfunded": false
               }
             ]
@@ -1844,7 +1844,7 @@
                 "operator_id": 1,
                 "node_id": 2,
                 "signing_addr": "7EWrbxU7YpHthanStG9yF6KyHS77LBPH6f52ANJmL9rs",
-                "signer_spendable_lamports": 2522680,
+                "signer_spendable_lamports": 10120,
                 "underfunded": false
               }
             ]
@@ -1872,7 +1872,7 @@
             "balances": [
               {
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "lamports": 3413559
+                "lamports": 900999
               }
             ],
             "sent": [
@@ -1888,14 +1888,14 @@
                 "operator_id": 1,
                 "node_id": 1,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               },
               {
                 "operator_id": 1,
                 "node_id": 2,
                 "signing_addr": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9",
-                "signer_spendable_lamports": 2522679,
+                "signer_spendable_lamports": 10119,
                 "underfunded": true
               }
             ]

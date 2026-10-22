@@ -22,6 +22,7 @@ export const NODE_SEED = 'node'
 export const VAULT_SEED = 'vault'
 export const STAKE_VAULT_SEED = 'stake'
 export const TICKET_SEED = 't'
+export const RENT_POOL_SEED = 'rent'
 export const EVENT_AUTHORITY_SEED = '__event_authority'
 
 /** The version every account this program creates carries. */
@@ -92,6 +93,10 @@ export class Addresses {
     ticket(node: PublicKey, ticketId: Uint8Array): PublicKey {
         if (ticketId.length !== 16) throw new RangeError(`zsescrow: a ticket id of ${ticketId.length} bytes`)
         return this.pda(utf8(TICKET_SEED), publicKeyBytes(node), ticketId)[0]
+    }
+    /** The payer's rent pool, which funds its tickets' rent as Algorand's prepaid MBR pool funds their boxes. */
+    rentPool(payer: PublicKey): PublicKey {
+        return this.pda(utf8(RENT_POOL_SEED), publicKeyBytes(payer))[0]
     }
     /** owner's associated USDC account. */
     tokenAccount(owner: PublicKey): PublicKey {

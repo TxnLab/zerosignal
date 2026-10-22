@@ -17,9 +17,10 @@ import (
 // A node's signing account pays the pooled fees of every open() group and
 // atomic settle it signs, so the shared selection policy drops a node whose
 // account is known to be below selection.MinSignerSpendableMicroAlgos. This
-// file supplies the reading. On Solana the account pays the open's fees and
-// its Ticket's rent, and the same pass reads it through the Chain's
-// SignerLamportsReader against selection.MinSignerSpendableLamports.
+// file supplies the reading. On Solana the account pays the open offer's fees
+// (the payer's rent pool pays the Ticket's rent), and the same pass reads it
+// through the Chain's SignerLamportsReader against
+// selection.MinSignerSpendableLamports.
 //
 // Every signer in the fleet is read on every chain refresh, never just the
 // nodes a request is about to use. The open() group this process submits

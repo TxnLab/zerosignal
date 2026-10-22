@@ -31,6 +31,27 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-21 — Solana ticket rent from the payer's pool (unreleased)
+
+The `zs_escrow` program takes each Ticket's rent from a per-payer `RentPool`, as Algorand's
+`open()` draws box MBR from the payer's prepaid pool, instead of from the node's signer
+(SPEC "Settlement asset model", "Ticket rent on Solana"). `solana/zsescrow` follows it:
+
+- **The pool.** `Deployment.RentPool(payer)` ↔ `rentPool(payer)`, the address seeded
+  `["rent", payer]`; `DecodeRentPool` ↔ `decodeRentPool` over the 82-byte account (`version`,
+  `bump`, `open_tickets`, `payer`); and the builders `DepositRent`, `WithdrawRent`,
+  `CloseRentPool` ↔ `depositRent`, `withdrawRent`, `closeRentPool`, the program's forms of
+  Algorand's `depositMbr`, `withdrawMbr` and `closeDeposit`.
+- **Open names the payer's pool**, writable, after the ticket. `VerifyOpenOffer` ↔
+  `verifyOpenOffer` rebuild open with it, so an offer drawing on another payer's pool is
+  refused at `open.accounts`.
+- **A settle passes the ticket's own `rent_payer`**, unchanged: the pool for a ticket opened
+  with one, the node's signer for one opened before. Both verifiers already take it from the
+  instruction.
+- **The signer floor is fees only**, 10,120 lamports (below).
+
+Neither SDK funds a pool yet: no Solana open path exists in either.
+
 ### 2026-10-21 — the Solana registry read (unreleased)
 
 Discovery can read its operators and nodes from the `zs_escrow` program, read-only. Nothing
@@ -42,9 +63,9 @@ rail, and a host opts in by building its own registry over it.
   `readDeployment`), set as `ChainOperatorSource.Chain` ↔ the `chain` option. Unset, it reads
   the Algorand app as before. The probes, routing stores and registry are the same on either
   rail.
-- **The signer-funding gate on Solana.** A node's signing key pays the open offer's fees and
-  the Ticket account's rent (`open` makes `node_signer` the rent payer), so the router holds out
-  a node that can't afford one open, as it holds out an Algorand node below 5 ALGO.
+- **The signer-funding gate on Solana.** A node's signing key pays the open offer's fees (the
+  payer's rent pool pays the Ticket's rent), so the router holds out a node that can't afford
+  one open, as it holds out an Algorand node below 5 ALGO.
   `ChainOperatorSource` runs its signer-balance pass over a reader that is a
   `SignerLamportsReader` (`ReadSignerSpendableLamports`) ↔ one with
   `readSignerSpendableLamports`, as `SolanaChainReader` is: every distinct signer read with
@@ -57,13 +78,12 @@ rail, and a host opts in by building its own registry over it.
   unset, so an Algorand descriptor's bytes and the selection vectors are unchanged).
   `SignerUnderfunded` ↔ `signerUnderfunded` hold a node out when either rail's reading is
   below its floor; the Solana floor is `selection.MinSignerSpendableLamports` ↔
-  `MIN_SIGNER_SPENDABLE_LAMPORTS`, 2,522,680 lamports: two 5,000-lamport signatures, the
+  `MIN_SIGNER_SPENDABLE_LAMPORTS`, 10,120 lamports: two 5,000-lamport signatures and the
   program fixtures' 120-lamport priority fee (1,000 micro-lamports per unit on a 120,000-unit
-  limit) and the rent-exempt minimum of the 233-byte Ticket plus the 128-byte account
-  overhead. Floor and reserve both price rent at 6,960 lamports a byte, the ceiling
-  SIMD-0437's steps fall from (the program's fixtures already charge 5,080), so both are
-  upper bounds that hold out a node a lower rate would admit. Unlike the ALGO floor it
-  carries no staleness budget. `SignerReadingsUnderfunded` ↔ `signerReadingsUnderfunded` is
+  limit). The reserve prices rent at 6,960 lamports a byte, the ceiling SIMD-0437's steps
+  fall from (the program's fixtures already charge 5,080), so it is an upper bound that
+  holds out a node a lower rate would admit. Unlike the ALGO floor the floor carries no
+  staleness budget. `SignerReadingsUnderfunded` ↔ `signerReadingsUnderfunded` is
   the one two-rail predicate the gates share. `/v1/zs/operators` lists the reading as
   `signer_spendable_lamports`, and the registry's funding log lines name lamports and
   `floor_lamports` for a Solana node. Still Algorand-only: the `no_funded_operator` message

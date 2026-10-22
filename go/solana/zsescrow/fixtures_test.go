@@ -124,7 +124,7 @@ func TestAccountFixtures(t *testing.T) {
 	d := zsescrow.Deployment{Program: f.ProgramID, Mint: f.Context.USDCMint}
 	sizes := map[string]int{
 		"Config": zsescrow.ConfigSize, "Operator": zsescrow.OperatorSize, "Node": zsescrow.NodeSize,
-		"Ticket": zsescrow.TicketSize, "TokenAccount": zsescrow.TokenAccountSize,
+		"Ticket": zsescrow.TicketSize, "RentPool": zsescrow.RentPoolSize, "TokenAccount": zsescrow.TokenAccountSize,
 	}
 	seen := map[string]bool{}
 	for _, a := range f.Accounts {
@@ -144,6 +144,8 @@ func TestAccountFixtures(t *testing.T) {
 				got, err = zsescrow.DecodeNode(data)
 			case "Ticket":
 				got, err = zsescrow.DecodeTicket(data)
+			case "RentPool":
+				got, err = zsescrow.DecodeRentPool(data)
 			case "TokenAccount":
 				got, err = zsescrow.DecodeTokenAccount(data)
 			default:
@@ -172,6 +174,11 @@ func TestAccountFixtures(t *testing.T) {
 			case *zsescrow.Ticket:
 				id, _ := hex.DecodeString(a.SeedsHex[2])
 				want = d.Ticket(v.Node, [16]byte(id))
+			case *zsescrow.RentPool:
+				want = d.RentPool(v.Payer)
+				if _, bump, _ := solana.FindProgramAddress([][]byte{[]byte(zsescrow.RentPoolSeed), v.Payer[:]}, d.Program); v.Bump != bump {
+					t.Errorf("pool stores bump %d, derives %d", v.Bump, bump)
+				}
 			case *zsescrow.TokenAccount:
 				owner = solana.TokenProgramID
 				switch seed, _ := hex.DecodeString(a.SeedsHex[0]); string(seed) {
@@ -466,6 +473,12 @@ func TestInstructionFixtures(t *testing.T) {
 			case "sweep_fees":
 				op, n := nodeIDs()
 				ix = d.SweepFees(op, n, ownerOf("treasury_usdc"))
+			case "deposit_rent":
+				ix = d.DepositRent(acct["payer"], args.u64("amount"))
+			case "withdraw_rent":
+				ix = d.WithdrawRent(acct["payer"], args.u64("amount"))
+			case "close_rent_pool":
+				ix = d.CloseRentPool(acct["payer"])
 			default:
 				t.Fatalf("no builder for %s", c.Instruction)
 			}

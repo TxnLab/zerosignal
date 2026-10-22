@@ -46,6 +46,10 @@
       "payer2": {
         "pubkey": "3Atsbq9N5EaCc9YWmqD2rUVedX4pqDe7hyk6JSyWRTrG",
         "seed": 18
+      },
+      "payer3": {
+        "pubkey": "6TcyBfPdBt1kjsvDZLzmBFnuMaLWiTaAt4RjUr9VA5YD",
+        "seed": 22
       }
     },
     "keys_about": "every key's secret is 32 bytes of its seed (Keypair::new_from_array([seed; 32])), so a test can re-sign as it",
@@ -825,6 +829,96 @@
         {
           "is_signer": true,
           "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "system_program",
+          "pubkey": "11111111111111111111111111111111"
+        }
+      ],
+      "args": {
+        "amount": "1000000000"
+      },
+      "case": "deposit_rent",
+      "data_base64": "Ng639FGyFxsAypo7AAAAAA==",
+      "discriminator_hex": "360eb7f451b2171b",
+      "instruction": "deposit_rent",
+      "program": "ok"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "system_program",
+          "pubkey": "11111111111111111111111111111111"
+        }
+      ],
+      "args": {
+        "amount": "250000000"
+      },
+      "case": "deposit_rent_topup",
+      "data_base64": "Ng639FGyFxuAsuYOAAAAAA==",
+      "discriminator_hex": "360eb7f451b2171b",
+      "instruction": "deposit_rent",
+      "program": "ok"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "system_program",
+          "pubkey": "11111111111111111111111111111111"
+        }
+      ],
+      "args": {
+        "amount": "0"
+      },
+      "case": "deposit_rent_zero",
+      "data_base64": "Ng639FGyFxsAAAAAAAAAAA==",
+      "discriminator_hex": "360eb7f451b2171b",
+      "instruction": "deposit_rent",
+      "program": "ZeroDeposit"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
           "name": "node_signer",
           "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
         },
@@ -851,6 +945,12 @@
           "is_writable": true,
           "name": "ticket",
           "pubkey": "EHQ4j6CtFMDzq53BtdeNmBJxF1SUiD8Brbb9HKmgSzCn"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -914,7 +1014,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1017,7 +1117,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1120,7 +1220,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1223,7 +1323,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1326,7 +1426,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1486,7 +1586,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1647,7 +1747,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1750,7 +1850,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -1853,7 +1953,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "6X8CpqZmDqzDnzrNsJPejQ1hMetEJyqQdnGjVyUTXhcH"
         },
         {
           "is_signer": false,
@@ -1956,7 +2056,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "6X8CpqZmDqzDnzrNsJPejQ1hMetEJyqQdnGjVyUTXhcH"
         },
         {
           "is_signer": false,
@@ -2048,7 +2148,7 @@
           "is_signer": false,
           "is_writable": true,
           "name": "rent_payer",
-          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
         },
         {
           "is_signer": false,
@@ -2200,6 +2300,190 @@
       "data_base64": "r+FiR3ZCIpQ=",
       "discriminator_hex": "afe1624776422294",
       "instruction": "sweep_fees",
+      "program": "ok"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        }
+      ],
+      "args": {
+        "amount": "1222491801"
+      },
+      "case": "withdraw_rent_over_available",
+      "data_base64": "4gcpnq1vwGuZvt1IAAAAAA==",
+      "discriminator_hex": "e207299ead6fc06b",
+      "instruction": "withdraw_rent",
+      "program": "WithdrawOverAvailable"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        }
+      ],
+      "args": {
+        "amount": "1222491800"
+      },
+      "case": "withdraw_rent",
+      "data_base64": "4gcpnq1vwGuYvt1IAAAAAA==",
+      "discriminator_hex": "e207299ead6fc06b",
+      "instruction": "withdraw_rent",
+      "program": "ok"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4"
+        }
+      ],
+      "args": {},
+      "case": "close_rent_pool_tickets_open",
+      "data_base64": "ZTmq2S4Cm0U=",
+      "discriminator_hex": "6539aad92e029b45",
+      "instruction": "close_rent_pool",
+      "program": "TicketsStillOpen"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": false,
+          "name": "submitter",
+          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "config",
+          "pubkey": "3rVjuc7SGmuoEH39tXujSZxTrSQKitiLifUCfvgfTS7o"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "node",
+          "pubkey": "JAyhLWcPBtbmj3TePScoKmaR1uMYVcpYvz1yV1FNtS6C"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "vault",
+          "pubkey": "ELJZoLaH667BbaHW8M7NXxUbmcnjVfRJSSLz1Sk9V11W"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "ticket",
+          "pubkey": "3sTiwWBQgUKdZkfLEJxWNCe9gxbDQmufADovtCGmW7dv"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_payer",
+          "pubkey": "oapfTk8FG2np1vSoGANkbijWiQApHZMFAytSdCoass9"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "payer_ata",
+          "pubkey": "5Dkta3juReMg5B24yUWWDuDdYhHwuMVVS4u3BqTtLeke"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "usdc_mint",
+          "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "instructions",
+          "pubkey": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "token_program",
+          "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "treasury_usdc",
+          "pubkey": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "event_authority",
+          "pubkey": "GrCyiZ7TSwJrKYfKpygWy7nnAVWsoSykGMtBrb11cG1D"
+        },
+        {
+          "is_signer": false,
+          "is_writable": false,
+          "name": "program",
+          "pubkey": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+        }
+      ],
+      "args": {
+        "bumps": {
+          "payer_ata": 253
+        }
+      },
+      "case": "refund_inactive_legacy_rent_payer",
+      "data_base64": "Ax+faCEhjdr9",
+      "discriminator_hex": "031f9f6821218dda",
+      "instruction": "refund_inactive",
+      "program": "ok"
+    },
+    {
+      "accounts": [
+        {
+          "is_signer": true,
+          "is_writable": true,
+          "name": "payer",
+          "pubkey": "AoVsGaj8MSJ6xwKxfFxo9iZWH3enC8RRTXKH2fx2F8os"
+        },
+        {
+          "is_signer": false,
+          "is_writable": true,
+          "name": "rent_pool",
+          "pubkey": "4Np9WEmKY9w7AqJBaRmZag3CoQCetiCvckk6p1iqsHaZ"
+        }
+      ],
+      "args": {},
+      "case": "close_rent_pool",
+      "data_base64": "ZTmq2S4Cm0U=",
+      "discriminator_hex": "6539aad92e029b45",
+      "instruction": "close_rent_pool",
       "program": "ok"
     },
     {

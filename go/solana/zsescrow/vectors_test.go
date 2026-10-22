@@ -170,6 +170,8 @@ func decodeAs(typ string, data []byte) (any, error) {
 		return zsescrow.DecodeNode(data)
 	case "Ticket":
 		return zsescrow.DecodeTicket(data)
+	case "RentPool":
+		return zsescrow.DecodeRentPool(data)
 	case "TokenAccount":
 		return zsescrow.DecodeTokenAccount(data)
 	}

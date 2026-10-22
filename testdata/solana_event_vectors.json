@@ -45,6 +45,10 @@
       "payer2": {
         "pubkey": "3Atsbq9N5EaCc9YWmqD2rUVedX4pqDe7hyk6JSyWRTrG",
         "seed": 18
+      },
+      "payer3": {
+        "pubkey": "6TcyBfPdBt1kjsvDZLzmBFnuMaLWiTaAt4RjUr9VA5YD",
+        "seed": 22
       }
     },
     "keys_about": "every key's secret is 32 bytes of its seed (Keypair::new_from_array([seed; 32])), so a test can re-sign as it",

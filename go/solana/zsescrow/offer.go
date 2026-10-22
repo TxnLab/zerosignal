@@ -90,6 +90,8 @@ type FoldSpec struct {
 //     to the node's vault, authorized by the payer.
 //  6. open names the node, the ticket, the payer, MaxPrice and ExpiresAt,
 //     with grace 0: the program's default, the one rule both rails share.
+//     Its rent comes from the payer's own rent pool, which the payer's
+//     signature on the transfer authorizes the program to draw.
 //  7. A folded settle_cooperative is allowed only with spec.Fold, and must
 //     settle the payer's ticket for exactly the receipt's claim, the
 //     receipt naming that ticket.

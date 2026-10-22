@@ -17,7 +17,8 @@ import { base64, hex } from '@scure/base'
 import { describe, expect, it } from 'vitest'
 
 import type { Instruction } from '../src/solana/index.js'
-import { ED25519_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, transferChecked } from '../src/solana/index.js'
+import { ED25519_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, publicKeyBytes, transferChecked } from '../src/solana/index.js'
+import { findProgramAddress } from '../src/solana/pda.js'
 import {
     type AckSpec,
     type ClaimFields,
@@ -32,6 +33,8 @@ import {
     NODE_SIZE,
     OPERATOR_SIZE,
     PROGRAM_ID,
+    RENT_POOL_SEED,
+    RENT_POOL_SIZE,
     STAKE_VAULT_SEED,
     TICKET_SIZE,
     TOKEN_ACCOUNT_SIZE,
@@ -42,6 +45,7 @@ import {
     decodeConfig,
     decodeNode,
     decodeOperator,
+    decodeRentPool,
     decodeTicket,
     decodeTokenAccount,
     discriminator,
@@ -102,6 +106,7 @@ const decoders: Record<string, [(d: Uint8Array) => Json, number]> = {
     Operator: [decodeOperator, OPERATOR_SIZE],
     Node: [decodeNode, NODE_SIZE],
     Ticket: [decodeTicket, TICKET_SIZE],
+    RentPool: [decodeRentPool, RENT_POOL_SIZE],
     TokenAccount: [decodeTokenAccount, TOKEN_ACCOUNT_SIZE],
 }
 
@@ -134,6 +139,10 @@ describe('solana_account_vectors.json', () => {
                     break
                 case 'Ticket':
                     want = d.ticket(v.node, hex.decode(a.seeds_hex[2]))
+                    break
+                case 'RentPool':
+                    want = d.rentPool(v.payer)
+                    expect(v.bump).toBe(findProgramAddress([new TextEncoder().encode(RENT_POOL_SEED), publicKeyBytes(v.payer)], d.program)[1])
                     break
                 case 'TokenAccount': {
                     owner = TOKEN_PROGRAM_ID
@@ -342,6 +351,15 @@ describe('solana_instruction_vectors.json', () => {
                     ix = d.sweepFees(op, n, ownerOf('treasury_usdc'))
                     break
                 }
+                case 'deposit_rent':
+                    ix = d.depositRent(acct.payer!, BigInt(args.amount))
+                    break
+                case 'withdraw_rent':
+                    ix = d.withdrawRent(acct.payer!, BigInt(args.amount))
+                    break
+                case 'close_rent_pool':
+                    ix = d.closeRentPool(acct.payer!)
+                    break
                 default:
                     throw new Error(`no builder for ${c.instruction}`)
             }
@@ -747,7 +765,7 @@ describe('the IDL', () => {
         ] as [string, Json[]][]) {
             for (const e of list) expect(Array.from(discriminator(ns, e.name)), `${ns}:${e.name}`).toEqual(e.discriminator)
         }
-        expect(idl.accounts.length).toBe(4)
+        expect(idl.accounts.length).toBe(5)
         expect(idl.events.length).toBe(6)
     })
 })

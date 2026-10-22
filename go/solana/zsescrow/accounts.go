@@ -44,6 +44,7 @@ const (
 	OperatorSize = 171
 	NodeSize     = 880
 	TicketSize   = 233
+	RentPoolSize = 82
 )
 
 // Config's Retired fields are the program's: retired with the owed vault,
@@ -331,6 +332,28 @@ func DecodeTicket(data []byte) (*Ticket, error) {
 	t.FrozenAt, t.FreezeOrigin = r.i64(), r.u8()
 	r.array(t.Reserve[:])
 	return t, r.err
+}
+
+// RentPool holds the lamports a payer prepaid for its tickets' rent. What an
+// open can draw, and a withdraw take, is the pool's lamports above its own
+// rent exemption, which is not in the data: the rent of a live ticket sits in
+// the ticket.
+type RentPool struct {
+	Version     uint8            `json:"version"`
+	Bump        uint8            `json:"bump"`
+	OpenTickets uint64           `json:"open_tickets"`
+	Payer       solana.PublicKey `json:"payer"`
+	Reserve     [32]byte         `json:"_reserve"`
+}
+
+func DecodeRentPool(data []byte) (*RentPool, error) {
+	r, err := accountReader("RentPool", data, RentPoolSize)
+	if err != nil {
+		return nil, err
+	}
+	p := &RentPool{Version: r.u8(), Bump: r.u8(), OpenTickets: r.u64(), Payer: r.key()}
+	r.array(p.Reserve[:])
+	return p, r.err
 }
 
 // TokenAccountSize is an SPL token account's length.

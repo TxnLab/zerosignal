@@ -274,6 +274,11 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("extra_signer", "the header requires a third signature, by a key no instruction references", "header.signers", marshal(t, extraSigner), spec)
 	built("another_payer", "the ack judged by a payer it does not name", "header.payer", compile(relayer, ack),
 		withSpec(func(s *zsescrow.AckSpec) { s.Payer = w.attacker }))
+	// The program checks the rent payer against the ticket, so the verifier
+	// takes the ack's own: a ticket opened before rent pools names the node's
+	// key there, and an ack of it must pass.
+	built("rent_payer_before_pools", "the ack of a ticket opened before rent pools, which returns its rent to the node's key", "ok",
+		compile(relayer, ackWith(func(e *zsescrow.Ending, _ *zsescrow.ClaimFields) { e.RentPayer = relayer })), spec)
 	built("payer_writable", "the ack names the payer's wallet as its rent payer, so the header grants the payer a write lock", "header.payerWritable",
 		compile(relayer, ackWith(func(e *zsescrow.Ending, _ *zsescrow.ClaimFields) { e.RentPayer = spec.Payer })), spec)
 
