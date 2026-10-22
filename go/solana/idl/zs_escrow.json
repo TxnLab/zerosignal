@@ -351,6 +351,48 @@
       ]
     },
     {
+      "name": "close_rent_pool",
+      "discriminator": [
+        101,
+        57,
+        170,
+        217,
+        46,
+        2,
+        155,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rent_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "create_node",
       "discriminator": [
         20,
@@ -592,6 +634,57 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "deposit_rent",
+      "discriminator": [
+        54,
+        14,
+        183,
+        244,
+        81,
+        178,
+        23,
+        27
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rent_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "evict",
@@ -923,6 +1016,27 @@
               {
                 "kind": "arg",
                 "path": "ticket_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "payer"
               }
             ]
           }
@@ -2150,6 +2264,53 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "withdraw_rent",
+      "discriminator": [
+        226,
+        7,
+        41,
+        158,
+        173,
+        111,
+        192,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "rent_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -2190,6 +2351,19 @@
         139,
         204,
         117
+      ]
+    },
+    {
+      "name": "RentPool",
+      "discriminator": [
+        147,
+        139,
+        254,
+        34,
+        153,
+        44,
+        233,
+        123
       ]
     },
     {
@@ -2551,6 +2725,31 @@
       "code": 6052,
       "name": "ReceiptNotPending",
       "msg": "The receipt is not the one the pending half names"
+    },
+    {
+      "code": 6053,
+      "name": "ZeroDeposit",
+      "msg": "A deposit must be positive"
+    },
+    {
+      "code": 6054,
+      "name": "InsufficientRentDeposit",
+      "msg": "The payer's rent pool cannot cover the ticket's rent"
+    },
+    {
+      "code": 6055,
+      "name": "WithdrawOverAvailable",
+      "msg": "Amount exceeds what the rent pool holds above its own rent"
+    },
+    {
+      "code": 6056,
+      "name": "TicketsStillOpen",
+      "msg": "The rent pool still funds open tickets"
+    },
+    {
+      "code": 6057,
+      "name": "TicketInUse",
+      "msg": "The ticket id is already in use by a live ticket"
     }
   ],
   "types": [
@@ -3205,6 +3404,51 @@
       }
     },
     {
+      "name": "RentPool",
+      "docs": [
+        "A payer's prepaid ticket rent, as Algorand's per-payer MBR pool: open",
+        "draws each ticket's rent from it and every ending returns the rent here,",
+        "so a node never has its own lamports out on a payer's tickets. Rent",
+        "backing a live ticket sits in the ticket, so whatever the pool holds above",
+        "its own rent exemption is free to fund an open or to withdraw."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "open_tickets",
+            "docs": [
+              "Live tickets this pool funded: Algorand's openTickets.",
+              "close_rent_pool waits for 0, so no ending returns rent to a closed",
+              "pool."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "_reserve",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "SetConfigArgs",
       "docs": [
         "Each field left `None` keeps its current value. Stakes apply to later",
@@ -3375,8 +3619,10 @@
           {
             "name": "rent_payer",
             "docs": [
-              "Who funded the rent. Closing the ticket refunds it here, never to the",
-              "caller, so a permissionless refund cannot capture the rent."
+              "Who funded the rent: the payer's rent pool, or the node's signer for",
+              "a ticket opened before pools existed. Closing the ticket refunds it",
+              "here, never to the caller, so a permissionless refund cannot capture",
+              "the rent."
             ],
             "type": "pubkey"
           },
@@ -3410,7 +3656,7 @@
             "name": "_reserve",
             "docs": [
               "Smaller than the long-lived accounts' reserves: every live ticket's",
-              "rent is float the node has out, and tickets are short-lived, so a new",
+              "rent is float the payer has out, and tickets are short-lived, so a new",
               "layout can apply to new opens while `version` tells the few remaining",
               "old tickets apart."
             ],
@@ -3632,6 +3878,16 @@
       "name": "OPERATOR_SEED",
       "type": "bytes",
       "value": "[111, 112]"
+    },
+    {
+      "name": "RENT_POOL_SEED",
+      "docs": [
+        "One rent pool per payer, seeded by the payer's key, so open finds the",
+        "pool from the payer it names and no one can fund a ticket from another",
+        "payer's pool."
+      ],
+      "type": "bytes",
+      "value": "[114, 101, 110, 116]"
     },
     {
       "name": "STAKE_VAULT_SEED",

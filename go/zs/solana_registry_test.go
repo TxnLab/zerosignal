@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -186,10 +187,9 @@ func TestSolanaChainReader_RefusesANonKeySigner(t *testing.T) {
 	}
 }
 
-// The floor is the cost of one open under the program, and the reserve the
-// rent-exempt minimum of an empty account, both at the ceiling rate the
-// floor's doc cites. Spelled out here so a change to the Ticket layout fails
-// this test rather than leaving the floor priced on the old size.
+// The floor is the cost of one open to the node's signer, its fees alone,
+// and the reserve the rent-exempt minimum of an empty account at the ceiling
+// rate solanaSignerReserveLamports cites.
 func TestMinSignerSpendableLamports_IsOneOpen(t *testing.T) {
 	const (
 		lamportsPerSignature = 5_000
@@ -200,18 +200,67 @@ func TestMinSignerSpendableLamports_IsOneOpen(t *testing.T) {
 		lamportsPerByte      = 6_960
 	)
 	priority := (cuPriceMicroLamports*cuLimit + 999_999) / 1_000_000
-	rent := uint64(accountOverhead+zsescrow.TicketSize) * lamportsPerByte
-	if want := uint64(offerSignatures*lamportsPerSignature+priority) + rent; selection.MinSignerSpendableLamports != want {
+	if want := uint64(offerSignatures*lamportsPerSignature + priority); selection.MinSignerSpendableLamports != want {
 		t.Fatalf("MinSignerSpendableLamports = %d, want %d", selection.MinSignerSpendableLamports, want)
 	}
 	if want := uint64(accountOverhead * lamportsPerByte); solanaSignerReserveLamports != want {
 		t.Fatalf("solanaSignerReserveLamports = %d, want %d", solanaSignerReserveLamports, want)
 	}
 
-	// Both must bound what the program's own run charged: the floor its
-	// Tickets' rent plus the fees, and the reserve an empty account at that
-	// run's rate.
-	raw, err := os.ReadFile(solanaAccountFixturesPath)
+	// The floor must cover every offer the program composed that a payer
+	// signs: its signatures and its priority fee, price × limit.
+	raw, err := os.ReadFile("../../testdata/solana_open_offer_vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var offers struct {
+		Cases []struct {
+			Name, Source, Verdict string
+			Message               string `json:"message_base64"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &offers); err != nil {
+		t.Fatal(err)
+	}
+	signed := 0
+	for _, c := range offers.Cases {
+		if c.Source != "fixture" || c.Verdict != "ok" {
+			continue
+		}
+		signed++
+		b, err := base64.StdEncoding.DecodeString(c.Message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := solana.ParseMessage(b)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		var limit, price uint64
+		for _, ix := range m.Instructions {
+			if m.AccountKeys[ix.ProgramIDIndex] != solana.ComputeBudgetProgramID {
+				continue
+			}
+			switch ix.Data[0] {
+			case solana.ComputeBudgetSetComputeUnitLimit:
+				limit = uint64(binary.LittleEndian.Uint32(ix.Data[1:]))
+			case solana.ComputeBudgetSetComputeUnitPrice:
+				price = binary.LittleEndian.Uint64(ix.Data[1:])
+			}
+		}
+		fee := uint64(m.Header.NumRequiredSignatures)*lamportsPerSignature + (price*limit+999_999)/1_000_000
+		if fee > selection.MinSignerSpendableLamports {
+			t.Errorf("%s: fee %d exceeds the floor %d", c.Name, fee, selection.MinSignerSpendableLamports)
+		}
+	}
+	if signed == 0 {
+		t.Fatal("no offer a payer signs in the fixtures")
+	}
+
+	// The floor leaves out the rent because every Ticket the program opened
+	// names its payer's rent pool as rent payer. The reserve must bound an
+	// empty account at the program's own run's rate, read off those Tickets.
+	raw, err = os.ReadFile(solanaAccountFixturesPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +268,7 @@ func TestMinSignerSpendableLamports_IsOneOpen(t *testing.T) {
 	if err := json.Unmarshal(raw, &fx); err != nil {
 		t.Fatal(err)
 	}
-	fees := uint64(offerSignatures*lamportsPerSignature + priority)
+	d := zsescrow.Deployment{Program: solana.MustPublicKey(fx.ProgramID)}
 	tickets := 0
 	for _, a := range fx.Accounts {
 		if a.Type != "Ticket" {
@@ -234,8 +283,12 @@ func TestMinSignerSpendableLamports_IsOneOpen(t *testing.T) {
 		if err != nil || len(data) != zsescrow.TicketSize {
 			t.Fatalf("%s: %d bytes (%v), want %d", a.Name, len(data), err, zsescrow.TicketSize)
 		}
-		if fees+lamports > selection.MinSignerSpendableLamports {
-			t.Errorf("%s: fees %d + rent %d exceed the floor %d", a.Name, fees, lamports, selection.MinSignerSpendableLamports)
+		tk, err := zsescrow.DecodeTicket(data)
+		if err != nil {
+			t.Fatalf("%s: %v", a.Name, err)
+		}
+		if tk.RentPayer != d.RentPool(tk.Payer) {
+			t.Errorf("%s: rent payer %s, not its payer's rent pool", a.Name, tk.RentPayer)
 		}
 		if rate := lamports / (accountOverhead + zsescrow.TicketSize); accountOverhead*rate > solanaSignerReserveLamports {
 			t.Errorf("%s: an empty account at %d lamports a byte exceeds the reserve %d", a.Name, rate, solanaSignerReserveLamports)

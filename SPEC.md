@@ -825,6 +825,14 @@ Tickets escrow USDC, not ALGO. The proxy locks `max_price` microUSDC into the co
 - `closeDeposit` (CloseOut) refunds the balance and opts the payer out, returning the local-schema MBR natively. It reverts while any ticket is still live, including a frozen one until `resolveFrozen` deletes it.
 - A payer who force-clears its local state (`ClearState`) forfeits its `algoBalance`, which stays in the app. The box-deletion decrements are gated on `app_opted_in`, so a cleared payer's tickets still settle.
 
+**Ticket rent on Solana.** The `zs_escrow` program keeps the same pool as a `RentPool` account per payer, at the address seeded `["rent", payer]`:
+
+- `deposit_rent` creates the pool on the first deposit and tops it up after; the amount must be positive. Only the payer signs for its own pool.
+- `open` takes the Ticket account's rent from the pool of the payer it names, and counts the ticket in `open_tickets`. The payer's signature on the open offer's transfer authorizes the draw; the node pays only fees. An open the pool can't cover fails `InsufficientRentDeposit`, and one by a payer with no pool fails `AccountNotInitialized`.
+- The lamports themselves move: a live ticket's rent sits in the ticket, and every ending returns it to the pool and decrements `open_tickets`. So `withdraw_rent` can take what the pool holds above its own rent-exempt minimum, the Solana form of `available`, and `close_rent_pool` returns everything and is refused while `open_tickets` is non-zero.
+- A ticket opened before pools existed names the node's signing key as its rent payer, and its ending returns the rent there. A settle passes the ticket's own `rent_payer`, never one derived from the payer.
+- A payer has as many tickets live at once as its pool holds rent for. One ticket's rent carries a payer turn after turn, because a settle folded into the next open offer returns the old rent before the open draws.
+
 Settlement inner transactions are not pre-funded: disbursement fees are pooled from the settle caller's outer fee at finalization.
 
 The open group is therefore two transactions, `[usdcPayment, open()]`. `usdcPayment.assetAmount` MUST equal `max_price`; for a free model that is a valid zero-amount asset transfer. `mbrForTicket()` is the contract's read-only box-MBR figure. It covers the open-time `feeBps` / `discountBps` snapshot, with bounded fields stored as narrow ARC-4 ints (§ 3c "Reserved slots"). It is the unit the pool reserves per ticket, and the figure clients use to size `depositMbr` / `withdrawMbr`; no per-turn transaction leg is asserted against it.
@@ -2586,18 +2594,17 @@ app pick identically.
     demand-independent and adds no channel.
   - The floor doubles as the staleness budget. At ~7,000 µALGO of pooled fees
     per paid request, 5 ALGO covers ~700 requests between reads.
-  - **On Solana** the node's signing key is the open offer's fee payer and the
-    Ticket account's rent payer. Its reading is
+  - **On Solana** the node's signing key is the open offer's fee payer. The
+    Ticket account's rent comes from the payer's rent pool ("Settlement asset
+    model", "Ticket rent on Solana"), not from the node. The reading is
     `selection.Operator.signer_spendable_lamports`: the `getBalance` balance at
     `confirmed` less an upper bound on the account's own rent-exempt minimum
-    (890,880 lamports), below which the runtime refuses a transaction that
-    leaves a fee payer above zero. The floor, `MinSignerSpendableLamports`
-    (2,522,680), is one open: two signatures at 5,000 lamports, a 120-lamport
-    priority fee, and the rent-exempt minimum of the 233-byte Ticket plus the
-    128-byte account overhead. Both price rent at 6,960 lamports a byte, the
-    ceiling SIMD-0437's lower steps fall from, so they hold out a node that a
-    lower current rate would admit rather than route to one that can't pay.
-    The floor is no staleness budget. Every other rule above applies
+    (890,880 lamports: the 128-byte account overhead at 6,960 lamports a byte,
+    the ceiling SIMD-0437's lower steps fall from), below which the runtime
+    refuses a transaction that leaves a fee payer above zero. The floor,
+    `MinSignerSpendableLamports` (10,120), is one open's fees: two signatures
+    at 5,000 lamports and a 120-lamport priority fee. The floor is no
+    staleness budget. Every other rule above applies
     unchanged, and a node carries the reading of its own rail only. The
     lamports gate is pinned by `solana_registry_vectors.json`, not the
     `selection_vectors.json` cases below.

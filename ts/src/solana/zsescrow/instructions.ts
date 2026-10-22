@@ -142,7 +142,12 @@ export interface Ending {
     operatorId: bigint
     nodeId: bigint
     ticketId: Uint8Array
-    /** Funded the ticket and gets its rent back: the ticket's rent_payer. */
+    /**
+     * Funded the ticket and gets its rent back: the ticket's rent_payer, read
+     * from the ticket. That is the payer's rent pool, or the node's signer for
+     * a ticket opened before pools existed, so deriving it from the payer
+     * fails to end those.
+     */
     rentPayer: PublicKey
     /** The ticket's payer, whose token account takes the refund. */
     payer: PublicKey
@@ -400,7 +405,7 @@ export class Deployment extends Addresses {
         return this.ix('reinstate', new Uint8Array(), signer(admin), readonly(this.config()), writable(this.operator(operatorId)))
     }
 
-    /** The node's half of the open offer: the node signs and pays for the ticket; the payer's TransferChecked into the vault rides beside it. */
+    /** The node's half of the open offer: the node signs and pays the fees, the ticket's rent comes from the payer's rent pool, and the payer's TransferChecked into the vault rides beside it. */
     open(nodeSigner: PublicKey, operatorId: bigint, nodeId: bigint, a: OpenArgs): Instruction {
         const w = new Writer()
         w.fixed(a.ticketId, 16)
@@ -418,9 +423,29 @@ export class Deployment extends Addresses {
             readonly(d.operator(operatorId)),
             writable(node),
             writable(d.ticket(node, a.ticketId)),
+            writable(d.rentPool(a.payer)),
             readonly(SYSVAR_INSTRUCTIONS_ID),
             readonly(SYSTEM_PROGRAM_ID),
         )
+    }
+
+    /** Funds the payer's rent pool, creating it on the first deposit, as Algorand's depositMbr. The amount must be positive. */
+    depositRent(payerKey: PublicKey, amount: bigint): Instruction {
+        const w = new Writer()
+        w.u64(amount)
+        return this.ix('deposit_rent', w.done(), payer(payerKey), writable(this.rentPool(payerKey)), readonly(SYSTEM_PROGRAM_ID))
+    }
+
+    /** Takes back what the pool holds above its own rent exemption, as Algorand's withdrawMbr. */
+    withdrawRent(payerKey: PublicKey, amount: bigint): Instruction {
+        const w = new Writer()
+        w.u64(amount)
+        return this.ix('withdraw_rent', w.done(), payer(payerKey), writable(this.rentPool(payerKey)))
+    }
+
+    /** Closes the pool and returns all of it, its own rent included, as Algorand's closeDeposit. Refused while a ticket it funded is live. */
+    closeRentPool(payerKey: PublicKey): Instruction {
+        return this.ix('close_rent_pool', new Uint8Array(), payer(payerKey), writable(this.rentPool(payerKey)))
     }
 
     /**

@@ -31,6 +31,7 @@ const (
 	VaultSeed          = "vault"
 	StakeVaultSeed     = "stake"
 	TicketSeed         = "t"
+	RentPoolSeed       = "rent"
 	EventAuthoritySeed = "__event_authority"
 )
 
@@ -92,6 +93,13 @@ func (d Deployment) Vault(node solana.PublicKey) solana.PublicKey {
 // Ticket is the node's ticket with this wire ticket id.
 func (d Deployment) Ticket(node solana.PublicKey, ticketID [16]byte) solana.PublicKey {
 	k, _ := d.pda([]byte(TicketSeed), node[:], ticketID[:])
+	return k
+}
+
+// RentPool is the payer's rent pool, which funds its tickets' rent as
+// Algorand's prepaid MBR pool funds their boxes.
+func (d Deployment) RentPool(payer solana.PublicKey) solana.PublicKey {
+	k, _ := d.pda([]byte(RentPoolSeed), payer[:])
 	return k
 }
 

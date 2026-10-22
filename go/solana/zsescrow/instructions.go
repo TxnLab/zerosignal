@@ -326,8 +326,9 @@ type OpenArgs struct {
 	Grace     uint32
 }
 
-// Open is the node's half of the open offer: the node signs and pays for the
-// ticket; the payer's TransferChecked into the vault rides beside it.
+// Open is the node's half of the open offer: the node signs and pays the
+// fees, the ticket's rent comes from the payer's rent pool, and the payer's
+// TransferChecked into the vault rides beside it.
 func (d Deployment) Open(nodeSigner solana.PublicKey, operatorID, nodeID uint64, a OpenArgs) solana.Instruction {
 	w := writer{}
 	w.bytes(a.TicketID[:])
@@ -342,9 +343,32 @@ func (d Deployment) Open(nodeSigner solana.PublicKey, operatorID, nodeID uint64,
 		readonly(d.Operator(operatorID)),
 		writable(node),
 		writable(d.Ticket(node, a.TicketID)),
+		writable(d.RentPool(a.Payer)),
 		readonly(solana.SysvarInstructionsID),
 		readonly(solana.SystemProgramID),
 	)
+}
+
+// DepositRent funds the payer's rent pool, creating it on the first deposit,
+// as Algorand's depositMbr. The amount must be positive.
+func (d Deployment) DepositRent(payerKey solana.PublicKey, amount uint64) solana.Instruction {
+	w := writer{}
+	w.u64(amount)
+	return d.ix("deposit_rent", w.b, payer(payerKey), writable(d.RentPool(payerKey)), readonly(solana.SystemProgramID))
+}
+
+// WithdrawRent takes back what the pool holds above its own rent exemption,
+// as Algorand's withdrawMbr.
+func (d Deployment) WithdrawRent(payerKey solana.PublicKey, amount uint64) solana.Instruction {
+	w := writer{}
+	w.u64(amount)
+	return d.ix("withdraw_rent", w.b, payer(payerKey), writable(d.RentPool(payerKey)))
+}
+
+// CloseRentPool closes the pool and returns all of it, its own rent included,
+// as Algorand's closeDeposit. Refused while a ticket it funded is live.
+func (d Deployment) CloseRentPool(payerKey solana.PublicKey) solana.Instruction {
+	return d.ix("close_rent_pool", nil, payer(payerKey), writable(d.RentPool(payerKey)))
 }
 
 // ClaimFields are what a node claims for a ticket; the payer's ack signs
@@ -431,7 +455,9 @@ type Ending struct {
 	NodeID     uint64
 	TicketID   [16]byte
 	// RentPayer funded the ticket and gets its rent back: the ticket's
-	// rent_payer.
+	// rent_payer, read from the ticket. That is the payer's rent pool, or the
+	// node's signer for a ticket opened before pools existed, so deriving it
+	// from the payer fails to end those.
 	RentPayer solana.PublicKey
 	// Payer is the ticket's payer, whose token account takes the refund.
 	Payer solana.PublicKey

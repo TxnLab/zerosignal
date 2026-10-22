@@ -32,6 +32,7 @@ export const CONFIG_SIZE = 349
 export const OPERATOR_SIZE = 171
 export const NODE_SIZE = 880
 export const TICKET_SIZE = 233
+export const RENT_POOL_SIZE = 82
 export const TOKEN_ACCOUNT_SIZE = 165
 
 export const OUTPUT_UNITS_LEN = 8
@@ -309,6 +310,24 @@ export function decodeTicket(data: Uint8Array): Ticket {
         freezeOrigin: r.u8(),
         reserve: r.array(7),
     }
+}
+
+/**
+ * The lamports a payer prepaid for its tickets' rent. What an open can draw,
+ * and a withdraw take, is the pool's lamports above its own rent exemption,
+ * which is not in the data: the rent of a live ticket sits in the ticket.
+ */
+export interface RentPool {
+    version: number
+    bump: number
+    openTickets: bigint
+    payer: PublicKey
+    reserve: Uint8Array
+}
+
+export function decodeRentPool(data: Uint8Array): RentPool {
+    const r = accountReader('RentPool', data, RENT_POOL_SIZE)
+    return { version: r.u8(), bump: r.u8(), openTickets: r.u64(), payer: r.key(), reserve: r.array(32) }
 }
 
 export function tokenAccountStateName(s: number): string {

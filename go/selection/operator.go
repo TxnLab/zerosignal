@@ -105,8 +105,8 @@ type Operator struct {
 
 	// SignerSpendableLamports is the same reading for a node on Solana: the
 	// signing account's lamports less its own rent-exempt reserve, read by each
-	// app from its RPC. That account is the open offer's fee payer and the
-	// Ticket account's rent payer, so SelectTargets drops a node below
+	// app from its RPC. That account pays the open offer's fees (the payer's
+	// rent pool pays the Ticket's rent), so SelectTargets drops a node below
 	// MinSignerSpendableLamports, under SignerSpendableMicroAlgos' rules: nil
 	// is ELIGIBLE, a failed re-read keeps the last-known value, 0 disqualifies.
 	// A node carries the reading of its own rail only, and omitempty keeps an
@@ -242,30 +242,20 @@ func SignerUnderfunded(spendable *uint64) bool {
 
 // MinSignerSpendableLamports is the routing floor for a Solana node signing
 // account's spendable lamports: what one open costs that account under the
-// zs_escrow program.
+// zs_escrow program, which is its fees alone. The Ticket's rent comes from
+// the payer's rent pool (zsescrow.Deployment.RentPool), as Algorand's open()
+// draws box MBR from the payer's prepaid pool.
 //   - 10,000 of signature fees. The fee payer pays 5,000 lamports for each
 //     signature, and an open offer carries exactly two, the node's key as fee
 //     payer and the payer's (zsescrow.VerifyOpenOffer).
 //   - 120 of priority fee. The program's own offers set 1,000 micro-lamports
 //     per compute unit on a limit of 120,000 units when they fold a settle in
-//     (60,000 when not), and the fee is price × limit. The folded settle
-//     refunds its ticket's rent to that ticket's rent payer, which a key
-//     rotation makes another key, so the folded open can cost the full fee
-//     and rent. The program does not bound the price; the node composes the
-//     offer, and the payer cannot see its price before routing.
-//   - 2,512,560 of rent. open creates the Ticket account with node_signer as
-//     its payer (programs/zs-escrow/src/instructions/open.rs), and the rent-
-//     exempt minimum of its 233 bytes (zsescrow.TicketSize) is that plus the
-//     128-byte account overhead at 6,960 lamports a byte. SIMD-0437 lowers
-//     the per-byte rate in steps (the program's fixtures already charge
-//     5,080) and its safeguard resets it to 6,960, so this is an upper bound:
-//     it holds out a node that could just afford an open at a lower rate
-//     rather than route to one that can't at this one.
+//     (60,000 when not), and the fee is price × limit. The program does not
+//     bound the price; the node composes the offer, and the payer cannot see
+//     its price before routing.
 //
-// Unlike the ALGO floor it is no staleness budget: a node read exactly at it
-// can hold one live ticket until the next read, since each holds its rent
-// until it closes.
-const MinSignerSpendableLamports uint64 = 2_522_680
+// Unlike the ALGO floor it is no staleness budget: it covers one open.
+const MinSignerSpendableLamports uint64 = 10_120
 
 // SignerLamportsUnderfunded reports whether a spendable-lamports reading is
 // known and below MinSignerSpendableLamports. nil (never read) is not

@@ -42,7 +42,8 @@ var signedComputeBudget = map[byte]int{solana.ComputeBudgetSetComputeUnitLimit: 
 //     one the payer cannot see in the bytes it signs.
 //  2. Exactly two signers: a fee payer feePayer accepts, then the payer,
 //     read-only, so the payer's signature grants no write lock on its
-//     wallet and pays nothing.
+//     wallet and pays no fee. The ticket's rent an open draws from the
+//     payer's rent pool is the open's to bind, not the header's.
 //  3. Compute-budget instructions lead, at most one of each allowed kind,
 //     with no accounts.
 //  4. kind names every other instruction, or refuses it.

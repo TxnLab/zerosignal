@@ -67,12 +67,13 @@ var (
 
 // solanaSignerReserveLamports bounds the rent-exempt minimum of a signer's own
 // account from above: no data, so the 128-byte account overhead at 6,960
-// lamports a byte, the ceiling selection.MinSignerSpendableLamports prices the
-// Ticket's rent at (the current rate can be lower; see there). The runtime
-// refuses a transaction that leaves its fee payer above zero but below its
-// minimum (InsufficientFundsForRent), so the minimum is the Solana account's
-// min-balance, and the spendable reading is what lies above this bound, as
-// spendableMicroAlgos reads above algod's.
+// lamports a byte. SIMD-0437 lowers the per-byte rate in steps and its
+// safeguard resets it to 6,960, so a bound at that rate holds out a node a
+// lower current rate would admit rather than route to one that can't pay.
+// The runtime refuses a transaction that leaves its fee payer above zero but
+// below its minimum (InsufficientFundsForRent), so the minimum is the Solana
+// account's min-balance, and the spendable reading is what lies above this
+// bound, as spendableMicroAlgos reads above algod's.
 const solanaSignerReserveLamports uint64 = 890_880
 
 // solanaRegistryCommitment is confirmed rather than the RPC's default,

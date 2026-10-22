@@ -242,6 +242,10 @@ var fixtureVerdicts = map[string]string{
 	"open_fold_settle_wrong_digest": "fold.data",
 	"open_fold_settle_wrong_usage":  "fold.data",
 	"open_fold_settle_wrong_ticket": "fold.accounts",
+	// The program refuses these on the pool's state, which the message
+	// doesn't carry: the offer itself is the payer's.
+	"open_no_rent_pool":    "ok",
+	"open_rent_pool_short": "ok",
 }
 
 func buildOfferVectors(t *testing.T) offerVectors {
@@ -318,6 +322,10 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	built("another_payer", "the open offer judged by a payer it does not name", "header.payer", b64(t, open.Message), other)
 	built("another_ticket", "open names a ticket id the payer did not reserve", "open.accounts",
 		compile(node, cbLimit, cbPrice, transfer, openWith(func(a *zsescrow.OpenArgs) { a.TicketID[0] ^= 1 })), spec)
+	otherPool := slices.Clone(openIx.Accounts)
+	otherPool[5].PublicKey = d.RentPool(w.attacker)
+	built("another_payers_rent_pool", "open draws the ticket's rent from another payer's rent pool", "open.accounts",
+		compile(node, cbLimit, cbPrice, transfer, solana.Instruction{ProgramID: openIx.ProgramID, Accounts: otherPool, Data: openIx.Data}), spec)
 	built("another_expiry", "open names an expiry one second past the ticket's", "open.data",
 		compile(node, cbLimit, cbPrice, transfer, openWith(func(a *zsescrow.OpenArgs) { a.ExpiresAt++ })), spec)
 	built("both_amounts_raised", "the transfer and open agree on one unit more than the payer reserved", "transfer.data",
@@ -364,12 +372,12 @@ func buildOfferVectors(t *testing.T) offerVectors {
 	built("open_discriminator_only", "open's discriminator with no arguments", "open.data", compile(node, cbLimit, cbPrice, transfer, bareOpen), spec)
 	built("claim_beside", "a claim of the payer's ticket after open", "escrow.instruction",
 		compile(node, cbLimit, cbPrice, transfer, openIx, d.Claim(zsescrow.Ending{Submitter: node, OperatorID: spec.OperatorID, NodeID: spec.NodeID,
-			TicketID: spec.TicketID, RentPayer: node, Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
+			TicketID: spec.TicketID, RentPayer: d.RentPool(spec.Payer), Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
 	// An ack is the payer's half, so beside open the payer's signature would
 	// answer a claim of the node's choosing.
 	built("ack_beside", "the payer's ack of a claim, after open", "escrow.instruction",
 		compile(node, cbLimit, cbPrice, transfer, openIx, d.Ack(zsescrow.Ending{Submitter: spec.Payer, OperatorID: spec.OperatorID, NodeID: spec.NodeID,
-			TicketID: spec.TicketID, RentPayer: node, Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
+			TicketID: spec.TicketID, RentPayer: d.RentPool(spec.Payer), Payer: spec.Payer}, zsescrow.ClaimFields{Amount: 1})), spec)
 
 	foldSpec := w.specFor(t, fold, &fold)
 	foldIxs := fold.instructions(t)
@@ -388,6 +396,13 @@ func buildOfferVectors(t *testing.T) offerVectors {
 		withTreasury(zsescrow.FallbackReadonly, w.treasury), foldSpec)
 	built("fold_writable_fallback", "the folded settle passing the treasury's USDC account writable, accepted: the program forfeits a refund the payer's account can't take on every ending", "ok",
 		withTreasury(zsescrow.FallbackWritable, w.treasury), foldSpec)
+	// The fold check takes the settle's own rent payer, as the program checks
+	// it against the ticket: a ticket opened before rent pools names the
+	// node's key there.
+	legacy := ending
+	legacy.RentPayer = foldSpec.NodeSigning
+	built("fold_rent_payer_before_pools", "the folded settle of a ticket opened before rent pools, which returns its rent to the node's key", "ok",
+		compile(foldSpec.NodeSigning, foldIxs[0], foldIxs[1], d.SettleCooperative(legacy, claim), foldIxs[3], foldIxs[4]), foldSpec)
 	built("fold_treasury_of_another", "the folded settle passing another key's USDC account where the treasury's goes", "fold.accounts",
 		withTreasury(zsescrow.FallbackReadonly, w.attacker), foldSpec)
 	noTreasury := *foldSpec.Fold

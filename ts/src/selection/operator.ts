@@ -100,7 +100,7 @@ export interface Operator {
     signer_spendable_microalgos?: number
     // the same reading for a node on Solana: the signing account's lamports
     // less its own rent-exempt reserve. That account pays the open offer's fees
-    // and the Ticket account's rent, so selectTargets drops a node below
+    // (the payer's rent pool pays the Ticket's rent), so selectTargets drops a node below
     // MIN_SIGNER_SPENDABLE_LAMPORTS, under the microAlgo field's rules. A node
     // carries its own rail's reading only; absent keeps an Algorand node's
     // descriptor as it was. Mirror of selection.Operator.SignerSpendableLamports.
@@ -141,9 +141,10 @@ export function signerSpendableBelowFloor(spendable: number | null | undefined):
 }
 
 /** Routing floor for a Solana node signing account's spendable lamports: one
- *  open's fees and Ticket rent, the rent at its 6,960-a-byte ceiling. Mirror
- *  of selection.MinSignerSpendableLamports (the derivation is in the Go doc). */
-export const MIN_SIGNER_SPENDABLE_LAMPORTS = 2_522_680
+ *  open offer's fees, since the payer's rent pool pays the Ticket's rent.
+ *  Mirror of selection.MinSignerSpendableLamports (the derivation is in the Go
+ *  doc). */
+export const MIN_SIGNER_SPENDABLE_LAMPORTS = 10_120
 
 /**
  * Reports whether a spendable-lamports reading is known and below the Solana
