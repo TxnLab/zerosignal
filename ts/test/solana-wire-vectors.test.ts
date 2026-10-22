@@ -121,6 +121,7 @@ describe('signReceiptAck', () => {
         const bad: Record<string, (msg: Uint8Array) => Uint8Array> = {
             'another key': (msg) => ed25519.sign(msg, secrets.get('attacker')!),
             short: (msg) => ed25519.sign(msg, payerSecret).subarray(0, 63),
+            long: (msg) => new Uint8Array([...ed25519.sign(msg, payerSecret), 0]),
             'other bytes': (msg) => ed25519.sign(new Uint8Array([0, ...msg]), payerSecret),
         }
         for (const [name, f] of Object.entries(bad)) {

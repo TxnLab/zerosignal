@@ -7,7 +7,6 @@ package zsescrow
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -111,7 +110,8 @@ func SignReceiptAck(ctx context.Context, signer ticket.BytesSigner, payer solana
 	if err != nil {
 		return "", fmt.Errorf("zsescrow: sign ack: %w", err)
 	}
-	if len(sig) != ed25519.SignatureSize || !solana.VerifyStrict(payer, digest[:], solana.Signature(sig)) {
+	s, err := solana.SignatureFromBytes(sig)
+	if err != nil || !solana.VerifyStrict(payer, digest[:], s) {
 		return "", fmt.Errorf("zsescrow: sign ack: the signer's signature does not verify as %s", payer)
 	}
 	return base64.StdEncoding.EncodeToString(sig), nil
@@ -124,10 +124,11 @@ func DecodeAckSignature(paymentSettle string) (solana.Signature, error) {
 	if err != nil {
 		return solana.Signature{}, fmt.Errorf("zsescrow: payment_settle: %w", err)
 	}
-	if len(b) != len(solana.Signature{}) {
+	sig, err := solana.SignatureFromBytes(b)
+	if err != nil {
 		return solana.Signature{}, fmt.Errorf("zsescrow: payment_settle: %d bytes, want 64", len(b))
 	}
-	return solana.Signature(b), nil
+	return sig, nil
 }
 
 // decodeCanonicalBase64 reads standard padded base64 in the one spelling

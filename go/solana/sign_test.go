@@ -99,6 +99,22 @@ func identityRSignature(t *testing.T, priv ed25519.PrivateKey, msg []byte) []byt
 	return append(r, edwards25519.NewScalar().Multiply(k, a).Bytes()...)
 }
 
+func TestSignatureFromBytes(t *testing.T) {
+	b := make([]byte, 65)
+	for i := range b {
+		b[i] = byte(i + 1)
+	}
+	for _, n := range []int{0, 63, 65} {
+		if _, err := solana.SignatureFromBytes(b[:n]); err == nil {
+			t.Errorf("read %d bytes as a signature", n)
+		}
+	}
+	sig, err := solana.SignatureFromBytes(b[:64])
+	if err != nil || !bytes.Equal(sig[:], b[:64]) {
+		t.Errorf("64 bytes: %x, %v", sig, err)
+	}
+}
+
 type fixedSigner struct {
 	sig []byte
 	err error

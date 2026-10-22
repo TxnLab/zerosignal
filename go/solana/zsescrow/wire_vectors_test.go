@@ -356,8 +356,8 @@ func TestWireVectorsMeanWhatTheySay(t *testing.T) {
 	}
 }
 
-// A signer that answers with another key's signature, or a short one, is
-// refused before anything reaches the node.
+// A signer that answers with another key's signature, or one of the wrong
+// length, is refused before anything reaches the node.
 func TestSignReceiptAckRefusesASignatureThatDoesNotVerify(t *testing.T) {
 	w := loadAckWorld(t)
 	keys := fixtureKeys(t)
@@ -366,6 +366,7 @@ func TestSignReceiptAckRefusesASignatureThatDoesNotVerify(t *testing.T) {
 	for name, s := range map[string]ticket.BytesSigner{
 		"another key": signFunc(func(msg []byte) []byte { return ed25519.Sign(keys["attacker"], msg) }),
 		"short":       signFunc(func(msg []byte) []byte { return ed25519.Sign(keys["payer"], msg)[:63] }),
+		"long":        signFunc(func(msg []byte) []byte { return append(ed25519.Sign(keys["payer"], msg), 0) }),
 		"other bytes": signFunc(func(msg []byte) []byte { return ed25519.Sign(keys["payer"], append([]byte{0}, msg...)) }),
 	} {
 		if sig, err := zsescrow.SignReceiptAck(context.Background(), s, payer, w.d, w.genesis, spec.OperatorID, spec.NodeID, spec.TicketID, 7, spec.Receipt); err == nil {

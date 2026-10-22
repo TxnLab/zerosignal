@@ -98,6 +98,17 @@ func ParseSignature(s string) (Signature, error) {
 	return sig, nil
 }
 
+// SignatureFromBytes reads a raw signature, such as a signer returns. It
+// refuses any length but 64, where a conversion to Signature would panic.
+func SignatureFromBytes(b []byte) (Signature, error) {
+	var sig Signature
+	if len(b) != len(sig) {
+		return sig, fmt.Errorf("solana: signature: %d bytes, want %d", len(b), len(sig))
+	}
+	copy(sig[:], b)
+	return sig, nil
+}
+
 // The programs and sysvars the rail's transactions name.
 var (
 	SystemProgramID               = PublicKey{}

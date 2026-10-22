@@ -51,12 +51,13 @@ func (t *Transaction) SignWith(ctx context.Context, key PublicKey, signer Transa
 	if err != nil {
 		return fmt.Errorf("solana: sign as %s: %w", key, err)
 	}
-	if len(sig) != len(Signature{}) {
+	s, err := SignatureFromBytes(sig)
+	if err != nil {
 		return fmt.Errorf("solana: signer returned %d bytes for %s, want a 64-byte signature", len(sig), key)
 	}
-	if !VerifyStrict(key, msg, Signature(sig)) {
+	if !VerifyStrict(key, msg, s) {
 		return fmt.Errorf("solana: signer's signature does not verify under %s", key)
 	}
-	t.Signatures[i] = Signature(sig)
+	t.Signatures[i] = s
 	return nil
 }
