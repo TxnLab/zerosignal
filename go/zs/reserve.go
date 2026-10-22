@@ -20,7 +20,6 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/transient"
 	"github.com/TxnLab/zerosignal/go/wire"
@@ -63,8 +62,9 @@ type ReservedTicket struct {
 	// carried it (presigned_open_txn), for the wallet to complete. Reserve has
 	// checked that it decodes; only the wallet reads it. On Algorand it is the
 	// 2-tx open group: gtxn[1] (the operator's open() AppCall) is signed and
-	// gtxn[0] (the payer's usdcPayment) is left for the wallet to sign. Empty
-	// when the node sent none.
+	// gtxn[0] (the payer's usdcPayment) is left for the wallet to sign. On
+	// Solana it is the node's offer transaction, with the payer's signature slot
+	// empty. Empty when the node sent none.
 	PresignedOpen string
 }
 
@@ -382,6 +382,9 @@ type HTTPReserveClient struct {
 	// ticket that comes back must be bound to it. Zero keeps the legacy
 	// layouts with every node.
 	Deployment ticket.DeploymentID
+	// Rail is the payer's rail; zero is Algorand. It decides how the open
+	// payload is checked and whether the payer chooses the ticket id.
+	Rail ticket.Rail
 }
 
 // reservePath is the node-side endpoint from SPEC.md § 3a.
@@ -512,6 +515,9 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 	req.Deployment = ticket.DeploymentID{}
 	if !c.Deployment.IsZero() && wire.UsesDeploymentBinding(op.ProtoVersion) {
 		req.Deployment = c.Deployment
+	}
+	if req.TicketID, err = requestTicketID(c.Rail); err != nil {
+		return nil, err
 	}
 
 	// Mandatory forward secrecy: seal ONLY to the operator's verified, unexpired
@@ -768,13 +774,13 @@ func (c *HTTPReserveClient) reserveAttempt(
 		return nil, errors.New("reserve commit_k mismatch: wrapped_response_key does not hash to ticket.commit_k")
 	}
 
-	// Checked here, as the TS SDK's reserve leg does, so a group that can't
+	// Checked here, as the TS SDK's reserve leg does, so an open that can't
 	// decode fails the reserve and dispatch moves to the next candidate rather
 	// than failing at open.
 	if parsed.PreSignedOpenTxn != "" {
-		if _, err := escrow.DecodeOpenGroup(parsed.PreSignedOpenTxn); err != nil {
+		if err := checkOpenOffer(c.Rail, parsed.PreSignedOpenTxn); err != nil {
 			clear(key[:])
-			return nil, fmt.Errorf("decode presigned open group: %w", err)
+			return nil, err
 		}
 	}
 
@@ -851,6 +857,9 @@ func validateTicketShape(t *ticket.Ticket, op Operator, req ticket.ReserveReques
 	}
 	if t.TicketID == "" {
 		return errors.New("ticket_id is empty")
+	}
+	if req.TicketID != "" && t.TicketID != req.TicketID {
+		return fmt.Errorf("ticket_id %q is not the requested %q", t.TicketID, req.TicketID)
 	}
 	if t.CommitK == "" {
 		return errors.New("commit_k is empty")

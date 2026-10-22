@@ -889,6 +889,20 @@ describe('bufferedResponder', () => {
         expect(s.logger.logged.map((l) => l.msg)).toContain('settle-group header malformed; falling back to standalone ack')
     })
 
+    // On Solana the header is the ticket's open_seq, in its one spelling.
+    it.each([
+        ['an open_seq', '7', '7'],
+        ['an open_seq in another spelling', '07', null],
+        ['a group', 'bm90IGEgZ3JvdXA=', null],
+    ] as const)('on Solana, hands %s to the ack as the header reads', async (_, group, want) => {
+        const s = await setup()
+        s.deps.rail = 'solana'
+        const { resp, body } = sealedResponse(s, { group })
+        await bufferedResponder(s.deps, s.call)(s.em, resp, body)
+        await (s.after[0]![1] as () => Promise<unknown>)()
+        expect(s.handle.acks[0]![1]).toBe(want)
+    })
+
     it('reports a receipt that fails its checks, without charging it', async () => {
         const s = await setup()
         const released: string[] = []

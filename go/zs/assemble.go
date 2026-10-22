@@ -159,6 +159,7 @@ func newReserveClient(cfg Config, deployment ticket.DeploymentID) *HTTPReserveCl
 		HTTPClient: cfg.nodeHTTPClient(cfg.ReserveTimeout, 0),
 		Signer:     cfg.Signer,
 		Deployment: deployment,
+		Rail:       cfg.Network.Rail,
 	}
 }
 

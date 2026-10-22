@@ -4,6 +4,7 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { base64 } from '@scure/base'
 import { encodeDeploymentId } from '@txnlab/zs-proto/ticket'
 import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,6 +15,10 @@ const groups = JSON.parse(readFileSync(new URL('../../testdata/escrow_group_vect
     open: { cases: { name: string; group_b64: string }[] }
 }
 const openGroup = (name: string) => groups.open.cases.find((c) => c.name === name)!.group_b64
+const wire = JSON.parse(readFileSync(new URL('../../testdata/solana_wire_vectors.json', import.meta.url), 'utf8')) as {
+    opens: { presigned_open_txn: string }[]
+}
+const offer = wire.opens[0]!.presigned_open_txn
 
 const reserveCalls: ReserveCall[] = []
 let reserved: { ticket: { id: string }; presignedOpenTxn: string }
@@ -230,6 +235,41 @@ describe('httpReserveClient', () => {
         reserved.presignedOpenTxn = openGroup('valid')
         const r = await httpReserveClient({ fetch, clock: () => 0 }).reserve(op, request, null)
         expect(r.presignedOpenTxn).toBe(openGroup('valid'))
+    })
+
+    // A Solana payer names a fresh 16-byte id on every reserve, so it never
+    // signs two opens with one id at a node.
+    it('names a fresh ticket id on every Solana reserve', async () => {
+        const c = httpReserveClient({ fetch, clock: () => 0, rail: 'solana' })
+        for (let i = 0; i < 3; i++) await c.reserve(op, { ...request, ticket_id: 'stale' }, null)
+        const ids = reserveCalls.map((call) => call.request.ticket_id!)
+        for (const id of ids) expect(base64.encode(base64.decode(id))).toBe(id)
+        expect(ids.map((id) => base64.decode(id).length)).toEqual([16, 16, 16])
+        expect(new Set(ids).size).toBe(3)
+        expect(request).not.toHaveProperty('ticket_id')
+    })
+
+    it.each([undefined, 'algorand'] as const)('leaves the ticket id to the node on rail %j', async (rail) => {
+        await httpReserveClient({ fetch, clock: () => 0, rail }).reserve(op, { ...request, ticket_id: 'stale' }, null)
+        expect(reserveCalls[0]!.request).toEqual(request)
+    })
+
+    // On Solana the open is the node's offer transaction, so an Algorand group
+    // fails the reserve there as an offer fails it on Algorand.
+    it.each([
+        ['an Algorand group on Solana', 'solana', openGroup('valid'), /decode presigned open offer/],
+        ['a respelled offer on Solana', 'solana', offer.replace(/=+$/, ''), /decode presigned open offer/],
+        ['base64 that is no transaction on Solana', 'solana', 'AAAA', /decode presigned open offer/],
+        ['a Solana offer on Algorand', 'algorand', offer, /decode presigned open group/],
+    ] as const)('rejects %s', async (_, rail, open, want) => {
+        reserved.presignedOpenTxn = open
+        await expect(httpReserveClient({ fetch, clock: () => 0, rail }).reserve(op, request, null)).rejects.toThrow(want)
+    })
+
+    it('passes a Solana offer that decodes', async () => {
+        reserved.presignedOpenTxn = offer
+        const r = await httpReserveClient({ fetch, clock: () => 0, rail: 'solana' }).reserve(op, request, null)
+        expect(r.presignedOpenTxn).toBe(offer)
     })
 })
 

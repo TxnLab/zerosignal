@@ -121,6 +121,7 @@ export class Client {
                 timeoutMs: cfg.reserveTimeout,
                 clock: cfg.clock,
                 deployment,
+                rail: cfg.network.rail,
             })
 
         let st = cfg.stores
@@ -432,6 +433,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         feeRate,
         afterResponse: (ticketId, submit) => p.settles.afterResponse(ticketId, submit),
         feeUnit: feeUnitOf(cfg.network.rail),
+        rail: cfg.network.rail,
     }
     const deps: SealedDeps = {
         wallet: p.wallet,

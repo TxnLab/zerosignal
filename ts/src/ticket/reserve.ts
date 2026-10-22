@@ -104,6 +104,14 @@ export interface ReserveRequest {
     // deployment refuses the reserve. Only set after usesDeploymentBinding
     // confirms the target. Mirrors Go's ReserveRequest.Deployment.
     deployment?: string
+    // The ticket id the payer asks the node to issue, in the ticket's
+    // canonical spelling. A Solana payer sends a fresh random one on every
+    // reserve and refuses a ticket naming any other, so it never signs two
+    // opens with one id at a node (SPEC.md § 3a "The open and the ack on
+    // Solana"). An Algorand payer sends none and the node chooses. Unsigned:
+    // the payer's own check of the ticket is the guard. Mirrors Go's
+    // ReserveRequest.TicketID.
+    ticket_id?: string
 }
 
 export interface ReserveResponse {

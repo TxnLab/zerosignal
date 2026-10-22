@@ -202,6 +202,17 @@ describe('reserve', () => {
         expect(seen[0]!.request.payer_issued_at).toBeUndefined()
     })
 
+    // The id a Solana payer named reaches the node, and a ticket naming any
+    // other is refused even when the node signed it.
+    it('holds the ticket to the id the request named', async () => {
+        const named = { request: { model: 'm', input_count: 300, max_output_count: 64, stream: true, ticket_id: 'dGlja2V0' } }
+        const echo = await fakeNode((r) => ok(r))
+        await expect(reserve(call(echo.node, echo.fetch, named))).resolves.toBeDefined()
+        expect(echo.seen[0]!.request.ticket_id).toBe('dGlja2V0')
+        const other = await fakeNode((r) => ok(r, {}, { ticket_id: 'b3RoZXI=' }))
+        await expect(reserve(call(other.node, other.fetch, named))).rejects.toThrow(/is not the requested/)
+    })
+
     // A ticket-only node never sends one, so requiring it is the caller's call.
     it('requires a presigned open group only when asked', async () => {
         const { node, fetch } = await fakeNode((r) => ok(r, { presigned_open_txn: '' }))

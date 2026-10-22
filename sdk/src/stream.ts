@@ -575,7 +575,7 @@ export function frameFactory(
         // One opener owns the frame counter: openNextFrame advances it,
         // openHeader doesn't, and a failed open doesn't.
         const opener = new ResponseOpener(responseKey, txId, ticketId)
-        const meta = { ticket, op, hop, log }
+        const meta = { ticket, op, hop, log, rail: deps.rail }
         const api = streamApiFor(endpoint)
         // The node sends its settle group before the receipt.
         let settleGroup: string | null = null

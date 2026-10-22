@@ -21,10 +21,10 @@ import { type SettleAck, usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult, SettleSubmission } from './ack.js'
 import type { AffinityStore } from './affinity.js'
-import { decodeOpenGroup } from './escrow/open.js'
-import { type ResolvedNetwork, ownsRecord } from './network.js'
+import { type Rail, type ResolvedNetwork, ownsRecord } from './network.js'
 import { type Operator, refOf, sealRecipientOf } from './operator.js'
 import type { Clock, Fetch } from './ports.js'
+import { checkOpenOffer, requestTicketId } from './rail.js'
 import type { ClaimVerdict, SettleArgs, TicketRecord } from './reconcile.js'
 import { type ReserveCall, type Reservation, reserve } from './reserve.js'
 import type { TargetBackoffStore } from './routing/backoff.js'
@@ -83,7 +83,7 @@ export interface ReserveClient {
      * Reserves on op, through hop when one is given. A result has passed every
      * check that needs only the node's answer: the ticket's signature under
      * op.ticketSigningKey, its terms against the request, commit_k, and that
-     * any presigned open group decodes. Dispatch escrows on it without
+     * any presigned open decodes as the rail's. Dispatch escrows on it without
      * checking again, so a failure here moves on to the next candidate.
      * Rejects with NoEphemeralError when op has no recipient to seal to,
      * which dispatch reads as "skip this candidate".
@@ -106,6 +106,11 @@ export interface HttpReserveClientOptions {
      * bound to it. Absent keeps the legacy layouts with every node.
      */
     deployment?: Uint8Array | undefined
+    /**
+     * The payer's rail; absent is Algorand. It decides how the open payload
+     * is checked and whether the payer chooses the ticket id.
+     */
+    rail?: Rail | undefined
 }
 
 /** httpReserveClient is the default ReserveClient, Go's HTTPReserveClient. */
@@ -126,6 +131,12 @@ export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
                 const { deployment: _stale, ...fields } = request
                 sent = fields
             }
+            const ticketId = requestTicketId(o.rail)
+            if (ticketId !== undefined) sent = { ...sent, ticket_id: ticketId }
+            else if (sent.ticket_id !== undefined) {
+                const { ticket_id: _stale, ...fields } = sent
+                sent = fields
+            }
             const call: ReserveCall = {
                 target: { operatorId: ref.op, nodeId: ref.node, baseUrl: op.baseUrl, sealRecipient },
                 request: sent,
@@ -142,15 +153,7 @@ export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
             // reserve() leaves these to its caller; Go's Reserve runs both, and
             // its dispatch trusts the result.
             verifyTicketSignature(r.ticket, op.ticketSigningKey, deployment, !named)
-            if (r.presignedOpenTxn) {
-                try {
-                    decodeOpenGroup(r.presignedOpenTxn)
-                } catch (err) {
-                    throw new Error(`decode presigned open group: ${err instanceof Error ? err.message : String(err)}`, {
-                        cause: err,
-                    })
-                }
-            }
+            if (r.presignedOpenTxn) checkOpenOffer(o.rail, r.presignedOpenTxn)
             return { ...r, sealRecipient }
         },
     }

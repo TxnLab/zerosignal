@@ -27,16 +27,16 @@ import {
 import type { AffinityStore } from './affinity.js'
 import { newError } from './codes.js'
 import { NodeReply, ZsError } from './errors.js'
-import { decodeSettleGroup } from './escrow/settle.js'
 import type { Event } from './events.js'
 import { algoOnly } from './fees.js'
-import type { FeeUnit } from './network.js'
+import type { FeeUnit, Rail } from './network.js'
 import { goJSON } from './gojson.js'
 import { goDecodeRune, goDecodeUTF8, goQuote } from './gotext.js'
 import { openAIError } from './http.js'
 import { type Operator, refOf } from './operator.js'
 import type { Reserved } from './parts.js'
 import type { LogAttrs, Logger } from './ports.js'
+import { checkSettleSlot } from './rail.js'
 import {
     EXCLUSION_REASONS,
     type ReceiptCheckDeps,
@@ -230,7 +230,7 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
         const responseKey = await openCommittedKey(wrappedKey, reserved)
         // One opener binds the body and both sealed headers to one (txId, ticketId).
         const opener = new ResponseOpener(responseKey, txId, ticket.ticket_id)
-        const meta: MetaContext = { ticket, op, hop, log }
+        const meta: MetaContext = { ticket, op, hop, log, rail: deps.rail }
         let plaintext: Uint8Array
         let receiptHdr: string
         let settleGroupHdr: string
@@ -353,6 +353,8 @@ export interface MetaContext {
     op: Operator
     hop: RelayHop | null
     log: Logger
+    /** The payer's rail, which decides what the settle slot holds; absent is Algorand. */
+    rail?: Rail | undefined
 }
 
 /**
@@ -378,14 +380,14 @@ export function openSealedResponseMeta(m: MetaContext, opener: ResponseOpener, s
 }
 
 /**
- * settleGroupOf is the node's settle group when it sent one that decodes, else
- * null: an absent one is normal, a malformed one is logged and the ack goes
- * standalone.
+ * settleGroupOf is the node's settle slot when it sent one that decodes for
+ * the rail (Algorand's settle group, Solana's open_seq), else null: an absent
+ * one is normal, a malformed one is logged and the ack goes standalone.
  */
 export function settleGroupOf(m: MetaContext, b64: string): string | null {
     if (b64 === '') return null
     try {
-        decodeSettleGroup(b64)
+        checkSettleSlot(m.rail, b64)
     } catch (err) {
         m.log.warn('settle-group header malformed; falling back to standalone ack', {
             ...opAttrs(m.op),

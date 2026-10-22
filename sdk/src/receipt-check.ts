@@ -19,7 +19,7 @@ import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
 import { type Operator, refOf } from './operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from './parts.js'
 import { algoOnly } from './fees.js'
-import type { FeeUnit } from './network.js'
+import type { FeeUnit, Rail } from './network.js'
 import type { LogAttrs, Logger } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { NodeExclusionStore } from './routing/exclusion.js'
@@ -163,6 +163,8 @@ export interface ReceiptCheckDeps {
     confirmSettled?(ticketId: string, txId: string, handle: OpenHandle): void
     /** The coin the deployment's network fees are paid in. */
     feeUnit: FeeUnit
+    /** The deployment's rail, which decides what the settle slot holds; absent is Algorand. */
+    rail?: Rail | undefined
 }
 
 /** One receipt to check, and the turn it belongs to. */
