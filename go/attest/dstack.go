@@ -57,6 +57,10 @@ const (
 	EventAppID       = "app-id"
 	EventInstanceID  = "instance-id"
 	EventKeyProvider = "key-provider"
+
+	// EventStorageEncrypted is dstack 0.6's record of whether the data
+	// disk was opened under LUKS. See VerifyStorageEncrypted.
+	EventStorageEncrypted = "storage-encrypted"
 )
 
 // Errors from ReplayRTMR3. Each corresponds to a way the replay can
@@ -242,6 +246,41 @@ func RuntimeMeasurements(events []Event) map[string]string {
 		out[e.Event] = strings.ToLower(strings.TrimPrefix(e.EventPayload, "0x"))
 	}
 	return out
+}
+
+// storageEncryptedPayload is the hex of the one byte "1" dstack-util
+// extends when the data disk is LUKS-encrypted.
+const storageEncryptedPayload = "31"
+
+// ErrStorageUnencrypted means the replay records a data disk that was not
+// opened under LUKS.
+var ErrStorageUnencrypted = errors.New("attest: the replay records an unencrypted data disk")
+
+// VerifyStorageEncrypted refuses replayed measurements whose
+// storage-encrypted event records anything but "1".
+//
+// THE HOST CHOOSES. dstack-util reads dstack.storage_encrypted= off the
+// kernel command line, which the VMM writes, and no verifier of ours pins
+// that line (RTMR2). An unencrypted disk hands the host every byte the
+// workload writes to its volume, while the compose, the OS image and the
+// replay all verify unchanged. dstack 0.6 emits the event precisely because
+// the cmdline is not measured everywhere, so this event is the only place
+// the choice is visible.
+//
+// ABSENT PASSES, and that is the 0.5.x line, not a skip. 0.5.9 and 0.5.12
+// honour the same cmdline switch and record nothing, so on those images
+// the choice is invisible and the gap stays open; 0.6.1 emits the event on
+// every boot. Requiring it would refuse every 0.5.x node for a record
+// their image cannot write.
+//
+// A malformed value refuses rather than passes: only the exact byte dstack
+// writes for "encrypted" counts as encrypted.
+func VerifyStorageEncrypted(measurements map[string]string) error {
+	v, ok := measurements[EventStorageEncrypted]
+	if !ok || v == storageEncryptedPayload {
+		return nil
+	}
+	return fmt.Errorf("%w (storage-encrypted payload %q)", ErrStorageUnencrypted, v)
 }
 
 // ---------------------------------------------------------------------------

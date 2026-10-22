@@ -49,6 +49,7 @@ import {
     reportData,
     reportDataB64,
     runtimeMeasurements,
+    verifyStorageEncrypted,
     splitReportData,
     verifyAux,
     verifyEventLog,
@@ -893,6 +894,24 @@ describe('attest failure modes', () => {
         ]
         expect(replayRTMR3(synthetic).extends).toBe(1)
         expect(runtimeMeasurements(synthetic)).toEqual({ runtime: 'bb' })
+    })
+
+    // Mirrors Go's TestVerifyStorageEncrypted row for row, including the
+    // code a caller would branch on.
+    it.each([
+        ['absent', { 'os-image-hash': 'aa' }, null],
+        ['encrypted', { 'storage-encrypted': '31' }, null],
+        ['unencrypted', { 'storage-encrypted': '30' }, 'storage_unencrypted'],
+        ['empty', { 'storage-encrypted': '' }, 'storage_unencrypted'],
+        ['ascii true', { 'storage-encrypted': '74727565' }, 'storage_unencrypted'],
+        ['not hex-decoded', { 'storage-encrypted': '1' }, 'storage_unencrypted'],
+    ] as const)('verifyStorageEncrypted: %s', (_name, m, code) => {
+        const run = () => verifyStorageEncrypted({ ...m })
+        if (code === null) {
+            expect(run).not.toThrow()
+        } else {
+            expect(run).toThrow(expect.objectContaining({ code }))
+        }
     })
 
     it('keeps the first occurrence of a duplicated event name', () => {

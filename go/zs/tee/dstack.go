@@ -84,10 +84,10 @@ type carriedChainVerifier func(ctx context.Context, quote []byte, c *inject.TEEC
 //  2. Verify the quote against Intel's PCK chain.
 //  3. Replay the event log into RTMR3 and compare against the quote.
 //  4. Check the recovered compose and OS-image hashes against the
-//     allowlist, then — for a node that publishes the preimage —
-//     validate the compose document's CONTENT. Content runs last so a
-//     dev OS image is reported as a dev OS image; the verdict is the
-//     same either way.
+//     allowlist, then the storage-encrypted record, then — for a node
+//     that publishes the preimage — validate the compose document's
+//     CONTENT. Content runs last so a dev OS image is reported as a dev
+//     OS image; the verdict is the same either way.
 //
 // Then SPEC step 6 checks report_data from the quote: the key half, then the
 // aux binding over node id, catalog and nonce. SPEC step 7 cross-checks the
@@ -305,6 +305,14 @@ func (v *DstackVerifier) verify(ctx context.Context, bundle inject.TEEEvidenceBu
 		v.log().Warn("attestation: OS image hash is not in the trusted set",
 			slog.Uint64("operator_id", op.OperatorID),
 			slog.String("os_image_hash", measurements[attest.EventOSImageHash]))
+		return FailureMeasurementMismatch
+	}
+	// After the OS image, which says whether the event means anything, and
+	// before the compose, which is the operator's to fix while this is the
+	// host's choice.
+	if err := attest.VerifyStorageEncrypted(measurements); err != nil {
+		v.log().Warn("attestation: the node's data disk is not encrypted",
+			slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 		return FailureMeasurementMismatch
 	}
 
