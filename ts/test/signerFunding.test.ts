@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 
 import {
@@ -52,9 +55,17 @@ describe('signer funding floor (mirror of selection.SignerUnderfunded)', () => {
     })
 })
 
-// Mirrors proto/go/selection TestSignerLamportsUnderfunded_Boundary; the
-// floor's value is pinned against Go by solana_registry_vectors.json.
+// Mirrors proto/go/selection TestSignerLamportsUnderfunded_Boundary.
 describe('Solana signer funding floor (mirror of selection.SignerLamportsUnderfunded)', () => {
+    // The SDK's replay of these vectors reads this package's build, not its
+    // source, so the floor is checked against Go's here too.
+    it('is the floor solana_registry_vectors.json records', () => {
+        const here = path.dirname(fileURLToPath(import.meta.url))
+        const vectors = JSON.parse(fs.readFileSync(path.resolve(here, '..', '..', 'testdata', 'solana_registry_vectors.json'), 'utf8')) as {
+            signer_balance: { min_signer_spendable_lamports: number }
+        }
+        expect(MIN_SIGNER_SPENDABLE_LAMPORTS).toBe(vectors.signer_balance.min_signer_spendable_lamports)
+    })
     it.each([
         ['never read (undefined)', undefined, false],
         ['never read (null)', null, false],

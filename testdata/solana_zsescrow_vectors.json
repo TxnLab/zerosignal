@@ -192,6 +192,19 @@
       }
     },
     {
+      "name": "rent_pool_reserve_set",
+      "type": "RentPool",
+      "about": "reserve bytes a later layout might write, read as written",
+      "data_base64": "k4v+Ipks6XsB/gAAAAAAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcBAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fIA==",
+      "decoded": {
+        "_reserve": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "bump": 254,
+        "open_tickets": "0",
+        "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
+        "version": 1
+      }
+    },
+    {
       "name": "token_account_every_option",
       "type": "TokenAccount",
       "about": "frozen, with a delegate, a native reserve and a close authority",
