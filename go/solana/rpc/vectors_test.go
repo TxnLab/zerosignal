@@ -76,6 +76,7 @@ type requestArgs struct {
 	MaxRetries          *uint64      `json:"max_retries,omitempty"`
 	Signatures          []string     `json:"signatures,omitempty"`
 	SearchHistory       bool         `json:"search_history,omitempty"`
+	DataLen             *uint64      `json:"data_len,omitempty"`
 }
 
 type filterArgs struct {
@@ -97,14 +98,15 @@ type captureTransport struct {
 }
 
 var cannedResults = map[string]string{
-	"getAccountInfo":       `{"context":{"slot":1},"value":null}`,
-	"getProgramAccounts":   `[]`,
-	"getBalance":           `{"context":{"slot":1},"value":0}`,
-	"getLatestBlockhash":   `{"context":{"slot":1},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":0}}`,
-	"getBlockHeight":       `0`,
-	"getGenesisHash":       `"11111111111111111111111111111111"`,
-	"sendTransaction":      `"1111111111111111111111111111111111111111111111111111111111111111"`,
-	"getSignatureStatuses": `{"context":{"slot":1},"value":[]}`,
+	"getAccountInfo":                    `{"context":{"slot":1},"value":null}`,
+	"getProgramAccounts":                `[]`,
+	"getBalance":                        `{"context":{"slot":1},"value":0}`,
+	"getLatestBlockhash":                `{"context":{"slot":1},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":0}}`,
+	"getBlockHeight":                    `0`,
+	"getGenesisHash":                    `"11111111111111111111111111111111"`,
+	"getMinimumBalanceForRentExemption": `0`,
+	"sendTransaction":                   `"1111111111111111111111111111111111111111111111111111111111111111"`,
+	"getSignatureStatuses":              `{"context":{"slot":1},"value":[]}`,
 }
 
 func (c *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -157,6 +159,8 @@ func requestCases(t *testing.T) []requestCase {
 		{Method: "getLatestBlockhash", Args: requestArgs{}},
 		{Method: "getBlockHeight", Args: requestArgs{Commitment: Confirmed}},
 		{Method: "getGenesisHash", Args: requestArgs{}},
+		{Method: "getMinimumBalanceForRentExemption", Args: requestArgs{DataLen: u64(233)}},
+		{Method: "getMinimumBalanceForRentExemption", Args: requestArgs{DataLen: u64(0), Commitment: Confirmed}},
 		{Method: "sendTransaction", Args: requestArgs{TxHex: hex.EncodeToString(tx)}},
 		{Method: "sendTransaction", Args: requestArgs{TxHex: hex.EncodeToString(tx), PreflightCommitment: Processed, MaxRetries: u64(0)}},
 		{Method: "sendTransaction", Args: requestArgs{TxHex: hex.EncodeToString(tx), SkipPreflight: true, MaxRetries: u64(5)}},
@@ -412,6 +416,9 @@ func issue(ctx context.Context, c *HTTPClient, rc requestCase) error {
 		return err
 	case "getGenesisHash":
 		_, err := c.GetGenesisHash(ctx)
+		return err
+	case "getMinimumBalanceForRentExemption":
+		_, err := c.GetMinimumBalanceForRentExemption(ctx, *a.DataLen, a.Commitment)
 		return err
 	case "sendTransaction":
 		tx, err := hex.DecodeString(a.TxHex)

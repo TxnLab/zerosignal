@@ -199,6 +199,8 @@ export interface SolanaRpc {
     getLatestBlockhash(o?: CallOptions): Promise<Blockhash>
     getBlockHeight(o?: CallOptions): Promise<bigint>
     getGenesisHash(o?: { signal?: AbortSignal | undefined }): Promise<Hash>
+    /** The lamports an account of dataLen bytes must hold to stay rent-exempt, at the cluster's current rate. */
+    getMinimumBalanceForRentExemption(dataLen: number, o?: CallOptions): Promise<bigint>
     /** Submits signed transaction bytes; resolves to the base58 signature the RPC reports. */
     sendTransaction(tx: Uint8Array, o?: SendOptions): Promise<string>
     getSignatureStatuses(
@@ -354,6 +356,11 @@ export class SolanaRpcClient implements SolanaRpc {
     async getGenesisHash(o: { signal?: AbortSignal | undefined } = {}): Promise<Hash> {
         const m = 'getGenesisHash'
         return base58Of(m, await this.#call(m, [], o.signal), 32, 'result')
+    }
+
+    async getMinimumBalanceForRentExemption(dataLen: number, o: CallOptions = {}): Promise<bigint> {
+        const m = 'getMinimumBalanceForRentExemption'
+        return u64(m, await this.#call(m, [dataLen, commitmentConfig(o.commitment)], o.signal), 'result')
     }
 
     async sendTransaction(tx: Uint8Array, o: SendOptions = {}): Promise<string> {

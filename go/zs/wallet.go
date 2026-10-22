@@ -1260,18 +1260,24 @@ func DepositExcess(slots, ticketMbr, freeQuotaMbr uint64, dep escrow.PayerDeposi
 // Returns 0 when the pool's sub-slot remainder already covers the term (or the
 // app has no quota).
 func quotaOnlyShortfall(ticketMbr, freeQuotaMbr uint64, dep escrow.PayerDeposit) uint64 {
-	if freeQuotaMbr == 0 || ticketMbr == 0 {
-		return 0
-	}
 	// Gross balance, same basis as DepositShortfall. Invariant to OpenTickets
 	// either way (live tickets reserve whole slots, and subtracting whole
 	// multiples of ticketMbr can't change a remainder), but stated on the same
 	// basis as the sizing it degrades from so the two can't drift.
-	remainder := dep.AlgoBalance % ticketMbr
-	if remainder >= freeQuotaMbr {
+	return quotaRemainderShortfall(ticketMbr, freeQuotaMbr, dep.AlgoBalance)
+}
+
+// quotaRemainderShortfall is the quota term a pool of gross balance doesn't
+// already cover with what it holds past its whole slots.
+func quotaRemainderShortfall(unit, quotaDue, gross uint64) uint64 {
+	if quotaDue == 0 || unit == 0 {
 		return 0
 	}
-	return freeQuotaMbr - remainder
+	remainder := gross % unit
+	if remainder >= quotaDue {
+		return 0
+	}
+	return quotaDue - remainder
 }
 
 // depositPlan is what one funding pass does to the pool. Amount > 0 deposits
@@ -1313,32 +1319,40 @@ type depositPlan struct {
 // testdata/deposit_plan_vectors.json, which the TS SDK's planMbrDeposit
 // replays.
 func planDeposit(slots, ticketMbr, quotaDue uint64, dep escrow.PayerDeposit, optedIn bool, spendable, minFee uint64) depositPlan {
-	target := poolTarget(slots, ticketMbr, quotaDue)
-	if dep.AlgoBalance >= target {
-		return depositPlan{}
-	}
 	overhead := 2 * minFee
 	if !optedIn {
 		overhead += depositOptInMBR
+	}
+	return planPoolDeposit(slots, ticketMbr, quotaDue, dep.AlgoBalance, overhead, spendable)
+}
+
+// planPoolDeposit is planDeposit's rule over either rail's pool: unit is what
+// one ticket holds (box MBR, or rent), gross what the pool backs counting
+// live tickets, and overhead what a deposit costs the wallet past its amount.
+// planRentDeposit sizes the Solana pool through it.
+func planPoolDeposit(slots, unit, quotaDue, gross, overhead, spendable uint64) depositPlan {
+	target := poolTarget(slots, unit, quotaDue)
+	if gross >= target {
+		return depositPlan{}
 	}
 	var net uint64 // spendable past the overhead; 0 when the overhead isn't covered
 	if spendable > overhead {
 		net = spendable - overhead
 	}
 	// The next slot costs only what the pool's part slot lacks.
-	need := ticketMbr - dep.AlgoBalance%ticketMbr + overhead
+	need := unit - gross%unit + overhead
 
-	current := dep.AlgoBalance / ticketMbr
-	reach, carry := bits.Add64(dep.AlgoBalance, net, 0)
+	current := gross / unit
+	reach, carry := bits.Add64(gross, net, 0)
 	if carry != 0 {
 		reach = math.MaxUint64
 	}
-	targetSlots := min(reach/ticketMbr, slots)
+	targetSlots := min(reach/unit, slots)
 	if targetSlots <= current {
-		quota := quotaOnlyShortfall(ticketMbr, quotaDue, dep)
+		quota := quotaRemainderShortfall(unit, quotaDue, gross)
 		if current >= 1 && quota > 0 {
 			if net >= quota {
-				return depositPlan{Amount: quota, BelowTarget: dep.AlgoBalance+quota < target}
+				return depositPlan{Amount: quota, BelowTarget: gross+quota < target}
 			}
 			// The box term is what this pool lacks first, and it is far
 			// cheaper than a slot; asking for a slot would overstate it.
@@ -1349,11 +1363,11 @@ func planDeposit(slots, ticketMbr, quotaDue uint64, dep escrow.PayerDeposit, opt
 		}
 		return depositPlan{Unaffordable: true, Need: need}
 	}
-	amount := targetSlots*ticketMbr - dep.AlgoBalance
+	amount := targetSlots*unit - gross
 	if net >= amount+quotaDue {
 		amount += quotaDue
 	}
-	return depositPlan{Amount: amount, BelowTarget: dep.AlgoBalance+amount < target}
+	return depositPlan{Amount: amount, BelowTarget: gross+amount < target}
 }
 
 // FreePoolHeadroom is the payer's UNCOMMITTED pool balance: the deposit less

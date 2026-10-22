@@ -44,6 +44,9 @@ type Client interface {
 	GetLatestBlockhash(ctx context.Context, c Commitment) (Blockhash, error)
 	GetBlockHeight(ctx context.Context, c Commitment) (uint64, error)
 	GetGenesisHash(ctx context.Context) (solana.Hash, error)
+	// GetMinimumBalanceForRentExemption is the lamports an account of dataLen
+	// bytes must hold to stay rent-exempt, at the cluster's current rate.
+	GetMinimumBalanceForRentExemption(ctx context.Context, dataLen uint64, c Commitment) (uint64, error)
 	SendTransaction(ctx context.Context, tx []byte, o SendOptions) (solana.Signature, error)
 	GetSignatureStatuses(ctx context.Context, sigs []solana.Signature, searchHistory bool) ([]*SignatureStatus, error)
 }

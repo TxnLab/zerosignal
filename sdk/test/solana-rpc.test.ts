@@ -40,6 +40,7 @@ interface RequestArgs {
     max_retries?: number
     signatures?: string[]
     search_history?: boolean
+    data_len?: number
 }
 
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_rpc_vectors.json', import.meta.url), 'utf8')) as {
@@ -132,6 +133,7 @@ const CANNED: Record<string, unknown> = {
     getLatestBlockhash: { context: { slot: 1 }, value: { blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 0 } },
     getBlockHeight: 0,
     getGenesisHash: '11111111111111111111111111111111',
+    getMinimumBalanceForRentExemption: 0,
     sendTransaction: '1111111111111111111111111111111111111111111111111111111111111111',
 }
 
@@ -154,6 +156,8 @@ async function issue(c: SolanaRpcClient, method: string, a: RequestArgs): Promis
             return c.getBlockHeight({ commitment })
         case 'getGenesisHash':
             return c.getGenesisHash()
+        case 'getMinimumBalanceForRentExemption':
+            return c.getMinimumBalanceForRentExemption(a.data_len!, { commitment })
         case 'sendTransaction':
             return c.sendTransaction(hex.decode(a.tx_hex!), {
                 skipPreflight: a.skip_preflight,
