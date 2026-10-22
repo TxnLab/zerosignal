@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/TxnLab/zerosignal/go/settle"
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
@@ -65,6 +66,16 @@ type deadlineCase struct {
 	Deadline  string `json:"deadline"`
 }
 
+// viewCase is a ticket's status and deadline fields and the rail-neutral view
+// they map to: view_status is a settle.Status, view_deadline unix seconds.
+type viewCase struct {
+	Status       uint8  `json:"status"`
+	ExpiresAt    string `json:"expires_at"`
+	Grace        uint32 `json:"grace"`
+	ViewStatus   uint8  `json:"view_status"`
+	ViewDeadline string `json:"view_deadline"`
+}
+
 type buildMeta struct {
 	Pubkey     string `json:"pubkey"`
 	IsSigner   bool   `json:"is_signer"`
@@ -91,6 +102,7 @@ type zsVectors struct {
 	EventsAccepted    []dataCase             `json:"events_accepted"`
 	EventInstructions []eventInstructionCase `json:"event_instructions"`
 	Deadlines         []deadlineCase         `json:"deadlines"`
+	Views             []viewCase             `json:"views"`
 	Builds            []buildCase            `json:"builds"`
 	SetConfigRefused  []map[string]string    `json:"set_config_refused"`
 }
@@ -202,6 +214,7 @@ func buildZsVectors(t *testing.T) zsVectors {
 			"accounts_accepted / events_accepted: data it must read as decoded (the fixtures' shape). " +
 			"event_instructions: whether an inner instruction is the program's event self-invocation. " +
 			"deadlines: a ticket's expires_at and grace and the deadline they give. " +
+			"views: a ticket's status, expires_at and grace and the rail-neutral view they map to (view_status is go/settle's Status). " +
 			"builds: a settle builder's instruction for an ending. set_config_refused: treasuries set_config must refuse.",
 		ProgramID: f.program.String(),
 		Mint:      f.mint.String(),
@@ -370,6 +383,28 @@ func buildZsVectors(t *testing.T) zsVectors {
 		v.Deadlines = append(v.Deadlines, deadlineCase{strconv.FormatInt(c.expiresAt, 10), c.grace, strconv.FormatInt(tk.Deadline(), 10)})
 	}
 
+	for _, c := range []struct {
+		status    zsescrow.TicketStatus
+		expiresAt int64
+		grace     uint32
+	}{
+		{zsescrow.TicketOpen, 1790000300, 120},
+		{zsescrow.TicketPendingByOperator, 1790000300, 120},
+		{zsescrow.TicketFrozen, 1790000300, 120},
+		{zsescrow.TicketPendingByPayer, 1790000300, 120},
+		{4, 1790000300, 120},
+		{0xff, 1790000300, 120},
+		{zsescrow.TicketOpen, -5, 10},
+		{zsescrow.TicketOpen, -600, 10},
+		{zsescrow.TicketOpen, -10, 10},
+		{zsescrow.TicketOpen, -11, 10},
+		{zsescrow.TicketPendingByOperator, 1<<63 - 1, 1<<32 - 1},
+	} {
+		tk := zsescrow.Ticket{Status: c.status, ExpiresAt: c.expiresAt, Grace: c.grace}
+		view := tk.View()
+		v.Views = append(v.Views, viewCase{uint8(c.status), strconv.FormatInt(c.expiresAt, 10), c.grace, uint8(view.Status), strconv.FormatUint(view.Deadline, 10)})
+	}
+
 	e := settleEnding(t, d, f)
 	for _, c := range []struct {
 		name, builder, about string
@@ -480,6 +515,23 @@ func TestZsEscrowVectorsMeanWhatTheySay(t *testing.T) {
 		}
 		if c.Deadline != want {
 			t.Errorf("%s + %d: %s, want %s", c.ExpiresAt, c.Grace, c.Deadline, want)
+		}
+	}
+	// The status names the program's TicketStatus gives, against go/settle's.
+	wantStatus := map[uint8]settle.Status{0: settle.StatusOpen, 1: settle.StatusPendingOperator, 2: settle.StatusFrozen, 3: settle.StatusPendingPayer}
+	for _, c := range v.Views {
+		if got := settle.Status(c.ViewStatus); got != wantStatus[c.Status] {
+			t.Errorf("status %d: view status %d, want %d", c.Status, got, wantStatus[c.Status])
+		}
+		exp, _ := strconv.ParseInt(c.ExpiresAt, 10, 64)
+		want := "0"
+		if d := exp + int64(c.Grace); exp > 1<<63-1-int64(c.Grace) {
+			want = strconv.FormatInt(1<<63-1, 10)
+		} else if d > 0 {
+			want = strconv.FormatInt(d, 10)
+		}
+		if c.ViewDeadline != want {
+			t.Errorf("status %d, %s + %d: view deadline %s, want %s", c.Status, c.ExpiresAt, c.Grace, c.ViewDeadline, want)
 		}
 	}
 	for _, c := range v.AccountsAccepted {

@@ -31,6 +31,23 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the claim verdict on a Solana ticket (unreleased)
+
+The Solana ticket account now maps onto the rail-neutral settlement view, and the payer can
+judge an operator's claim on it against its own receipt. Nothing calls either yet; the
+Solana ack is next.
+
+- **`zsescrow.(*Ticket).View` / `zsescrow.Classify`** ↔ `ticketView` / `classify`
+  (`@txnlab/zs-proto/solana/zsescrow`), the Solana twins of the `escrow` package's. A status
+  the decoder doesn't know reads as unrecognized, and a deadline before the epoch as the
+  epoch. `ticketDeadline` now takes just `expiresAt` and `grace`.
+- **`judgeSolanaClaim`** (Go, unexported) ↔ `judgeSolanaClaim` (`sdk/src/reconcile.ts`,
+  exported beside `judgeClaim`, with the `SolanaTicketView` type of the account fields it
+  reads) gives the same verdicts as `judgeClaim`. The account keeps the first half's hash
+  rather than its fields, so a claim agrees when the receipt's fields hash to it, and the
+  pending amount alone decides an over-claim. TS args that can't be hashed (a digest that
+  isn't 32 bytes, a count past u64) contradict the claim, as `judgeClaim` finds of them.
+
 ### 2026-10-22 — the Solana wallet's open (unreleased)
 
 Both SDKs can open a ticket on Solana: `zs.SolanaWallet` ↔ `SolanaWallet`

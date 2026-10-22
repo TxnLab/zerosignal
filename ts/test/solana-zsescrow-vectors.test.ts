@@ -56,6 +56,7 @@ import {
     settleOutcomeName,
     ticketDeadline,
     ticketStatusName,
+    ticketView,
     tokenAccountStateName,
     verifyOpenOffer,
     verifyRelayedAck,
@@ -500,7 +501,8 @@ function ed25519Message(data: Uint8Array): { message: Uint8Array; signer: string
 // What the program never writes, pinned by the Go-generated
 // solana_zsescrow_vectors.json: data the decoders refuse or read a particular
 // way, instructions that only look like events, deadlines at their edges,
-// and settles built with each refund fallback.
+// the settlement view of each ticket status, and settles built with each
+// refund fallback.
 describe('solana_zsescrow_vectors.json', () => {
     const d = new Deployment(vectors.program_id, vectors.usdc_mint)
     for (const c of vectors.accounts_refused as Json[]) {
@@ -534,6 +536,16 @@ describe('solana_zsescrow_vectors.json', () => {
         for (const c of vectors.deadlines as Json[]) {
             const t = { expiresAt: BigInt(c.expires_at), grace: c.grace } as Parameters<typeof ticketDeadline>[0]
             expect(ticketDeadline(t).toString(), `${c.expires_at} + ${c.grace}`).toBe(c.deadline)
+        }
+    })
+    it('maps each ticket onto the settlement view', () => {
+        expect((vectors.views as Json[]).length).toBeGreaterThan(0)
+        for (const c of vectors.views as Json[]) {
+            const v = ticketView({ status: c.status, expiresAt: BigInt(c.expires_at), grace: c.grace })
+            expect({ status: v.status, deadline: v.deadline.toString() }, `status ${c.status}, ${c.expires_at} + ${c.grace}`).toEqual({
+                status: c.view_status,
+                deadline: c.view_deadline,
+            })
         }
     })
     for (const c of vectors.builds as Json[]) {
