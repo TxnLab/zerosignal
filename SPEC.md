@@ -290,6 +290,23 @@ So the operator, not the payer, pays the open-time ALGO fee ("Settlement asset m
 
 **Validity window.** The pre-signed open txn is valid from `firstValid = currentRound` to `lastValid = currentRound + 1000` (the Algorand maximum), fixed at reserve time. If the paying request lands after `lastValid`, the proxy treats it like any failed reserve and tries another operator.
 
+**The open and the ack on Solana.** The fields keep their names and carry the Solana rail's own values. Each value has exactly one spelling, and a reader refuses any other, so two parties never read one value two ways: base64 is standard and padded, with no whitespace and zero padding bits, and a decimal has no sign and no leading zero (`0` itself excepted). Reference: `solana/zsescrow` `wire.go` ↔ `wire.ts`, pinned by `solana_wire_vectors.json`.
+- `presigned_open_txn` is the node's open offer, in base64: a wire transaction, legacy or v0 with no address lookup table, whose fee payer and first signer is the node's signing key. The node has signed it, and the payer's slot is all zeros. Before signing, the payer checks the whole message against the ticket with `VerifyOpenOffer`: the instruction list, the derived vault, the amount, the signers. That check is the Solana form of the group check in § 9 "The payer runs the mirror-image check before signing".
+- The payer always hands the open over (§ 4), and uses only the rail-neutral names, since every node on Solana advertises ≥ 9.13. `payment_open` is the offer with the payer's signature in its slot, in base64. `payment_ref` is the transaction's first signature, the node's, in base58, which is its id on the cluster. The payer's signature covers the message, not the node's signature, so a node that signs the same message again lands it under another id: the payer tracks the open by its ticket, never by this id. The payer refuses to hand over an open whose signatures don't all verify, and the node refuses a `payment_open` whose first signature is not `payment_ref`, or any of whose signatures fails to verify.
+- The settle-group slot, `X-Zs-Settle-Group` or the `zs-settle-group` frame, sealed as on Algorand (§ 5), carries the opened ticket's `open_seq` in decimal, at most 2^64−1. The program gives each open the node's next sequence number and stores it on the ticket. A closed ticket's address can be opened again with the same id, and the sequence number is what tells the two opens apart.
+- The settle ack's `payment_settle` (§ 3a "Settle ack") is the payer's Ed25519 signature over the ack digest, in base64:
+
+  ```
+  ack_digest = sha256("zs-settle-ack-v3\x00" ‖ genesis_hash[32] ‖ program_id[32] ‖ ticket_pda[32] ‖ u64le(open_seq) ‖ claim_hash[32])
+  claim_hash = sha256("zs-claim-v3\x00" ‖ u64le(amount_charged) ‖ receipt_digest[32] ‖ u64le(ttft_ms) ‖ u64le(decode_ms)
+                      ‖ u64le(actual_input_count) ‖ u64le(actual_output_count) ‖ u8(output_usage_type)
+                      ‖ u8(aux_output_usage_type) ‖ u64le(aux_output_count))
+  ```
+
+  `genesis_hash` is the cluster's, equal to the program's `Config.genesis_hash`. `ticket_pda` is the address seeded `["t", node_pda, ticket_id]`, and `receipt_digest` is `sha256` of the receipt's canonical bytes. The claim is always the payer's verified receipt, for the ticket the payer opened (`ReceiptAckDigest`), never a claim the node proposes. The node puts the signature in an Ed25519 precompile instruction before its `settle_cooperative` and submits one transaction, paying its fee.
+
+The payer takes `open_seq` from the node rather than reading the ticket from the chain on every turn. A false value can only hurt the node: the digest then matches no ticket, and the node's settle fails at its own expense. That holds only while no other ticket of the payer has the same address, so the payer refuses an open offer whose ticket id it has already opened at that node, and signs an ack only behind that refusal. The node chooses the ticket id, so without it a node could send a false `open_seq`, let that ticket end another way, reopen the same id at the sequence number it named, and settle the new ticket with the old ack.
+
 **Ticket signature.** `ticket.sig` is raw Ed25519 over `sha256(CanonicalBytes())`, used for audit and SDK verification; no on-chain method consumes it. The off-chain verifier resolves the signing key from the destination's `(operator_id, node_id)` node box.
 
 `CanonicalBytes()` places `node_id` (`u64`) right after `operator_id`, then appends `input_usage_type` and `output_usage_type` (one byte each, "Usage types"), then `cache_read_rate` (`u64`) at the tail. `UsageReceipt` canonical bytes end with the matching `cached_input_count` `u64`. The ticket and receipt signing tags carry a literal `v2`: `zs-ticket-v2\x00` and `zs-receipt-v2\x00`. Their deployment-bound layouts are `v3` ("Deployment binding").
@@ -905,7 +922,7 @@ The escrow app enforces a co-signed settlement protocol. Finalization requires e
 
 #### Atomic settle group (typical happy path)
 
-The node delivers an operator-pre-signed atomic settle group in the response envelope: the `X-Zs-Settle-Group` header on non-streaming responses, or an `event: zs-settle-group` SSE frame on streams (§ 5). Group shape:
+The node delivers an operator-pre-signed atomic settle group in the response envelope: the `X-Zs-Settle-Group` header on non-streaming responses, or an `event: zs-settle-group` SSE frame on streams (§ 5). On Solana the same slot carries the ticket's `open_seq` instead (§ 3a "The open and the ack on Solana"). Group shape:
 
 | gtxn | sender | fee | role |
 |---|---|---|---|
@@ -963,7 +980,7 @@ Since 9.12 the payer does not broadcast the completed settle group. It sends the
 {"ticket_id": "<the ticket's id>", "settle_group": "<base64 msgpack of [gtxn0, gtxn1]>"}
 ```
 
-A node advertising ≥ 9.13 also reads `settle_group` as `payment_settle`, and a payer uses that name only with such a node (`wire.UsesRailNeutralNames`). An ack carrying both names with different values is refused with `400 bad_settle_ack`.
+A node advertising ≥ 9.13 also reads `settle_group` as `payment_settle`, and a payer uses that name only with such a node (`wire.UsesRailNeutralNames`). An ack carrying both names with different values is refused with `400 bad_settle_ack`. On Solana `payment_settle` carries the payer's signature over the ack digest rather than a group (§ 3a "The open and the ack on Solana"), and the node submits it in its own transaction.
 
 `settle_group` is in the same form as `X-Zs-Settle-Group`, with gtxn[1] now signed by the payer. The ack is sealed because the group names the payer, and the ack usually travels through a relay. A relayed ack goes through a relay advertising ≥ 9.12, since an older relay's allow-list refuses the path (§ 3f "What goes through the relay"). When privacy mode finds no such relay, the payer broadcasts the group itself rather than sending the ack directly from its own IP.
 
@@ -2984,7 +3001,7 @@ The envelope carries **nothing but ciphertext**. Everything the node needs rides
 
 **`algorand_tx_id`.** The group is two transactions: the payer's usdcPayment (gtxn[0]) and the node-signed AppCall (gtxn[1]). The node pre-signs gtxn[1] and delivers it at reserve time as `presigned_open_txn` (§ 3a); the proxy signs gtxn[0] against it and either hands the group over as `open_group` or submits it itself. The proxy puts gtxn[1]'s app-call txid in this field. With `open_group` the node checks the handed-over gtxn[1] against it; without, the node looks the txid up directly via algod's `PendingTransactionInformation`. The group id is NOT a valid lookup key, so the app-call txid is used; the proxy keeps the group id for audit only.
 
-**Rail-neutral names.** A node advertising `proto_version` ≥ 9.13 also reads `algorand_tx_id` as `payment_ref` and `open_group` as `payment_open`. The payer uses the neutral names only with such a node (`wire.UsesRailNeutralNames`); an older node would find no tx id. A node accepts a value under either name, and MUST refuse a header that carries both names with different values, so the header has one reading: the admission tag, the payment check and anything else that reads it all see the same value. Only the key changes: the admission tag and every AAD hash the value. The legacy names are dropped in the major that refuses the legacy signing layouts (§ 3a "Deployment binding").
+**Rail-neutral names.** A node advertising `proto_version` ≥ 9.13 also reads `algorand_tx_id` as `payment_ref` and `open_group` as `payment_open`. The payer uses the neutral names only with such a node (`wire.UsesRailNeutralNames`); an older node would find no tx id. A node accepts a value under either name, and MUST refuse a header that carries both names with different values, so the header has one reading: the admission tag, the payment check and anything else that reads it all see the same value. Only the key changes: the admission tag and every AAD hash the value. The legacy names are dropped in the major that refuses the legacy signing layouts (§ 3a "Deployment binding"). On Solana the payer sends only the neutral names, with the rail's own values (§ 3a "The open and the ack on Solana").
 
 **`admission_tag`.** The node verifies it before `Consume`, so a forged tag does not burn the ticket (§ 3a "Sealed request envelope").
 

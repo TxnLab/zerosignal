@@ -7,7 +7,7 @@
 // proto/go/ticket/signing.go.
 //
 // BytesSigner produces a raw Ed25519 signature over msg under the key
-// identified by an Algorand address. Implementations MUST sign msg
+// identified by an address, Algorand's or Solana's base58. Implementations MUST sign msg
 // verbatim — no domain prefix, no hashing — because signTicket /
 // signReceipt hand the signer a precomputed sha256 digest of a
 // domain-tagged canonical body.
