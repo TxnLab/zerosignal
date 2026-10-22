@@ -31,6 +31,31 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the Solana open and ack on the wire (unreleased)
+
+SPEC § 3a "The open and the ack on Solana" defines what the rail-neutral fields carry on
+Solana, and `solana/zsescrow` (`wire.go` ↔ `wire.ts`) writes and reads each value. Nothing
+calls them yet: the Solana wallet and the node are still to come.
+
+- `presigned_open_txn` is the node's offer as a base64 wire transaction (`DecodeOpenOffer` ↔
+  `decodeOpenOffer`). `payment_open` is the payer-signed offer in base64, and `payment_ref` its
+  first signature, the node's, in base58 (`EncodeOpenPayment` / `DecodeOpenPayment` ↔
+  `encodeOpenPayment` / `decodeOpenPayment`). The node's reading refuses a `payment_ref` that is
+  not the first signature, and a transaction whose signatures don't all verify.
+- The settle-group slot carries the ticket's `open_seq` in decimal (`FormatOpenSeq` /
+  `ParseOpenSeq` ↔ `formatOpenSeq` / `parseOpenSeq`).
+- `payment_settle` is the payer's signature over `ReceiptAckDigest`, in base64
+  (`SignReceiptAck` / `DecodeAckSignature` ↔ `signReceiptAck` / `decodeAckSignature`).
+  `SignReceiptAck` refuses a signature that doesn't verify as the payer before it reaches the
+  node. It signs whatever `open_seq` it is handed, the node's: a caller must first refuse any
+  open offer whose ticket id the payer has already opened at that node (SPEC), which neither
+  SDK does yet.
+- `EncodeOpenPayment` refuses a completed open whose signatures don't all verify, the node's
+  included, which `CompleteOpenOffer` does not check.
+- Each value has one spelling, and the readers refuse any other: standard padded base64 with
+  no whitespace and zero padding bits, and a decimal with no sign or leading zero (`0`
+  excepted). Pinned by the new `solana_wire_vectors.json`.
+
 ### 2026-10-22 — funding the Solana rent pool (0.9.2)
 
 Both SDKs can top up a payer's Solana rent pool, the program's form of Algorand's prepaid MBR
