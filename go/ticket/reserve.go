@@ -125,6 +125,13 @@ type ReserveRequest struct {
 	// confirms the target; a node that predates the field ignores it, and a
 	// payer that predates it gets v2 tickets.
 	Deployment DeploymentID `json:"deployment,omitzero"`
+	// TicketID is the ticket id the payer asks the node to issue, in
+	// Ticket.TicketID's canonical spelling. A Solana payer sends a fresh
+	// random one on every reserve and refuses a ticket naming any other, so it
+	// never signs two opens with one id at a node (SPEC.md § 3a "The open and
+	// the ack on Solana"). An Algorand payer sends none and the node chooses.
+	// Unsigned: the payer's own check of the ticket is the guard.
+	TicketID string `json:"ticket_id,omitempty"`
 }
 
 // reserveSigningTag domain-separates the reserve-request payer signature from

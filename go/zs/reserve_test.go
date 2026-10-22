@@ -156,6 +156,10 @@ func (h *reserveTestHarness) issueValidTicket(t *testing.T, req ticket.ReserveRe
 		Stream:         req.Stream,
 		CommitK:        base64.StdEncoding.EncodeToString(commit[:]),
 	}
+	// A node issues the id a Solana payer asks for.
+	if req.TicketID != "" {
+		tkt.TicketID = req.TicketID
+	}
 	if err := tkt.Sign(context.Background(), rawKeyBytesSigner{addr: h.signAddr, priv: h.signKey}, h.signAddr); err != nil {
 		t.Fatal(err)
 	}

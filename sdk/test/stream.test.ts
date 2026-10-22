@@ -1278,6 +1278,22 @@ describe('frameFactory', () => {
         expect(s.logger.logged.map((l) => l.msg)).toContain('settle-group header malformed; falling back to standalone ack')
     })
 
+    // On Solana the slot is the ticket's open_seq, and an Algorand group is
+    // malformed there.
+    it.each([
+        ['an open_seq', '7', '7'],
+        ['an open_seq in another spelling', '07', null],
+        ['an Algorand group', VALID_GROUP, null],
+    ] as const)('on Solana, hands %s to the ack as the slot reads', async (_, slot, want) => {
+        const s = await setup()
+        s.deps.rail = 'solana'
+        const fn = await transform(s)
+        for (const pt of s.frames) await fn(zs(s, pt))
+        await fn(groupFrame(s, slot))
+        await fn(receiptFrame(s))
+        expect(s.handle.acks[0]![1]).toBe(want)
+    })
+
     it('protests a hash mismatch inline with the frames as the excerpt, and releases the spend', async () => {
         // The excerpt spans both frames and stops at the cap.
         const big = 'x'.repeat(DISPUTE_EXCERPT_CAP - 3)

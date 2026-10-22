@@ -9,6 +9,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { base64 } from '@scure/base'
 import { algorandDeploymentId, encodeDeploymentId } from '@txnlab/zs-proto/ticket'
 import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 
@@ -51,6 +52,17 @@ vi.mock('../src/escrow/algod.js', async (importOriginal) => {
         }
     }
     return { ...real, AlgodEscrowChain: StandInChain, suggestedParams: () => h.params() }
+})
+
+// Only Algorand resolves until a Solana host is wired, so a Solana network
+// stands on Algorand's here: enough for Client.create to build for its rail.
+vi.mock('../src/network.js', async (importOriginal) => {
+    const m = await importOriginal<typeof import('../src/network.js')>()
+    return {
+        ...m,
+        resolveNetwork: (n: Parameters<typeof m.resolveNetwork>[0]) =>
+            n?.rail === 'solana' ? { ...m.resolveNetwork({ ...n, rail: 'algorand' }), rail: 'solana' as const } : m.resolveNetwork(n),
+    }
 })
 
 const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, testnet } = await import('../src/index.js')
@@ -149,6 +161,18 @@ describe('Client.create building the wallet', () => {
         ).rejects.toThrow('captured')
         const want = encodeDeploymentId(algorandDeploymentId(GENESIS, resolveNetwork(testnet()).escrowAppId))
         expect(h.reserveCalls[0]!.request.deployment).toBe(want)
+        c.close()
+    })
+
+    // A reserve client built without the rail would let a Solana payer's node
+    // choose its ticket ids.
+    it('hands the rail to the reserve client it builds', async () => {
+        const c = await Client.create({ ...base, network: { ...testnet(), rail: 'solana' } })
+        const op = testOperator({ ephemeralRecipient: 'age1live', ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600 })
+        await expect(
+            partsOf.get(c)!.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
+        ).rejects.toThrow('captured')
+        expect(base64.decode(h.reserveCalls[0]!.request.ticket_id ?? '')).toHaveLength(16)
         c.close()
     })
 })

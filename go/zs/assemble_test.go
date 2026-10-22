@@ -185,6 +185,9 @@ func TestNewReserveClient_MapsConfig(t *testing.T) {
 	if rc.Deployment != dep {
 		t.Error("deployment dropped: reserves would never ask for bound tickets")
 	}
+	if rc := newReserveClient(Config{Network: Network{Rail: ticket.RailSolana}}, dep); rc.Rail != ticket.RailSolana {
+		t.Error("rail dropped: a Solana payer would let the node choose its ticket ids")
+	}
 	if rc.HTTPClient == nil || rc.HTTPClient.Timeout != 3*time.Second {
 		t.Errorf("reserve client %+v, want a 3s timeout", rc.HTTPClient)
 	}

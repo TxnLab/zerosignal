@@ -45,6 +45,8 @@ export interface ReserveTerms {
      */
     operatorId: number | bigint
     nodeId: number | bigint
+    /** The ticket id the payer asked for, when it chose one. */
+    ticketId?: string | undefined
 }
 
 /** ReserveResponseError is a 200 reserve response the payer refuses to escrow against. */
@@ -69,7 +71,10 @@ export interface ReservedTicket {
     responseKey: Uint8Array
     /** ALGO/USD at reserve, for display; 0 when the node sent none. */
     algoUsdPrice: number
-    /** base64 msgpack of the presigned open group; '' when the node sent none. */
+    /**
+     * The node's presigned open: on Algorand base64 msgpack of the open group,
+     * on Solana base64 of the offer transaction. '' when the node sent none.
+     */
     presignedOpenTxn: string
 }
 
@@ -181,6 +186,9 @@ export function checkTicketTerms(t: Ticket, terms: ReserveTerms, nowMs: number, 
         )
     }
     if (!t.ticket_id) throw new ReserveResponseError('ticket_id is empty')
+    if (terms.ticketId && t.ticket_id !== terms.ticketId) {
+        throw new ReserveResponseError(`ticket_id ${JSON.stringify(t.ticket_id)} is not the requested ${JSON.stringify(terms.ticketId)}`)
+    }
     if (!t.commit_k) throw new ReserveResponseError('commit_k is empty')
     // The node bumps max_price up to min_price for a tiny paid request, so a
     // ticket that breaks this would underfund escrow or marks a misbehaving
@@ -522,6 +530,7 @@ export async function reserve(call: ReserveCall): Promise<Reservation> {
             stream: request.stream,
             operatorId: target.operatorId,
             nodeId: target.nodeId,
+            ticketId: request.ticket_id,
         },
         {
             nowMs: clock(),

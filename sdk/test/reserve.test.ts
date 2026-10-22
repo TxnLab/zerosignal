@@ -235,6 +235,17 @@ describe('checkTicketTerms', () => {
         expect(ok(ticket(over))).toThrow(msg)
     })
 
+    // A Solana payer opens only the id it asked for; with none asked, the
+    // node's choice stands.
+    it('holds the ticket to the id the payer asked for', () => {
+        expect(ok(ticket(), { ...terms, ticketId: 'dGlja2V0LWlkLTE2Ynl0ZQ==' })).not.toThrow()
+        expect(ok(ticket(), { ...terms, ticketId: 'AAAAAAAAAAAAAAAAAAAAAA==' })).toThrow(ReserveResponseError)
+        expect(ok(ticket(), { ...terms, ticketId: 'AAAAAAAAAAAAAAAAAAAAAA==' })).toThrow(/is not the requested/)
+        expect(ok(ticket(), { ...terms, ticketId: undefined })).not.toThrow()
+        // Go's empty string is no id asked for.
+        expect(ok(ticket(), { ...terms, ticketId: '' })).not.toThrow()
+    })
+
     it('accepts min_price equal to max_price', () => {
         expect(ok(ticket({ min_price: 3000 }))).not.toThrow()
     })

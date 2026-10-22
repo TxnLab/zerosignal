@@ -3892,7 +3892,7 @@ func checkSettleGroupHeader(s *Client, headerVal string, op Operator, tkt *ticke
 	if headerVal == "" {
 		return ""
 	}
-	if _, err := escrow.DecodeSettleGroup(headerVal); err != nil {
+	if err := checkSettleSlot(s.deployment.Rail, headerVal); err != nil {
 		s.log.Warn("settle-group header malformed; falling back to standalone ack",
 			opAttr(op),
 			relayAttr(hop),

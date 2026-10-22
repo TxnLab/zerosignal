@@ -31,6 +31,25 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the Solana payer chooses the ticket id (unreleased)
+
+SPEC § 3a "The open and the ack on Solana" closes the precondition the entry below left open:
+the payer must never sign two opens with one ticket id at a node. On Solana the payer now
+chooses the id.
+
+- The reserve request gains `ticket_id` (`ReserveRequest.TicketID` ↔ `ReserveRequest.ticket_id`),
+  unsigned, inside the sealed body. A Solana payer's reserve client sends a fresh random 16-byte
+  id on every reserve and refuses a ticket naming any other id (`validateTicketShape` ↔
+  `checkTicketTerms`). An Algorand payer sends none, and clears one a caller set. A Solana node
+  issues exactly that id, or refuses the reserve with `409 ticket_id_taken`; no Solana node
+  exists yet.
+- The reserve's `presigned_open_txn` and the settle slot are checked by rail (`go/zs/rail.go` ↔
+  `sdk/src/rail.ts`). On Algorand they still decode as the open and settle groups. On Solana the
+  offer must decode as a transaction, and the slot as an `open_seq`; anything else fails the
+  reserve, or sends the ack standalone, as a malformed group does on Algorand. The rail comes
+  from `HTTPReserveClient.Rail` ↔ `HttpReserveClientOptions.rail` and the client's deployment,
+  and only Algorand is reachable until the Solana rail can be configured.
+
 ### 2026-10-22 — the Solana open and ack on the wire (unreleased)
 
 SPEC § 3a "The open and the ack on Solana" defines what the rail-neutral fields carry on

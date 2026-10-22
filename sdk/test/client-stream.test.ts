@@ -64,6 +64,16 @@ vi.mock('../src/parts.js', async (importOriginal) => {
         },
     }
 })
+// Only Algorand resolves until a Solana host is wired, so a Solana network
+// stands on Algorand's here: enough for a turn to run on its rail.
+vi.mock('../src/network.js', async (importOriginal) => {
+    const m = await importOriginal<typeof import('../src/network.js')>()
+    return {
+        ...m,
+        resolveNetwork: (n: Parameters<typeof m.resolveNetwork>[0]) =>
+            n?.rail === 'solana' ? { ...m.resolveNetwork({ ...n, rail: 'algorand' }), rail: 'solana' as const } : m.resolveNetwork(n),
+    }
+})
 vi.mock('#default-fetch', () => ({
     defaultFetch: (): Fetch => (url, init) => defaultFetchHook.fetch!(url, init),
 }))
@@ -98,6 +108,8 @@ interface HarnessOptions {
     stream?: boolean
     outcomes?: (SettleOutcome | Error)[]
     group?: boolean
+    /** What a streamed settle-group frame carries, VALID_GROUP by default. */
+    slot?: string
     groupRejected?: boolean
     journal?: TicketJournal
     /** A whole reply's plaintext, ANSWER by default. */
@@ -227,7 +239,7 @@ async function harness(o: HarnessOptions = {}) {
             }
             let sse = ''
             for (const pt of frames) sse += `event: zs\ndata: ${s.sealStreamFrame(pt)}\n\n`
-            if (o.group) sse += `event: zs-settle-group\ndata: ${s.sealHeader(SEALED_HEADER_SETTLE_GROUP, enc.encode(VALID_GROUP))}\n\n`
+            if (o.group) sse += `event: zs-settle-group\ndata: ${s.sealHeader(SEALED_HEADER_SETTLE_GROUP, enc.encode(o.slot ?? VALID_GROUP))}\n\n`
             sse += `event: zs-receipt\ndata: ${s.sealStreamFrame(enc.encode(JSON.stringify(f.receipt)))}\n\n`
             sse += 'data: [DONE]\n\n'
             return new Response(sse, { headers: { 'Content-Type': 'text/event-stream', [RESPONSE_KEY_HEADER]: s.wrappedKeyHeader() } })
@@ -368,6 +380,18 @@ describe('Client.stream', () => {
         expect(h.handle.looks).toEqual(['ACK'])
         expect(h.writes).toEqual(['put open', 'put settle_pending', 'delete'])
         expect(await h.journal.list('PAYER', h.deployment)).toEqual([])
+        await h.c.close()
+    })
+
+    // A Client that left its rail out of the turn would read the open_seq as
+    // a malformed Algorand group and send the ack standalone.
+    it("reads the settle slot by the Client's rail", async () => {
+        const h = await harness({ stream: true, group: true, slot: '7', outcomes: ['landed'], config: { network: { ...testnet(), rail: 'solana' } } })
+        const st = h.c.stream({ endpoint: CHAT, body: h.body })
+        expect(await st.text()).toBe('hi')
+        await st.wait()
+        expect(h.handle.acks.map((a) => a[1])).toEqual(['7'])
+        await h.c.waitSettles()
         await h.c.close()
     })
 

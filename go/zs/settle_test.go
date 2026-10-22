@@ -556,13 +556,30 @@ func TestSettleOutcomeOf(t *testing.T) {
 // atomic branch, which surfaces the error and sends no ack at all.
 func TestCheckSettleGroupHeader(t *testing.T) {
 	f := newSettleFixture(t)
-	for _, tc := range []struct{ name, header, want string }{
-		{"absent", "", ""},
-		{"malformed", "AAAA", ""},
-		{"not base64", "not-base64!", ""},
-		{"decodes", testSettleGroup, testSettleGroup},
+	for _, tc := range []struct {
+		name         string
+		rail         ticket.Rail
+		header, want string
+	}{
+		{"absent", 0, "", ""},
+		{"malformed", 0, "AAAA", ""},
+		{"not base64", 0, "not-base64!", ""},
+		{"decodes", 0, testSettleGroup, testSettleGroup},
+		{"decodes, rail named", ticket.RailAlgorand, testSettleGroup, testSettleGroup},
+		{"an open_seq on Algorand", ticket.RailAlgorand, "7", ""},
+		// On Solana the slot is the ticket's open_seq, in its one spelling.
+		{"open_seq", ticket.RailSolana, "7", "7"},
+		{"open_seq zero", ticket.RailSolana, "0", "0"},
+		{"open_seq max", ticket.RailSolana, "18446744073709551615", "18446744073709551615"},
+		{"open_seq past u64", ticket.RailSolana, "18446744073709551616", ""},
+		{"open_seq leading zero", ticket.RailSolana, "07", ""},
+		{"open_seq signed", ticket.RailSolana, "+7", ""},
+		{"an Algorand group on Solana", ticket.RailSolana, testSettleGroup, ""},
+		{"absent on Solana", ticket.RailSolana, "", ""},
 	} {
-		if got := checkSettleGroupHeader(settleClient(), tc.header, f.op, f.tkt, nil); got != tc.want {
+		c := settleClient()
+		c.deployment.Rail = tc.rail
+		if got := checkSettleGroupHeader(c, tc.header, f.op, f.tkt, nil); got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}
 	}
