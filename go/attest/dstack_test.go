@@ -528,6 +528,33 @@ func TestRuntimeMeasurements_FirstWins(t *testing.T) {
 	}
 }
 
+// The absent row is the 0.5.x line and must pass; every other row but the
+// exact byte "1" must refuse with the sentinel the verifiers branch on.
+func TestVerifyStorageEncrypted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		m    map[string]string
+		ok   bool
+	}{
+		{"absent", map[string]string{EventOSImageHash: "aa"}, true},
+		{"encrypted", map[string]string{EventStorageEncrypted: "31"}, true},
+		{"unencrypted", map[string]string{EventStorageEncrypted: "30"}, false},
+		{"empty", map[string]string{EventStorageEncrypted: ""}, false},
+		{"ascii true", map[string]string{EventStorageEncrypted: "74727565"}, false},
+		{"not hex-decoded", map[string]string{EventStorageEncrypted: "1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := VerifyStorageEncrypted(tc.m)
+			if tc.ok && err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if !tc.ok && !errors.Is(err, ErrStorageUnencrypted) {
+				t.Fatalf("err = %v, want ErrStorageUnencrypted", err)
+			}
+		})
+	}
+}
+
 func keys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

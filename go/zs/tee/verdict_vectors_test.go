@@ -616,21 +616,51 @@ func (fx *verdictFixture) measuredRelease(doc string) (quote []byte, eventLog, c
 	sum := sha256.Sum256([]byte(doc))
 	composeHash = hex.EncodeToString(sum[:])
 
+	quote, eventLog = fx.remeasured(func(events []map[string]json.RawMessage) []map[string]json.RawMessage {
+		rewritten := false
+		for _, e := range events {
+			var name string
+			if json.Unmarshal(e["event"], &name) == nil && name == attest.EventComposeHash {
+				e["event_payload"], _ = json.Marshal(composeHash)
+				rewritten = true
+			}
+		}
+		if !rewritten {
+			fx.t.Fatal("the capture has no compose-hash event to rewrite")
+		}
+		return events
+	})
+	return quote, eventLog, composeHash
+}
+
+// withStorageEvents is the capture's log with a storage-encrypted event
+// appended per payload, as dstack 0.6 emits it. The 0.5.9 capture carries
+// none, which is the absent case.
+func (fx *verdictFixture) withStorageEvents(payloads ...string) (quote []byte, eventLog string) {
+	return fx.remeasured(func(events []map[string]json.RawMessage) []map[string]json.RawMessage {
+		for _, p := range payloads {
+			payload, _ := json.Marshal(p)
+			events = append(events, map[string]json.RawMessage{
+				"imr":           json.RawMessage("3"),
+				"event_type":    json.RawMessage(strconv.FormatUint(uint64(attest.DstackRuntimeEventType), 10)),
+				"digest":        json.RawMessage(`""`),
+				"event":         json.RawMessage(`"` + attest.EventStorageEncrypted + `"`),
+				"event_payload": payload,
+			})
+		}
+		return events
+	})
+}
+
+// remeasured returns the capture's log edited by edit, and the bound quote
+// with the edited log's replay written into RTMR3, so a case reaches the
+// checks after the replay instead of stopping at it.
+func (fx *verdictFixture) remeasured(edit func([]map[string]json.RawMessage) []map[string]json.RawMessage) (quote []byte, eventLog string) {
 	var events []map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(fx.eventLog), &events); err != nil {
 		fx.t.Fatalf("parse event log: %v", err)
 	}
-	rewritten := false
-	for _, e := range events {
-		var name string
-		if json.Unmarshal(e["event"], &name) == nil && name == attest.EventComposeHash {
-			e["event_payload"], _ = json.Marshal(composeHash)
-			rewritten = true
-		}
-	}
-	if !rewritten {
-		fx.t.Fatal("the capture has no compose-hash event to rewrite")
-	}
+	events = edit(events)
 	logBytes, err := json.Marshal(events)
 	if err != nil {
 		fx.t.Fatal(err)
@@ -649,7 +679,7 @@ func (fx *verdictFixture) measuredRelease(doc string) (quote []byte, eventLog, c
 		fx.t.Fatal("the capture has no RTMR3")
 	}
 	copy(reg, rtmr3)
-	return quote, string(logBytes), composeHash
+	return quote, string(logBytes)
 }
 
 // cleanAppCompose is a document in the shape the deploy recipe publishes,
@@ -1042,6 +1072,31 @@ func (fx *verdictFixture) cases() []verdictCase {
 		c.Policy.TrustedOSImages = []string{}
 		c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
 	})
+
+	// dstack 0.6's storage-encrypted record. The capture is 0.5.9 and
+	// carries none, so every base case is the absent one. The refusals
+	// share their construction with the passes, so a pass proves the
+	// edited log replays and a refusal can only come from the record.
+	storage := func(name string, pass bool, payloads ...string) {
+		add(fx.base(name), func(c *verdictCase) {
+			q, log := fx.withStorageEvents(payloads...)
+			c.CPUReportQuote = fx.quoteNamed(name, q)
+			fx.eventLogs[name] = log
+			c.EventLog = name
+			if !pass {
+				c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+			}
+		})
+	}
+	storage("storage_encrypted_recorded", true, "31")
+	storage("storage_unencrypted", false, "30")
+	// A 0x prefix is trimmed, as for every measurement.
+	storage("storage_encrypted_hex_prefixed", true, "0x31")
+	// Only the byte dstack writes for "encrypted" counts.
+	storage("storage_encrypted_spelled_true", false, "74727565")
+	storage("storage_encrypted_empty_payload", false, "")
+	// The first record counts, so a later "1" cannot cover an unencrypted boot.
+	storage("storage_unencrypted_then_encrypted", false, "30", "31")
 
 	// The compose-hash guard: an empty pin is "no constraint" only under the
 	// release match.

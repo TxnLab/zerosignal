@@ -46,6 +46,9 @@ export const EVENT_OS_IMAGE_HASH = 'os-image-hash'
 export const EVENT_APP_ID = 'app-id'
 export const EVENT_INSTANCE_ID = 'instance-id'
 export const EVENT_KEY_PROVIDER = 'key-provider'
+// dstack 0.6's record of whether the data disk was opened under LUKS. See
+// verifyStorageEncrypted.
+export const EVENT_STORAGE_ENCRYPTED = 'storage-encrypted'
 
 // One entry of a dstack runtime event log.
 //
@@ -92,6 +95,11 @@ export type AttestErrorCode =
      * produces. Comparing against it would let an all-zero replay pass.
      */
     | 'zero_rtmr'
+    /**
+     * The replay records a data disk not opened under LUKS. Raised by
+     * verifyStorageEncrypted, not by the replay.
+     */
+    | 'storage_unencrypted'
     /**
      * The quote is too short to hold the register the log would be
      * compared against.
@@ -480,6 +488,27 @@ export function runtimeMeasurements(events: DstackEvent[]): Record<string, strin
         out[e.event] = (p.startsWith(HEX_PREFIX) ? p.slice(2) : p).toLowerCase()
     }
     return out
+}
+
+// The hex of the one byte "1" dstack-util extends when the data disk is
+// LUKS-encrypted.
+const STORAGE_ENCRYPTED_PAYLOAD = '31'
+
+/**
+ * verifyStorageEncrypted throws when the replayed storage-encrypted event
+ * records anything but "1". Mirrors Go's attest.VerifyStorageEncrypted,
+ * whose godoc carries why: the host picks encryption on a kernel command
+ * line no verifier pins, and an absent event is the 0.5.x line, which
+ * records nothing.
+ */
+export function verifyStorageEncrypted(measurements: Record<string, string>): void {
+    if (!Object.hasOwn(measurements, EVENT_STORAGE_ENCRYPTED)) return
+    const v = measurements[EVENT_STORAGE_ENCRYPTED]
+    if (v === STORAGE_ENCRYPTED_PAYLOAD) return
+    throw new AttestError(
+        'storage_unencrypted',
+        `attest: the replay records an unencrypted data disk (storage-encrypted payload ${JSON.stringify(v)})`,
+    )
 }
 
 /**

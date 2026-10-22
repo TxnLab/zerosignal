@@ -7,7 +7,8 @@
 // whose godoc carries the reasoning for each step; SPEC § 3e steps 5 to 7 are
 // authoritative. The ORDER is load-bearing and is Go's: platform from the quote
 // bytes, the vendor chain, the event-log replay, the measurement lists, the
-// compose document, both halves of report_data, then the posture.
+// storage-encrypted record, the compose document, both halves of report_data,
+// then the posture.
 
 import {
     ComposeError,
@@ -30,6 +31,7 @@ import {
     verifyAppCompose,
     verifyAux,
     verifyEventLog,
+    verifyStorageEncrypted,
 } from '@txnlab/zs-proto/attest'
 import {
     type TEECollateral,
@@ -265,6 +267,12 @@ export class DstackVerifier {
                 ...opAttrs,
                 os_image_hash: recovered[EVENT_OS_IMAGE_HASH] ?? '',
             })
+            return fail(FailureTag.MeasurementMismatch)
+        }
+        try {
+            verifyStorageEncrypted(recovered)
+        } catch (err) {
+            this.log.warn("attestation: the node's data disk is not encrypted", { ...opAttrs, err: String(err) })
             return fail(FailureTag.MeasurementMismatch)
         }
 
