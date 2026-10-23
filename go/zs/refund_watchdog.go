@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/settle"
 )
 
 // RefundWatchdog recovers escrowed USDC for tickets whose settlement never
@@ -39,7 +40,9 @@ import (
 // window, so a locally-computed deadline that ran early (the cached `grace`
 // global was rotated, or an open() carried a window our verification missed)
 // waits instead of burning retries on guaranteed "refund before deadline"
-// reverts. Otherwise refundInactive is attempted.
+// reverts. Otherwise refundInactive is attempted. On Solana the read is of the
+// ticket account, which the program closes as Algorand deletes the box, and
+// the calls are the program's refund_inactive and settle_lapsed.
 //
 // The pending-claim side decides which deadline path is legal, and the two are
 // disjoint (contract: refundInactive vs settleLapsed). A standalone
@@ -55,7 +58,9 @@ import (
 // State is in-memory only. A ticket outlives a restart through the journal
 // (Stores.Journal): the reconciler picks up any row the watchdog is not
 // watching. With the in-memory default journal, a restart leaves the escrowed
-// USDC to a manual refundInactive (the ticket id is in the logs).
+// USDC to a manual refundInactive (the ticket id is in the logs). No
+// reconciler sweeps a Solana wallet's rows yet, so a Solana ticket in flight
+// at a restart is left to a manual refund_inactive the same way.
 type RefundWatchdog struct {
 	log *slog.Logger
 
@@ -226,26 +231,60 @@ func probeState(res ticketProbe, err error) slog.Attr {
 	)
 }
 
-// ticketProbe is the fire-time snapshot of a tracked ticket's on-chain box.
+// ticketProbe is the fire-time snapshot of a tracked ticket on chain: the
+// Algorand box or the Solana ticket account.
 type ticketProbe struct {
-	// exists is false when the box is gone — settled or lapsed elsewhere.
+	// exists is false when the ticket is gone — settled or lapsed elsewhere.
 	exists bool
-	// verdict is which deadline call the contract allows on this box right now
-	// (escrow.Classify). VerdictArbitrate (frozen) and VerdictLapse (an
+	// verdict is which deadline call the contract allows on this ticket right
+	// now (settle.Classify). VerdictArbitrate (frozen) and VerdictLapse (an
 	// operator-side claim, which refundInactive asserts 'ticket not refundable'
 	// against) are both terminal for the refund path: neither state has an edge
 	// back to one refundInactive accepts, so no retry can make it legal.
 	// VerdictWait means the box's own deadline is still ahead — the re-arm
 	// below, not a reason to stop.
-	verdict escrow.Verdict
-	// deadline is the box's own refundInactive deadline
-	// D = expires_at + settlement_grace_seconds — the authoritative value,
-	// unlike the Track-time computation from the cached grace default.
+	verdict settle.Verdict
+	// deadline is the ticket's own refundInactive deadline D = expires_at +
+	// the grace it took at open — the authoritative value, unlike the
+	// Track-time computation from the cached grace default.
 	deadline time.Time
-	// pendingAmount is the amount on whichever side's claim the box carries.
+	// pendingAmount is the amount on whichever side's claim the ticket carries.
 	// driveLapse reads it only beside VerdictLapse, an operator claim: a
 	// payer claim's amount is the payer's own receipt.
 	pendingAmount uint64
+}
+
+// refundSource is how Track reads a handle's ticket on its rail: the grace an
+// open takes by default, and the ticket as the rail-neutral view with the
+// amount of its pending claim. A nil view is a ticket gone.
+type refundSource struct {
+	grace time.Duration
+	read  func(ctx context.Context, ticketIDRaw []byte) (*settle.Ticket, uint64, error)
+	// callTimeout, when set, bounds each refund or lapse in place of the
+	// watchdog's callTimeout, for a rail whose call waits for its outcome.
+	callTimeout time.Duration
+}
+
+// refundSource is the handle's, false for one no SDK wallet opened.
+func (h *OpenHandle) refundSource() (refundSource, bool) {
+	switch {
+	case h.solana != nil:
+		return h.solanaRefundSource(), true
+	case h.wallet != nil && h.wallet.chain != nil:
+		chain := h.wallet.chain
+		return refundSource{
+			grace: time.Duration(chain.Config().SettlementGraceDefault) * time.Second,
+			read: func(ctx context.Context, ticketIDRaw []byte) (*settle.Ticket, uint64, error) {
+				rec, err := chain.ReadTicketBox(ctx, ticketIDRaw)
+				if err != nil || rec == nil {
+					return nil, 0, err
+				}
+				v := rec.View()
+				return &v, rec.PendingAmount, nil
+			},
+		}, true
+	}
+	return refundSource{}, false
 }
 
 // Track arms a deferred refundInactive for the ticket behind h, firing at
@@ -253,39 +292,47 @@ type ticketProbe struct {
 // Nil-safe on every input so test fakes (detached handles) and wiring
 // without a watchdog are no-ops.
 func (rw *RefundWatchdog) Track(h *OpenHandle, expiresAt int64) {
-	if rw == nil || h == nil || h.wallet == nil || h.wallet.chain == nil {
+	if rw == nil || h == nil {
 		return
 	}
-	chain := h.wallet.chain
+	src, ok := h.refundSource()
+	if !ok {
+		return
+	}
 	ticketIDRaw, err := decodeTicketID(h.TicketID)
 	if err != nil {
 		rw.log.Warn("refund watchdog: undecodable ticket id; not tracking",
 			slog.String("ticket_id", h.TicketID), slog.Any("err", err))
 		return
 	}
-	grace := time.Duration(chain.Config().SettlementGraceDefault) * time.Second
-	deadline := time.Unix(expiresAt, 0).Add(grace + rw.margin)
+	deadline := time.Unix(expiresAt, 0).Add(src.grace + rw.margin)
 	probe := func(ctx context.Context) (ticketProbe, error) {
-		rec, err := chain.ReadTicketBox(ctx, ticketIDRaw)
+		v, pending, err := src.read(ctx, ticketIDRaw)
 		if err != nil {
 			return ticketProbe{}, err
 		}
-		if rec == nil {
+		if v == nil {
 			return ticketProbe{exists: false}, nil
 		}
 		return ticketProbe{
 			exists:        true,
-			verdict:       escrow.Classify(rec, time.Now()),
-			deadline:      rec.SettlementDeadline(),
-			pendingAmount: rec.PendingAmount,
+			verdict:       settle.Classify(*v, time.Now()),
+			deadline:      v.DeadlineTime(),
+			pendingAmount: pending,
 		}, nil
 	}
-	refund := func(ctx context.Context) (string, error) {
-		return h.RefundInactive(ctx)
+	budget := func(call func(context.Context) (string, error)) func(context.Context) (string, error) {
+		if src.callTimeout == 0 {
+			return call
+		}
+		return func(ctx context.Context) (string, error) {
+			ctx, stop := context.WithTimeout(context.WithoutCancel(ctx), src.callTimeout)
+			defer stop()
+			return call(ctx)
+		}
 	}
-	lapse := func(ctx context.Context) (string, error) {
-		return h.SettleLapsed(ctx)
-	}
+	refund := budget(h.RefundInactive)
+	lapse := budget(h.SettleLapsed)
 	rw.track(h.TicketID, deadline, probe, refund, lapse)
 }
 

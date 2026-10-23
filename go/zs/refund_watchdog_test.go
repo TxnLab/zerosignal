@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/algorand/go-algorand-sdk/v2/transaction"
+
 	"github.com/TxnLab/zerosignal/go/escrow"
 )
 
@@ -516,6 +518,84 @@ func TestRefundWatchdog_ProbeErrorStillRefunds(t *testing.T) {
 		noLapse(t),
 	)
 	waitFor(t, "refund despite probe error", func() bool { return refunds.Load() == 1 })
+}
+
+// graceChain is ackChain with the contract's grace global set.
+type graceChain struct {
+	*ackChain
+	grace uint64
+}
+
+func (c *graceChain) Config() EscrowChainConfig {
+	cfg := c.ackChain.Config()
+	cfg.SettlementGraceDefault = c.grace
+	return cfg
+}
+
+// Track first reads an Algorand box at expires_at plus the grace global and
+// the margin, not before.
+func TestRefundWatchdog_TrackWaitsOutTheGrace(t *testing.T) {
+	chain := &ackChain{box: &escrow.TicketRecord{Status: escrow.StatusOpen, ExpiresAt: uint64(time.Now().Add(-time.Minute).Unix())}}
+	h := ackHandle(t, chain, nil)
+	h.wallet.chain = &graceChain{ackChain: chain, grace: 3600}
+	rw := testWatchdog()
+	// Past expires_at by less than the grace.
+	rw.Track(h, time.Now().Unix()-60)
+	time.Sleep(50 * time.Millisecond)
+	if n := chain.reads.Load(); n != 0 || !rw.watching(h.TicketID) {
+		t.Fatalf("read the box %d times before expires_at plus the grace", n)
+	}
+	rw.Resolve(h.TicketID)
+}
+
+// refundChain is ackChain failing its first fail box reads, and counting
+// each refundInactive.
+type refundChain struct {
+	*ackChain
+	fail    atomic.Int32
+	refunds atomic.Int32
+}
+
+func (c *refundChain) ReadTicketBox(ctx context.Context, id []byte) (*escrow.TicketRecord, error) {
+	if c.fail.Add(-1) >= 0 {
+		c.reads.Add(1)
+		return nil, errors.New("algod down")
+	}
+	return c.ackChain.ReadTicketBox(ctx, id)
+}
+
+func (c *refundChain) ComposeRefundInactive(context.Context, escrow.RefundInactiveArgs, transaction.TransactionSigner, string) (escrow.CallResult, error) {
+	c.refunds.Add(1)
+	return escrow.CallResult{TxID: "REFUNDTX"}, nil
+}
+
+// Track's own read of an Algorand box: a failed read is not a box gone, so
+// the refund goes ahead; a box gone is read once and refunds nothing.
+func TestRefundWatchdog_TrackTellsAFailedReadFromABoxGone(t *testing.T) {
+	past := uint64(time.Now().Add(-time.Minute).Unix())
+	for _, c := range []struct {
+		name    string
+		box     *escrow.TicketRecord
+		fail    int32
+		refunds int32
+		reads   int32
+	}{
+		{"a failed read", &escrow.TicketRecord{Status: escrow.StatusOpen, ExpiresAt: past}, 1, 1, 1},
+		{"a box gone", nil, 0, 0, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := &refundChain{ackChain: &ackChain{box: c.box}}
+			chain.fail.Store(c.fail)
+			h := ackHandle(t, chain.ackChain, nil)
+			h.wallet.chain = chain
+			rw := testWatchdog()
+			rw.Track(h, int64(past))
+			waitFor(t, "the ticket's driver to finish", func() bool { return !rw.watching(h.TicketID) })
+			if chain.refunds.Load() != c.refunds || chain.reads.Load() != c.reads {
+				t.Fatalf("%d refunds after %d reads, want %d after %d", chain.refunds.Load(), chain.reads.Load(), c.refunds, c.reads)
+			}
+		})
+	}
 }
 
 // Track with a detached handle (test fakes / nil wallet) is a safe no-op,

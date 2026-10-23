@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/settle"
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
@@ -125,6 +127,35 @@ func (h *OpenHandle) solanaFreezeOverclaim(ctx context.Context, receipt *ticket.
 		return r.Sig, r.FeeLamports, claim, fmt.Errorf("wallet: freeze: %w", err)
 	}
 	return r.Sig, r.FeeLamports, claim, nil
+}
+
+// solanaEndingTimeout bounds the refund watchdog's refund_inactive or
+// settle_lapsed, which waits for its transaction to confirm. A blockhash
+// lives about 150 blocks, a minute or so, and the wait ends once the
+// confirmed height passes it, so this outlasts it: cut short, a refund that
+// landed late would read as a ticket gone and the watchdog would never report
+// it refunded, where Algorand's returns once algod accepts it.
+const solanaEndingTimeout = 3 * time.Minute
+
+// solanaRefundSource is how the refund watchdog reads a Solana handle's
+// ticket. The payer's open sends grace 0, so the ticket takes the Config's
+// default_grace, as it stood when the wallet read it; the ticket's own
+// deadline, which the watchdog re-arms to, is the one that counts.
+func (h *OpenHandle) solanaRefundSource() refundSource {
+	w := h.solana
+	opID, nodeID := h.Operator.ID, h.Operator.NodeID
+	return refundSource{
+		callTimeout: solanaEndingTimeout,
+		grace:       time.Duration(w.defaultGrace) * time.Second,
+		read: func(ctx context.Context, ticketIDRaw []byte) (*settle.Ticket, uint64, error) {
+			t, err := w.readTicket(ctx, opID, nodeID, [16]byte(ticketIDRaw))
+			if err != nil || t == nil {
+				return nil, 0, err
+			}
+			v := t.View()
+			return &v, t.Pending.Amount, nil
+		},
+	}
 }
 
 func solanaTicketID(what, ticketID string) ([16]byte, error) {

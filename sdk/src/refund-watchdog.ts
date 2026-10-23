@@ -6,7 +6,7 @@
 // Internal but for the RefundWatchdog type: the payer's recovery of escrow
 // whose settlement never arrived, mirroring proto/go/zs refund_watchdog.go.
 
-import { type TicketRecord, type Verdict, classify, settlementDeadline } from '@txnlab/zs-proto/escrow'
+import { type TicketView, type Verdict, classify } from '@txnlab/zs-proto/settle'
 
 import type { OpenHandle } from './parts.js'
 import type { NodeRef } from './types.js'
@@ -28,10 +28,15 @@ import { idle } from './sleep.js'
  * claim bars refundInactive, so it waits for the node's own settleLapsed and
  * posts one itself only if the node never does. A box whose own deadline is
  * still ahead re-arms to it: the box is authoritative, and the grace track
- * read can have been rotated since. Anything else gets refundInactive.
+ * read can have been rotated since. Anything else gets refundInactive. On
+ * Solana the read is of the ticket account, which the program closes as
+ * Algorand deletes the box, and the calls are the program's refund_inactive
+ * and settle_lapsed.
  *
  * State is in memory. A ticket outlives a restart through the journal, whose
- * sweep takes any row the watchdog isn't watching.
+ * sweep takes any row the watchdog isn't watching. No sweep reads a Solana
+ * wallet's rows yet, so a Solana ticket in flight at a restart is left to a
+ * manual refund_inactive.
  */
 export interface RefundWatchdog {
     /**
@@ -48,18 +53,24 @@ export interface RefundWatchdog {
 }
 
 /**
- * What track reads off a handle the SDK's Wallet opened, Go's
- * OpenHandle.wallet, which a caller's wallet leaves unset. The Wallet decoded
- * the ticket id at open, so track has no undecodable id to refuse.
+ * What track reads off a handle the SDK's Wallet or SolanaWallet opened, Go's
+ * refundSource, which a caller's wallet leaves unset. The wallet decoded the
+ * ticket id at open, so track has no undecodable id to refuse.
  */
 export interface RefundSource {
-    /** The contract's grace global as the wallet read it. */
+    /** The grace an open takes by default, as the wallet read it: the contract's grace global, the program's default_grace. */
     graceSeconds: bigint
-    /** The ticket's box, or null once it is gone. */
-    readTicketBox(signal: AbortSignal): Promise<TicketRecord | null>
+    /** The ticket as the rail-neutral view with the amount of its pending claim, or null once it is gone. */
+    readTicket(signal: AbortSignal): Promise<{ view: TicketView; pendingAmount: bigint } | null>
+    /**
+     * When set, bounds each refund or lapse in place of the watchdog's
+     * callTimeoutMs, for a rail whose call waits for its outcome. Go's
+     * refundSource.callTimeout.
+     */
+    callTimeoutMs?: number
 }
 
-/** Each handle the SDK's Wallet opened, set by the Wallet. */
+/** Each handle the SDK's wallets opened, set by the wallet. */
 export const refundSources = new WeakMap<OpenHandle, RefundSource>()
 
 /** The fire-time read of a tracked ticket's box. */
@@ -160,21 +171,25 @@ export class Watchdog implements RefundWatchdog {
         if (!h || src === undefined) return
         const deadlineMs = expiresAt * 1000 + Number(src.graceSeconds) * 1000 + this.marginMs
         const probe: Probe = async (signal) => {
-            const rec = await src.readTicketBox(signal)
-            if (rec === null) return { exists: false, verdict: 'unknown', deadlineMs: 0 }
+            const t = await src.readTicket(signal)
+            if (t === null) return { exists: false, verdict: 'unknown', deadlineMs: 0 }
             return {
                 exists: true,
-                verdict: classify(rec, new Date(this.#clock())),
-                deadlineMs: Number(settlementDeadline(rec)) * 1000,
-                pendingAmount: rec.pendingAmount,
+                verdict: classify(t.view, new Date(this.#clock())),
+                deadlineMs: Number(t.view.deadline) * 1000,
+                pendingAmount: t.pendingAmount,
             }
         }
+        const budget =
+            (call: Call): Call =>
+            (signal) =>
+                call(src.callTimeoutMs === undefined ? signal : AbortSignal.timeout(src.callTimeoutMs))
         this.arm(
             h.ticketId,
             deadlineMs,
             probe,
-            (signal) => h.refundInactive(signal),
-            (signal) => h.settleLapsed(signal),
+            budget((signal) => h.refundInactive(signal)),
+            budget((signal) => h.settleLapsed(signal)),
         )
     }
 

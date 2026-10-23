@@ -29,8 +29,10 @@ import {
     type Ending,
     Deployment,
     PROGRAM_ID,
+    TICKET_FROZEN,
     TICKET_OPEN,
     TICKET_PENDING_BY_OPERATOR,
+    TICKET_PENDING_BY_PAYER,
     TOKEN_FROZEN,
     TOKEN_INITIALIZED,
     TOKEN_UNINITIALIZED,
@@ -38,6 +40,7 @@ import {
     decodeConfig,
     decodeTicket,
     receiptAckDigest,
+    ticketDeadline,
 } from '@txnlab/zs-proto/solana/zsescrow'
 import type { UsageReceipt } from '@txnlab/zs-proto/ticket'
 import type { SettleAck } from '@txnlab/zs-proto/wire'
@@ -49,11 +52,13 @@ import type { Operator } from '../src/operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from '../src/parts.js'
 import type { SolanaSigner } from '../src/ports.js'
 import type { ClaimVerdict } from '../src/reconcile.js'
+import { Watchdog } from '../src/refund-watchdog.js'
+import type { NodeRef } from '../src/types.js'
 import { solanaClaimFields } from '../src/solana/claim.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
 import { type Account, CODE_PREFLIGHT_FAILURE, type SignatureStatus, type SolanaRpc, SolanaRpcError } from '../src/solana/rpc.js'
-import { SolanaAckSendError, SolanaWallet } from '../src/solana/wallet.js'
+import { SOLANA_ENDING_TIMEOUT_MS, SolanaAckSendError, SolanaWallet } from '../src/solana/wallet.js'
 
 type Json = Record<string, any>
 
@@ -657,5 +662,199 @@ describe('Solana handle freezeOverclaim', () => {
         expect(res.claim).toBe('unreadable')
         expect(res.err).toBeDefined()
         expect(f.state.sent).toHaveLength(0)
+    })
+})
+
+// The ticket account's expires_at, after the discriminator, the header,
+// open_seq, max_price, the pending claim and opened_at, as Go's test has it.
+const TICKET_EXPIRES_AT_OFFSET = 123
+
+// Moves the fixture's ticket account's deadline, its expires_at plus the
+// grace it took at open, to deadline (unix seconds).
+function setTicketDeadline(f: Awaited<ReturnType<typeof fixture>>, deadline: bigint) {
+    const a = f.state.accounts.get(TICKET_ADDR)!
+    const data = a.data.slice()
+    new DataView(data.buffer).setBigInt64(TICKET_EXPIRES_AT_OFFSET, deadline - BigInt(decodeTicket(data).grace), true)
+    expect(ticketDeadline(decodeTicket(data))).toBe(deadline)
+    f.state.accounts.set(TICKET_ADDR, { ...a, data })
+}
+
+const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000))
+
+// A watchdog on short timings, with what it reported.
+function solanaWatchdog() {
+    const refunded: string[] = []
+    const barred: NodeRef[] = []
+    const rw = new Watchdog({ remedy: 'recover it by hand', refunded: (id) => refunded.push(id), overclaimed: (_id, n) => barred.push(n) })
+    rw.marginMs = 2
+    rw.retryDelayMs = 5
+    // Long enough that the receipt is pinned before the lapse reads it.
+    rw.lapseFallbackMs = 100
+    return { rw, refunded, barred }
+}
+
+async function untilDone(rw: Watchdog, ticketId: string, ms = 2000) {
+    const end = Date.now() + ms
+    while (rw.watching(ticketId)) {
+        if (Date.now() > end) throw new Error("timed out waiting for the ticket's driver to finish")
+        await new Promise((r) => setTimeout(r, 2))
+    }
+}
+
+describe('Solana refund watchdog', () => {
+    // The watchdog drives a Solana handle as it drives an Algorand one,
+    // reading the ticket account where Algorand reads the box: refund_inactive
+    // on an open ticket past its deadline, nothing on a ticket gone or frozen,
+    // settle_lapsed on a node's claim the node never lapsed, and nothing on a
+    // claim above the receipt the node signed, whose node it bars.
+    const cases: {
+        name: string
+        status?: number
+        claim?: bigint
+        receipt?: boolean
+        send?: (e: Ending) => Instruction
+        refunded?: boolean
+        barred?: boolean
+    }[] = [
+        { name: 'open', status: TICKET_OPEN, send: (e) => d.refundInactive(e), refunded: true },
+        { name: "the payer's own claim", status: TICKET_PENDING_BY_PAYER, claim: 100n, send: (e) => d.refundInactive(e), refunded: true },
+        { name: 'gone' },
+        { name: 'frozen', status: TICKET_FROZEN, claim: 100n },
+        { name: "the node's claim", status: TICKET_PENDING_BY_OPERATOR, claim: 100n, send: (e) => d.settleLapsed(e) },
+        { name: "the node's claim at the receipt", status: TICKET_PENDING_BY_OPERATOR, claim: 100n, receipt: true, send: (e) => d.settleLapsed(e) },
+        { name: "the node's claim above the receipt", status: TICKET_PENDING_BY_OPERATOR, claim: 101n, receipt: true, barred: true },
+    ]
+    it.each(cases)('drives $name', async (c) => {
+        const f = await fixture()
+        let t = null
+        if (c.status === undefined) {
+            f.state.accounts.set(TICKET_ADDR, null)
+        } else {
+            setTicket(f, c.status, c.claim ?? 0n)
+            setTicketDeadline(f, nowSeconds() - 60n)
+            t = await f.ticket()
+        }
+        const { rw, refunded, barred } = solanaWatchdog()
+        const h = handleOf(f)
+        const before = ticketReads(f)
+        rw.track(h, Number(nowSeconds()) - 60 - decodeConfig(CONFIG).defaultGrace)
+        expect(rw.watching(h.ticketId)).toBe(true)
+        if (c.receipt) rw.recordReceipt(h.ticketId, { op: Number(OPERATOR_ID), node: Number(NODE_ID) }, 100n)
+        await untilDone(rw, h.ticketId)
+
+        expect(ticketReads(f)).toBeGreaterThan(before)
+        if (c.send === undefined) {
+            expect(f.state.sent).toHaveLength(0)
+        } else {
+            expect(f.state.sent).toHaveLength(1)
+            const e: Ending = { submitter: PAYER, operatorId: OPERATOR_ID, nodeId: NODE_ID, ticketId: TICKET_ID, rentPayer: t!.rentPayer, payer: PAYER }
+            const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [c.send(e)], 'legacy')
+            expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+        }
+        expect(refunded).toEqual(c.refunded ? [h.ticketId] : [])
+        expect(barred).toEqual(c.barred ? [{ op: Number(OPERATOR_ID), node: Number(NODE_ID) }] : [])
+    })
+
+    // It first reads a Solana ticket at expires_at plus the Config's
+    // default_grace, the grace a payer's open takes, and waits out the
+    // ticket's own deadline when that is later.
+    it("waits out the Config's grace", async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        setTicketDeadline(f, nowSeconds() - 60n)
+        const { rw } = solanaWatchdog()
+        const h = handleOf(f)
+        const before = ticketReads(f)
+        // Past expires_at by less than the grace.
+        rw.track(h, Number(nowSeconds()) - decodeConfig(CONFIG).defaultGrace + 60)
+        await new Promise((r) => setTimeout(r, 50))
+        expect(ticketReads(f)).toBe(before)
+        expect(rw.watching(h.ticketId)).toBe(true)
+        rw.resolve(h.ticketId)
+    })
+
+    it("waits out the ticket's own deadline", async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        const ahead = nowSeconds() + 2n
+        setTicketDeadline(f, ahead)
+        const { rw, refunded } = solanaWatchdog()
+        const h = handleOf(f)
+        const before = ticketReads(f)
+        rw.track(h, Number(nowSeconds()) - 60 - decodeConfig(CONFIG).defaultGrace)
+        const end = Date.now() + 2000
+        while (ticketReads(f) === before && Date.now() < end) await new Promise((r) => setTimeout(r, 2))
+        expect(ticketReads(f)).toBeGreaterThan(before)
+        expect(f.state.sent).toHaveLength(0)
+        await untilDone(rw, h.ticketId, 5000)
+        expect(f.state.sent).toHaveLength(1)
+        expect(refunded).toEqual([h.ticketId])
+        expect(Date.now()).toBeGreaterThanOrEqual(Number(ahead) * 1000)
+    })
+
+    // A Solana refund or lapse waits for its confirmation, which can outlast
+    // the watchdog's callTimeoutMs. It is waited for rather than cut short
+    // and sent again, so a refund that lands late is reported as one. The
+    // budget is past a blockhash's life, a minute or so, with room for a slow
+    // cluster.
+    it.each([
+        ['refund_inactive', TICKET_OPEN, 0n, true],
+        ['settle_lapsed', TICKET_PENDING_BY_OPERATOR, 100n, false],
+    ] as const)('waits for %s to confirm', async (_name, status, claim, refunds) => {
+        expect(SOLANA_ENDING_TIMEOUT_MS).toBe(180_000)
+        const f = await fixture()
+        setTicket(f, status, claim)
+        setTicketDeadline(f, nowSeconds() - 60n)
+        const landAt = Date.now() + 150
+        const land = f.state.land
+        f.rpc.getSignatureStatuses = async () => [Date.now() < landAt ? null : land]
+        // A height that never passes the blockhash.
+        f.rpc.getBlockHeight = async () => 0n
+        const { rw, refunded } = solanaWatchdog()
+        rw.callTimeoutMs = 20
+        const h = handleOf(f)
+        rw.track(h, Number(nowSeconds()) - 60 - decodeConfig(CONFIG).defaultGrace)
+        await untilDone(rw, h.ticketId)
+        expect(f.state.sent).toHaveLength(1)
+        expect(refunded).toEqual(refunds ? [h.ticketId] : [])
+    })
+
+    // A ticket read that fails is not a ticket gone: the watchdog goes on to
+    // the refund, as on Algorand, and it lands once the read works again.
+    it('takes a failed read for no ticket gone', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        setTicketDeadline(f, nowSeconds() - 60n)
+        const read = f.rpc.getAccountInfo
+        let fail = 1
+        f.rpc.getAccountInfo = async (k, o) => {
+            if (k === TICKET_ADDR && fail-- > 0) throw new Error('rpc down')
+            return read(k, o)
+        }
+        const { rw, refunded } = solanaWatchdog()
+        const h = handleOf(f)
+        rw.track(h, Number(nowSeconds()) - 60 - decodeConfig(CONFIG).defaultGrace)
+        await untilDone(rw, h.ticketId)
+        expect(f.state.sent).toHaveLength(1)
+        expect(refunded).toEqual([h.ticketId])
+    })
+
+    // It reads the ticket at the handle's node, operator id then node id, as
+    // the open put it there.
+    it('reads the ticket at its node', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        setTicketDeadline(f, nowSeconds() - 60n)
+        const [opId, nodeId] = [7n, 9n]
+        f.state.accounts.set(d.ticket(d.node(opId, nodeId), TICKET_ID), f.state.accounts.get(TICKET_ADDR)!)
+        f.state.accounts.set(d.ticket(d.node(nodeId, opId), TICKET_ID), null)
+        f.state.accounts.set(TICKET_ADDR, null)
+        const { rw, refunded } = solanaWatchdog()
+        const h = handleOf(f)
+        h.operator = { id: Number(opId), nodeId: Number(nodeId) } as Operator
+        rw.track(h, Number(nowSeconds()) - 60 - decodeConfig(CONFIG).defaultGrace)
+        await untilDone(rw, h.ticketId)
+        expect(f.state.sent).toHaveLength(1)
+        expect(refunded).toEqual([h.ticketId])
     })
 })

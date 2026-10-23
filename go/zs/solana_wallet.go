@@ -37,10 +37,13 @@ type SolanaWallet struct {
 	// genesis is the Config's genesis hash, which the ack digest binds. The
 	// program fixes it at initialize.
 	genesis solana.Hash
-	pool    *SolanaRentPool
-	slots   uint64
-	now     func() time.Time
-	log     *slog.Logger // nil: slog.Default()
+	// defaultGrace is the Config's default_grace in seconds, the settle
+	// window of a ticket the payer opens: its offer must carry grace 0.
+	defaultGrace uint32
+	pool         *SolanaRentPool
+	slots        uint64
+	now          func() time.Time
+	log          *slog.Logger // nil: slog.Default()
 
 	// depositMu and depositReady are Wallet's: one top-up at a time, and none
 	// once the pool covers the working set.
@@ -103,19 +106,20 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 		return nil, fmt.Errorf("solana wallet: the Config's mint is %s, not the deployment's %s", c.USDCMint, cfg.Deployment.Mint)
 	}
 	return &SolanaWallet{
-		rpc:        cfg.RPC,
-		confirm:    cfg.Confirm,
-		deployment: cfg.Deployment,
-		signer:     cfg.Signer,
-		payer:      payer,
-		payerUSDC:  cfg.Deployment.TokenAccount(payer),
-		decimals:   c.USDCDecimals,
-		genesis:    c.GenesisHash,
-		pool:       &SolanaRentPool{RPC: cfg.RPC, Deployment: cfg.Deployment, Signer: cfg.Signer, Confirm: cfg.Confirm},
-		slots:      cfg.DepositSlots,
-		now:        time.Now,
-		log:        cfg.Logger,
-		signed:     map[[16]byte]int64{},
+		rpc:          cfg.RPC,
+		confirm:      cfg.Confirm,
+		deployment:   cfg.Deployment,
+		signer:       cfg.Signer,
+		payer:        payer,
+		payerUSDC:    cfg.Deployment.TokenAccount(payer),
+		decimals:     c.USDCDecimals,
+		genesis:      c.GenesisHash,
+		defaultGrace: c.DefaultGrace,
+		pool:         &SolanaRentPool{RPC: cfg.RPC, Deployment: cfg.Deployment, Signer: cfg.Signer, Confirm: cfg.Confirm},
+		slots:        cfg.DepositSlots,
+		now:          time.Now,
+		log:          cfg.Logger,
+		signed:       map[[16]byte]int64{},
 	}, nil
 }
 
