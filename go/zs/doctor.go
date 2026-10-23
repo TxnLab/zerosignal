@@ -107,6 +107,9 @@ type DoctorNode struct {
 	// SignerSpendable is nil when the signing account was never read, which
 	// routes, as in selection.
 	SignerSpendable *uint64 `json:"signerSpendable,omitempty,string"`
+	// SignerSpendableLamports is the same reading for a node on Solana. A
+	// node carries its own rail's reading only.
+	SignerSpendableLamports *uint64 `json:"signerSpendableLamports,omitempty,string"`
 }
 
 // DoctorChecks judges readings, in order: algod, escrow, algo, usdc_opt_in,
@@ -218,31 +221,33 @@ func DoctorChecks(r DoctorReadings) []DoctorCheck {
 	case len(r.Nodes) == 0:
 		add("operators", DoctorFail, "no nodes are registered on %s", net)
 	default:
-		s, msg := operatorsVerdict(r)
+		s, msg := operatorsVerdict(r.Nodes, r.RelayRequired, r.AllowStaging, "ALGO")
 		add("operators", s, "%s", msg)
 	}
 	return out
 }
 
-func operatorsVerdict(r DoctorReadings) (DoctorStatus, string) {
+// operatorsVerdict judges the fleet for either rail; coin names the fee coin
+// a signing account runs short of.
+func operatorsVerdict(nodes []DoctorNode, relayRequired, allowStaging bool, coin string) (DoctorStatus, string) {
 	// A relay must belong to another owner, so a fleet of one owner has none
 	// to probe through, and its nodes read as unreachable for that alone.
 	owners := map[string]bool{}
-	for _, n := range r.Nodes {
+	for _, n := range nodes {
 		owners[n.Owner] = true
 	}
 	var usable, noRelay, unreachable, incompatible, staging, unfunded int
-	for _, n := range r.Nodes {
+	for _, n := range nodes {
 		switch {
-		case !n.Reachable && r.RelayRequired && len(owners) == 1:
+		case !n.Reachable && relayRequired && len(owners) == 1:
 			noRelay++
 		case !n.Reachable:
 			unreachable++
 		case !wire.ProtoVersionCompatible(n.ProtoVersion):
 			incompatible++
-		case n.Staging && !r.AllowStaging:
+		case n.Staging && !allowStaging:
 			staging++
-		case n.SignerSpendable != nil && *n.SignerSpendable < selection.MinSignerSpendableMicroAlgos:
+		case selection.SignerReadingsUnderfunded(n.SignerSpendable, n.SignerSpendableLamports):
 			unfunded++
 		default:
 			usable++
@@ -257,7 +262,7 @@ func operatorsVerdict(r DoctorReadings) (DoctorStatus, string) {
 		{unreachable, "unreachable"},
 		{incompatible, "on an incompatible protocol version"},
 		{staging, "staging"},
-		{unfunded, "with a signing account short of fee ALGO"},
+		{unfunded, "with a signing account short of fee " + coin},
 	} {
 		if c.n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", c.n, c.what))
@@ -268,9 +273,9 @@ func operatorsVerdict(r DoctorReadings) (DoctorStatus, string) {
 	case usable == 0:
 		return DoctorFail, "no node can serve a request: " + why
 	case why == "":
-		return DoctorPass, fmt.Sprintf("%d of %d nodes can serve a request", usable, len(r.Nodes))
+		return DoctorPass, fmt.Sprintf("%d of %d nodes can serve a request", usable, len(nodes))
 	default:
-		return DoctorPass, fmt.Sprintf("%d of %d nodes can serve a request; the rest: %s", usable, len(r.Nodes), why)
+		return DoctorPass, fmt.Sprintf("%d of %d nodes can serve a request; the rest: %s", usable, len(nodes), why)
 	}
 }
 
@@ -291,12 +296,14 @@ const doctorReadTimeout = 30 * time.Second
 
 // Diagnose reads, without signing anything, what a Client paying from address
 // would need: algod, the escrow app, the account's ALGO and USDC, the prepaid
-// ticket pool, and one discovery cycle over the fleet. cfg is read as New reads
-// it, its signers ignored. An error is a config Diagnose can't run on; every
-// failed read is a check in the report instead. It reads Algorand only.
+// ticket pool, and one discovery cycle over the fleet. On a Solana network it
+// reads that rail's counterparts instead (see SolanaDoctorChecks), for a
+// base58 address. cfg is read as New reads it, its signers ignored. An error
+// is a config Diagnose can't run on; every failed read is a check in the
+// report instead.
 func Diagnose(ctx context.Context, cfg Config, address string) (DoctorReport, error) {
 	if cfg.Network.Rail == ticket.RailSolana {
-		return DoctorReport{}, configError("Diagnose reads the Algorand rail only; Network.Rail is solana")
+		return diagnoseSolana(ctx, cfg, address)
 	}
 	cfg.SolanaSigner = nil
 	if _, err := types.DecodeAddress(address); err != nil {
@@ -318,12 +325,15 @@ func Diagnose(ctx context.Context, cfg Config, address string) (DoctorReport, er
 	} else {
 		r = gatherDoctorReadings(ctx, &algodDoctorChain{cfg: cfg, chain: chain, appID: appID, address: address}, base)
 	}
-	checks := DoctorChecks(r)
-	rep := DoctorReport{Network: r.Network, Address: address, Checks: checks, Warnings: warnings}
+	return doctorReport(r.Network, address, DoctorChecks(r), warnings), nil
+}
+
+func doctorReport(network, address string, checks []DoctorCheck, warnings []string) DoctorReport {
+	rep := DoctorReport{Network: network, Address: address, Checks: checks, Warnings: warnings}
 	for _, c := range checks {
 		rep.Failed = rep.Failed || c.Status == DoctorFail
 	}
-	return rep, nil
+	return rep
 }
 
 // doctorBase is the readings a defaulted cfg decides before anything is read.
@@ -469,8 +479,8 @@ func (a *algodDoctorChain) payerDeposit(ctx context.Context) (escrow.PayerDeposi
 }
 
 func (a *algodDoctorChain) nodes(ctx context.Context) ([]Operator, error) {
-	// No deployment: the doctor reports reachability, which the legacy
-	// ephemeral signature answers for every node version.
+	// The source derives the deployment from the chain before it probes, so
+	// the doctor drops a node advertising another one, as a Client does.
 	src := newChainSource(a.cfg, a.appID, a.chain, ticket.DeploymentID{})
 	src.ProxyPayerAddr = crypto.GetApplicationAddress(a.appID).String()
 	ctx, cancel := context.WithTimeout(ctx, bootFetchTimeout)
@@ -478,7 +488,8 @@ func (a *algodDoctorChain) nodes(ctx context.Context) ([]Operator, error) {
 	return src.Fetch(ctx)
 }
 
-// readOnlySigner names the address Diagnose reads for and signs nothing.
+// readOnlySigner names the address Diagnose reads for, on either rail, and
+// signs nothing.
 type readOnlySigner string
 
 var errReadOnlySigner = errors.New("zs: Diagnose signs nothing")
@@ -491,4 +502,8 @@ func (readOnlySigner) SignBytes(context.Context, string, []byte) ([]byte, error)
 
 func (readOnlySigner) SignWithAccount(context.Context, types.Transaction, string) (string, []byte, error) {
 	return "", nil, errReadOnlySigner
+}
+
+func (readOnlySigner) SignTransactionMessage(context.Context, string, []byte) ([]byte, error) {
+	return nil, errReadOnlySigner
 }

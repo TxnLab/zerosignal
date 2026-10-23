@@ -7,10 +7,10 @@
 // without signing anything. Mirrors go/zs/doctor.go: doctorChecks is Go's
 // DoctorChecks, pinned by testdata/doctor_vectors.json; diagnose and
 // gatherDoctorReadings are Go's Diagnose and gatherDoctorReadings, mirrored
-// but unpinned.
+// but unpinned. The Solana rail's are in solana/doctor.ts.
 
 import algosdk from 'algosdk'
-import { MIN_SIGNER_SPENDABLE_MICROALGOS } from '@txnlab/zs-proto/selection'
+import { MIN_SIGNER_SPENDABLE_LAMPORTS, MIN_SIGNER_SPENDABLE_MICROALGOS } from '@txnlab/zs-proto/selection'
 import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 
 import { chainAlgod } from './assemble.js'
@@ -19,8 +19,9 @@ import { configError, findError } from './errors.js'
 import { AlgodEscrowChain, requestOptions, requestTimeoutOrDefault, spendableOf } from './escrow/algod.js'
 import { type PayerDeposit, planMbrDeposit } from './mbr.js'
 import type { Operator } from './operator.js'
-import type { Signer } from './ports.js'
+import type { Signer, SolanaSigner } from './ports.js'
 import { ChainOperatorSource, NoOperatorsError } from './registry/chain.js'
+import { diagnoseSolana } from './solana/doctor.js'
 
 /** One check's verdict. Only 'fail' means a request from the address can't succeed as things stand. */
 export type DoctorStatus = 'pass' | 'warn' | 'fail' | 'skip'
@@ -53,6 +54,8 @@ export interface DoctorNode {
     staging: boolean
     /** Absent when the signing account was never read, which routes, as in selection. */
     signerSpendable?: bigint | undefined
+    /** The same reading for a node on Solana. A node carries its own rail's reading only. */
+    signerSpendableLamports?: bigint | undefined
 }
 
 /**
@@ -137,7 +140,7 @@ export function doctorChecks(r: DoctorReadings): DoctorCheck[] {
     if (!algodOK) add('operators', 'skip', needsAlgod)
     else if (r.operatorsErr) add('operators', 'fail', `can't read the operators: ${r.operatorsErr}`)
     else if (r.nodes.length === 0) add('operators', 'fail', `no nodes are registered on ${net}`)
-    else add('operators', ...operatorsVerdict(r))
+    else add('operators', ...operatorsVerdict(r.nodes, r.relayRequired, r.allowStaging, 'ALGO'))
     return out
 }
 
@@ -175,22 +178,23 @@ function poolVerdict(r: DoctorReadings, spendable: bigint): [DoctorStatus, strin
     return ['pass', held]
 }
 
-function operatorsVerdict(r: DoctorReadings): [DoctorStatus, string] {
+/** operatorsVerdict judges the fleet for either rail; coin names the fee coin a signing account runs short of. */
+export function operatorsVerdict(nodes: DoctorNode[], relayRequired: boolean, allowStaging: boolean, coin: string): [DoctorStatus, string] {
     // A relay must belong to another owner, so a fleet of one owner has none
     // to probe through, and its nodes read as unreachable for that alone.
-    const oneOwner = new Set(r.nodes.map((n) => n.owner)).size === 1
+    const oneOwner = new Set(nodes.map((n) => n.owner)).size === 1
     let usable = 0
     let noRelay = 0
     let unreachable = 0
     let incompatible = 0
     let staging = 0
     let unfunded = 0
-    for (const n of r.nodes) {
-        if (!n.reachable && r.relayRequired && oneOwner) noRelay++
+    for (const n of nodes) {
+        if (!n.reachable && relayRequired && oneOwner) noRelay++
         else if (!n.reachable) unreachable++
         else if (!protoVersionCompatible(n.protoVersion)) incompatible++
-        else if (n.staging && !r.allowStaging) staging++
-        else if (n.signerSpendable !== undefined && n.signerSpendable < BigInt(MIN_SIGNER_SPENDABLE_MICROALGOS)) unfunded++
+        else if (n.staging && !allowStaging) staging++
+        else if (signerUnderfunded(n)) unfunded++
         else usable++
     }
     const parts: [number, string][] = [
@@ -198,20 +202,28 @@ function operatorsVerdict(r: DoctorReadings): [DoctorStatus, string] {
         [unreachable, 'unreachable'],
         [incompatible, 'on an incompatible protocol version'],
         [staging, 'staging'],
-        [unfunded, 'with a signing account short of fee ALGO'],
+        [unfunded, `with a signing account short of fee ${coin}`],
     ]
     const why = parts
         .filter(([n]) => n > 0)
         .map(([n, what]) => `${n} ${what}`)
         .join(', ')
     if (usable === 0) return ['fail', `no node can serve a request: ${why}`]
-    const served = `${usable} of ${r.nodes.length} nodes can serve a request`
+    const served = `${usable} of ${nodes.length} nodes can serve a request`
     return ['pass', why === '' ? served : `${served}; the rest: ${why}`]
+}
+
+// Go's selection.SignerReadingsUnderfunded over the doctor's bigint readings.
+function signerUnderfunded(n: DoctorNode): boolean {
+    return (
+        (n.signerSpendable !== undefined && n.signerSpendable < BigInt(MIN_SIGNER_SPENDABLE_MICROALGOS)) ||
+        (n.signerSpendableLamports !== undefined && n.signerSpendableLamports < BigInt(MIN_SIGNER_SPENDABLE_LAMPORTS))
+    )
 }
 
 // micros renders a 6-decimal base-unit amount (µALGO, micro-USDC) in whole
 // units, with no trailing zeros.
-function micros(v: bigint): string {
+export function micros(v: bigint): string {
     const whole = (v / 1_000_000n).toString()
     const frac = v % 1_000_000n
     return frac === 0n ? whole : `${whole}.${frac.toString().padStart(6, '0').replace(/0+$/, '')}`
@@ -223,22 +235,24 @@ const DISCOVERY_TIMEOUT_MS = 60_000
 /**
  * diagnose reads, without signing anything, what a Client paying from address
  * would need: algod, the escrow app, the account's ALGO and USDC, the prepaid
- * ticket pool, and one discovery cycle over the fleet. config is read as
- * Client.create reads it, without a signer. It throws a ZsError for a config
- * it can't run on; every failed read is a check in the report instead. It
- * reads Algorand only.
+ * ticket pool, and one discovery cycle over the fleet. On a Solana network it
+ * reads that rail's counterparts instead (see solanaDoctorChecks), for a
+ * base58 address. config is read as Client.create reads it, its signers
+ * ignored. It throws a ZsError for a config it can't run on; every failed
+ * read is a check in the report instead.
  */
 export async function diagnose(config: Omit<Config, 'signer'>, address: string, signal?: AbortSignal): Promise<DoctorReport> {
-    if (config.network?.rail === 'solana') {
-        throw configError('diagnose reads the Algorand rail only; Network.rail is solana')
-    }
+    if (config.network?.rail === 'solana') return diagnoseSolana(config, address, signal)
     if (!algosdk.isValidAddress(address)) {
         throw configError(`address ${JSON.stringify(address)} is not an Algorand address`)
     }
     const cfg = resolveConfig({ ...config, signer: readOnlySigner(address), solanaSigner: undefined })
     const r = await gatherDoctorReadings(algodDoctorChain(cfg, address), doctorBase(cfg, address), signal)
-    const checks = doctorChecks(r)
-    return { network: r.network, address, checks, failed: checks.some((c) => c.status === 'fail'), warnings: cfg.warnings }
+    return doctorReport(r.network, address, doctorChecks(r), cfg.warnings)
+}
+
+export function doctorReport(network: string, address: string, checks: DoctorCheck[], warnings: string[]): DoctorReport {
+    return { network, address, checks, failed: checks.some((c) => c.status === 'fail'), warnings }
 }
 
 /** doctorBase is the readings a resolved config decides before anything is read. */
@@ -406,6 +420,19 @@ function readOnlySigner(address: string): Signer {
     }
 }
 
-function message(err: unknown): string {
+/** readOnlySolanaSigner is readOnlySigner on the Solana rail. */
+export function readOnlySolanaSigner(address: string): SolanaSigner {
+    return {
+        address,
+        signBytes: async () => {
+            throw new ReadOnlySignerError()
+        },
+        signTransactionMessage: async () => {
+            throw new ReadOnlySignerError()
+        },
+    }
+}
+
+export function message(err: unknown): string {
     return err instanceof Error ? err.message : String(err)
 }

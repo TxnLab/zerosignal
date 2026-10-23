@@ -141,10 +141,11 @@ type solanaAccountFixtures struct {
 	} `json:"context"`
 }
 
-// fakeSolanaRPC answers getGenesisHash and the two getProgramAccounts reads,
-// telling them apart by the discriminator they filter on, and keeps the
-// params each read sent. It answers getBalance from balances, with an RPC
-// error for an address it has no lamports for, and keeps each one's params.
+// fakeSolanaRPC answers getGenesisHash, getBlockHeight, the rent quote and
+// the two getProgramAccounts reads, telling those apart by the discriminator
+// they filter on, and keeps the params each read sent. It answers getBalance
+// from balances, with an RPC error for an address it has no lamports for, and
+// keeps each one's params.
 type fakeSolanaRPC struct {
 	genesis   solana.Hash
 	operators []solanaRegistryAccount
@@ -179,6 +180,15 @@ func (f *fakeSolanaRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case "getGenesisHash":
 		result = f.genesis.String()
+	case "getBlockHeight":
+		result = 1_000
+	case "getMinimumBalanceForRentExemption":
+		var n uint64
+		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &n) != nil {
+			http.Error(w, "unexpected getMinimumBalanceForRentExemption params", http.StatusBadRequest)
+			return
+		}
+		result = (128 + n) * 6_960
 	case "getAccountInfo":
 		var addr string
 		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &addr) != nil {
