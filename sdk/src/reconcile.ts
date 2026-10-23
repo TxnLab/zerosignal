@@ -10,7 +10,7 @@
 
 import { type TicketRecord as TicketBox, ticketView } from '@txnlab/zs-proto/escrow'
 import { SettleStatus, type TicketView, classify } from '@txnlab/zs-proto/settle'
-import { type Ticket as SolanaTicket, claimHash, ticketView as solanaTicketView } from '@txnlab/zs-proto/solana/zsescrow'
+import { type ClaimFields, type Ticket as SolanaTicket, ticketView as solanaTicketView } from '@txnlab/zs-proto/solana/zsescrow'
 
 import { solanaClaimFields } from './solana/claim.js'
 import type { NodeRef, TicketStatus } from './types.js'
@@ -130,32 +130,44 @@ export function judgeClaim(a: SettleArgs, box: TicketBoxView | null): ClaimVerdi
 }
 
 /** The Solana ticket account fields judgeSolanaClaim reads. */
-export type SolanaTicketView = Pick<SolanaTicket, 'status' | 'pendingAmount' | 'claimHash'>
+export type SolanaTicketView = Pick<SolanaTicket, 'status' | 'pending'>
 
 /**
  * judgeSolanaClaim is judgeClaim for a Solana ticket account (null when
- * closed). The account keeps the first half's hash, not its fields, so a
- * claim matches when the payer's own fields hash to it. Mirrors Go's
- * judgeSolanaClaim; testdata/ack_settle_vectors.json pins it.
+ * closed): a claim matches when it is the payer's own fields, every one, as
+ * the program compares the halves. Mirrors Go's judgeSolanaClaim;
+ * testdata/ack_settle_vectors.json pins it.
  */
 export function judgeSolanaClaim(a: SettleArgs, t: SolanaTicketView | null): ClaimVerdict {
     if (t === null) return 'none'
     // The verdict reads no deadline, so none is passed.
     const status = solanaTicketView({ status: t.status, expiresAt: 0n, grace: 0 }).status
-    return weighClaim(status, t.pendingAmount, a.amountCharged, () => solanaClaimMatches(a, t.claimHash))
+    return weighClaim(status, t.pending.amount, a.amountCharged, () => solanaClaimMatches(a, t.pending))
 }
 
-// Whether a's claim fields hash to claim. Args a host journal mangled (a
-// digest that isn't 32 bytes, a count past u64) can't be hashed, and match
-// nothing, as judgeClaim's field comparison finds of them.
-function solanaClaimMatches(a: SettleArgs, claim: Uint8Array): boolean {
-    let h: Uint8Array
-    try {
-        h = claimHash(solanaClaimFields(a))
-    } catch {
-        return false
-    }
-    return bytesEqual(h, claim)
+// One comparison per ClaimFields key, so a field added to the program's struct
+// fails to compile here rather than going unread, as Go's struct equality
+// would read it.
+const sameClaimField: { [K in keyof ClaimFields]-?: (x: ClaimFields[K], y: ClaimFields[K]) => boolean } = {
+    amount: (x, y) => x === y,
+    receiptDigest: bytesEqual,
+    ttftMs: (x, y) => x === y,
+    decodeMs: (x, y) => x === y,
+    inputUnits: (x, y) => x === y,
+    outputUnits: (x, y) => x === y,
+    outputUsageType: (x, y) => x === y,
+    auxUsageType: (x, y) => x === y,
+    auxCount: (x, y) => x === y,
+}
+
+// Args from a host journal can hold what Go's types rule out, a short digest
+// or a count past u64; none equals a field read from the account, so they
+// contradict the claim, as Go never sees them.
+function solanaClaimMatches(a: SettleArgs, p: ClaimFields): boolean {
+    const f = solanaClaimFields(a)
+    return (Object.keys(sameClaimField) as (keyof ClaimFields)[]).every((k) =>
+        (sameClaimField[k] as (x: unknown, y: unknown) => boolean)(f[k], p[k]),
+    )
 }
 
 // The verdict on a ticket of status carrying an operator claim of pending,

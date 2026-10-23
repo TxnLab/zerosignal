@@ -91,6 +91,7 @@ function toFixture(type: string, v: Json): Json {
         if (name === 'pad0' || name === 'reserve' || name.startsWith('retired_')) name = `_${name}`
         if ((name === 'status' || name === 'state' || name === 'outcome') && ENUMS[type]) out[name] = ENUMS[type]!(x)
         else if (name === 'genesis_hash') out[name] = hex.encode(decodeBase58(x, 32))
+        else if (name === 'pending') out[name] = toFixture('ClaimFields', x)
         else out[name] = plain(x)
     }
     return out
@@ -197,17 +198,6 @@ describe('solana_instruction_vectors.json', () => {
                 }
                 throw new Error('no ticket id gives the ticket')
             }
-            const claim = (f: Json): ClaimFields => ({
-                amount: BigInt(f.amount),
-                receiptDigest: hex.decode(f.receipt_digest),
-                ttftMs: BigInt(f.ttft_ms),
-                decodeMs: BigInt(f.decode_ms),
-                inputUnits: BigInt(f.input_units),
-                outputUnits: BigInt(f.output_units),
-                outputUsageType: f.output_usage_type,
-                auxUsageType: f.aux_usage_type,
-                auxCount: BigInt(f.aux_count),
-            })
             const ending = (): Ending => {
                 const [op, n] = nodeIds()
                 const e: Ending = {
@@ -327,7 +317,7 @@ describe('solana_instruction_vectors.json', () => {
                     ix = d.ack(ending(), claim(args.fields))
                     break
                 case 'settle_lapsed':
-                    ix = d.settleLapsed(ending(), claim(args.fields))
+                    ix = d.settleLapsed(ending())
                     break
                 case 'refund_inactive':
                     ix = d.refundInactive(ending())
@@ -339,7 +329,7 @@ describe('solana_instruction_vectors.json', () => {
                     const [op, n] = nodeIds()
                     const id = hex.decode(args.ticket_id)
                     expect(d.ticket(acct.node!, id)).toBe(acct.ticket)
-                    ix = d.protest(acct.payer!, op, n, id, hex.decode(args.receipt), args.reason, args.pending === null ? null : claim(args.pending))
+                    ix = d.protest(acct.payer!, op, n, id, hex.decode(args.receipt), args.reason)
                     break
                 }
                 case 'withdraw_payout': {
@@ -416,10 +406,10 @@ describe('the ack digest in solana_tx_vectors.json', () => {
             const settle = ixs.find((ix) => ix.programId === d.program && hex.encode(ix.data.subarray(0, 8)) === hex.encode(settleDisc))
             const precompile = ixs.find((ix) => ix.programId === ED25519_PROGRAM_ID)
             if (!settle || !precompile) throw new Error('no settle_cooperative beside an Ed25519 instruction')
-            const claim = claimHash(claimFieldsOf(settle.data.subarray(8)))
-            expect(hex.encode(claim)).toBe(tx.claim_hash_hex)
+            const hash = claimHash(claimFieldsOf(settle.data.subarray(8)))
+            expect(hex.encode(hash)).toBe(tx.claim_hash_hex)
             const ticketAt = 4
-            const digest = d.ackDigest(genesis, settle.accounts[ticketAt]!.pubkey, BigInt(tx.open_seq), claim)
+            const digest = d.ackDigest(genesis, settle.accounts[ticketAt]!.pubkey, BigInt(tx.open_seq), hash)
             expect(hex.encode(digest)).toBe(tx.ack_digest_hex)
             const { message, signer } = ed25519Message(precompile.data)
             expect([hex.encode(message), signer]).toEqual([hex.encode(digest), tx.payer])
@@ -436,28 +426,26 @@ describe('the ack digest in solana_tx_vectors.json', () => {
 })
 
 // The protest of a pending ticket the program accepted, as Go's
-// TestProtestPendingFixture reads it: its pending claim fields hash to the
-// ticket's claim and carry the receipt's digest, sha256 of its canonical bytes,
-// which the node's Ed25519 instruction signs.
+// TestProtestPendingFixture reads it: the protest carries no claim fields, and
+// the pending claim the ticket holds carries the receipt's digest, sha256 of
+// its canonical bytes, which the node's Ed25519 instruction signs.
 describe('the protest of a pending ticket in solana_tx_vectors.json', () => {
     const txs = load('testdata/solana_tx_vectors.json')
     const protestDisc = discriminator('global', 'protest')
     const tx = (txs.transactions as Json[]).find((t) => t.name === 'protest_pending')
-    it('passes the pending half the receipt names', () => {
+    it("protests the receipt whose digest the ticket's pending half carries", () => {
         if (!tx) throw new Error('no protest_pending transaction')
         expect(tx.program).toBe('ok')
         const ixs = (tx.built_instructions as Json[]).map((b) => ({ programId: b.program_id as string, data: base64.decode(b.data_base64) }))
         const protest = ixs.find((ix) => ix.programId === txs.program_id && hex.encode(ix.data.subarray(0, 8)) === hex.encode(protestDisc))
         const precompile = ixs.find((ix) => ix.programId === ED25519_PROGRAM_ID)
         if (!protest || !precompile) throw new Error('no protest beside an Ed25519 instruction')
-        // ticket_id, then the receipt as a u32-prefixed vector, the reason, and the pending fields as Some.
+        // ticket_id, then the receipt as a u32-prefixed vector and the reason, and nothing after.
         const args = protest.data.subarray(8 + 16)
         const n = new DataView(args.buffer, args.byteOffset, args.byteLength).getUint32(0, true)
+        expect(args.length).toBe(4 + n + 1)
         const receipt = args.subarray(4, 4 + n)
-        const rest = args.subarray(4 + n + 1)
-        expect(rest[0]).toBe(1)
-        const pending = claimFieldsOf(rest.subarray(1))
-        expect(hex.encode(claimHash(pending))).toBe(tx.claim_hash_hex)
+        const pending = claim(tx.claim_fields)
         const r = parseReceiptJSON(new TextEncoder().encode(JSON.stringify(tx.receipt_value)))
         expect(hex.encode(receiptCanonicalBytes(r))).toBe(hex.encode(receipt))
         const digest = receiptSigDigest(r)
@@ -466,6 +454,21 @@ describe('the protest of a pending ticket in solana_tx_vectors.json', () => {
         expect(hex.encode(ed25519Message(precompile.data).message)).toBe(hex.encode(digest))
     })
 })
+
+// ClaimFields as the program's fixtures write them.
+function claim(f: Json): ClaimFields {
+    return {
+        amount: BigInt(f.amount),
+        receiptDigest: hex.decode(f.receipt_digest),
+        ttftMs: BigInt(f.ttft_ms),
+        decodeMs: BigInt(f.decode_ms),
+        inputUnits: BigInt(f.input_units),
+        outputUnits: BigInt(f.output_units),
+        outputUsageType: f.output_usage_type,
+        auxUsageType: f.aux_usage_type,
+        auxCount: BigInt(f.aux_count),
+    }
+}
 
 // ClaimFields from the head of an instruction's arguments, in the program's Borsh order.
 function claimFieldsOf(b: Uint8Array): ClaimFields {

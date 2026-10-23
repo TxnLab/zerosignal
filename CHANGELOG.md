@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — a Solana ticket holds its pending claim (unreleased)
+
+The `zs_escrow` program's `Ticket` account stores the first half's claim fields
+(`Ticket.Pending` ↔ `pending`, a `ClaimFields`) where it stored their hash and the claimed amount,
+as Algorand's ticket box keeps `pendingAmount`, `pendingDigest` and the rest. The account grows
+from 233 to 275 bytes (`TicketSize` ↔ `TICKET_SIZE`), so a ticket's rent rises from 2,512,560
+to 2,804,880 lamports. `settle_lapsed` pays the stored claim and takes no arguments
+(`SettleLapsed(e)` ↔ `settleLapsed(e)`). `protest` takes no claim fields and checks the receipt's
+digest against the stored one (`Protest` ↔ `protest` lose their `pending` argument).
+`judgeSolanaClaim` ↔ `judgeSolanaClaim` compares the receipt's fields with the stored ones.
+`ClaimHash` ↔ `claimHash` remains for the ack digest. A deployed program and its tickets must be
+replaced, since old accounts no longer decode.
+
 ### 2026-10-22 — Go's Solana wallet reads a missing account as absent (unreleased)
 
 `rpc.HTTPClient.GetAccountInfo` reports an account that does not exist as `rpc.ErrNotFound`,

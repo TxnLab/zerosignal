@@ -275,7 +275,7 @@ func TestSolanaRentPoolUnaffordableSendsNothing(t *testing.T) {
 	if len(c.sent) != 0 {
 		t.Fatal("sent a deposit it can't afford")
 	}
-	for _, part := range []string{"backs 0 of 1", "needs 3979160 lamports", "+ 1461600 pool rent", "have 3979159 lamports spendable"} {
+	for _, part := range []string{"backs 0 of 1", "needs 4271480 lamports", "+ 1461600 pool rent", "have 4271479 lamports spendable"} {
 		if !strings.Contains(err.Error(), part) {
 			t.Errorf("error %q lacks %q", err, part)
 		}
@@ -292,7 +292,7 @@ func TestSolanaRentPoolBelowTargetReportsTheDeposit(t *testing.T) {
 	if sig == "" || n != 2*testTicketRent {
 		t.Fatalf("EnsureDeposit = %q, %d", sig, n)
 	}
-	if !strings.Contains(err.Error(), "still 20100480 lamports short of 10") {
+	if !strings.Contains(err.Error(), "still 22439040 lamports short of 10") {
 		t.Errorf("error %q", err)
 	}
 	if free, err := rentPool(c, s).FreeSlots(t.Context()); err != nil || free != 2 {

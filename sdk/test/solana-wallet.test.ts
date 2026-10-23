@@ -41,7 +41,7 @@ const MINT: string = signVectors.usdc_mint
 const d = new Deployment(PROGRAM_ID, MINT)
 const CONFIG = base64.decode(accountVectors.accounts.find((a: Json) => a.name === 'config_initialized').data_base64)
 
-const TICKET_RENT = (128n + 233n) * 6_960n
+const TICKET_RENT = (128n + 275n) * 6_960n
 const POOL_RENT = (128n + 82n) * 6_960n
 
 const seed = new Uint8Array(32).fill(txVectors.context.keys.payer.seed)

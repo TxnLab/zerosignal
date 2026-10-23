@@ -33,7 +33,6 @@ import {
     TOKEN_FROZEN,
     TOKEN_INITIALIZED,
     TOKEN_UNINITIALIZED,
-    claimHash,
     decodeAckSignature,
     decodeConfig,
     decodeTicket,
@@ -299,22 +298,26 @@ function handleOf(f: Awaited<ReturnType<typeof fixture>>, deliver?: OpenHandle['
 // The ticket account's offsets of the fields a claim is judged on, after the
 // 8-byte discriminator, as Go's test has them.
 const TICKET_STATUS_OFFSET = 9
-const TICKET_PENDING_AMOUNT_OFFSET = 33
-const TICKET_CLAIM_HASH_OFFSET = 185
+const TICKET_PENDING_OFFSET = 33
 
-// Rewrites the fixture's ticket account: status, and a claim of pending whose
-// hash is the receipt's fields with the amount set to pending, as a node
-// claiming pending would write it.
+// Rewrites the fixture's ticket account: status, and a claim of the receipt's
+// fields with the amount set to pending, as a node claiming pending would
+// write it.
 function setTicket(f: Awaited<ReturnType<typeof fixture>>, status: number, pending: bigint, edit?: (c: ClaimFields) => void) {
     const data = TICKET_DATA.slice()
     const fields = { ...solanaClaimFields(ARGS), amount: pending }
     fields.receiptDigest = fields.receiptDigest.slice()
     edit?.(fields)
-    const h = claimHash(fields)
     data[TICKET_STATUS_OFFSET] = status
-    new DataView(data.buffer).setBigUint64(TICKET_PENDING_AMOUNT_OFFSET, pending, true)
-    data.set(h, TICKET_CLAIM_HASH_OFFSET)
-    expect(decodeTicket(data)).toMatchObject({ status, pendingAmount: pending, claimHash: h })
+    const at = TICKET_PENDING_OFFSET
+    const v = new DataView(data.buffer)
+    v.setBigUint64(at, fields.amount, true)
+    data.set(fields.receiptDigest, at + 8)
+    ;[fields.ttftMs, fields.decodeMs, fields.inputUnits, fields.outputUnits].forEach((x, i) => v.setBigUint64(at + 40 + 8 * i, x, true))
+    data[at + 72] = fields.outputUsageType
+    data[at + 73] = fields.auxUsageType
+    v.setBigUint64(at + 74, fields.auxCount, true)
+    expect(decodeTicket(data)).toMatchObject({ status, pending: fields })
     f.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data, executable: false })
 }
 
