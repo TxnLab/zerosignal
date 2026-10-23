@@ -386,7 +386,7 @@ func issue(ctx context.Context, c *HTTPClient, rc requestCase) error {
 	switch rc.Method {
 	case "getAccountInfo":
 		_, err := c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
-		if err == ErrNotFound {
+		if errors.Is(err, ErrNotFound) {
 			return nil
 		}
 		return err

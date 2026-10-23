@@ -110,7 +110,7 @@ func (h *OpenHandle) solanaAckSettle(ctx context.Context, receipt *ticket.UsageR
 // is no ticket either, since only the program can write one at the address.
 func (w *SolanaWallet) readTicket(ctx context.Context, operatorID, nodeID uint64, id [16]byte) (*zsescrow.Ticket, error) {
 	addr := w.deployment.Ticket(w.deployment.Node(operatorID, nodeID), id)
-	acct, err := w.rpc.GetAccountInfo(ctx, addr, rentCommitment)
+	acct, err := getAccount(ctx, w.rpc, addr)
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: read ticket: %w", err)
 	}
@@ -194,14 +194,14 @@ func (w *SolanaWallet) sendAck(ctx context.Context, t *zsescrow.Ticket, operator
 // settle in one lane. The treasury comes from the Config, which set_config can
 // change.
 func (w *SolanaWallet) refundFallback(ctx context.Context, e *zsescrow.Ending) error {
-	acct, err := w.rpc.GetAccountInfo(ctx, w.payerUSDC, rentCommitment)
+	acct, err := getAccount(ctx, w.rpc, w.payerUSDC)
 	if err != nil {
 		return fmt.Errorf("solana wallet: ack: read the payer's token account: %w", err)
 	}
 	if canReceiveRefund(acct, w.deployment.Mint, w.payer) {
 		return nil
 	}
-	cfg, err := w.rpc.GetAccountInfo(ctx, w.deployment.Config(), rentCommitment)
+	cfg, err := getAccount(ctx, w.rpc, w.deployment.Config())
 	if err != nil {
 		return fmt.Errorf("solana wallet: ack: read config: %w", err)
 	}

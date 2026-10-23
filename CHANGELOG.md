@@ -31,6 +31,16 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — Go's Solana wallet reads a missing account as absent (unreleased)
+
+`rpc.HTTPClient.GetAccountInfo` reports an account that does not exist as `rpc.ErrNotFound`,
+and the Go Solana wallet read that as a failed read, where it means no account. Against a real
+RPC a first-time payer's rent pool could never be created, so its first open failed; a ticket
+that had closed read as unreadable; and an ack for a payer with no USDC account failed rather
+than forfeiting the refund to the treasury. Each read now takes `ErrNotFound` as no account,
+as the TS wallet takes `null`. The test clusters answer a missing account with `ErrNotFound`,
+as the real client does.
+
 ### 2026-10-22 — the Solana handle's ack (unreleased)
 
 A Solana ticket's handle now acks a verified receipt, through the same decision as Algorand's
