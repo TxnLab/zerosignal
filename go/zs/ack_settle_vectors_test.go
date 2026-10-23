@@ -72,11 +72,13 @@ type ackSettleScenario struct {
 	// Spec is ok or error.
 	Spec string `json:"spec"`
 	// Group is ok, rejected (the payer's checks refused it), rejected_wrapped
-	// (the same, inside another error) or error (anything else).
+	// (the same, inside another error), no_route (no relay could carry the
+	// ack, so nothing was sent) or error (anything else).
 	Group string `json:"group"`
 	// Claim is the ClaimVerdict the box read returns, or error when it fails.
 	Claim string `json:"claim"`
-	// Standalone, Freeze and Half are ok or error.
+	// Standalone, Freeze and Half are ok, error, or landed: sent, and failed
+	// having paid its fee, as a Solana transaction can.
 	Standalone string `json:"standalone"`
 	Freeze     string `json:"freeze"`
 	Half       string `json:"half"`
@@ -124,6 +126,17 @@ func ackSettleScenarios() []ackSettleScenario {
 		{Name: "a failed group submit then a failed half returns the half's error", Atomic: true, Spec: "ok", Group: "error", Claim: open, Standalone: "ok", Half: "error"},
 		{Name: "no group: an open box is acked standalone", Spec: "ok", Group: "ok", Claim: open, Standalone: "ok"},
 		{Name: "a rejected group then an open box acks standalone", Atomic: true, Spec: "ok", Group: "rejected", Claim: open, Standalone: "ok"},
+
+		// No relay could carry the ack, so the node never saw it: on Solana the
+		// payer acks standalone, blaming no node, as if no slot had come.
+		{Name: "an ack no relay can carry goes standalone, blaming no node", Atomic: true, Spec: "ok", Group: "no_route", Claim: open, Standalone: "ok"},
+		{Name: "an ack no relay can carry, over a claim above the receipt, freezes it", Atomic: true, Spec: "ok", Group: "no_route", Claim: over, Standalone: "ok"},
+		{Name: "an ack no relay can carry, over a contradicting claim, sends nothing", Atomic: true, Spec: "ok", Group: "no_route", Claim: string(ClaimContradicts), Standalone: "ok"},
+
+		// A payer settle that landed and failed reports what it paid.
+		{Name: "a standalone ack that landed and failed reports its id and fee", Spec: "ok", Group: "ok", Claim: open, Standalone: "landed"},
+		{Name: "a freeze that landed and failed reports its id and fee, unfrozen", Spec: "ok", Group: "ok", Claim: over, Standalone: "ok", Freeze: "landed"},
+		{Name: "a half that landed and failed reports its id and fee", Atomic: true, Spec: "ok", Group: "error", Claim: open, Standalone: "ok", Half: "landed"},
 	}
 	// An escrow without resolveFrozen keeps a frozen ticket's escrow for good,
 	// so the ack sends no freeze, and no payer half after a failed group
@@ -153,26 +166,39 @@ func ackSettleScenarios() []ackSettleScenario {
 
 func runAckSettleScenario(sc ackSettleScenario) ackSettleWant {
 	w := ackSettleWant{Calls: []string{}}
-	res, err := ackSettle(sc.Atomic, ackSettleDeps{
-		spec: func() (escrow.SettleGroupSpec, error) {
+	// A step scripted "landed" sent its transaction, which failed having paid
+	// its fee.
+	step := func(script string, sent ackSubmission, fail error) (ackSubmission, error) {
+		switch script {
+		case "error":
+			return ackSubmission{}, fail
+		case "landed":
+			return sent, fail
+		}
+		return sent, nil
+	}
+	res, err := ackSettle(sc.Atomic, ackSettleDeps[struct{}]{
+		spec: func() (struct{}, error) {
 			w.Calls = append(w.Calls, "spec")
 			if sc.Spec == "error" {
-				return escrow.SettleGroupSpec{}, errors.New("spec")
+				return struct{}{}, errors.New("spec")
 			}
-			return escrow.SettleGroupSpec{}, nil
+			return struct{}{}, nil
 		},
-		submitGroup: func(escrow.SettleGroupSpec) (escrow.CallResult, error) {
+		submitGroup: func(struct{}) (ackSubmission, error) {
 			w.Calls = append(w.Calls, "group")
 			rejection := &escrow.SettleGroupRejectedError{Field: "payer.rekeyTo", Detail: "scripted"}
 			switch sc.Group {
 			case "rejected":
-				return escrow.CallResult{}, rejection
+				return ackSubmission{}, rejection
 			case "rejected_wrapped":
-				return escrow.CallResult{}, fmt.Errorf("submit: %w", rejection)
+				return ackSubmission{}, fmt.Errorf("submit: %w", rejection)
+			case "no_route":
+				return ackSubmission{}, fmt.Errorf("deliver: %w", errNoSettleAckRoute)
 			case "error":
-				return escrow.CallResult{}, errGroupSubmit
+				return ackSubmission{}, errGroupSubmit
 			}
-			return escrow.CallResult{TxID: ackGroupTxID}, nil
+			return ackSubmission{TxID: ackGroupTxID}, nil
 		},
 		claim: func() (ClaimVerdict, error) {
 			w.Calls = append(w.Calls, "claim")
@@ -181,26 +207,17 @@ func runAckSettleScenario(sc ackSettleScenario) ackSettleWant {
 			}
 			return ClaimVerdict(sc.Claim), nil
 		},
-		standalone: func() (escrow.CallResult, error) {
+		standalone: func() (ackSubmission, error) {
 			w.Calls = append(w.Calls, "standalone")
-			if sc.Standalone == "error" {
-				return escrow.CallResult{}, errStandaloneSubmit
-			}
-			return escrow.CallResult{TxID: ackStandaloneTxID, PayerFeeMicroalgos: ackStandaloneFee}, nil
+			return step(sc.Standalone, ackSubmission{TxID: ackStandaloneTxID, Fee: ackStandaloneFee}, errStandaloneSubmit)
 		},
-		freeze: func() (escrow.CallResult, error) {
+		freeze: func() (ackSubmission, error) {
 			w.Calls = append(w.Calls, "freeze")
-			if sc.Freeze == "error" {
-				return escrow.CallResult{}, errFreezeSubmit
-			}
-			return escrow.CallResult{TxID: ackFreezeTxID, PayerFeeMicroalgos: ackFreezeFee}, nil
+			return step(sc.Freeze, ackSubmission{TxID: ackFreezeTxID, Fee: ackFreezeFee}, errFreezeSubmit)
 		},
-		half: func() (escrow.CallResult, error) {
+		half: func() (ackSubmission, error) {
 			w.Calls = append(w.Calls, "half")
-			if sc.Half == "error" {
-				return escrow.CallResult{}, errHalfSubmit
-			}
-			return escrow.CallResult{TxID: ackHalfTxID, PayerFeeMicroalgos: ackHalfFee}, nil
+			return step(sc.Half, ackSubmission{TxID: ackHalfTxID, Fee: ackHalfFee}, errHalfSubmit)
 		},
 		freezes: sc.ResolvesFrozen,
 		log:     slog.New(slog.NewTextHandler(io.Discard, nil)),

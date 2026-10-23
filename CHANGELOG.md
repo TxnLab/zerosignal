@@ -31,6 +31,29 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the Solana handle's ack (unreleased)
+
+A Solana ticket's handle now acks a verified receipt, through the same decision as Algorand's
+(`ackSettle` ↔ `ackSettle`, generalized over what the settle slot decodes to).
+
+- **With the node's `open_seq`** the payer hands the node its ack over the sealed settle-ack
+  route: its signature over the receipt's ack digest as `payment_settle`, binding the Config's
+  genesis hash. The node submits its settle and pays for it.
+- **With no slot, or no relay to carry the ack** (`errNoSettleAckRoute` ↔
+  `NoSettleAckRouteError`), the payer sends its own `ack` transaction over the ticket account it
+  read, as Algorand's standalone settle, and pays its 5,000-lamport fee. As on Algorand, a claim
+  above the receipt is acked to freeze it, and one that contradicts the receipt without taking
+  more is not acked. On Algorand no route still broadcasts the node's group.
+- **After a failed delivery** the payer reads the ticket on a fresh budget and sends its ack
+  only over a claim above the receipt or an open ticket, as on Algorand; the Solana program
+  always has `resolve_frozen`.
+- **A payer settle that was sent and failed** reports its transaction id and the fee it paid
+  (`AckResult.TxID` / `FeeMicroalgos` ↔ `txid` / `feeMicroalgos`, and the turn's
+  `Settlement`), since a Solana transaction that lands and fails pays its fee. An Algorand
+  settle that fails has sent nothing, so its report is unchanged. TS: a port that sent its
+  transaction throws `SentSettleError` (`SolanaAckSendError` is one), carrying the submission.
+- `SolanaWalletConfig.Logger` ↔ `SolanaWalletOptions.log`.
+
 ### 2026-10-22 — the payer's own ack on Solana (unreleased)
 
 The Solana wallet can send the payer's half of a settle itself, the Solana form of

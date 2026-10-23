@@ -209,8 +209,9 @@ export interface OpenHandle {
      * (takesSettleAck); absent keeps the broadcast. The sealed run sets it,
      * since it owns the transport the request took. It rejects with
      * NoSettleAckRouteError when it sent nothing, which ackSettle answers by
-     * broadcasting; any other rejection may have reached the node, so nothing
-     * is broadcast after it. A host's own handle may ignore it and broadcast.
+     * broadcasting, or on Solana by acking standalone; any other rejection may
+     * have reached the node, so nothing is broadcast after it. A host's own
+     * handle may ignore it and broadcast.
      */
     deliverAck?: (ack: SettleAck, signal?: AbortSignal) => Promise<void>
     /**

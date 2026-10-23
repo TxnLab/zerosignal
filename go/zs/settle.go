@@ -25,7 +25,9 @@ const (
 	// also reports SettleNone, with an error.
 	SettleNone SettleKind = ""
 	// SettleAtomic: the node's pre-signed group with the payer's half, which
-	// finishes the ticket once it lands.
+	// finishes the ticket once it lands. On Solana it is the node's settle
+	// carrying the payer's ack, which the node submits: the payer knows no
+	// TxID for it.
 	SettleAtomic SettleKind = "atomic"
 	// SettlePayerAck: the payer's half alone, posted when the node sent no
 	// group or one that failed verification. The ticket finishes when the

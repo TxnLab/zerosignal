@@ -2510,7 +2510,8 @@ func (s *Client) recheckDepositOnRefusedOpen(next nonStreamResponder) nonStreamR
 // the ack would tie the payer's IP to the node the relay hid it from.
 //
 // Only relays that forward the path can carry it. With none, the poster
-// reports errNoSettleAckRoute and the ack is broadcast as before 9.12. Any
+// reports errNoSettleAckRoute and the ack is broadcast as before 9.12, or on
+// Solana the payer sends its own ack transaction. Any
 // other failure is final: the node's settlement driver claims the ticket on
 // its own, and broadcasting after a send that may have arrived would only race
 // it.
@@ -4168,8 +4169,12 @@ func (s *Client) checkReceipt(
 					slog.String("ticket_id", ticket.TicketID),
 					slog.Bool("atomic", atomic),
 					slog.Bool("group_rejected", groupRejected),
+					slog.String("txid", txid),
+					slog.Uint64("network_fee", fee),
 					slog.Any("err", err))
-				return Settlement{Kind: kind}, err
+				// A settle sent and failed names its transaction, and on Solana
+				// may have paid its fee.
+				return s.settlement(kind, txid, fee), err
 			default:
 				// Info when the payer paid a fee: the non-streaming usage
 				// headers were written before this submit and cannot report it.

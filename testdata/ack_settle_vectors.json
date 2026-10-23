@@ -699,6 +699,157 @@
       }
     },
     {
+      "name": "an ack no relay can carry goes standalone, blaming no node",
+      "atomic": true,
+      "spec": "ok",
+      "group": "no_route",
+      "claim": "open",
+      "standalone": "ok",
+      "freeze": "ok",
+      "half": "ok",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "spec",
+          "group",
+          "claim",
+          "standalone"
+        ],
+        "txid": "STANDALONETX",
+        "fee_microalgos": 5000,
+        "group_rejected": false,
+        "claim": "open",
+        "payer_settle": true,
+        "frozen": false,
+        "result": "ok"
+      }
+    },
+    {
+      "name": "an ack no relay can carry, over a claim above the receipt, freezes it",
+      "atomic": true,
+      "spec": "ok",
+      "group": "no_route",
+      "claim": "overclaims",
+      "standalone": "ok",
+      "freeze": "ok",
+      "half": "ok",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "spec",
+          "group",
+          "claim",
+          "freeze"
+        ],
+        "txid": "FREEZETX",
+        "fee_microalgos": 1000,
+        "group_rejected": false,
+        "claim": "overclaims",
+        "payer_settle": true,
+        "frozen": true,
+        "result": "ok"
+      }
+    },
+    {
+      "name": "an ack no relay can carry, over a contradicting claim, sends nothing",
+      "atomic": true,
+      "spec": "ok",
+      "group": "no_route",
+      "claim": "contradicts",
+      "standalone": "ok",
+      "freeze": "ok",
+      "half": "ok",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "spec",
+          "group",
+          "claim"
+        ],
+        "txid": "",
+        "fee_microalgos": 0,
+        "group_rejected": false,
+        "claim": "contradicts",
+        "payer_settle": false,
+        "frozen": false,
+        "result": "ok"
+      }
+    },
+    {
+      "name": "a standalone ack that landed and failed reports its id and fee",
+      "atomic": false,
+      "spec": "ok",
+      "group": "ok",
+      "claim": "open",
+      "standalone": "landed",
+      "freeze": "ok",
+      "half": "ok",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "claim",
+          "standalone"
+        ],
+        "txid": "STANDALONETX",
+        "fee_microalgos": 5000,
+        "group_rejected": false,
+        "claim": "open",
+        "payer_settle": true,
+        "frozen": false,
+        "result": "standalone"
+      }
+    },
+    {
+      "name": "a freeze that landed and failed reports its id and fee, unfrozen",
+      "atomic": false,
+      "spec": "ok",
+      "group": "ok",
+      "claim": "overclaims",
+      "standalone": "ok",
+      "freeze": "landed",
+      "half": "ok",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "claim",
+          "freeze"
+        ],
+        "txid": "FREEZETX",
+        "fee_microalgos": 1000,
+        "group_rejected": false,
+        "claim": "overclaims",
+        "payer_settle": true,
+        "frozen": false,
+        "result": "freeze"
+      }
+    },
+    {
+      "name": "a half that landed and failed reports its id and fee",
+      "atomic": true,
+      "spec": "ok",
+      "group": "error",
+      "claim": "open",
+      "standalone": "ok",
+      "freeze": "ok",
+      "half": "landed",
+      "resolves_frozen": true,
+      "want": {
+        "calls": [
+          "spec",
+          "group",
+          "claim",
+          "half"
+        ],
+        "txid": "HALFTX",
+        "fee_microalgos": 1000,
+        "group_rejected": false,
+        "claim": "open",
+        "payer_settle": true,
+        "frozen": false,
+        "result": "half"
+      }
+    },
+    {
       "name": "no resolveFrozen: no group, a claim above the receipt is not acked",
       "atomic": false,
       "spec": "ok",

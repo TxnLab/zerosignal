@@ -44,6 +44,9 @@ func (c *walletCluster) GetAccountInfo(ctx context.Context, k solana.PublicKey, 
 	if cm != rpc.Confirmed {
 		panic("read of " + k.String() + " at " + string(cm))
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	c.accountReads = append(c.accountReads, k)
 	a, ok := c.accounts[k]
@@ -435,15 +438,12 @@ var (
 	_ DepositRechecker = (*SolanaWallet)(nil)
 )
 
-// A Solana handle settles nothing yet, and says so.
-func TestSolanaHandle_HasNoSettlePath(t *testing.T) {
+// A Solana handle acks but has no other settle path yet, and says so.
+func TestSolanaHandle_HasNoOtherSettlePath(t *testing.T) {
 	f := newSolanaOpenFixture(t, 1_000_000_000, 3)
 	h, err := f.open(t)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err := h.AckSettle(t.Context(), &ticket.UsageReceipt{}, ""); err == nil || !strings.Contains(err.Error(), "on Solana is not supported yet") {
-		t.Fatalf("AckSettle: err = %v", err)
 	}
 	const want = "on Solana is not supported yet"
 	r := &ticket.UsageReceipt{}

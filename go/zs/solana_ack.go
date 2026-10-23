@@ -14,6 +14,8 @@ import (
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
+	"github.com/TxnLab/zerosignal/go/wire"
 )
 
 // solanaAck is the payer's own ack transaction once sent.
@@ -26,6 +28,81 @@ type solanaAck struct {
 	// code tells a deadline the ack lost to apart from a refund it couldn't
 	// route.
 	TxErr json.RawMessage
+}
+
+// solanaAckSettle is AckSettle on a Solana ticket, through Algorand's decision
+// (ackSettle). slot is the node's open_seq, or "" for none. The node's half is
+// its settle_cooperative, which only it can submit, so the payer hands it the
+// ack: its signature over the receipt's ack digest, as payment_settle. With no
+// slot, or no relay to carry the ack, the payer sends its own ack transaction
+// instead, as Algorand's standalone settle: over the node's claim it settles
+// the ticket or freezes it, and on an open ticket it is the payer's first
+// half. The ticket account read for the claim is the one that ack names.
+func (h *OpenHandle) solanaAckSettle(ctx context.Context, receipt *ticket.UsageReceipt, slot string) (AckResult, error) {
+	w := h.solana
+	raw, err := decodeTicketID(h.TicketID)
+	if err != nil {
+		return AckResult{}, fmt.Errorf("wallet: ack-settle: decode ticket id: %w", err)
+	}
+	id := [16]byte(raw)
+	opID, nodeID := h.Operator.ID, h.Operator.NodeID
+	a := settleArgsOf(receipt)
+	// As on Algorand: what follows a failed delivery runs on a budget of its
+	// own.
+	followCtx, cancelFollow := ctx, context.CancelFunc(func() {})
+	defer func() { cancelFollow() }()
+	var (
+		tk     *zsescrow.Ticket
+		readOK bool
+	)
+	read := func() (ClaimVerdict, error) {
+		var err error
+		if tk, err = w.readTicket(followCtx, opID, nodeID, id); err != nil {
+			return ClaimUnreadable, err
+		}
+		readOK = true
+		return judgeSolanaClaim(a, tk), nil
+	}
+	ack := func() (ackSubmission, error) {
+		// An unreadable claim is acked anyway, as on Algorand, which needs the
+		// account it couldn't read.
+		if !readOK {
+			if _, err := read(); err != nil {
+				return ackSubmission{}, err
+			}
+		}
+		r, err := w.sendAck(followCtx, tk, opID, nodeID, id, a)
+		return ackSubmission{TxID: r.Sig, Fee: r.FeeLamports}, err
+	}
+	return ackSettle(slot != "", ackSettleDeps[uint64]{
+		// The caller checked that it parses (checkSettleSlot).
+		spec: func() (uint64, error) { return zsescrow.ParseOpenSeq(slot) },
+		submitGroup: func(openSeq uint64) (_ ackSubmission, err error) {
+			// With no route nothing was sent, so the standalone ack keeps the
+			// caller's budget, as with no slot.
+			defer func() {
+				if err != nil && !errors.Is(err, errNoSettleAckRoute) {
+					followCtx, cancelFollow = followUpCtx(ctx)
+				}
+			}()
+			if h.deliverAck == nil {
+				return ackSubmission{}, errNoSettleAckRoute
+			}
+			sig, err := zsescrow.SignReceiptAck(ctx, w.signer, w.payer, w.deployment, w.genesis, opID, nodeID, id, openSeq, receipt)
+			if err != nil {
+				return ackSubmission{}, err
+			}
+			// The node submits its settle with the ack and pays its fee.
+			return ackSubmission{}, h.deliverAck(ctx, wire.SettleAck{TicketID: h.TicketID, SettleGroup: sig})
+		},
+		claim:      read,
+		standalone: ack,
+		freeze:     ack,
+		half:       ack,
+		// The program always has resolve_frozen.
+		freezes: true,
+		log:     w.logger().With("operator_id", opID, "node_id", nodeID),
+	})
 }
 
 // readTicket reads the ticket account for id at the node, nil when there is

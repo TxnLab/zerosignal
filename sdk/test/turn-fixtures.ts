@@ -127,7 +127,9 @@ export function handleOf(s: Scripted = {}) {
         async ackSettle(r: UsageReceipt, g: string | null, signal?: AbortSignal): Promise<AckSettleResult> {
             acks.push([r, g, signal])
             if (s.throws !== undefined) throw s.throws
-            const res: AckSettleResult = { txid: s.err ? '' : (s.txid ?? ''), feeMicroalgos: s.err ? 0 : (s.fee ?? 0), groupRejected: s.groupRejected ?? false }
+            // A failed ack still reports what it sent and paid, as a Solana
+            // ack that landed and failed does.
+            const res: AckSettleResult = { txid: s.txid ?? '', feeMicroalgos: s.fee ?? 0, groupRejected: s.groupRejected ?? false }
             if (s.err) res.err = s.err
             if (s.claim !== undefined) res.claim = s.claim
             if (s.payerSettle !== undefined) res.payerSettle = s.payerSettle

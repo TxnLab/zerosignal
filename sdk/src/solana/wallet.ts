@@ -23,17 +23,20 @@ import {
     decodeTicket,
     decodeTokenAccount,
     encodeOpenPayment,
+    parseOpenSeq,
+    signReceiptAck,
 } from '@txnlab/zs-proto/solana/zsescrow'
-import type { Ticket } from '@txnlab/zs-proto/ticket'
+import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { RAIL_NEUTRAL_NAMES_MIN_VERSION, usesRailNeutralNames } from '@txnlab/zs-proto/wire'
 
+import { type AckSettleResult, NoSettleAckRouteError, SentSettleError, type SettleSubmission, ackSettle, settleArgsOf } from '../ack.js'
 import { MbrDepositUnaffordableError } from '../mbr.js'
 import type { Operator } from '../operator.js'
 import type { OpenHandle, WalletOpener } from '../parts.js'
-import type { SolanaSigner } from '../ports.js'
-import type { SettleArgs } from '../reconcile.js'
+import { type Logger, type SolanaSigner, discardLogger } from '../ports.js'
+import { type ClaimVerdict, type SettleArgs, judgeSolanaClaim } from '../reconcile.js'
 import { untilAborted } from '../sleep.js'
-import { decodeTicketId, slotCount } from '../wallet.js'
+import { decodeTicketId, followUpSignal, slotCount } from '../wallet.js'
 import { solanaClaimFields } from './claim.js'
 import { type ConfirmOptions, confirmSignature } from './confirm.js'
 import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE, SolanaRentPool } from './rent.js'
@@ -60,6 +63,8 @@ export interface SolanaWalletOptions {
     confirm?: Omit<ConfirmOptions, 'signal'> | undefined
     /** Milliseconds since the epoch; Date.now by default. */
     clock?: () => number
+    /** Receives the wallet's warnings; absent discards them. */
+    log?: Logger
 }
 
 /**
@@ -73,9 +78,12 @@ export class SolanaWallet implements WalletOpener {
     readonly #signer: SolanaSigner
     readonly #payerUsdc: PublicKey
     readonly #decimals: number
+    /** The Config's genesis hash, which the ack digest binds. The program fixes it at initialize. */
+    readonly #genesis: string
     readonly #pool: SolanaRentPool
     readonly #slots: bigint
     readonly #clock: () => number
+    readonly #log: Logger
     #depositReady = false
     #depositLock: Promise<unknown> = Promise.resolve()
     /**
@@ -87,16 +95,18 @@ export class SolanaWallet implements WalletOpener {
      */
     readonly #signed = new Map<string, number>()
 
-    private constructor(o: SolanaWalletOptions, decimals: number) {
+    private constructor(o: SolanaWalletOptions, decimals: number, genesis: string) {
         this.#rpc = o.rpc
         this.#confirm = o.confirm
         this.#deployment = o.deployment
         this.#signer = o.signer
         this.#payerUsdc = o.deployment.tokenAccount(o.signer.address)
         this.#decimals = decimals
+        this.#genesis = genesis
         this.#pool = new SolanaRentPool({ rpc: o.rpc, deployment: o.deployment, signer: o.signer, confirm: o.confirm })
         this.#slots = slotCount(o.depositSlots)
         this.#clock = o.clock ?? Date.now
+        this.#log = o.log ?? discardLogger
     }
 
     /**
@@ -129,7 +139,7 @@ export class SolanaWallet implements WalletOpener {
         if (config.usdcMint !== o.deployment.mint) {
             throw new Error(`solana wallet: the Config's mint is ${config.usdcMint}, not the deployment's ${o.deployment.mint}`)
         }
-        return new SolanaWallet(o, config.usdcDecimals)
+        return new SolanaWallet(o, config.usdcDecimals, config.genesisHash)
     }
 
     payerAddr(): string {
@@ -216,7 +226,7 @@ export class SolanaWallet implements WalletOpener {
         } catch (err) {
             throw new Error(`wallet: complete open offer: ${message(err)}`, { cause: err })
         }
-        return solanaHandle({
+        return this.handleFor({
             appCallTxId: payment.paymentRef,
             groupId: '',
             ticketId: ticket.ticket_id,
@@ -380,6 +390,93 @@ export class SolanaWallet implements WalletOpener {
     }
 
     /**
+     * @internal A Solana open's handle, which openForNode returns and a test
+     * builds for a ticket it holds. It acks as Go's solanaAckSettle does; its
+     * other settle paths aren't built yet, and each fails as Go's does on a
+     * handle with no Algorand wallet.
+     */
+    handleFor(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'freezeOverclaim' | 'refundInactive' | 'settleLapsed'>): OpenHandle {
+        const unsupported = (what: string) => new Error(`wallet: ${what} on Solana is not supported yet`)
+        const h: OpenHandle = {
+            ...fields,
+            ackSettle: (receipt, settleGroup, signal) => this.#ackSettle(h, receipt, settleGroup ?? '', signal),
+            protest: () => Promise.reject(unsupported('protest')),
+            freezeOverclaim: () => Promise.resolve({ claim: 'unreadable', err: unsupported('freeze') }),
+            refundInactive: () => Promise.reject(unsupported('refund-inactive')),
+            settleLapsed: () => Promise.reject(unsupported('settle-lapsed')),
+        }
+        return h
+    }
+
+    /**
+     * The handle's ackSettle, through Algorand's decision (ackSettle). slot is
+     * the node's open_seq, or '' for none. The node's half is its
+     * settle_cooperative, which only it can submit, so the payer hands it the
+     * ack: its signature over the receipt's ack digest, as payment_settle.
+     * With no slot, or no relay to carry the ack, the payer sends its own ack
+     * transaction instead, as Algorand's standalone settle: over the node's
+     * claim it settles the ticket or freezes it, and on an open ticket it is
+     * the payer's first half. The ticket account read for the claim is the one
+     * that ack names. Go's solanaAckSettle.
+     */
+    async #ackSettle(h: OpenHandle, receipt: UsageReceipt, slot: string, signal: AbortSignal | undefined): Promise<AckSettleResult> {
+        // It never rejects, as the handle's ackSettle promises.
+        let ticketId: Uint8Array, opId: bigint, nodeId: bigint, a: SettleArgs
+        try {
+            ticketId = decodeTicketId(h.ticketId)
+            opId = BigInt(h.operator.id)
+            nodeId = BigInt(h.operator.nodeId)
+            a = settleArgsOf(receipt)
+        } catch (err) {
+            return { txid: '', feeMicroalgos: 0, groupRejected: false, err: new Error(`wallet: ack-settle: ${message(err)}`, { cause: err }) }
+        }
+        // As on Algorand: what follows a failed delivery runs on a budget of
+        // its own.
+        let follow = signal
+        let t: TicketAccount | null = null
+        let readOk = false
+        const read = async (): Promise<ClaimVerdict> => {
+            t = await this.readTicket(opId, nodeId, ticketId, follow)
+            readOk = true
+            return judgeSolanaClaim(a, t)
+        }
+        const ack = async (): Promise<SettleSubmission> => {
+            // An unreadable claim is acked anyway, as on Algorand, which needs
+            // the account it couldn't read.
+            if (!readOk) await read()
+            const r = await this.sendAck(t, opId, nodeId, ticketId, a, follow)
+            return { txid: r.signature, payerFeeMicroalgos: r.feeLamports }
+        }
+        return ackSettle<bigint>({
+            atomic: slot !== '',
+            log: this.#log,
+            // The caller checked that it parses (checkSettleSlot).
+            spec: async () => parseOpenSeq(slot),
+            submitGroup: async (openSeq) => {
+                try {
+                    const deliver = h.deliverAck
+                    if (!deliver) throw new NoSettleAckRouteError()
+                    const sig = await signReceiptAck(this.#signer, this.#signer.address, this.#deployment, this.#genesis, opId, nodeId, ticketId, openSeq, receipt)
+                    // The node submits its settle with the ack and pays its fee.
+                    await deliver({ ticket_id: h.ticketId, settle_group: sig }, signal)
+                    return { txid: '', payerFeeMicroalgos: 0n }
+                } catch (err) {
+                    // With no route nothing was sent, so the standalone ack
+                    // keeps the caller's budget, as with no slot.
+                    if (!(err instanceof NoSettleAckRouteError)) follow = followUpSignal(signal)
+                    throw err
+                }
+            },
+            claim: read,
+            standalone: ack,
+            freeze: ack,
+            half: ack,
+            // The program always has resolve_frozen.
+            resolvesFrozen: async () => true,
+        })
+    }
+
+    /**
      * Clears the ready latch, so the next open reads the pool again: a node
      * refused an open the wallet signed, perhaps for a pool emptied outside
      * this wallet. Go's RecheckDeposit, except that Go waits for a funding
@@ -406,7 +503,7 @@ export interface SolanaAck {
  * TransactionExpiredError it may still land, so the signature lets the caller
  * look before it sends another.
  */
-export class SolanaAckSendError extends Error {
+export class SolanaAckSendError extends SentSettleError {
     override readonly name = 'SolanaAckSendError'
 
     constructor(
@@ -416,7 +513,7 @@ export class SolanaAckSendError extends Error {
         msg: string,
         cause?: unknown,
     ) {
-        super(msg, cause === undefined ? undefined : { cause })
+        super({ txid: signature, payerFeeMicroalgos: feeLamports }, msg, cause)
     }
 }
 
@@ -433,20 +530,6 @@ export function canReceiveRefund(acct: { owner: PublicKey; data: Uint8Array } | 
 
 function railNeutralNamesError(op: Pick<Operator, 'protoVersion'>): Error {
     return new Error(`wallet: open: node runs protocol ${JSON.stringify(op.protoVersion ?? '')}; a Solana open needs ${RAIL_NEUTRAL_NAMES_MIN_VERSION} or later`)
-}
-
-// A Solana open's handle, whose settle paths aren't built yet. Each fails as
-// Go's does on a handle with no Algorand wallet.
-function solanaHandle(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'freezeOverclaim' | 'refundInactive' | 'settleLapsed'>): OpenHandle {
-    const unsupported = (what: string) => new Error(`wallet: ${what} on Solana is not supported yet`)
-    return {
-        ...fields,
-        ackSettle: () => Promise.resolve({ txid: '', feeMicroalgos: 0, groupRejected: false, err: unsupported('ack-settle') }),
-        protest: () => Promise.reject(unsupported('protest')),
-        freezeOverclaim: () => Promise.resolve({ claim: 'unreadable', err: unsupported('freeze') }),
-        refundInactive: () => Promise.reject(unsupported('refund-inactive')),
-        settleLapsed: () => Promise.reject(unsupported('settle-lapsed')),
-    }
 }
 
 function message(err: unknown): string {

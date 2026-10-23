@@ -117,7 +117,9 @@ describe('checkTurnReceipt', () => {
         ['atomic', { txid: 'GROUPTX' }, true, VALID_GROUP, { kind: 'atomic', txId: 'GROUPTX', feesMicroAlgos: 0, networkFees: 0 }, undefined, false, true],
         ['payer ack without a group', { txid: 'ACKTX', fee: 1000 }, true, null, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000, networkFees: 1000 }, undefined, true, false],
         ['payer ack after a rejected group', { txid: 'ACKTX', fee: 1000, groupRejected: true }, true, VALID_GROUP, { kind: 'payer_ack', txId: 'ACKTX', feesMicroAlgos: 1000, networkFees: 1000 }, undefined, true, false],
-        ['failed ack', { txid: 'IGNORED', fee: 7, err: ackErr }, true, VALID_GROUP, { kind: 'atomic', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],
+        // A failed ack reports what it sent and paid: a Solana ack that
+        // landed and failed paid its fee.
+        ['failed ack', { txid: 'SENTTX', fee: 7, err: ackErr }, true, VALID_GROUP, { kind: 'atomic', txId: 'SENTTX', feesMicroAlgos: 7, networkFees: 7 }, ackErr, true, false],
         // The payer signs the protest, so its fee is the payer's.
         ['protest', { txid: 'PROTESTTX', fee: 3000 }, false, null, { kind: 'protest', txId: 'PROTESTTX', feesMicroAlgos: 3000, networkFees: 3000, frozen: true }, undefined, false, false],
         ['failed protest', { txid: 'IGNORED', err: ackErr }, false, null, { kind: 'protest', txId: '', feesMicroAlgos: 0, networkFees: 0 }, ackErr, true, false],

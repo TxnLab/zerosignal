@@ -30,6 +30,7 @@ type solanaAckFixture struct {
 	ticketID           [16]byte
 	ticketAddr         solana.PublicKey
 	ticketAcct         *rpc.Account
+	receipt            *ticket.UsageReceipt
 	args               SettleArgs
 	// wire is the transaction as the program's payer sent it.
 	wire []byte
@@ -70,7 +71,7 @@ func newSolanaAckFixture(t *testing.T) *solanaAckFixture {
 		if err := json.Unmarshal(x.Receipt, &r); err != nil {
 			t.Fatal(err)
 		}
-		f.args = settleArgsOf(&r)
+		f.receipt, f.args = &r, settleArgsOf(&r)
 		id, err := base64.StdEncoding.DecodeString(r.TicketID)
 		if err != nil || len(id) != 16 {
 			t.Fatalf("ticket id %q", r.TicketID)

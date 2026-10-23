@@ -243,8 +243,9 @@ const SETTLE_ACK_REPLY_LIMIT = 4 << 10
  * relay hid it from.
  *
  * Only relays that forward the path can carry it. With none, the poster
- * rejects with NoSettleAckRouteError and the ack is broadcast as before 9.12.
- * Any other failure is final: the node's settlement driver claims the ticket
+ * rejects with NoSettleAckRouteError and the ack is broadcast as before 9.12,
+ * or on Solana the payer sends its own ack transaction. Any other failure is
+ * final: the node's settlement driver claims the ticket
  * on its own, and broadcasting after a send that may have arrived would only
  * race it.
  */
