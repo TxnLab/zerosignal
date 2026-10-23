@@ -100,7 +100,7 @@ func SolanaAddress(priv ed25519.PrivateKey) (string, error) {
 // providers hold, each derived at m/44'/501'/0'/0', keyed by base58 address.
 // A 25-word Algorand mnemonic has no Solana derivation any wallet shares, so
 // it is skipped rather than loaded as a key nobody else could recover, as New
-// skips a phrase only Solana takes.
+// skips a phrase only Solana takes, unless it is all NewSolanaKeys was given.
 type SolanaKeys struct {
 	keys map[string]ed25519.PrivateKey
 }
@@ -109,6 +109,7 @@ type SolanaKeys struct {
 // fails to decode fails the load, as in New.
 func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKeys, error) {
 	ks := &SolanaKeys{keys: map[string]ed25519.PrivateKey{}}
+	skippedName := ""
 	for i, p := range providers {
 		if p == nil {
 			continue
@@ -119,7 +120,13 @@ func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKey
 		}
 		for _, e := range entries {
 			n := len(strings.Fields(e.Mnemonic))
-			if n == 0 || n == 25 {
+			if n == 0 {
+				continue
+			}
+			if n == 25 {
+				if skippedName == "" {
+					skippedName = e.Name
+				}
 				continue
 			}
 			priv, err := SolanaKeyFromPhrase(e.Mnemonic)
@@ -137,6 +144,12 @@ func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKey
 			ks.keys[addr] = priv
 			slog.InfoContext(ctx, "keystore: Solana address loaded", slog.String("address", addr), slog.String("name", e.Name))
 		}
+	}
+	// Algorand mnemonics and nothing else, as New refuses Solana phrases and
+	// nothing else: the startup error names the phrase instead of a later "no
+	// key loaded".
+	if len(ks.keys) == 0 && skippedName != "" {
+		return nil, fmt.Errorf("keystore: mnemonic %q: a 25-word Algorand mnemonic has no Solana key; want a BIP-39 phrase of 12 to 24 words", skippedName)
 	}
 	return ks, nil
 }

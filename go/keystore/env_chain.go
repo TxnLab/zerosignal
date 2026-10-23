@@ -48,3 +48,11 @@ func LoadFromEnv(parent context.Context) (*KeyStore, error) {
 	defer cancel()
 	return New(ctx, ProvidersFromEnv()...)
 }
+
+// LoadSolanaFromEnv is LoadFromEnv for the Solana rail: the same providers
+// and timeout, each phrase derived by NewSolanaKeys.
+func LoadSolanaFromEnv(parent context.Context) (*SolanaKeys, error) {
+	ctx, cancel := context.WithTimeout(parent, LoadTimeout)
+	defer cancel()
+	return NewSolanaKeys(ctx, ProvidersFromEnv()...)
+}

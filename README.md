@@ -99,7 +99,7 @@ The canonical implementation; it generates every golden vector.
 | `algod` | Thin `Client` interface over the algod SDK, plus per-network presets (escrow app id, endpoints). |
 | `algo` | Adapts a keystore entry into a `TransactionSigner` for `AtomicTransactionComposer` groups. |
 | `keystore` | Signing-mnemonic loader: `<NAME>_MNEMONIC` env vars + `ZS_MNEMONIC_URLS` cloud-secret URLs (AWS/GCP/Azure). See [`go/keystore/README.md`](./go/keystore/README.md). |
-| `wallet` | A payer's local wallet: generate or import a recovery phrase, held in the OS keychain or a passphrase-encrypted file, shared by every zerosignal program on the machine. Feeds `keystore` through `Wallet.Provider`; `LoadPayer` loads it with the environment's keys and picks a `zs.Signer`. |
+| `wallet` | A payer's local wallet: generate or import a recovery phrase, held in the OS keychain or a passphrase-encrypted file, shared by every zerosignal program on the machine. Feeds `keystore` through `Wallet.Provider`; `LoadPayer` loads it with the environment's keys and picks a `zs.Signer`, and `LoadSolanaPayer` a `zs.SolanaSigner`. |
 | `httpx` | A tuned, shared `http.Transport` for node↔node and payer↔node calls, with a private-address dial guard. |
 | `gcplog` | `slog` attribute names for Google Cloud Logging. |
 | `zs` | The Go payer SDK: operator discovery, routing, reserve, escrow `open` / settle / refund, receipts, and `Diagnose`, the read-only doctor. Used by `zs-proxy`, the TUI's `-direct` mode, and `cmd/zschat`. |

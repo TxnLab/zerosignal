@@ -331,6 +331,29 @@ func TestLoadFromEnv_EnvOnly(t *testing.T) {
 	}
 }
 
+// The Solana loader reads the same environment, so a Phantom phrase in a
+// *_MNEMONIC loads beside an Algorand one, each in its own store.
+func TestLoadSolanaFromEnv_EnvOnly(t *testing.T) {
+	algo, algoAddr := freshMnemonic(t)
+	t.Setenv("LOADFROMENV_MNEMONIC", algo)
+	t.Setenv("LOADSOLANA_MNEMONIC", keygen12)
+	t.Setenv(MnemonicURLsEnv, "")
+	ks, err := LoadSolanaFromEnv(context.Background())
+	if err != nil {
+		t.Fatalf("LoadSolanaFromEnv: %v", err)
+	}
+	if !ks.HasAccount(keygen12Addr) || ks.HasAccount(algoAddr) {
+		t.Fatalf("Solana addresses %v", ks.Addresses())
+	}
+	aks, err := LoadFromEnv(context.Background())
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if !aks.HasAccount(algoAddr) || aks.HasAccount(keygen12Addr) {
+		t.Fatalf("Algorand addresses %v", aks.Addresses())
+	}
+}
+
 func TestParseAzureKeyVaultURL(t *testing.T) {
 	vault, name, err := parseAzureKeyVaultURL("azurekeyvault://my-vault/my-secret")
 	if err != nil {
