@@ -123,8 +123,7 @@ func adversarialBodies(t *testing.T) []struct {
 	body []byte
 } {
 	t.Helper()
-	png := smallPNG(t, 1024, 768)
-	flat := base64.StdEncoding.EncodeToString(png)
+	flat := base64.StdEncoding.EncodeToString(gradientPNG(t))
 
 	// MIME-wrapped base64: Go's decoder silently skips newlines, @scure/base
 	// rejects them, so this read true dimensions on one side and the fallback on
@@ -192,20 +191,38 @@ var v1DivergentBodies = map[string]bool{
 	"img_nested_zero_dims": true,
 }
 
-// smallPNG builds a real PNG of the given size (smooth, so it stays small).
-func smallPNG(t *testing.T, w, h int) []byte {
+// gradientPNGPath is a real 1024x768 PNG of gradientAt, smooth so it stays
+// small. It is checked in rather than encoded here because image/png's output
+// is not stable across Go releases (1.27 compresses it differently), and the
+// fixture pins the bytes, so a toolchain upgrade would read as drift.
+const gradientPNGPath = "testdata/gradient_1024x768.png"
+
+func gradientAt(x, y int) color.RGBA { return color.RGBA{uint8(x % 256), uint8(y % 256), 128, 255} }
+
+func gradientPNG(t *testing.T) []byte {
 	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			img.Set(x, y, color.RGBA{uint8(x % 256), uint8(y % 256), 128, 255})
+	b, err := os.ReadFile(gradientPNGPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", gradientPNGPath, err)
+	}
+	return b
+}
+
+func TestGradientPNGIsTheGradient(t *testing.T) {
+	img, err := png.Decode(bytes.NewReader(gradientPNG(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds(); got != image.Rect(0, 0, 1024, 768) {
+		t.Fatalf("bounds %v", got)
+	}
+	for y := range 768 {
+		for x := range 1024 {
+			if got := color.RGBAModel.Convert(img.At(x, y)); got != gradientAt(x, y) {
+				t.Fatalf("pixel (%d,%d) = %v, want %v", x, y, got, gradientAt(x, y))
+			}
 		}
 	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		t.Fatalf("encode png: %v", err)
-	}
-	return buf.Bytes()
 }
 
 // tinyGIFClaiming1x1 is a GIF whose Logical Screen Descriptor says 1x1 while the

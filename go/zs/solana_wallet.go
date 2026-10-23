@@ -26,6 +26,8 @@ import (
 // It never submits the open. The node does, from the sealed request's
 // payment_open, so the wallet needs a node that reads the rail-neutral names.
 type SolanaWallet struct {
+	rpc        rpc.Client
+	confirm    rpc.ConfirmOptions
 	deployment zsescrow.Deployment
 	signer     SolanaSigner
 	payer      solana.PublicKey
@@ -62,7 +64,8 @@ type SolanaWalletConfig struct {
 	Signer     SolanaSigner
 	// DepositSlots is the rent pool's working set; 0 is DefaultDepositSlots.
 	DepositSlots uint64
-	// Confirm tunes the wait for a rent deposit to land; the zero value polls.
+	// Confirm tunes the wait for a rent deposit or an ack to land; the zero
+	// value polls.
 	Confirm rpc.ConfirmOptions
 }
 
@@ -93,6 +96,8 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 		return nil, fmt.Errorf("solana wallet: the Config's mint is %s, not the deployment's %s", c.USDCMint, cfg.Deployment.Mint)
 	}
 	return &SolanaWallet{
+		rpc:        cfg.RPC,
+		confirm:    cfg.Confirm,
 		deployment: cfg.Deployment,
 		signer:     cfg.Signer,
 		payer:      payer,

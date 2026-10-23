@@ -25,23 +25,64 @@ import (
 	"github.com/TxnLab/zerosignal/go/wire"
 )
 
-// walletCluster is rentChain with the deployment's Config, counting the reads
-// of the pool.
+// walletCluster is rentChain with the deployment's Config and whatever other
+// accounts a test puts in accounts, counting the reads of the pool. An ack it
+// is sent lands as ackLand says (nil: confirmed) and moves nothing.
 type walletCluster struct {
 	*rentChain
 	config    *rpc.Account
 	poolReads int
+	// accounts holds each other account by address; a nil value is an
+	// address with no account.
+	accounts     map[solana.PublicKey]*rpc.Account
+	accountReads []solana.PublicKey
+	acks         []*solana.Transaction
+	ackLand      *rpc.SignatureStatus
 }
 
 func (c *walletCluster) GetAccountInfo(ctx context.Context, k solana.PublicKey, cm rpc.Commitment) (*rpc.Account, error) {
-	if k == c.d.Config() {
-		if cm != rpc.Confirmed {
-			panic("config read at " + string(cm))
-		}
+	if cm != rpc.Confirmed {
+		panic("read of " + k.String() + " at " + string(cm))
+	}
+	c.mu.Lock()
+	c.accountReads = append(c.accountReads, k)
+	a, ok := c.accounts[k]
+	c.mu.Unlock()
+	switch {
+	case k == c.d.Config():
 		return c.config, nil
+	case ok:
+		if a == nil {
+			return nil, nil
+		}
+		cp := *a
+		return &cp, nil
 	}
 	c.poolReads++
 	return c.rentChain.GetAccountInfo(ctx, k, cm)
+}
+
+func (c *walletCluster) SendTransaction(ctx context.Context, raw []byte, o rpc.SendOptions) (solana.Signature, error) {
+	tx, err := solana.ParseTransaction(raw)
+	if err != nil {
+		return solana.Signature{}, err
+	}
+	ackTag := c.d.Ack(zsescrow.Ending{}, zsescrow.ClaimFields{}).Data[:8]
+	if ix := tx.Message.Instructions[0]; !bytes.HasPrefix(ix.Data, ackTag) {
+		return c.rentChain.SendTransaction(ctx, raw, o)
+	}
+	if err := tx.VerifySignatures(); err != nil {
+		return solana.Signature{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.acks, c.sendOpts = append(c.acks, tx), append(c.sendOpts, o)
+	st := &rpc.SignatureStatus{Slot: 5, ConfirmationStatus: rpc.Confirmed}
+	if c.ackLand != nil {
+		st = c.ackLand
+	}
+	c.statusFor[tx.Signatures[0]] = st
+	return tx.Signatures[0], nil
 }
 
 // countingSolanaSigner counts the transactions it signs.

@@ -31,6 +31,25 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-22 — the payer's own ack on Solana (unreleased)
+
+The Solana wallet can send the payer's half of a settle itself, the Solana form of
+Algorand's standalone settle. Nothing calls it yet; the Solana handle's `AckSettle` is next.
+
+- **`readTicket`** reads the ticket account for a ticket at a node, `nil` ↔ `null` when there is
+  none or the program doesn't own the account.
+- **`sendAck`** signs and sends the program's `ack` with the payer as sole signer and fee payer,
+  and waits for it to confirm. It refuses a ticket whose payer isn't the wallet's before
+  asking the signer. A payer whose USDC account can't take a refund (missing, frozen,
+  uninitialized, another mint or owner, not the token program's) passes the Config's treasury
+  account writable, so the refund is forfeited there as on Algorand; otherwise it passes none.
+  A transaction that landed and failed reports its 5,000-lamport fee and the program's
+  `TransactionError` beside the error (TS: `SolanaAckSendError.feeLamports` / `.txErr`); one
+  that never confirmed reports its signature, with `rpc.ErrExpired` ↔ a
+  `TransactionExpiredError` cause once it never can land.
+- TS: `solanaClaimFields` moves to `sdk/src/solana/claim.ts`, shared by `judgeSolanaClaim`
+  and the ack.
+
 ### 2026-10-22 — the claim verdict on a Solana ticket (unreleased)
 
 The Solana ticket account now maps onto the rail-neutral settlement view, and the payer can

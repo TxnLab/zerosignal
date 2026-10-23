@@ -10,8 +10,9 @@
 
 import { type TicketRecord as TicketBox, ticketView } from '@txnlab/zs-proto/escrow'
 import { SettleStatus, type TicketView, classify } from '@txnlab/zs-proto/settle'
-import { type ClaimFields, type Ticket as SolanaTicket, claimHash, ticketView as solanaTicketView } from '@txnlab/zs-proto/solana/zsescrow'
+import { type Ticket as SolanaTicket, claimHash, ticketView as solanaTicketView } from '@txnlab/zs-proto/solana/zsescrow'
 
+import { solanaClaimFields } from './solana/claim.js'
 import type { NodeRef, TicketStatus } from './types.js'
 
 /**
@@ -164,22 +165,6 @@ function weighClaim(status: number, pending: bigint, charged: bigint, matches: (
     if (status !== SettleStatus.PendingOperator) return 'none'
     if (pending > charged) return 'overclaims'
     return matches() ? 'agrees' : 'contradicts'
-}
-
-// The claim fields the payer's half carries for a, on Solana. Go's
-// solanaClaimFields.
-function solanaClaimFields(a: SettleArgs): ClaimFields {
-    return {
-        amount: a.amountCharged,
-        receiptDigest: a.receiptDigest,
-        ttftMs: a.ttftMs,
-        decodeMs: a.decodeMs,
-        inputUnits: a.inputTokens,
-        outputUnits: a.outputTokens,
-        outputUsageType: a.outputUsageType,
-        auxUsageType: a.auxOutputUsageType,
-        auxCount: a.auxOutputCount,
-    }
 }
 
 /**
