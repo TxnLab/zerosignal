@@ -82,6 +82,10 @@ func TestSolanaHandle_HandsTheNodeItsAck(t *testing.T) {
 		got = append(got, ack)
 		return nil
 	})
+	// Ids that differ, so the digest binds each in its place; nothing here
+	// reads the ticket account at them.
+	const opID, nodeID = 3, 5
+	h.Operator = Operator{ID: opID, NodeID: nodeID}
 	res, err := h.AckSettle(t.Context(), f.receipt, "7")
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +100,7 @@ func TestSolanaHandle_HandsTheNodeItsAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest, err := zsescrow.ReceiptAckDigest(f.cluster.d, f.wallet.genesis, f.operatorID, f.nodeID, f.ticketID, 7, f.receipt)
+	digest, err := zsescrow.ReceiptAckDigest(f.cluster.d, f.wallet.genesis, opID, nodeID, f.ticketID, 7, f.receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +144,24 @@ func TestSolanaHandle_AcksAloneWithoutTheNode(t *testing.T) {
 			if got, _ := f.cluster.acks[0].MarshalBinary(); string(got) != string(f.wire) {
 				t.Fatal("the ack is not the program's own ack of this ticket")
 			}
+			// The ack names the account the claim was judged on.
+			if n := f.readsOfTicket(); n != 1 {
+				t.Fatalf("%d reads of the ticket", n)
+			}
 		})
+	}
+}
+
+// With no route nothing reached the node, so the payer's own ack runs on the
+// caller's budget, not a fresh one: a caller whose deadline has passed gets
+// nothing sent.
+func TestSolanaHandle_AcksAloneOnTheCallersBudget(t *testing.T) {
+	f := newSolanaAckFixture(t)
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := f.handle(func(context.Context, wire.SettleAck) error { return errNoSettleAckRoute }).AckSettle(ctx, f.receipt, "7")
+	if !errors.Is(err, context.DeadlineExceeded) || len(f.cluster.acks) != 0 {
+		t.Fatalf("err = %v, %d acks sent", err, len(f.cluster.acks))
 	}
 }
 
@@ -180,6 +201,9 @@ func TestSolanaHandle_AcksAloneByTheClaim(t *testing.T) {
 			}
 			if c.sent && (res.TxID != f.cluster.acks[0].Signatures[0].String() || res.FeeMicroalgos != solanaSignatureFee) {
 				t.Fatalf("result %+v", res)
+			}
+			if n := f.readsOfTicket(); n != 1 {
+				t.Fatalf("%d reads of the ticket", n)
 			}
 		})
 	}

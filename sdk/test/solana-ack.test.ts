@@ -328,14 +328,18 @@ describe('Solana handle ackSettle', () => {
     it('hands the node its ack', async () => {
         const f = await fixture()
         const got: SettleAck[] = []
-        const res = await handleOf(f, async (ack) => {
+        const h = handleOf(f, async (ack) => {
             got.push(ack)
-        }).ackSettle(RECEIPT, '7')
+        })
+        // Ids that differ, so the digest binds each in its place; nothing
+        // here reads the ticket account at them.
+        h.operator = { id: 3, nodeId: 5 } as Operator
+        const res = await h.ackSettle(RECEIPT, '7')
         expect(res).toEqual({ txid: '', feeMicroalgos: 0, groupRejected: false })
         expect(got).toHaveLength(1)
         expect(got[0]!.ticket_id).toBe(base64.encode(TICKET_ID))
         const genesis = decodeConfig(CONFIG).genesisHash
-        const digest = receiptAckDigest(d, genesis, OPERATOR_ID, NODE_ID, TICKET_ID, 7n, RECEIPT)
+        const digest = receiptAckDigest(d, genesis, 3n, 5n, TICKET_ID, 7n, RECEIPT)
         expect(verifyStrict(PAYER, digest, decodeAckSignature(got[0]!.settle_group))).toBe(true)
         expect(ticketReads(f)).toBe(0)
         expect(f.state.sent).toHaveLength(0)
@@ -363,6 +367,20 @@ describe('Solana handle ackSettle', () => {
         })
         expect(f.state.sent).toHaveLength(1)
         expect(base64.encode(encodeTransaction(f.state.sent[0]!))).toBe(ACK.wire_base64)
+        // The ack names the account the claim was judged on.
+        expect(ticketReads(f)).toBe(1)
+    })
+
+    // With no route nothing reached the node, so the payer's own ack runs on
+    // the caller's budget, not a fresh one: a caller whose deadline has
+    // passed gets nothing sent.
+    it("acks alone on the caller's budget", async () => {
+        const f = await fixture()
+        const signal = AbortSignal.timeout(0)
+        await new Promise((r) => setTimeout(r, 5))
+        const res = await handleOf(f, () => Promise.reject(new NoSettleAckRouteError())).ackSettle(RECEIPT, '7', signal)
+        expect(res.err).toBeDefined()
+        expect(f.state.sent).toHaveLength(0)
     })
 
     // What the payer's own ack does turns on the claim it read, as on
@@ -388,6 +406,7 @@ describe('Solana handle ackSettle', () => {
         expect(res.frozen ?? false).toBe(frozen)
         expect(f.state.sent).toHaveLength(sent ? 1 : 0)
         if (sent) expect(res).toMatchObject({ txid: encodeBase58(f.state.sent[0]!.signatures[0]!), feeMicroalgos: Number(SOLANA_SIGNATURE_FEE) })
+        expect(ticketReads(f)).toBe(1)
     })
 
     // After a delivery the node refused, or one that may have reached it, the
