@@ -468,6 +468,15 @@ describe('pickCandidates', () => {
             )
         })
 
+        // A Solana node's signer pays its fees in lamports. Go's
+        // TestNoFundedOperator_NamesTheRailsFloor.
+        it("names a Solana pin's floor in lamports", async () => {
+            const res = await pick(pinned(op(7, { signerSpendableLamports: 0 }), [op(1)], { rail: 'solana' }))
+            expect(res.signerUnderfundedReason).toBe(
+                'previous_response_id "rid" is pinned to operator 7 node 1, whose signing account has less than 10120 lamports spendable to pay network fees; retry once the operator tops up, or start a new conversation',
+            )
+        })
+
         it('skips an excluded node, which the registry count then omits', async () => {
             const nodeExclusions = new NodeExclusionStore()
             nodeExclusions.excludeNode({ op: 1, node: 1 })
@@ -578,6 +587,10 @@ describe('pickCandidates', () => {
             res = await pickCandidates(withPin({ affinityPolicy: 'prefer' }, list), request({ body }))
             expect(res.signerUnderfundedReason).toBe('')
             expect(ids(res.operators)).toEqual(['1/1'])
+            res = await pickCandidates(withPin({ affinityPolicy: 'strict', rail: 'solana' }, [op(1), op(7, { signerSpendableLamports: 0 })]), request({ body }))
+            expect(res.signerUnderfundedReason).toBe(
+                'this tool-call continuation is pinned (strict affinity) to operator 7 node 1, whose signing account has less than 10120 lamports spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it',
+            )
         })
 
         it('says when a strict pin lost its attestation, though the pool has an attested node', async () => {

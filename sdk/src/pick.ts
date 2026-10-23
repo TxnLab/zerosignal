@@ -12,7 +12,6 @@
 import {
     type Constraints,
     type ImageToolBudgets,
-    MIN_SIGNER_SPENDABLE_MICROALGOS,
     type Operator as SelectionOperator,
     type RoutingPreferences,
     type SizingMiss,
@@ -29,6 +28,8 @@ import { protoVersionCompatible } from '@txnlab/zs-proto/wire'
 import type { AffinityStore } from './affinity.js'
 import { goDecodeUTF8, goQuote, wellFormed } from './gotext.js'
 import { binaryOf } from './multipart.js'
+import type { Rail } from './network.js'
+import { signerFloorText } from './rail.js'
 import { type Operator, isTeeAttested, refOf, selectionOf } from './operator.js'
 import type { RegistryProvider } from './parts.js'
 import type { LogAttrs, Logger } from './ports.js'
@@ -57,6 +58,8 @@ export interface PickDeps {
     logger: Logger
     /** The (model, node) pairs already warned about, for the process. */
     weightsWarned: Set<string>
+    /** The payer's rail, which names the signer floor in refusals; absent is algorand. */
+    rail?: Rail | undefined
 }
 
 /** One request as selection sees it. */
@@ -128,7 +131,6 @@ export function bodyText(body: string | Uint8Array): string {
 // Go's %q of an id or model that came from the request body.
 export const quoted = (s: string): string => goQuote(binaryOf(new TextEncoder().encode(s)))
 
-const minSignerAlgo = MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000
 
 function excluded(deps: PickDeps, op: Operator): boolean {
     return deps.nodeExclusions?.nodeExcluded(refOf(op)) ?? false
@@ -313,7 +315,7 @@ export async function pickCandidates(deps: PickDeps, req: PickRequest, signal?: 
             if (signerUnderfunded(sel)) {
                 res.signerUnderfundedBlocked = true
                 res.signerUnderfundedReason =
-                    `previous_response_id ${quoted(rid)} is pinned to operator ${op.id} node ${op.nodeId}, whose signing account has less than ${minSignerAlgo} ALGO ` +
+                    `previous_response_id ${quoted(rid)} is pinned to operator ${op.id} node ${op.nodeId}, whose signing account has less than ${signerFloorText(deps.rail)} ` +
                     'spendable to pay network fees; retry once the operator tops up, or start a new conversation'
                 return res
             }
@@ -390,7 +392,7 @@ export async function pickCandidates(deps: PickDeps, req: PickRequest, signal?: 
     ) {
         res.signerUnderfundedReason =
             `this tool-call continuation is pinned (strict affinity) to operator ${preferredOp.id} node ${preferredOp.nodeId}, whose signing account ` +
-            `has less than ${minSignerAlgo} ALGO spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it`
+            `has less than ${signerFloorText(deps.rail)} spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it`
     }
     res.imageEndpointUnsupported = d.image_endpoint_unsupported
     res.affinityBlocked = d.affinity_blocked

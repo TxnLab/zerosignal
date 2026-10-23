@@ -276,8 +276,8 @@ type Config struct {
 // is a clause that reads after "to fix it, ". An empty field gets one that
 // names no tool.
 type Remedies struct {
-	// Fund adds ALGO and USDC to the payer's wallet. It ends wallet_unfunded
-	// and mbr_pool_underfunded.
+	// Fund adds the rail's coin (ALGO or SOL) and USDC to the payer's wallet.
+	// It ends wallet_unfunded and mbr_pool_underfunded.
 	Fund string
 	// RaiseSlots raises ConcurrentSlots and funds the larger pool.
 	RaiseSlots string
@@ -288,20 +288,33 @@ type Remedies struct {
 	RecoverTicket string
 }
 
-// The defaults name only what the SDK itself offers. It has no USDC opt-in, so
-// Fund says to do it; ConcurrentSlots is read once, when New builds the wallet,
-// so RaiseSlots says to rebuild; the log a RecoverTicket rides carries the
-// ticket id, which ReadTicketBox takes.
-func (r Remedies) withDefaults() Remedies {
-	r.Fund = cmp.Or(r.Fund,
-		"fund the payer address: ALGO for fees and the ticket pool, and USDC for requests once the address has opted in to the USDC asset")
-	r.RaiseSlots = cmp.Or(r.RaiseSlots,
-		"raise Config.ConcurrentSlots (WalletConfig.DepositSlots for a Wallet you built) and rebuild the Client; the next request funds the larger pool")
+// The defaults name only what the SDK itself offers, for the payer's rail. It
+// has no USDC opt-in, so Algorand's Fund says to do it; Solana has no opt-in,
+// and its pool holds ticket rent, not MBR. ConcurrentSlots is read once, when
+// New builds the wallet, so RaiseSlots says to rebuild. The log a
+// RecoverTicket rides carries the ticket id, which ReadTicketBox takes, and
+// which names a Solana ticket account with its node.
+func (r Remedies) withDefaults(rail ticket.Rail) Remedies {
+	fund := "fund the payer address: ALGO for fees and the ticket pool, and USDC for requests once the address has opted in to the USDC asset"
+	raiseSlots := "raise Config.ConcurrentSlots (WalletConfig.DepositSlots for a Wallet you built) and rebuild the Client; the next request funds the larger pool"
+	recoverTicket := "read its box with escrow.Client.ReadTicketBox and, once the deadline passes, call refundInactive on an open ticket or settleLapsed on an operator's claim"
+	if rail == ticket.RailSolana {
+		fund = solanaFundRemedy
+		raiseSlots = "raise Config.ConcurrentSlots (SolanaWalletConfig.DepositSlots for a SolanaWallet you built) and rebuild the Client; the next request funds the larger pool"
+		recoverTicket = solanaRecoverTicketRemedy
+	}
+	r.Fund = cmp.Or(r.Fund, fund)
+	r.RaiseSlots = cmp.Or(r.RaiseSlots, raiseSlots)
 	r.RaiseSpendCap = cmp.Or(r.RaiseSpendCap, "raise the SpendGuard's limits")
-	r.RecoverTicket = cmp.Or(r.RecoverTicket,
-		"read its box with escrow.Client.ReadTicketBox and, once the deadline passes, call refundInactive on an open ticket or settleLapsed on an operator's claim")
+	r.RecoverTicket = cmp.Or(r.RecoverTicket, recoverTicket)
 	return r
 }
+
+// The Solana defaults, the TS twin's word for word.
+const (
+	solanaFundRemedy          = "fund the payer address: SOL for fees and the ticket rent pool, and USDC for requests"
+	solanaRecoverTicketRemedy = "read its ticket account from the escrow program and, once the deadline passes, send refund_inactive on an open ticket or settle_lapsed on an operator's claim"
+)
 
 // defaultHTTPClient has no overall timeout, because streams end by context;
 // a response-header backstop, so a connected but silent node is given up on;
@@ -350,7 +363,7 @@ func (c Config) withDefaults() Config {
 	}
 	c.Affinity.TTL = orDefault(c.Affinity.TTL, defaultAffinityTTL)
 	c.Affinity.Max = orDefault(c.Affinity.Max, defaultAffinityMax)
-	c.Remedies = c.Remedies.withDefaults()
+	c.Remedies = c.Remedies.withDefaults(c.Network.Rail)
 	c.MaxOutputCeiling = orDefault(c.MaxOutputCeiling, selection.DefaultMaxOutputCeiling)
 	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, DefaultDepositSlots)
 	c.ReserveTimeout = orDefault(c.ReserveTimeout, DefaultReserveTimeout)

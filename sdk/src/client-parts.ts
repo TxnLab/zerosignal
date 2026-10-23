@@ -67,6 +67,7 @@ export function dispatchDepsOf(c: Client, runSealed: RunSealed): DispatchDeps {
         spendGuard: cfg.spendGuard,
         remedies: cfg.remedies,
         network: cfg.network.network,
+        rail: cfg.network.rail,
         retryBudget: cfg.retryBudget,
         sweepDelay: cfg.sweepDelay,
         feeRate: () => c.feeRate(),

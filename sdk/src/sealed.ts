@@ -35,6 +35,7 @@ import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
 import { openAIError } from './http.js'
 import { type StreamIdle, readReply } from './idle.js'
 import { MbrDepositUnaffordableError } from './mbr.js'
+import type { Rail } from './network.js'
 import type { Operator } from './operator.js'
 import type { OpenHandle, Reserved, WalletOpener } from './parts.js'
 import type { Fetch, LogAttrs, Logger } from './ports.js'
@@ -85,6 +86,8 @@ export interface SealedDeps {
     remedies: Remedies
     /** The network's name, as failure messages give it. Empty when named only by endpoint. */
     network: string
+    /** The payer's rail, which names the coin and pool in failure messages; absent is algorand. */
+    rail?: Rail | undefined
     fetch: Fetch
     relayReputation?: RelayReputationStore | undefined
     logger: Logger
@@ -164,7 +167,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
             ticket_id: ticket.ticket_id,
             err: errText(err),
         })
-        em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err))
+        em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err, deps.rail))
         return
     }
     // The ceiling stays on the spend tally: settlement charges less on chain,
@@ -309,16 +312,18 @@ export function recheckDepositOnRefusedOpen(wallet: Pick<WalletOpener, 'recheckD
 }
 
 /** openFailure is the error a failed open ends the turn with, most specific first. */
-export function openFailure(payer: string, network: string, remedies: Remedies, err: unknown) {
+export function openFailure(payer: string, network: string, remedies: Remedies, err: unknown, rail?: Rail | undefined) {
     // The payer is short of ALGO (not USDC) to grow the prepaid ticket-MBR
     // pool, and no slot is free. A deposit that landed but left the pool short
     // with no slot free is the same condition. Checked before exhaustion: an
     // open retried after a failed top-up carries the pool revert too, which
-    // alone reads as exhaustion.
+    // alone reads as exhaustion. A Solana rent pool's shortfall extends these
+    // errors, and its coin and pool are SOL and ticket rent.
     if (findError(err, MbrDepositUnaffordableError) !== undefined || findError(err, BelowTargetError) !== undefined) {
+        const [coin, pool] = rail === 'solana' ? ['SOL', 'prepaid ticket rent pool'] : ['ALGO', 'prepaid ticket-MBR pool']
         return newError(
             'mbr_pool_underfunded',
-            `zerosignal wallet ${payer} needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on ${network} — ${errText(err)}. To fix it, ${remedies.fund}.`,
+            `zerosignal wallet ${payer} needs more ${coin} (not USDC) to fund the ${pool} on ${network} — ${errText(err)}. To fix it, ${remedies.fund}.`,
         )
     }
     // The wallet holds the ALGO but every slot backs an in-flight ticket: a

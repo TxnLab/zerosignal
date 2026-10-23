@@ -9,6 +9,7 @@
 // go/zs/rail.go. An absent rail is Algorand, as an absent Network.rail is.
 
 import { base64 } from '@scure/base'
+import { MIN_SIGNER_SPENDABLE_LAMPORTS, MIN_SIGNER_SPENDABLE_MICROALGOS } from '@txnlab/zs-proto/selection'
 import { parseTransaction } from '@txnlab/zs-proto/solana'
 import { decodeOpenOffer, parseOpenSeq } from '@txnlab/zs-proto/solana/zsescrow'
 
@@ -57,4 +58,13 @@ export function checkSettleSlot(rail: Rail | undefined, slot: string): void {
  */
 export function requestTicketId(rail: Rail | undefined): string | undefined {
     return rail === 'solana' ? base64.encode(crypto.getRandomValues(new Uint8Array(16))) : undefined
+}
+
+/**
+ * signerFloorText is the signing-account floor as a no_funded_operator refusal
+ * names it, in the rail's own unit. Go's signerFloorText, whose division is
+ * an integer one.
+ */
+export function signerFloorText(rail: Rail | undefined): string {
+    return rail === 'solana' ? `${MIN_SIGNER_SPENDABLE_LAMPORTS} lamports` : `${Math.floor(MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000)} ALGO`
 }

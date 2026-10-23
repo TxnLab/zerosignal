@@ -424,7 +424,7 @@ func newReconciler(journal TicketJournal, chain sweepChain, payer string, d Depl
 		watching:      watching,
 		spend:         spend,
 		log:           log,
-		remedy:        Remedies{}.withDefaults().RecoverTicket,
+		remedy:        Remedies{}.withDefaults(d.Rail).RecoverTicket,
 		now:           time.Now,
 		interval:      reconcileInterval,
 		callTimeout:   30 * time.Second,

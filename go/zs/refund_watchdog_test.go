@@ -21,6 +21,7 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/transaction"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 func testWatchdog() *RefundWatchdog {
@@ -339,7 +340,7 @@ func TestRefundWatchdog_GiveUpLogsTheRemedy(t *testing.T) {
 		if remedy != "" {
 			rw.remedy = remedy
 		}
-		want := cmp.Or(remedy, Remedies{}.withDefaults().RecoverTicket)
+		want := cmp.Or(remedy, Remedies{}.withDefaults(ticket.RailAlgorand).RecoverTicket)
 		var refunds atomic.Int32
 		rw.track("tik-give-up", time.Now().Add(2*time.Millisecond), liveBox(),
 			func(context.Context) (string, error) { refunds.Add(1); return "", errors.New("algod down") },

@@ -31,6 +31,26 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — `no_funded_operator` and the funding remedies name the rail's coin (0.11.0)
+
+Messages a payer reads named ALGO on every rail. On a Solana Client, which a host can build
+once a Solana network resolves (it doesn't yet), they now name the Solana rail's own:
+- The `no_funded_operator` refusal and the two pin refusals behind it (a `previous_response_id`
+  pin, a strict tool-affinity pin) say "less than 10120 lamports", the floor
+  `MinSignerSpendableLamports` ↔ `MIN_SIGNER_SPENDABLE_LAMPORTS` gates on, where they said
+  "less than 5 ALGO".
+- `mbr_pool_underfunded` says the wallet "needs more SOL (not USDC) to fund the prepaid ticket
+  rent pool", where it said ALGO and the ticket-MBR pool.
+- The default `Remedies.Fund` ↔ `remedies.fund` says "fund the payer address: SOL for fees and
+  the ticket rent pool, and USDC for requests", with no USDC opt-in, and the default
+  `RecoverTicket` ↔ `recoverTicket` points at the ticket account and `refund_inactive` /
+  `settle_lapsed` rather than the box. Go's default `RaiseSlots` names
+  `SolanaWalletConfig.DepositSlots`. A host's own remedies are used as given.
+
+An Algorand Client's messages are unchanged, byte for byte. The TS `DispatchDeps`, `PickDeps`
+and `SealedDeps` take the rail as an optional `rail`, and `openFailure` as a last argument,
+absent meaning Algorand.
+
 ### 2026-10-23 — a delivered Solana ack is confirmed by its ticket (0.11.0)
 
 After a turn whose ack the payer handed the node, both SDKs now watch for the node's settle to
@@ -387,9 +407,10 @@ rail, and a host opts in by building its own registry over it.
   staleness budget. `SignerReadingsUnderfunded` ↔ `signerReadingsUnderfunded` is
   the one two-rail predicate the gates share. `/v1/zs/operators` lists the reading as
   `signer_spendable_lamports`, and the registry's funding log lines name lamports and
-  `floor_lamports` for a Solana node. Still Algorand-only: the `no_funded_operator` message
-  and both pin refusals say "5 ALGO", and the doctor copies only the microAlgo reading, so it
-  would count a Solana node short of lamports as usable (it reads only algod today).
+  `floor_lamports` for a Solana node. Still Algorand-only: the doctor copies only the
+  microAlgo reading, so it would count a Solana node short of lamports as usable (it reads
+  only algod today). From 0.11.0 the `no_funded_operator` refusals name the rail's floor (see
+  "`no_funded_operator` and the funding remedies name the rail's coin").
 - **The Solana reader.** `zs.SolanaChainReader` ↔ `SolanaChainReader` read the `Operator` and
   `Node` accounts with two confirmed `getProgramAccounts` calls, each filtered on its account
   discriminator, decode them with `solana/zsescrow`, and build the Operator the Algorand read

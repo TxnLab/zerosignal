@@ -15,6 +15,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/settle"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // RefundWatchdog recovers escrowed USDC for tickets whose settlement never
@@ -123,7 +124,7 @@ func NewRefundWatchdog(log *slog.Logger) *RefundWatchdog {
 		attempts:      3,
 		callTimeout:   30 * time.Second,
 		lapseFallback: 10 * time.Minute,
-		remedy:        Remedies{}.withDefaults().RecoverTicket,
+		remedy:        Remedies{}.withDefaults(ticket.RailAlgorand).RecoverTicket,
 		pending:       map[string]chan struct{}{},
 		receipts:      map[string]signedReceipt{},
 	}

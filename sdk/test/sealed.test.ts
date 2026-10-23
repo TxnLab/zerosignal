@@ -59,11 +59,13 @@ import {
     isPoolExhaustedOpenError,
     isUnderfundedOpenError,
     nodeHeader,
+    openFailure,
     operatorHeaders,
     relayEvidence,
     runSealed,
     settleAckPoster,
 } from '../src/sealed.js'
+import { RentDepositBelowTargetError, RentDepositUnaffordableError } from '../src/solana/rent.js'
 import { BelowTargetError, NoSettleAckRouteError, OpenTopUpError } from '../src/wallet.js'
 import { testOperator } from './fixtures.js'
 
@@ -974,6 +976,32 @@ describe('runSealed', () => {
             await runSealed(s.deps, s.em, s.run)
             expect(s.em.order).toEqual(['reserved TKT1 9', 'fail mbr_pool_exhausted'])
             expect(s.sent).toEqual([])
+        })
+
+        // A Solana payer funds SOL for ticket rent. Go's
+        // TestOpenFailure_NamesTheRailsCoinAndPool.
+        it("names a Solana payer's coin and pool", () => {
+            const remedies = { fund: 'fund it' } as Remedies
+            const short = new RentDepositUnaffordableError(1n, 4n, 2_000_000n, 5n, 'rent 1995000 + fee 5000')
+            expect(openFailure('PAYER', 'devnet', remedies, short, 'solana').message).toBe(
+                `zerosignal wallet PAYER needs more SOL (not USDC) to fund the prepaid ticket rent pool on devnet — ${short.message}. To fix it, fund it.`,
+            )
+            const below = new RentDepositBelowTargetError(7n)
+            expect(openFailure('PAYER', 'devnet', remedies, below, 'solana').message).toBe(
+                `zerosignal wallet PAYER needs more SOL (not USDC) to fund the prepaid ticket rent pool on devnet — ${below.message}. To fix it, fund it.`,
+            )
+            expect(openFailure('PAYER', 'testnet', remedies, below, 'algorand').message).toBe(
+                `zerosignal wallet PAYER needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on testnet — ${below.message}. To fix it, fund it.`,
+            )
+        })
+
+        // The sealed run hands its own rail to the message.
+        it("names a Solana payer's coin and pool from the run's rail", async () => {
+            const s = await setup({ openErr: new RentDepositUnaffordableError(1n, 4n, 2_000_000n, 5n, 'rent 1995000 + fee 5000') })
+            s.deps.rail = 'solana'
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.em.failed?.code).toBe('mbr_pool_underfunded')
+            expect(s.em.failed!.message).toContain('needs more SOL (not USDC) to fund the prepaid ticket rent pool')
         })
 
         it('names the payer, the network, the shortfall and the remedy', async () => {

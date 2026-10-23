@@ -142,7 +142,7 @@ export interface Diagnostics {
     // allow_staging was not set (served, but only by held-out nodes).
     staging_blocked: boolean
     // every otherwise-eligible node serving the model has a signing account known
-    // to be below MIN_SIGNER_SPENDABLE_MICROALGOS; also set when strict affinity
+    // to be below its rail's floor (signerReadingsUnderfunded); also set when strict affinity
     // pins to such a node. Pool availability (clears on top-up), not a conflict.
     signer_underfunded_blocked: boolean
     image_endpoint_unsupported: boolean

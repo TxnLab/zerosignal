@@ -314,6 +314,15 @@ const defaultRemedies: Remedies = {
         "read its box from the escrow and, once the deadline passes, call refundInactive on an open ticket or settleLapsed on an operator's claim",
 }
 
+// Solana has no USDC opt-in, and its pool holds ticket rent, not MBR. Go's
+// solanaFundRemedy and solanaRecoverTicketRemedy, word for word.
+const solanaRemedies: Remedies = {
+    ...defaultRemedies,
+    fund: 'fund the payer address: SOL for fees and the ticket rent pool, and USDC for requests',
+    recoverTicket:
+        "read its ticket account from the escrow program and, once the deadline passes, send refund_inactive on an open ticket or settle_lapsed on an operator's claim",
+}
+
 // orDefault treats any non-positive value as unset: a negative timeout or
 // count is never a meaningful request. NaN and Infinity are unset too, since
 // a timer handed Infinity fires at once.
@@ -346,6 +355,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
     }
     const network = resolveNetwork(c.network)
     const warnings = [...network.warnings]
+    const railRemedies = network.rail === 'solana' ? solanaRemedies : defaultRemedies
 
     const requireMaxOutput = c.requireMaxOutput ?? false
     const maxOutputCeiling = orDefault(c.maxOutputCeiling, defaults.maxOutputCeiling)
@@ -434,10 +444,10 @@ export function resolveConfig(c: Config): ResolvedConfig {
         reserveClient: c.reserveClient,
         wallet: c.wallet,
         remedies: {
-            fund: r.fund || defaultRemedies.fund,
-            raiseSlots: r.raiseSlots || defaultRemedies.raiseSlots,
-            raiseSpendCap: r.raiseSpendCap || defaultRemedies.raiseSpendCap,
-            recoverTicket: r.recoverTicket || defaultRemedies.recoverTicket,
+            fund: r.fund || railRemedies.fund,
+            raiseSlots: r.raiseSlots || railRemedies.raiseSlots,
+            raiseSpendCap: r.raiseSpendCap || railRemedies.raiseSpendCap,
+            recoverTicket: r.recoverTicket || railRemedies.recoverTicket,
         },
         storage: c.storage ?? memoryStorage(),
         cache: c.cache ?? memoryCache(clock),

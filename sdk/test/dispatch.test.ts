@@ -24,6 +24,7 @@ import { type DispatchDeps, type SealedRun, dispatch } from '../src/dispatch.js'
 import type { ZsError } from '../src/errors.js'
 import type { Event } from '../src/events.js'
 import { MbrDepositUnaffordableError } from '../src/mbr.js'
+import { RentDepositUnaffordableError } from '../src/solana/rent.js'
 import type { ModelCapacity, Operator } from '../src/operator.js'
 import type { RegistryProvider, Reserved, ReserveClient } from '../src/parts.js'
 import type { PickDeps } from '../src/pick.js'
@@ -498,6 +499,11 @@ describe('an empty pick', () => {
         expect(await fail([op(1, { signerSpendableMicroAlgos: 0 })])).toMatchObject({
             code: 'no_funded_operator',
             message: `every node serving the model "${MODEL}" has less than ${MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000} ALGO spendable in its signing account to pay network fees; retry later or pick another model`,
+        })
+        // A Solana node's signer pays its fees in lamports.
+        expect(await fail([op(1, { signerSpendableLamports: 0 })], chat(), { deps: { rail: 'solana' } })).toMatchObject({
+            code: 'no_funded_operator',
+            message: `every node serving the model "${MODEL}" has less than 10120 lamports spendable in its signing account to pay network fees; retry later or pick another model`,
         })
         // A chat model pricing the image tool doesn't serve the dedicated route.
         const chatTool = withCap(op(1), { imageToolRateMicroUsdc: 80_000, outputUsdPer1m: 10 })
@@ -1260,6 +1266,14 @@ describe('the prepaid pool before reserve', () => {
         expect(em.failed!.message).toContain('PAYER')
         expect(em.failed!.message).toContain('fund it')
         expect(h.rc.calls).toEqual([])
+    })
+
+    // The rail reaches the message: a Solana payer funds SOL for ticket rent.
+    it("names a Solana payer's coin and pool", async () => {
+        const short = new RentDepositUnaffordableError(1n, 4n, 2_000_000n, 5n, 'rent 1995000 + fee 5000')
+        const em = await preparing(short, { rail: 'solana' }).run(body)
+        expect(em.failed?.code).toBe('mbr_pool_underfunded')
+        expect(em.failed!.message).toContain('needs more SOL (not USDC) to fund the prepaid ticket rent pool')
     })
 
     it('goes on past a failure that says nothing about funds', async () => {
