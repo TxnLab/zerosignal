@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -33,9 +34,13 @@ type SolanaWallet struct {
 	payer      solana.PublicKey
 	payerUSDC  solana.PublicKey
 	decimals   uint8
-	pool       *SolanaRentPool
-	slots      uint64
-	now        func() time.Time
+	// genesis is the Config's genesis hash, which the ack digest binds. The
+	// program fixes it at initialize.
+	genesis solana.Hash
+	pool    *SolanaRentPool
+	slots   uint64
+	now     func() time.Time
+	log     *slog.Logger // nil: slog.Default()
 
 	// depositMu and depositReady are Wallet's: one top-up at a time, and none
 	// once the pool covers the working set.
@@ -67,6 +72,8 @@ type SolanaWalletConfig struct {
 	// Confirm tunes the wait for a rent deposit or an ack to land; the zero
 	// value polls.
 	Confirm rpc.ConfirmOptions
+	// Logger receives the wallet's warnings; nil uses slog.Default().
+	Logger *slog.Logger
 }
 
 // NewSolanaWallet reads the deployment's Config for the mint's decimals,
@@ -103,11 +110,20 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 		payer:      payer,
 		payerUSDC:  cfg.Deployment.TokenAccount(payer),
 		decimals:   c.USDCDecimals,
+		genesis:    c.GenesisHash,
 		pool:       &SolanaRentPool{RPC: cfg.RPC, Deployment: cfg.Deployment, Signer: cfg.Signer, Confirm: cfg.Confirm},
 		slots:      cfg.DepositSlots,
 		now:        time.Now,
+		log:        cfg.Logger,
 		signed:     map[[16]byte]int64{},
 	}, nil
+}
+
+func (w *SolanaWallet) logger() *slog.Logger {
+	if w.log == nil {
+		return slog.Default()
+	}
+	return w.log
 }
 
 // PayerAddr is the payer's base58 address.

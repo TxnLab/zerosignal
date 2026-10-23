@@ -19,6 +19,7 @@ import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 import {
     type AckSettleResult,
     NoResolveFrozenError,
+    NoSettleAckRouteError,
     type SettleSubmission,
     ackSettle,
     settleArgsOf,
@@ -659,7 +660,7 @@ export class Wallet implements WalletOpener {
  * abort of signal carries over, not its timeout, which the failed attempt may
  * have spent.
  */
-function followUpSignal(signal: AbortSignal | undefined): AbortSignal {
+export function followUpSignal(signal: AbortSignal | undefined): AbortSignal {
     const fresh = AbortSignal.timeout(SETTLE_SUBMIT_TIMEOUT_MS)
     if (signal === undefined) return fresh
     const cancelled = new AbortController()
@@ -685,19 +686,7 @@ export class BelowTargetError extends Error {
     }
 }
 
-/**
- * NoSettleAckRouteError: a deliverAck failure that sent nothing, because no
- * relay can carry the ack yet (every relay predates SETTLE_ACK_MIN_VERSION).
- * The ack then goes out as it did before 9.12, at exactly the old privacy
- * cost. Go's errNoSettleAckRoute.
- */
-export class NoSettleAckRouteError extends Error {
-    override readonly name = 'NoSettleAckRouteError'
-
-    constructor() {
-        super('zs: no relay serves the settle ack')
-    }
-}
+export { NoSettleAckRouteError }
 
 /**
  * OpenTopUpError: an open that failed, and the pool top-up its retry needed

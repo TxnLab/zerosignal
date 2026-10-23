@@ -134,8 +134,10 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000, NetworkFees: 1000}, nil, true},
 		{"payer ack after a rejected group", &scriptedSettleHandle{txid: "ACKTX", fee: 1000, groupRejected: true}, true, testSettleGroup,
 			Settlement{Kind: SettlePayerAck, TxID: "ACKTX", FeesMicroAlgos: 1000, NetworkFees: 1000}, nil, true},
-		{"failed ack", &scriptedSettleHandle{txid: "IGNORED", fee: 7, err: ackErr}, true, testSettleGroup,
-			Settlement{Kind: SettleAtomic}, ackErr, true},
+		// A failed ack reports what it sent and paid: a Solana ack that landed
+		// and failed paid its fee.
+		{"failed ack", &scriptedSettleHandle{txid: "SENTTX", fee: 7, err: ackErr}, true, testSettleGroup,
+			Settlement{Kind: SettleAtomic, TxID: "SENTTX", FeesMicroAlgos: 7, NetworkFees: 7}, ackErr, true},
 		// The payer signs the protest, so its fee is the payer's.
 		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, "",
 			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000, NetworkFees: 3000, Frozen: true}, nil, false},

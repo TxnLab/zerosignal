@@ -326,9 +326,13 @@ export async function checkTurnReceipt(
                         ticket_id: ticketId,
                         atomic,
                         group_rejected: res.groupRejected,
+                        txid: res.txid,
+                        network_fee: res.feeMicroalgos,
                         err: errText(res.err),
                     })
-                    return { settlement: { ...emptySettlement(ticketId), kind }, err: res.err }
+                    // A settle sent and failed names its transaction, and on
+                    // Solana may have paid its fee.
+                    return { settlement: settlementOf(deps, ticketId, kind, res.txid, res.feeMicroalgos), err: res.err }
                 }
                 // Info when the payer paid a fee: a buffered reply was written
                 // before this submit and can't report it.

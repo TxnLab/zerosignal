@@ -21,7 +21,10 @@ import {
     type AckSettlePorts,
     type ClaimVerdict,
     discardLogger,
+    NoSettleAckRouteError,
+    SentSettleError,
     SettleGroupRejectedError,
+    type SettleSubmission,
     type SettleArgs,
     type SettleGroupSpec,
     type TicketBoxView,
@@ -106,6 +109,14 @@ const standaloneErr = new Error('standalone submit')
 const freezeErr = new Error('freeze submit')
 const halfErr = new Error('half submit')
 
+// A step scripted "landed" sent its transaction, which failed having paid its
+// fee: the error carries what it sent, its cause the step's error.
+function step(script: string | undefined, sent: SettleSubmission, fail: Error): SettleSubmission {
+    if (script === 'error') throw fail
+    if (script === 'landed') throw new SentSettleError(sent, fail.message, fail)
+    return sent
+}
+
 // The same scripted ports as Go's runAckSettleScenario. A scenario without a
 // claim scripts no claim port, which reads nothing, one without a freeze no
 // freeze port, which freezes through standalone, and one without
@@ -119,15 +130,13 @@ function scripted(
         ...(freeze !== undefined && {
             freeze: async () => {
                 calls.push('freeze')
-                if (freeze === 'error') throw freezeErr
-                return { txid: 'FREEZETX', payerFeeMicroalgos: 1000n }
+                return step(freeze, { txid: 'FREEZETX', payerFeeMicroalgos: 1000n }, freezeErr)
             },
         }),
         ...(half !== undefined && {
             half: async () => {
                 calls.push('half')
-                if (half === 'error') throw halfErr
-                return { txid: 'HALFTX', payerFeeMicroalgos: 1000n }
+                return step(half, { txid: 'HALFTX', payerFeeMicroalgos: 1000n }, halfErr)
             },
         }),
         ...(resolves !== undefined && { resolvesFrozen: async () => resolves }),
@@ -148,13 +157,13 @@ function scripted(
             const rejection = new SettleGroupRejectedError('payer.rekeyTo', 'scripted')
             if (sc.group === 'rejected') throw rejection
             if (sc.group === 'rejected_wrapped') throw new Error('submit', { cause: rejection })
+            if (sc.group === 'no_route') throw new Error('deliver', { cause: new NoSettleAckRouteError() })
             if (sc.group === 'error') throw groupErr
             return { txid: 'GROUPTX', payerFeeMicroalgos: 0n }
         },
         standalone: async () => {
             calls.push('standalone')
-            if (sc.standalone === 'error') throw standaloneErr
-            return { txid: 'STANDALONETX', payerFeeMicroalgos: 5000n }
+            return step(sc.standalone, { txid: 'STANDALONETX', payerFeeMicroalgos: 5000n }, standaloneErr)
         },
     }
 }
@@ -170,7 +179,8 @@ describe('ackSettle vectors', () => {
             [freezeErr, 'freeze'],
             [halfErr, 'half'],
         ])
-        const result = res.err === undefined ? 'ok' : (errs.get(res.err) ?? 'other')
+        const cause = res.err instanceof SentSettleError ? res.err.cause : res.err
+        const result = res.err === undefined ? 'ok' : (errs.get(cause) ?? 'other')
         expect({
             calls,
             txid: res.txid,

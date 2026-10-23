@@ -204,8 +204,8 @@ type OpenHandle struct {
 	deliverAck func(ctx context.Context, ack wire.SettleAck) error
 
 	wallet *Wallet
-	// solana is the wallet that signed a Solana open, whose handle has no
-	// settle path yet; nil on Algorand.
+	// solana is the wallet that signed a Solana open, whose handle acks but
+	// has no other settle path yet; nil on Algorand.
 	solana *SolanaWallet
 }
 
@@ -429,8 +429,12 @@ func (w *Wallet) handleFor(tk *ticket.Ticket, op Operator, result escrow.OpenRes
 // any transaction. Fail loudly rather than panic on dereference.
 // Before a standalone ack, and after the node's group fails to submit, it reads
 // the ticket box for an operator claim, which no check has compared with the
-// receipt on either path (AckResult.Claim).
+// receipt on either path (AckResult.Claim). A Solana handle acks the same way
+// over the ticket account (solanaAckSettle).
 func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt, settleGroup string) (AckResult, error) {
+	if h.solana != nil {
+		return h.solanaAckSettle(ctx, receipt, settleGroup)
+	}
 	if h.wallet == nil {
 		return AckResult{}, h.detached("ack-settle")
 	}
@@ -441,9 +445,9 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 	// them nothing.
 	followCtx, cancelFollow := ctx, context.CancelFunc(func() {})
 	defer func() { cancelFollow() }()
-	return ackSettle(settleGroup != "", ackSettleDeps{
+	return ackSettle(settleGroup != "", ackSettleDeps[escrow.SettleGroupSpec]{
 		spec: func() (escrow.SettleGroupSpec, error) { return h.settleGroupSpec(receipt) },
-		submitGroup: func(spec escrow.SettleGroupSpec) (res escrow.CallResult, err error) {
+		submitGroup: func(spec escrow.SettleGroupSpec) (_ ackSubmission, err error) {
 			defer func() {
 				if err != nil {
 					followCtx, cancelFollow = followUpCtx(ctx)
@@ -453,14 +457,14 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 			// failure here is a group no node sent and surfaces as the error.
 			presignedSettleGroup, err := escrow.DecodeSettleGroup(settleGroup)
 			if err != nil {
-				return escrow.CallResult{}, err
+				return ackSubmission{}, err
 			}
 			if h.deliverAck == nil {
-				return h.wallet.chain.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec)
+				return submitted(h.wallet.chain.SubmitPresignedSettleGroup(ctx, presignedSettleGroup, signer, spec))
 			}
-			res, encoded, err := h.wallet.chain.CompletePresignedSettleGroup(presignedSettleGroup, signer, spec)
+			call, encoded, err := h.wallet.chain.CompletePresignedSettleGroup(presignedSettleGroup, signer, spec)
 			if err != nil {
-				return escrow.CallResult{}, err
+				return ackSubmission{}, err
 			}
 			err = h.deliverAck(ctx, wire.SettleAck{TicketID: h.TicketID, SettleGroup: encoded})
 			if errors.Is(err, errNoSettleAckRoute) {
@@ -468,25 +472,34 @@ func (h *OpenHandle) AckSettle(ctx context.Context, receipt *ticket.UsageReceipt
 				// verifying and signing it a second time (as the TS twin does).
 				completed, derr := escrow.DecodeSettleGroup(encoded)
 				if derr != nil {
-					return escrow.CallResult{}, derr
+					return ackSubmission{}, derr
 				}
 				if err := h.wallet.chain.SubmitSettleGroup(ctx, completed); err != nil {
-					return escrow.CallResult{}, err
+					return ackSubmission{}, err
 				}
-				return res, nil
+				return submitted(call, nil)
 			}
 			if err != nil {
-				return escrow.CallResult{}, err
+				return ackSubmission{}, err
 			}
-			return res, nil
+			return submitted(call, nil)
 		},
 		claim:      func() (ClaimVerdict, error) { return h.readClaim(followCtx, settleArgsOf(receipt)) },
-		standalone: func() (escrow.CallResult, error) { return h.settleStandalone(followCtx, settleArgsOf(receipt)) },
-		freeze:     func() (escrow.CallResult, error) { return h.settleOuterOnly(followCtx, settleArgsOf(receipt)) },
-		half:       func() (escrow.CallResult, error) { return h.settleOuterOnly(followCtx, settleArgsOf(receipt)) },
+		standalone: func() (ackSubmission, error) { return submitted(h.settleStandalone(followCtx, settleArgsOf(receipt))) },
+		freeze:     func() (ackSubmission, error) { return submitted(h.settleOuterOnly(followCtx, settleArgsOf(receipt))) },
+		half:       func() (ackSubmission, error) { return submitted(h.settleOuterOnly(followCtx, settleArgsOf(receipt))) },
 		freezes:    h.wallet.resolvesFrozen(),
 		log:        h.wallet.logger().With("operator_id", h.Operator.ID, "node_id", h.Operator.NodeID),
 	})
+}
+
+// submitted is an Algorand escrow call as the ack reports it. A call that
+// fails on Algorand has paid nothing.
+func submitted(r escrow.CallResult, err error) (ackSubmission, error) {
+	if err != nil {
+		return ackSubmission{}, err
+	}
+	return ackSubmission{TxID: r.TxID, Fee: r.PayerFeeMicroalgos}, nil
 }
 
 // followUpCtx is a budget of settleSubmitTimeout of its own for the calls an
@@ -514,10 +527,15 @@ func (w *Wallet) resolvesFrozen() bool {
 
 // AckResult is what one AckSettle did.
 type AckResult struct {
+	// TxID is the payer's settle, or the node's group on Algorand. A payer's
+	// settle that failed has one when it was sent: on Solana it may have
+	// landed, or may still.
 	TxID string
-	// FeeMicroalgos is the network fee the payer's own transactions paid: 0
-	// on the node's group, which pools the fee on its half, and the standalone
-	// settle's fee otherwise.
+	// FeeMicroalgos is the network fee the payer's own transactions paid, in
+	// base units of the deployment's FeeUnit (lamports on Solana): 0 on the
+	// node's group or ack, whose half carries the fee, and the payer's own
+	// settle's fee otherwise. A Solana settle that landed and failed paid its
+	// fee too, so it is set beside that error.
 	FeeMicroalgos uint64
 	// GroupRejected is set when the node handed a settle group the payer's
 	// checks refused (*escrow.SettleGroupRejectedError). It survives the
@@ -540,20 +558,33 @@ type AckResult struct {
 	Frozen bool
 }
 
+// ackSubmission is one of the payer's settles, or the node's group, as the ack
+// reports it: its id and the fee the payer's own transactions paid, in base
+// units of the rail's fee. A submit returns it beside an error when it sent a
+// transaction that didn't settle.
+type ackSubmission struct {
+	TxID string
+	Fee  uint64
+}
+
 // ackSettleDeps is the open handle's ways of putting the ack on chain and of
 // reading the claim it answers, injected so ackSettle is the decision alone:
 // the code testdata/ack_settle_vectors.json pins and the TS SDK mirrors as
-// ackSettle in sdk/src/ack.ts.
-type ackSettleDeps struct {
-	spec        func() (escrow.SettleGroupSpec, error)
-	submitGroup func(escrow.SettleGroupSpec) (escrow.CallResult, error)
+// ackSettle in sdk/src/ack.ts. S is what the node's settle slot decodes to:
+// Algorand's group spec, Solana's open_seq.
+type ackSettleDeps[S any] struct {
+	spec func() (S, error)
+	// submitGroup hands the payer's half of the node's settle to the node, or
+	// on Algorand broadcasts the group. errNoSettleAckRoute says it sent
+	// nothing and could not, so the payer acks standalone.
+	submitGroup func(S) (ackSubmission, error)
 	claim       func() (ClaimVerdict, error)
-	standalone  func() (escrow.CallResult, error)
+	standalone  func() (ackSubmission, error)
 	// freeze is standalone paid for the freeze an over-claim turns it into.
-	freeze func() (escrow.CallResult, error)
+	freeze func() (ackSubmission, error)
 	// half is the payer's half on an open box, paid the same way: a first
 	// half finalizes nothing.
-	half func() (escrow.CallResult, error)
+	half func() (ackSubmission, error)
 	// freezes is whether the deployed escrow has resolveFrozen. Without it
 	// neither freeze nor half is sent: a frozen ticket's escrow would be
 	// locked for good, and a half on an open box freezes the ticket when the
@@ -564,7 +595,7 @@ type ackSettleDeps struct {
 
 // readClaim is d.claim, ClaimUnread without one and ClaimUnreadable when the
 // read fails.
-func (d ackSettleDeps) readClaim() ClaimVerdict {
+func (d ackSettleDeps[S]) readClaim() ClaimVerdict {
 	if d.claim == nil {
 		return ClaimUnread
 	}
@@ -579,7 +610,7 @@ func (d ackSettleDeps) readClaim() ClaimVerdict {
 // ackSettle is AckSettle's decision between the node's pre-signed group and
 // the payer's standalone ack. atomic is whether the node sent a group that
 // decoded.
-func ackSettle(atomic bool, d ackSettleDeps) (AckResult, error) {
+func ackSettle[S any](atomic bool, d ackSettleDeps[S]) (AckResult, error) {
 	var groupRejected bool
 	// Atomic settle path: the operator's pre-signed gtxn[0] arrived
 	// in the response's X-Zs-Settle-Group header. We VERIFY the
@@ -598,10 +629,15 @@ func ackSettle(atomic bool, d ackSettleDeps) (AckResult, error) {
 		} else {
 			res, subErr := d.submitGroup(spec)
 			if subErr == nil {
-				return AckResult{TxID: res.TxID, FeeMicroalgos: res.PayerFeeMicroalgos}, nil
+				return AckResult{TxID: res.TxID, FeeMicroalgos: res.Fee}, nil
 			}
 			var rejected *escrow.SettleGroupRejectedError
-			if errors.As(subErr, &rejected) {
+			if errors.Is(subErr, errNoSettleAckRoute) {
+				// Nothing reached the node, and no relay can carry the ack to it.
+				// On Solana the payer cannot submit the node's settle, so it acks
+				// standalone, as when no slot came; the node is not at fault.
+				d.log.Info("ack-settle: no relay serves the settle ack; acking standalone")
+			} else if errors.As(subErr, &rejected) {
 				// The node handed a malformed / fraudulent group: a rekeyTo
 				// (account takeover), a non-NoOp onComplete (ClearState wipes the
 				// payer's local pool accounting), a non-zero payer fee, or a value
@@ -678,15 +714,14 @@ func ackSettle(atomic bool, d ackSettleDeps) (AckResult, error) {
 
 // sendAck submits the payer's own settle through send and reports it. frozen
 // is whether the settle freezes the ticket once it lands.
-func sendAck(send func() (escrow.CallResult, error), groupRejected bool, claim ClaimVerdict, frozen bool) (AckResult, error) {
+func sendAck(send func() (ackSubmission, error), groupRejected bool, claim ClaimVerdict, frozen bool) (AckResult, error) {
 	res, err := send()
+	r := AckResult{TxID: res.TxID, FeeMicroalgos: res.Fee, GroupRejected: groupRejected, Claim: claim, PayerSettle: true}
 	if err != nil {
-		return AckResult{GroupRejected: groupRejected, Claim: claim, PayerSettle: true}, fmt.Errorf("wallet: ack-settle: %w", err)
+		return r, fmt.Errorf("wallet: ack-settle: %w", err)
 	}
-	return AckResult{
-		TxID: res.TxID, FeeMicroalgos: res.PayerFeeMicroalgos, GroupRejected: groupRejected, Claim: claim,
-		PayerSettle: true, Frozen: frozen,
-	}, nil
+	r.Frozen = frozen
+	return r, nil
 }
 
 // readClaim is how the operator's claim on the ticket's box stands against a.

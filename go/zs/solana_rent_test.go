@@ -39,8 +39,8 @@ func (s testSolanaSigner) pub() solana.PublicKey {
 	return solana.PublicKey(s.key.Public().(ed25519.PublicKey))
 }
 func (s testSolanaSigner) Address() string { return s.pub().String() }
-func (s testSolanaSigner) SignBytes(context.Context, string, []byte) ([]byte, error) {
-	panic("unused")
+func (s testSolanaSigner) SignBytes(_ context.Context, _ string, digest []byte) ([]byte, error) {
+	return ed25519.Sign(s.key, digest), nil
 }
 func (s testSolanaSigner) SignTransactionMessage(_ context.Context, _ string, msg []byte) ([]byte, error) {
 	return ed25519.Sign(s.key, msg), nil

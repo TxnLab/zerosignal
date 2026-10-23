@@ -81,22 +81,64 @@ export function settleGroupSpecOf(receipt: UsageReceipt, ids: SettleGroupIds): S
     }
 }
 
-/** One settle submitted: its txid and the fee the payer's own txns carried. */
+/**
+ * One settle submitted: its txid and the fee the payer's own txns carried, in
+ * base units of the rail's fee (lamports on Solana).
+ */
 export interface SettleSubmission {
     txid: string
     payerFeeMicroalgos: bigint | number
 }
 
-/** The ways an ack goes on chain, which the host supplies. */
-export interface AckSettlePorts {
+/**
+ * SentSettleError: a submit that sent its transaction, which didn't settle. It
+ * names the transaction, and the fee when it landed and failed, which a Solana
+ * transaction pays: the ack reports both beside the error, as Go's submits
+ * return their ackSubmission beside one.
+ */
+export class SentSettleError extends Error {
+    override readonly name: string = 'SentSettleError'
+
+    constructor(
+        readonly submission: SettleSubmission,
+        msg: string,
+        cause?: unknown,
+    ) {
+        super(msg, cause === undefined ? undefined : { cause })
+    }
+}
+
+/**
+ * NoSettleAckRouteError: a deliverAck failure that sent nothing, because no
+ * relay can carry the ack yet (every relay predates SETTLE_ACK_MIN_VERSION).
+ * The ack then goes out as it did before 9.12, at exactly the old privacy
+ * cost: on Algorand the payer broadcasts the group, and on Solana, where it
+ * cannot submit the node's settle, ackSettle acks standalone. Go's
+ * errNoSettleAckRoute.
+ */
+export class NoSettleAckRouteError extends Error {
+    override readonly name = 'NoSettleAckRouteError'
+
+    constructor() {
+        super('zs: no relay serves the settle ack')
+    }
+}
+
+/**
+ * The ways an ack goes on chain, which the host supplies. S is what the node's
+ * settle slot decodes to: Algorand's group spec, Solana's open_seq.
+ */
+export interface AckSettlePorts<S = SettleGroupSpec> {
     /** Builds the group's spec. A failure is the host's, not the node's: the ack goes standalone. */
-    spec(): Promise<SettleGroupSpec>
+    spec(): Promise<S>
     /**
      * Checks the node's group against spec, signs the payer's half and submits
-     * it. Throws SettleGroupRejectedError, possibly as a cause, when the checks
-     * refuse the group.
+     * it, or on Solana hands the node the payer's ack. Throws
+     * SettleGroupRejectedError, possibly as a cause, when the checks refuse
+     * the group, and NoSettleAckRouteError, possibly as a cause, when it sent
+     * nothing and could not, which ackSettle answers by acking standalone.
      */
-    submitGroup(spec: SettleGroupSpec): Promise<SettleSubmission>
+    submitGroup(spec: S): Promise<SettleSubmission>
     /**
      * How the operator's claim on the ticket's box stands against the
      * receipt (judgeClaim), read before a standalone ack and after the node's
@@ -137,7 +179,7 @@ export class NoResolveFrozenError extends Error {
     }
 }
 
-export interface AckSettleCall extends AckSettlePorts {
+export interface AckSettleCall<S = SettleGroupSpec> extends AckSettlePorts<S> {
     /**
      * Whether the node sent a settle group that decodes; check it with
      * decodeSettleGroup first. One that doesn't is absent, as Go's
@@ -154,7 +196,17 @@ export interface AckSettleCall extends AckSettlePorts {
  * own receipt either way. err is the submit's error when the ack failed.
  */
 export interface AckSettleResult {
+    /**
+     * The payer's settle, or the node's group on Algorand. A payer's settle
+     * that failed has one when it was sent: on Solana it may have landed, or
+     * may still.
+     */
     txid: string
+    /**
+     * The fee the payer's own transactions paid, in base units of the rail's
+     * fee (lamports on Solana): 0 on the node's group or ack. A Solana settle
+     * that landed and failed paid its fee too, so it is set beside err.
+     */
     feeMicroalgos: number
     groupRejected: boolean
     /** The refusal, when groupRejected: which check the node's group failed. */
@@ -181,7 +233,7 @@ export interface AckSettleResult {
 /**
  * ackSettle acks a verified receipt: through the node's group when it sent one
  * and the group passes the payer's checks, standalone when it sent none, its
- * spec can't be built, or the checks refuse it. A group that passes but fails
+ * spec can't be built, the checks refuse it, or no relay can carry the ack. A group that passes but fails
  * to submit is returned as the error, never re-sent standalone at the payer's
  * expense: the sweep re-fires or refunds the ticket. The exceptions, on an
  * escrow with resolveFrozen, are an operator claim above the receipt, which
@@ -191,7 +243,7 @@ export interface AckSettleResult {
  * check has compared with the receipt on that path. A claim that contradicts
  * the receipt without taking more is not acked. Mirrors Go's ackSettle.
  */
-export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
+export async function ackSettle<S = SettleGroupSpec>(call: AckSettleCall<S>): Promise<AckSettleResult> {
     const log = call.log ?? discardLogger
     const readClaim = async (): Promise<ClaimVerdict> => {
         if (!call.claim) return ''
@@ -213,7 +265,8 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
             const res = await submit()
             return { txid: res.txid, feeMicroalgos: Number(res.payerFeeMicroalgos), ...rejected, claim, payerSettle: true, frozen }
         } catch (err) {
-            return { txid: '', feeMicroalgos: 0, ...rejected, claim, payerSettle: true, frozen: false, err }
+            const sent = findInCauses(err, SentSettleError)?.submission
+            return { txid: sent?.txid ?? '', feeMicroalgos: Number(sent?.payerFeeMicroalgos ?? 0), ...rejected, claim, payerSettle: true, frozen: false, err }
         }
     }
     const freezes = async (): Promise<boolean> => {
@@ -227,19 +280,26 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
     const freeze = () => (call.freeze ? call.freeze() : call.standalone())
     let rejection: SettleGroupRejectedError | undefined
     if (call.atomic) {
-        let spec: SettleGroupSpec | undefined
+        let spec: { s: S } | undefined
         try {
-            spec = await call.spec()
+            spec = { s: await call.spec() }
         } catch (err) {
             log.warn('ack-settle: settle-group spec build failed; falling back to standalone', { err: message(err) })
         }
         if (spec !== undefined) {
             try {
-                const res = await call.submitGroup(spec)
+                const res = await call.submitGroup(spec.s)
                 return { txid: res.txid, feeMicroalgos: Number(res.payerFeeMicroalgos), groupRejected: false }
             } catch (err) {
-                rejection = rejectionOf(err)
-                if (rejection === undefined) {
+                rejection = findInCauses(err, SettleGroupRejectedError)
+                if (findInCauses(err, NoSettleAckRouteError) !== undefined) {
+                    // Nothing reached the node, and no relay can carry the
+                    // ack to it. On Solana the payer cannot submit the node's
+                    // settle, so it acks standalone, as when no slot came; the
+                    // node is not at fault.
+                    log.info('ack-settle: no relay serves the settle ack; acking standalone')
+                    rejection = undefined
+                } else if (rejection === undefined) {
                     // The node may still land the group, so no settle that
                     // could finalize goes out in its place. Two box states call
                     // for the payer's settle at one fee, as Go's ackSettle
@@ -266,14 +326,16 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
                         }
                     }
                     return { txid: '', feeMicroalgos: 0, groupRejected: false, claim, err }
+                } else {
+                    // The node authored both halves and the receipt, so a
+                    // refused group is proven misbehaviour. The standalone ack
+                    // still settles the turn; groupRejected lets the caller bar
+                    // the node.
+                    log.warn('ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack', {
+                        field: rejection.field,
+                        detail: rejection.detail,
+                    })
                 }
-                // The node authored both halves and the receipt, so a refused
-                // group is proven misbehaviour. The standalone ack still settles
-                // the turn; groupRejected lets the caller bar the node.
-                log.warn('ack-settle: operator settle group REJECTED; refusing atomic path, falling back to standalone ack', {
-                    field: rejection.field,
-                    detail: rejection.detail,
-                })
             }
         }
     }
@@ -296,11 +358,11 @@ export async function ackSettle(call: AckSettleCall): Promise<AckSettleResult> {
     return send(() => call.standalone(), rejected, claim)
 }
 
-// rejectionOf finds a SettleGroupRejectedError in err's cause chain, as Go's
-// errors.As finds one through %w.
-function rejectionOf(err: unknown): SettleGroupRejectedError | undefined {
+// findInCauses finds an E in err's cause chain, as Go's errors.As finds one
+// through %w.
+function findInCauses<E extends Error>(err: unknown, cls: abstract new (...args: never[]) => E): E | undefined {
     for (let e: unknown = err, depth = 0; e instanceof Error && depth < 16; e = e.cause, depth++) {
-        if (e instanceof SettleGroupRejectedError) return e
+        if (e instanceof cls) return e
     }
     return undefined
 }

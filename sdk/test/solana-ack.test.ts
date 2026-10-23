@@ -21,14 +21,34 @@ import {
     parseTransaction,
     publicKeyBytes,
     verifySignatures,
+    verifyStrict,
 } from '@txnlab/zs-proto/solana'
-import { type Ending, Deployment, PROGRAM_ID, TOKEN_FROZEN, TOKEN_INITIALIZED, TOKEN_UNINITIALIZED, decodeConfig } from '@txnlab/zs-proto/solana/zsescrow'
+import {
+    type ClaimFields,
+    type Ending,
+    Deployment,
+    PROGRAM_ID,
+    TICKET_OPEN,
+    TICKET_PENDING_BY_OPERATOR,
+    TOKEN_FROZEN,
+    TOKEN_INITIALIZED,
+    TOKEN_UNINITIALIZED,
+    claimHash,
+    decodeAckSignature,
+    decodeConfig,
+    decodeTicket,
+    receiptAckDigest,
+} from '@txnlab/zs-proto/solana/zsescrow'
 import type { UsageReceipt } from '@txnlab/zs-proto/ticket'
+import type { SettleAck } from '@txnlab/zs-proto/wire'
 import { describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
-import { settleArgsOf } from '../src/ack.js'
+import { NoSettleAckRouteError, settleArgsOf } from '../src/ack.js'
+import type { Operator } from '../src/operator.js'
+import type { OpenHandle } from '../src/parts.js'
 import type { SolanaSigner } from '../src/ports.js'
+import type { ClaimVerdict } from '../src/reconcile.js'
 import { solanaClaimFields } from '../src/solana/claim.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
@@ -111,6 +131,7 @@ function cluster() {
         getMinimumBalanceForRentExemption: unused,
         getAccountInfo: async (k, o) => {
             expect(o?.commitment).toBe('confirmed')
+            o?.signal?.throwIfAborted()
             state.reads.push(k)
             const a = state.accounts.get(k)
             if (a === undefined) throw new Error(`read of ${k}`)
@@ -252,6 +273,188 @@ describe('SolanaWallet ack', () => {
         const t = await f.ticket()
         f.state.accounts.set(d.config(), config)
         await expect(f.ack(t)).rejects.toThrow(/solana wallet: ack/)
+        expect(f.state.sent).toHaveLength(0)
+        expect(f.signer.asked).toBe(0)
+    })
+})
+
+const RECEIPT = ACK.receipt_value as UsageReceipt
+
+// The fixture ticket's handle, which hands its ack to deliver; absent hands it
+// to no node.
+function handleOf(f: Awaited<ReturnType<typeof fixture>>, deliver?: OpenHandle['deliverAck']): OpenHandle {
+    const h = f.wallet.handleFor({
+        appCallTxId: '',
+        groupId: '',
+        ticketId: base64.encode(TICKET_ID),
+        operator: { id: Number(OPERATOR_ID), nodeId: Number(NODE_ID) } as Operator,
+        maxPrice: 0,
+        openFeesMicroalgos: 0,
+        signedGroup: new Uint8Array(),
+    })
+    if (deliver) h.deliverAck = deliver
+    return h
+}
+
+// The ticket account's offsets of the fields a claim is judged on, after the
+// 8-byte discriminator, as Go's test has them.
+const TICKET_STATUS_OFFSET = 9
+const TICKET_PENDING_AMOUNT_OFFSET = 33
+const TICKET_CLAIM_HASH_OFFSET = 185
+
+// Rewrites the fixture's ticket account: status, and a claim of pending whose
+// hash is the receipt's fields with the amount set to pending, as a node
+// claiming pending would write it.
+function setTicket(f: Awaited<ReturnType<typeof fixture>>, status: number, pending: bigint, edit?: (c: ClaimFields) => void) {
+    const data = TICKET_DATA.slice()
+    const fields = { ...solanaClaimFields(ARGS), amount: pending }
+    fields.receiptDigest = fields.receiptDigest.slice()
+    edit?.(fields)
+    const h = claimHash(fields)
+    data[TICKET_STATUS_OFFSET] = status
+    new DataView(data.buffer).setBigUint64(TICKET_PENDING_AMOUNT_OFFSET, pending, true)
+    data.set(h, TICKET_CLAIM_HASH_OFFSET)
+    expect(decodeTicket(data)).toMatchObject({ status, pendingAmount: pending, claimHash: h })
+    f.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data, executable: false })
+}
+
+const ticketReads = (f: Awaited<ReturnType<typeof fixture>>) => f.state.reads.filter((k) => k === TICKET_ADDR).length
+
+describe('Solana handle ackSettle', () => {
+    // With the node's open_seq the payer hands the node its ack: its
+    // signature over the receipt's ack digest at that open_seq, as
+    // payment_settle. It reads nothing, sends nothing and pays nothing; the
+    // node submits its settle.
+    it('hands the node its ack', async () => {
+        const f = await fixture()
+        const got: SettleAck[] = []
+        const h = handleOf(f, async (ack) => {
+            got.push(ack)
+        })
+        // Ids that differ, so the digest binds each in its place; nothing
+        // here reads the ticket account at them.
+        h.operator = { id: 3, nodeId: 5 } as Operator
+        const res = await h.ackSettle(RECEIPT, '7')
+        expect(res).toEqual({ txid: '', feeMicroalgos: 0, groupRejected: false })
+        expect(got).toHaveLength(1)
+        expect(got[0]!.ticket_id).toBe(base64.encode(TICKET_ID))
+        const genesis = decodeConfig(CONFIG).genesisHash
+        const digest = receiptAckDigest(d, genesis, 3n, 5n, TICKET_ID, 7n, RECEIPT)
+        expect(verifyStrict(PAYER, digest, decodeAckSignature(got[0]!.settle_group))).toBe(true)
+        expect(ticketReads(f)).toBe(0)
+        expect(f.state.sent).toHaveLength(0)
+        expect(f.signer.asked).toBe(0)
+    })
+
+    // Without the node's open_seq, or with no relay to carry the ack, the
+    // payer sends its own ack over the ticket it read, and pays for it: here
+    // the node's claim matches the receipt, so the ack settles the ticket.
+    const alone: [string, string, OpenHandle['deliverAck']][] = [
+        ['no slot', '', () => Promise.reject(new Error('delivered'))],
+        ['no relay', '7', () => Promise.reject(new NoSettleAckRouteError())],
+        ['no ack route at all', '7', undefined],
+    ]
+    it.each(alone)('acks alone without the node: %s', async (_name, slot, deliver) => {
+        const f = await fixture()
+        const res = await handleOf(f, deliver).ackSettle(RECEIPT, slot)
+        expect(res).toEqual({
+            txid: ACK.signatures[0],
+            feeMicroalgos: Number(SOLANA_SIGNATURE_FEE),
+            groupRejected: false,
+            claim: 'agrees',
+            payerSettle: true,
+            frozen: false,
+        })
+        expect(f.state.sent).toHaveLength(1)
+        expect(base64.encode(encodeTransaction(f.state.sent[0]!))).toBe(ACK.wire_base64)
+        // The ack names the account the claim was judged on.
+        expect(ticketReads(f)).toBe(1)
+    })
+
+    // With no route nothing reached the node, so the payer's own ack runs on
+    // the caller's budget, not a fresh one: a caller whose deadline has
+    // passed gets nothing sent.
+    it("acks alone on the caller's budget", async () => {
+        const f = await fixture()
+        const signal = AbortSignal.timeout(0)
+        await new Promise((r) => setTimeout(r, 5))
+        const res = await handleOf(f, () => Promise.reject(new NoSettleAckRouteError())).ackSettle(RECEIPT, '7', signal)
+        expect(res.err).toBeDefined()
+        expect(f.state.sent).toHaveLength(0)
+    })
+
+    // What the payer's own ack does turns on the claim it read, as on
+    // Algorand: an over-claim is acked to freeze it, a claim that contradicts
+    // the receipt without taking more is left to lapse, and an open ticket
+    // gets the payer's first half.
+    const amount = ARGS.amountCharged
+    const otherDigest = (c: ClaimFields) => {
+        c.receiptDigest[0]! ^= 0xff
+    }
+    const byClaim: [string, number, bigint, ((c: ClaimFields) => void) | undefined, ClaimVerdict, boolean, boolean][] = [
+        ['an over-claim is frozen', TICKET_PENDING_BY_OPERATOR, amount + 1n, undefined, 'overclaims', true, true],
+        ['a contradicting claim taking no more is not acked', TICKET_PENDING_BY_OPERATOR, amount - 1n, otherDigest, 'contradicts', false, false],
+        ["an open ticket gets the payer's half", TICKET_OPEN, 0n, undefined, 'open', true, false],
+    ]
+    it.each(byClaim)('acks alone by the claim: %s', async (_name, status, pending, edit, claim, sent, frozen) => {
+        const f = await fixture()
+        setTicket(f, status, pending, edit)
+        const res = await handleOf(f).ackSettle(RECEIPT, null)
+        expect(res.err).toBeUndefined()
+        expect(res.claim).toBe(claim)
+        expect(res.payerSettle ?? false).toBe(sent)
+        expect(res.frozen ?? false).toBe(frozen)
+        expect(f.state.sent).toHaveLength(sent ? 1 : 0)
+        if (sent) expect(res).toMatchObject({ txid: encodeBase58(f.state.sent[0]!.signatures[0]!), feeMicroalgos: Number(SOLANA_SIGNATURE_FEE) })
+        expect(ticketReads(f)).toBe(1)
+    })
+
+    // After a delivery the node refused, or one that may have reached it, the
+    // payer reads the ticket on a budget of its own and sends its ack only
+    // where Algorand sends its settle: over an over-claim, to freeze it, and
+    // over an open ticket, as its first half. A claim matching the receipt is
+    // the node's to settle, and the delivery's error is returned.
+    const failed: [string, number, bigint, ClaimVerdict, boolean, boolean][] = [
+        ['over-claim', TICKET_PENDING_BY_OPERATOR, amount + 1n, 'overclaims', true, true],
+        ['open ticket', TICKET_OPEN, 0n, 'open', true, false],
+        ['matching claim', TICKET_PENDING_BY_OPERATOR, amount, 'agrees', false, false],
+    ]
+    it.each(failed)('follows a failed delivery: %s', async (_name, status, pending, claim, sent, frozen) => {
+        const f = await fixture()
+        setTicket(f, status, pending)
+        const refused = new Error('node answered 409')
+        // The delivery spends the whole of its signal, as a node holding the
+        // request open until the timeout would.
+        const signal = AbortSignal.timeout(20)
+        const res = await handleOf(f, (_ack, s) => new Promise((_resolve, reject) => s?.addEventListener('abort', () => reject(refused)))).ackSettle(
+            RECEIPT,
+            '7',
+            signal,
+        )
+        expect(res.claim).toBe(claim)
+        expect(res.payerSettle ?? false).toBe(sent)
+        expect(res.frozen ?? false).toBe(frozen)
+        expect(f.state.sent).toHaveLength(sent ? 1 : 0)
+        expect(res.err).toBe(sent ? undefined : refused)
+    })
+
+    // The payer's own ack that landed and failed reports its signature and
+    // the fee it paid beside the error.
+    it('reports what a failed ack paid', async () => {
+        const f = await fixture()
+        f.state.land = { slot: 5n, confirmations: 1n, err: { InstructionError: [0, { Custom: 6012 }] }, confirmationStatus: 'confirmed' }
+        const res = await handleOf(f).ackSettle(RECEIPT, null)
+        expect(res.err).toBeInstanceOf(SolanaAckSendError)
+        expect(res).toMatchObject({ txid: ACK.signatures[0], feeMicroalgos: Number(SOLANA_SIGNATURE_FEE), payerSettle: true })
+    })
+
+    // With no ticket account to name there is no ack to send, and nothing is.
+    it('sends no ack for a missing ticket', async () => {
+        const f = await fixture()
+        f.state.accounts.set(TICKET_ADDR, null)
+        const res = await handleOf(f).ackSettle(RECEIPT, null)
+        expect(res.err).toBeDefined()
+        expect(res.claim).toBe('none')
         expect(f.state.sent).toHaveLength(0)
         expect(f.signer.asked).toBe(0)
     })
