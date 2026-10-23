@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
     type Account,
+    type AccountAt,
     type Commitment,
     type Filter,
     type KeyedAccount,
@@ -42,6 +43,7 @@ interface RequestArgs {
     signatures?: string[]
     search_history?: boolean
     data_len?: number
+    min_context_slot?: number
 }
 
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_rpc_vectors.json', import.meta.url), 'utf8')) as {
@@ -142,6 +144,7 @@ async function issue(c: SolanaRpcClient, method: string, a: RequestArgs): Promis
     const commitment = a.commitment
     switch (method) {
         case 'getAccountInfo':
+            if (a.min_context_slot !== undefined) return c.getAccountInfoAt(a.key!, { commitment, minContextSlot: BigInt(a.min_context_slot) })
             return c.getAccountInfo(a.key!, { commitment })
         case 'getProgramAccounts': {
             const filters = a.filters?.map(
@@ -237,17 +240,22 @@ describe('solana_rpc vectors', () => {
                 expect((err as Error).name).toBe('SolanaRpcMalformedAnswer')
                 return
             }
-            expect(rendered(method, await call)).toEqual(want)
+            expect(rendered(method, args, await call)).toEqual(want)
         },
     )
+
+    it('has slot-aware answer cases', () => expect(vectors.answers.filter((c) => c.args.min_context_slot !== undefined).length).toBeGreaterThan(5))
 })
 
 /** What a call decoded, in the vectors' want form. */
-function rendered(method: string, got: unknown): unknown {
+function rendered(method: string, args: RequestArgs, got: unknown): unknown {
     const account = (a: Account) => ({ lamports: Number(a.lamports), owner: a.owner, data_hex: hex.encode(a.data), executable: a.executable })
     switch (method) {
-        case 'getAccountInfo':
-            return got === null ? null : account(got as Account)
+        case 'getAccountInfo': {
+            if (args.min_context_slot === undefined) return got === null ? null : account(got as Account)
+            const at = got as AccountAt
+            return { account: at.account === null ? null : account(at.account), slot: Number(at.slot) }
+        }
         case 'getProgramAccounts':
             return (got as KeyedAccount[]).map((k) => ({ pubkey: k.key, account: account(k.account) }))
         case 'getSignatureStatuses':
@@ -282,6 +290,20 @@ describe('SolanaRpcClient', () => {
 
     it('answers null for an account that does not exist', async () => {
         expect(await client(fakeRpc(result({ context: { slot: 9 }, value: null }))).getAccountInfo(KEY)).toBeNull()
+    })
+
+    // JSON carries the slot as a number, which would round one past 2^53 to
+    // another slot, so none goes; nor a negative one.
+    it.each([-1n, 2n ** 53n + 1n])('refuses to send minContextSlot %s', async (minContextSlot) => {
+        const f = fakeRpc(result({ context: { slot: 9 }, value: null }))
+        await expect(client(f).getAccountInfoAt(KEY, { minContextSlot })).rejects.toThrow(/out of range/)
+        expect(f.seen).toHaveLength(0)
+    })
+
+    it('sends minContextSlot 2^53 - 1', async () => {
+        const f = fakeRpc(result({ context: { slot: 9 }, value: null }))
+        await client(f).getAccountInfoAt(KEY, { minContextSlot: 2n ** 53n - 1n })
+        expect(f.seen[0]!.params).toEqual([KEY, { encoding: 'base64', minContextSlot: Number.MAX_SAFE_INTEGER }])
     })
 
     it.each([[['AQID', 'base58']], [['AQID']], [['!!', 'base64']], ['AQID']])('refuses account data %j', async (data) => {

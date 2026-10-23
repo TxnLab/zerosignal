@@ -77,7 +77,9 @@ export class Settles {
 
     /**
      * confirmSettled watches the atomic settle txId just submitted for
-     * ticketId until it lands, then deletes the ticket's journal row. A settle
+     * ticketId until it lands, then deletes the ticket's journal row. On
+     * Solana the node builds and sends its settle, so there is no txId and the
+     * watch reads the ticket instead (OpenHandle.settleByTicket). A settle
      * dropped from the pool, one not confirmed by the deadline, or one whose
      * lookups keep failing keeps its row for the reconciler, which re-settles
      * or refunds it. The Client's close ends the watch.
@@ -86,11 +88,12 @@ export class Settles {
         const o = this.#o
         const journal = o.journal
         const outcome = handle.settleOutcome?.bind(handle)
-        if (outcome === undefined || journal === undefined || txId === '') return
+        const byTicket = handle.settleByTicket
+        if (outcome === undefined || journal === undefined || (txId === '' && byTicket === undefined)) return
         const log = o.logger
         const clock = o.clock ?? Date.now
         const sleep = o.sleep ?? sleepFor
-        const timeoutMs = o.confirmTimeoutMs ?? SETTLE_CONFIRM_TIMEOUT_MS
+        const timeoutMs = byTicket?.timeoutMs ?? o.confirmTimeoutMs ?? SETTLE_CONFIRM_TIMEOUT_MS
         const pollMs = o.confirmPollMs ?? SETTLE_CONFIRM_POLL_MS
         this.#go(ticketId + CONFIRMING_SUFFIX, 'confirmation', ticketId, async () => {
             const end = clock() + timeoutMs

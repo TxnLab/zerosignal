@@ -207,6 +207,10 @@ type OpenHandle struct {
 	// solana is the wallet that signed a Solana open, whose settle paths the
 	// handle's methods take; nil on Algorand.
 	solana *SolanaWallet
+	// ticketSeenSlot is the latest slot the settle watch read the payer's
+	// own ticket account at, 0 before it has (no ticket is open at genesis);
+	// only an account missing as of a later slot is the settle landed.
+	ticketSeenSlot atomic.Uint64
 }
 
 // detached is the error of a settle path called on a handle without a wallet.

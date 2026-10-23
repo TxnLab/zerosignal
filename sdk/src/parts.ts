@@ -250,6 +250,14 @@ export interface OpenHandle {
      * confirm an atomic settle landed, and leaves the journal row to the sweep.
      */
     settleOutcome?(txId: string, signal?: AbortSignal): Promise<SettleOutcome>
+    /**
+     * Set when settleOutcome looks the settle up by its ticket and needs no
+     * txId, watched for up to timeoutMs: a Solana node builds and sends its
+     * own settle, so the payer never learns its signature. Absent, a settle
+     * with no txId is not watched, and the Client's budget applies. Go's
+     * settleWatch.
+     */
+    settleByTicket?: { timeoutMs: number }
 }
 
 /** What OpenHandle.freezeOverclaim found and did. */

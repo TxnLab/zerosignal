@@ -31,6 +31,36 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — a delivered Solana ack is confirmed by its ticket (0.11.0)
+
+After a turn whose ack the payer handed the node, both SDKs now watch for the node's settle to
+land and then drop the ticket's journal row, as they do on Algorand once the settle group
+confirms. The node builds and sends that settle, so the payer has no transaction id to look up:
+the watch reads the ticket account, for up to the watchdog's three minutes, past a blockhash's
+life, and takes it closing after the watch saw it open as the settle landed. An account not seen
+yet is no answer, since the node serves on an open still confirming, which can land after the
+reply. So the account is also read once just before the ack goes to the node, which cannot
+settle without it: an open seen there counts, and a settle that lands before the watch's first
+read is still seen closing. That read holds the delivery up for at most two seconds. The watch
+was skipped, so the row stayed until the reconciler forgot it after the ticket's expiry. A
+settle that never lands, or one that lands before any read has seen the account open, leaves
+the row to the reconciler, as before.
+
+A closed account counts only as of a slot after the one the watch last saw it open at. A
+provider balances reads across nodes slots apart, so a node behind the one that showed the
+account can answer that it is missing. Each read therefore sends that slot as its
+`minContextSlot`, through a new slot-aware read: `rpc.AccountAtReader`'s
+`GetAccountInfoAt`, which `HTTPClient` implements, ↔ the optional
+`SolanaRpc.getAccountInfoAt`, which `SolanaRpcClient` implements. Both clients now retry a
+getAccountInfo refused with -32016 (minimum context slot not reached), as a node behind the
+cluster. An RPC client without the slot-aware read gets no watch, and the row stays with the
+reconciler as before.
+
+`WaitSettles` ↔ `waitSettles` now waits for these watches too, as for Algorand's: usually a few
+seconds, and up to the host's budget for a node slow to settle. A watch that never sees the
+account open, as when the settle lands before any read has, runs the whole three minutes.
+Closing the Client ends them and keeps the rows.
+
 ### 2026-10-23 — the reconciler sweeps Solana tickets (0.11.0)
 
 The journal's reconciler in both SDKs now runs for a Solana wallet, which got none, and so did

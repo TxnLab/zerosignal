@@ -1017,7 +1017,7 @@ A matching group is exactly the settle the payer wants on chain, whoever submits
   Any other claim, or a box the payer cannot read, leaves the rule above standing. Neither settle goes to a contract without `resolveFrozen` ("Payer's check of an operator claim" below).
 
 **Residual payer contact with algod.** On the happy path a payer's turns now submit nothing to algod, but the payer still reads from algod, and some of those reads name a ticket. A ticket box or a settle txid resolves to the payer address on chain, so its algod provider can still tie the payer's IP to the payer through them. These reads are **per ticket**, not rare:
-- the txid poll that confirms a settle landed, a few seconds after each acked turn;
+- the txid poll that confirms a settle landed, a few seconds after each acked turn (on Solana, where the node sends its settle and the payer never learns its signature, a poll of the ticket account until it closes, which counts only after the poll has seen it open, since the node serves on an open still confirming, and only as of a later slot than it was seen at, which each poll asks for as its `minContextSlot`; the account is also read once just before the ack goes to the node, which cannot settle without it, so a settle that lands before the first poll is still seen);
 - the box read before every standalone ack, and after every failed group submit or failed ack;
 - the reconciler's sweep, which reads the box of every ticket still in the journal, roughly once a minute;
 - the refund watchdog's box read at a ticket's deadline, when the ticket did not settle.

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/rpc"
@@ -92,6 +93,7 @@ func (h *OpenHandle) solanaAckSettle(ctx context.Context, receipt *ticket.UsageR
 			if err != nil {
 				return ackSubmission{}, err
 			}
+			h.solanaSettleBaseline(ctx)
 			// The node submits its settle with the ack and pays its fee.
 			return ackSubmission{}, h.deliverAck(ctx, wire.SettleAck{TicketID: h.TicketID, SettleGroup: sig})
 		},
@@ -105,15 +107,103 @@ func (h *OpenHandle) solanaAckSettle(ctx context.Context, receipt *ticket.UsageR
 	})
 }
 
+// solanaSettleBaselineTimeout bounds the read before an ack goes to the node,
+// which holds up the delivery. A var so a test can shorten it.
+var solanaSettleBaselineTimeout = 2 * time.Second
+
+// solanaSettleBaseline reads h's ticket account before its ack goes to the
+// node, so the settle watch has seen it open even when the node's settle lands
+// before the watch's first read. The node cannot settle cooperatively without
+// the ack, so an account open now is one only an ending can close. A failed or
+// slow read leaves the watch to see it itself.
+func (h *OpenHandle) solanaSettleBaseline(ctx context.Context) {
+	if !h.solana.slotReads() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, solanaSettleBaselineTimeout)
+	defer cancel()
+	_, _ = h.solanaSettleOutcome(ctx)
+}
+
+// errNoSlotRead is an RPC client without the slot-aware account read, which
+// the settle watch needs to trust an account's absence.
+var errNoSlotRead = errors.New("solana wallet: rpc client has no slot-aware account read")
+
+// solanaSettleOutcome is where the node's settle of a delivered ack stands,
+// read off the ticket account, since the node builds that transaction and the
+// payer never learns its signature. An account closed after the watch saw it
+// open is landed: the settle closed it, or another ending did, and either way
+// the row has nothing left to finish. One not seen yet is pending: the node
+// serves on an open still confirming, which can land after the reply, so an
+// account not there yet may be one about to open, and dropping its row then
+// would leave nothing to refund it. There is no dropped: a settle that never
+// lands leaves the account open, and the watch times out.
+//
+// Closed means missing as of a slot after the one the watch saw it at: each
+// read asks for that slot as its minContextSlot, and an answer as of it or
+// earlier is pending. A provider balances reads across nodes slots apart, so a
+// node behind the one that showed the account can answer that it is missing.
+func (h *OpenHandle) solanaSettleOutcome(ctx context.Context) (SettleOutcome, error) {
+	id, err := solanaTicketID("settle outcome", h.TicketID)
+	if err != nil {
+		return SettlePending, err
+	}
+	seen := h.ticketSeenSlot.Load()
+	t, slot, err := h.solana.readTicketAt(ctx, h.Operator.ID, h.Operator.NodeID, id, seen)
+	switch {
+	case err != nil:
+		return SettlePending, err
+	case t == nil && seen != 0 && slot > seen:
+		return SettleLanded, nil
+	case t != nil && t.Payer == h.solana.payer && slot > seen:
+		h.ticketSeenSlot.Store(slot)
+	}
+	return SettlePending, nil
+}
+
 // readTicket reads the ticket account for id at the node, nil when there is
 // none: never opened, or ended and closed. An account the program doesn't own
 // is no ticket either, since only the program can write one at the address.
 func (w *SolanaWallet) readTicket(ctx context.Context, operatorID, nodeID uint64, id [16]byte) (*zsescrow.Ticket, error) {
-	addr := w.deployment.Ticket(w.deployment.Node(operatorID, nodeID), id)
-	acct, err := getAccount(ctx, w.rpc, addr)
+	acct, err := getAccount(ctx, w.rpc, w.ticketAddr(operatorID, nodeID, id))
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: read ticket: %w", err)
 	}
+	return w.ticketOf(acct)
+}
+
+// slotReads is whether the RPC client has the read readTicketAt makes.
+func (w *SolanaWallet) slotReads() bool {
+	_, ok := w.rpc.(rpc.AccountAtReader)
+	return ok
+}
+
+// readTicketAt is readTicket from a node at minContextSlot or later (0 asks
+// for none), with the slot the answer is as of. It reads at confirmed, as
+// readTicket does: an open seen only at processed could be on a fork that is
+// dropped, and its absence later would drop the row of an open still to land.
+func (w *SolanaWallet) readTicketAt(ctx context.Context, operatorID, nodeID uint64, id [16]byte, minContextSlot uint64) (*zsescrow.Ticket, uint64, error) {
+	r, ok := w.rpc.(rpc.AccountAtReader)
+	if !ok {
+		return nil, 0, errNoSlotRead
+	}
+	acct, slot, err := r.GetAccountInfoAt(ctx, w.ticketAddr(operatorID, nodeID, id), rentCommitment, minContextSlot)
+	if errors.Is(err, rpc.ErrNotFound) {
+		acct, err = nil, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("solana wallet: read ticket: %w", err)
+	}
+	t, err := w.ticketOf(acct)
+	return t, slot, err
+}
+
+func (w *SolanaWallet) ticketAddr(operatorID, nodeID uint64, id [16]byte) solana.PublicKey {
+	return w.deployment.Ticket(w.deployment.Node(operatorID, nodeID), id)
+}
+
+// ticketOf decodes a ticket account read, nil for none.
+func (w *SolanaWallet) ticketOf(acct *rpc.Account) (*zsescrow.Ticket, error) {
 	if acct == nil || acct.Owner != w.deployment.Program {
 		return nil, nil
 	}

@@ -190,12 +190,50 @@
       "tx_custom": null
     },
     {
+      "method": "getAccountInfo",
+      "status": 200,
+      "code": -32016,
+      "data": {
+        "contextSlot": 7
+      },
+      "retry": true,
+      "tx_err_name": "",
+      "tx_custom": null
+    },
+    {
+      "method": "getAccountInfo",
+      "status": 200,
+      "code": -32016,
+      "data": null,
+      "retry": true,
+      "tx_err_name": "",
+      "tx_custom": null
+    },
+    {
+      "method": "getAccountInfo",
+      "status": 201,
+      "code": -32016,
+      "data": null,
+      "retry": true,
+      "tx_err_name": "",
+      "tx_custom": null
+    },
+    {
       "method": "getBalance",
       "status": 200,
       "code": -32016,
       "data": {
         "contextSlot": 7
       },
+      "retry": false,
+      "tx_err_name": "",
+      "tx_custom": null
+    },
+    {
+      "method": "getProgramAccounts",
+      "status": 200,
+      "code": -32016,
+      "data": null,
       "retry": false,
       "tx_err_name": "",
       "tx_custom": null
@@ -1050,6 +1088,51 @@
       ]
     },
     {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "commitment": "confirmed",
+        "min_context_slot": 0
+      },
+      "params": [
+        "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        {
+          "encoding": "base64",
+          "commitment": "confirmed"
+        }
+      ]
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "commitment": "confirmed",
+        "min_context_slot": 123456789
+      },
+      "params": [
+        "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        {
+          "encoding": "base64",
+          "commitment": "confirmed",
+          "minContextSlot": 123456789
+        }
+      ]
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 1
+      },
+      "params": [
+        "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        {
+          "encoding": "base64",
+          "minContextSlot": 1
+        }
+      ]
+    },
+    {
       "method": "getProgramAccounts",
       "args": {
         "key": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
@@ -1756,6 +1839,211 @@
         }
       },
       "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": 9
+        },
+        "value": {
+          "data": [
+            "AQID",
+            "base64"
+          ],
+          "lamports": 5,
+          "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "rentEpoch": 0,
+          "space": 3
+        }
+      },
+      "refused": false,
+      "want": {
+        "account": {
+          "lamports": 5,
+          "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "data_hex": "010203",
+          "executable": false
+        },
+        "slot": 9
+      }
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": 9
+        },
+        "value": null
+      },
+      "refused": false,
+      "want": {
+        "account": null,
+        "slot": 9
+      }
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": 0
+        },
+        "value": null
+      },
+      "refused": false,
+      "want": {
+        "account": null,
+        "slot": 0
+      }
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": null,
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {},
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": null
+        },
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": "9"
+        },
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": -1
+        },
+        "value": null
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": 9
+        }
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d",
+        "min_context_slot": 7
+      },
+      "result": {
+        "context": {
+          "slot": 9
+        },
+        "value": 5
+      },
+      "refused": true,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d"
+      },
+      "result": {
+        "value": null
+      },
+      "refused": false,
+      "want": null
+    },
+    {
+      "method": "getAccountInfo",
+      "args": {
+        "key": "75hbt6uvDqjPZ9WgFtMhBnTeyHw7cinoHiz4FD2vEz2d"
+      },
+      "result": {
+        "context": {
+          "slot": "9"
+        },
+        "value": null
+      },
+      "refused": false,
       "want": null
     },
     {

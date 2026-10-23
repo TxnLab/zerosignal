@@ -81,6 +81,9 @@ type requestArgs struct {
 	Signatures          []string     `json:"signatures,omitempty"`
 	SearchHistory       bool         `json:"search_history,omitempty"`
 	DataLen             *uint64      `json:"data_len,omitempty"`
+	// MinContextSlot makes a getAccountInfo the slot-aware read
+	// (GetAccountInfoAt) with this slot; absent is GetAccountInfo.
+	MinContextSlot *uint64 `json:"min_context_slot,omitempty"`
 }
 
 type filterArgs struct {
@@ -150,6 +153,10 @@ func requestCases(t *testing.T) []requestCase {
 	return []requestCase{
 		{Method: "getAccountInfo", Args: requestArgs{Key: key}},
 		{Method: "getAccountInfo", Args: requestArgs{Key: key, Commitment: Confirmed}},
+		// A slot of 0 asks for none, so sends none.
+		{Method: "getAccountInfo", Args: requestArgs{Key: key, Commitment: Confirmed, MinContextSlot: u64(0)}},
+		{Method: "getAccountInfo", Args: requestArgs{Key: key, Commitment: Confirmed, MinContextSlot: u64(123456789)}},
+		{Method: "getAccountInfo", Args: requestArgs{Key: key, MinContextSlot: u64(1)}},
 		{Method: "getProgramAccounts", Args: requestArgs{Key: program}},
 		{Method: "getProgramAccounts", Args: requestArgs{Key: program, Commitment: Confirmed, Filters: []filterArgs{
 			{DataSize: u64(880)}, {Offset: u64(0), BytesHex: hex.EncodeToString(disc)}, {Offset: u64(72), BytesHex: hex.EncodeToString(bytes.Repeat([]byte{7}, 32))},
@@ -191,6 +198,13 @@ type wantAccount struct {
 	Executable bool   `json:"executable"`
 }
 
+// wantAccountAt is a slot-aware read: the account, null when it does not
+// exist, and the slot the answer is as of.
+type wantAccountAt struct {
+	Account *wantAccount `json:"account"`
+	Slot    uint64       `json:"slot"`
+}
+
 type wantKeyed struct {
 	Pubkey  string      `json:"pubkey"`
 	Account wantAccount `json:"account"`
@@ -227,6 +241,19 @@ func readAnswer(ctx context.Context, rc answerCase) (json.RawMessage, error) {
 	}
 	switch rc.Method {
 	case "getAccountInfo":
+		if a.MinContextSlot != nil {
+			acc, slot, err := c.GetAccountInfoAt(ctx, solana.MustPublicKey(a.Key), a.Commitment, *a.MinContextSlot)
+			at := wantAccountAt{Slot: slot}
+			switch {
+			case errors.Is(err, ErrNotFound):
+			case err != nil:
+				return nil, err
+			default:
+				w := render(*acc)
+				at.Account = &w
+			}
+			return json.Marshal(at)
+		}
 		acc, err := c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
 		if errors.Is(err, ErrNotFound) {
 			return json.RawMessage(`null`), nil
@@ -291,6 +318,7 @@ func answerCases(t *testing.T) []answerCase {
 		return fmt.Sprintf(`{"lamports":5,"owner":"%s","data_hex":"010203","executable":%v}`, owner, executable)
 	}
 	const refused = ""
+	at := requestArgs{Key: key, MinContextSlot: u64(7)}
 	statuses := func(entries ...string) string {
 		return `{"context":{"slot":9},"value":[` + strings.Join(entries, ",") + `]}`
 	}
@@ -333,6 +361,23 @@ func answerCases(t *testing.T) []answerCase {
 		{"getAccountInfo", requestArgs{Key: key}, info(acct(lamports, ownerMember)), refused},
 		{"getAccountInfo", requestArgs{Key: key}, info(acct(`"data":[null,"base64"]`, lamports, ownerMember)), refused},
 		{"getAccountInfo", requestArgs{Key: key}, info(acct(`"data":["AQID",null]`, lamports, ownerMember)), refused},
+		// The slot-aware read returns the slot the answer is as of, and
+		// refuses one without it: a slot read as 0 would pass any later
+		// comparison as no older than the one asked for. A plain read never
+		// looks at it.
+		{"getAccountInfo", at, info(acct(data, lamports, ownerMember)), `{"account":` + accountWant(false) + `,"slot":9}`},
+		{"getAccountInfo", at, info(`null`), `{"account":null,"slot":9}`},
+		{"getAccountInfo", at, `{"context":{"slot":0},"value":null}`, `{"account":null,"slot":0}`},
+		{"getAccountInfo", at, `{"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":null,"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":{},"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":{"slot":null},"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":{"slot":"9"},"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":{"slot":-1},"value":null}`, refused},
+		{"getAccountInfo", at, `{"context":{"slot":9}}`, refused},
+		{"getAccountInfo", at, `{"context":{"slot":9},"value":5}`, refused},
+		{"getAccountInfo", requestArgs{Key: key}, `{"value":null}`, `null`},
+		{"getAccountInfo", requestArgs{Key: key}, `{"context":{"slot":"9"},"value":null}`, `null`},
 		// getProgramAccounts reads its accounts the same way.
 		{"getProgramAccounts", requestArgs{Key: owner}, keyed(), `[]`},
 		{"getProgramAccounts", requestArgs{Key: owner}, keyed(entry(acct(data, lamports, ownerMember))),
@@ -389,7 +434,12 @@ func issue(ctx context.Context, c *HTTPClient, rc requestCase) error {
 	a := rc.Args
 	switch rc.Method {
 	case "getAccountInfo":
-		_, err := c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
+		var err error
+		if a.MinContextSlot != nil {
+			_, _, err = c.GetAccountInfoAt(ctx, solana.MustPublicKey(a.Key), a.Commitment, *a.MinContextSlot)
+		} else {
+			_, err = c.GetAccountInfo(ctx, solana.MustPublicKey(a.Key), a.Commitment)
+		}
 		if errors.Is(err, ErrNotFound) {
 			return nil
 		}
@@ -469,10 +519,14 @@ func TestSolanaRPCVectors(t *testing.T) {
 		{"getAccountInfo", 201, CodeNodeUnhealthy, ``},
 		{"getAccountInfo", 299, CodeNodeUnhealthy, ``},
 		{"sendTransaction", 200, CodeNodeUnhealthy, `{"numSlotsBehind":3}`},
-		// No method here sends a minContextSlot, so its refusal is not expected
-		// weather; a caller that starts sending one decides then.
-		{"getBalance", 200, -32016, `{"contextSlot":7}`},
-		{"sendTransaction", 200, -32016, ``},
+		// Only getAccountInfo sends a minContextSlot, so only its refusal is
+		// a node behind; on any other method the code is unexpected.
+		{"getAccountInfo", 200, CodeMinContextSlotNotReached, `{"contextSlot":7}`},
+		{"getAccountInfo", 200, CodeMinContextSlotNotReached, ``},
+		{"getAccountInfo", 201, CodeMinContextSlotNotReached, ``},
+		{"getBalance", 200, CodeMinContextSlotNotReached, `{"contextSlot":7}`},
+		{"getProgramAccounts", 200, CodeMinContextSlotNotReached, ``},
+		{"sendTransaction", 200, CodeMinContextSlotNotReached, ``},
 		// A failed simulation: only a missing blockhash is weather.
 		{"sendTransaction", 200, CodePreflightFailure, `{"err":"BlockhashNotFound","logs":[],"accounts":null,"unitsConsumed":0}`},
 		{"sendTransaction", 200, CodePreflightFailure, `{"err":{"BlockhashNotFound":null}}`},

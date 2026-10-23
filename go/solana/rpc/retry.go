@@ -44,6 +44,9 @@ const (
 	// whether it is), which sendTransaction's preflight and getHealth answer
 	// until it catches up.
 	CodeNodeUnhealthy = -32005
+	// CodeMinContextSlotNotReached is a node that has not reached the
+	// minContextSlot a read asked for.
+	CodeMinContextSlotNotReached = -32016
 )
 
 // shouldRetry is whether an outcome is retried. status is the HTTP status,
@@ -54,11 +57,13 @@ const (
 // other non-2xx status is an answer. Within a 2xx, a node behind the cluster
 // is weather, and so is a simulation that found no blockhash: the blockhash
 // came from a node ahead of the one simulating (providers balance across
-// nodes at different slots), and the same bytes pass once it catches up.
-// Resending is safe on every method, sendTransaction included, because the
-// cluster processes a signature once. Every other JSON-RPC error is an answer
-// that asking again repeats, a failed simulation's InsufficientFundsForFee or
-// program error included.
+// nodes at different slots), and the same bytes pass once it catches up. A
+// node short of a getAccountInfo's minContextSlot is behind in the same way,
+// and the next answer may come from one that is not; getAccountInfo is the
+// only method that sends one. Resending is safe on every method,
+// sendTransaction included, because the cluster processes a signature once.
+// Every other JSON-RPC error is an answer that asking again repeats, a failed
+// simulation's InsufficientFundsForFee or program error included.
 func shouldRetry(method string, status int, rpcErr *Error) bool {
 	if status == 0 {
 		return true
@@ -74,6 +79,8 @@ func shouldRetry(method string, status int, rpcErr *Error) bool {
 		return true
 	case CodePreflightFailure:
 		return method == "sendTransaction" && rpcErr.TxErrName() == "BlockhashNotFound"
+	case CodeMinContextSlotNotReached:
+		return method == "getAccountInfo"
 	}
 	return false
 }
