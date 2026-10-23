@@ -23,6 +23,7 @@ import {
     signTransactionWith,
 } from '@txnlab/zs-proto/solana'
 import {
+    type Config as SolanaConfig,
     type Deployment,
     type Ending,
     ERR_PAST_DEADLINE,
@@ -169,18 +170,9 @@ export class SolanaWallet implements WalletOpener {
         } catch (err) {
             throw new Error(`solana wallet: payer address: ${message(err)}`, { cause: err })
         }
-        let acct
-        try {
-            acct = await o.rpc.getAccountInfo(o.deployment.config(), { commitment: 'confirmed', signal })
-        } catch (err) {
-            throw new Error(`solana wallet: read config: ${message(err)}`, { cause: err })
-        }
-        if (acct === null || acct.owner !== o.deployment.program) {
-            throw new Error(`solana wallet: program ${o.deployment.program} has no Config`)
-        }
         let config
         try {
-            config = decodeConfig(acct.data)
+            config = await readSolanaConfig(o.rpc, o.deployment, signal)
         } catch (err) {
             throw new Error(`solana wallet: ${message(err)}`, { cause: err })
         }
@@ -764,6 +756,23 @@ export class SolanaAckSendError extends SentSettleError {
     ) {
         super({ txid: signature, payerFeeMicroalgos: feeLamports }, msg, cause)
     }
+}
+
+/**
+ * readSolanaConfig reads and decodes d's Config account. Its mint is not
+ * checked: d's may be empty. Go's readSolanaConfig.
+ */
+export async function readSolanaConfig(rpc: SolanaRpc, d: Deployment, signal?: AbortSignal): Promise<SolanaConfig> {
+    let acct
+    try {
+        acct = await rpc.getAccountInfo(d.config(), { commitment: 'confirmed', signal })
+    } catch (err) {
+        throw new Error(`read config: ${message(err)}`, { cause: err })
+    }
+    if (acct === null || acct.owner !== d.program) {
+        throw new Error(`program ${d.program} has no Config`)
+    }
+    return decodeConfig(acct.data)
 }
 
 /** The program's can_receive: a token account of mint, owned by owner and not frozen, which the token program owns. Go's canReceiveRefund. */

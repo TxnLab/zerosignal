@@ -292,9 +292,13 @@ const doctorReadTimeout = 30 * time.Second
 // Diagnose reads, without signing anything, what a Client paying from address
 // would need: algod, the escrow app, the account's ALGO and USDC, the prepaid
 // ticket pool, and one discovery cycle over the fleet. cfg is read as New reads
-// it, its Signer ignored. An error is a config Diagnose can't run on; every
-// failed read is a check in the report instead.
+// it, its signers ignored. An error is a config Diagnose can't run on; every
+// failed read is a check in the report instead. It reads Algorand only.
 func Diagnose(ctx context.Context, cfg Config, address string) (DoctorReport, error) {
+	if cfg.Network.Rail == ticket.RailSolana {
+		return DoctorReport{}, configError("Diagnose reads the Algorand rail only; Network.Rail is solana")
+	}
+	cfg.SolanaSigner = nil
 	if _, err := types.DecodeAddress(address); err != nil {
 		return DoctorReport{}, configError(fmt.Sprintf("address %q is not an Algorand address: %v", address, err))
 	}

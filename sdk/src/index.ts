@@ -21,7 +21,8 @@ export {
     RetryingAlgodClient,
     retryingAlgod,
 } from './algod-transport.js'
-export { type BuiltDiscovery, type RoutingStores, buildDiscovery, catalogStorageKey, chainAlgod } from './assemble.js'
+export { type BuiltDiscovery, type RoutingStores, buildDiscovery, catalogStorageKey, chainAlgod, solanaRpc } from './assemble.js'
+export type { SolanaRpcClient } from './solana/rpc.js'
 export * from './attestation.js'
 export * from './client.js'
 export * from './config.js'

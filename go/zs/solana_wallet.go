@@ -91,14 +91,7 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: payer address: %w", err)
 	}
-	acct, err := getAccount(ctx, cfg.RPC, cfg.Deployment.Config())
-	if err != nil {
-		return nil, fmt.Errorf("solana wallet: read config: %w", err)
-	}
-	if acct == nil || acct.Owner != cfg.Deployment.Program {
-		return nil, fmt.Errorf("solana wallet: program %s has no Config", cfg.Deployment.Program)
-	}
-	c, err := zsescrow.DecodeConfig(acct.Data)
+	c, err := readSolanaConfig(ctx, cfg.RPC, cfg.Deployment)
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: %w", err)
 	}
@@ -121,6 +114,19 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 		log:          cfg.Logger,
 		signed:       map[[16]byte]int64{},
 	}, nil
+}
+
+// readSolanaConfig reads and decodes d's Config account. Its mint is not
+// checked: d's may be zero.
+func readSolanaConfig(ctx context.Context, rc rpc.Client, d zsescrow.Deployment) (*zsescrow.Config, error) {
+	acct, err := getAccount(ctx, rc, d.Config())
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	if acct == nil || acct.Owner != d.Program {
+		return nil, fmt.Errorf("program %s has no Config", d.Program)
+	}
+	return zsescrow.DecodeConfig(acct.Data)
 }
 
 func (w *SolanaWallet) logger() *slog.Logger {

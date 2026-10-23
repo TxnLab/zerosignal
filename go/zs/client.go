@@ -177,7 +177,7 @@ type Client struct {
 }
 
 // New builds a Client, and each nil Registry, ReserveClient and Wallet from
-// Signer and Network. Building them reads the chain: the escrow's config,
+// Network and the payer's key on its rail. Building them reads the chain: the escrow's config,
 // which must succeed, and a first discovery, which may fail and is retried in
 // the background. That discovery is the chain read and a details probe of
 // every node, and New waits for both, up to a minute. The TS Client waits only
@@ -191,7 +191,6 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	ac, appID := dep.Algod, dep.EscrowAppID
 	for _, w := range warnings {
 		cfg.Logger.Warn(w)
 	}
@@ -203,14 +202,14 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if err := tee.PersistCollateral(cfg.Stores.CollateralDir); err != nil {
 		cfg.Logger.Warn("Stores.CollateralDir is not used", slog.Any("err", err))
 	}
-	cfg.Network = Network{Rail: dep.Rail, Algod: ac, EscrowAppID: appID}
+	cfg.Network = Network{Rail: dep.Rail, Algod: dep.Algod, EscrowAppID: dep.EscrowAppID, Solana: dep.Solana}
 	if d := cfg.Discovery; d.CatalogPath != "" {
 		if err := AdoptLegacyFile(d.CatalogLegacyPath, d.CatalogPath); err != nil {
 			cfg.Logger.Warn("could not rename the saved operator catalog; discovery starts without it",
 				slog.String("from", d.CatalogLegacyPath), slog.String("to", d.CatalogPath), slog.Any("err", err))
 		}
 	}
-	parts, err := buildNetworkParts(ctx, cfg, ac, appID)
+	parts, err := buildNetworkParts(ctx, cfg, dep)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +435,7 @@ func (c *Config) teeRequired(model string) bool { return slices.Contains(c.Requi
 
 // networkName names the chain in a funding error, spelled as the handler's
 // funding hint compares it.
-func (s *Client) networkName() string { return string(s.cfg.Network.Algod.ResolvedNetwork) }
+func (s *Client) networkName() string { return s.cfg.Network.Name() }
 
 // settlementHandle is the subset of *OpenHandle the response builders use to
 // settle or dispute a ticket.

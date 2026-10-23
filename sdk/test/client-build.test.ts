@@ -54,18 +54,7 @@ vi.mock('../src/escrow/algod.js', async (importOriginal) => {
     return { ...real, AlgodEscrowChain: StandInChain, suggestedParams: () => h.params() }
 })
 
-// Only Algorand resolves until a Solana host is wired, so a Solana network
-// stands on Algorand's here: enough for Client.create to build for its rail.
-vi.mock('../src/network.js', async (importOriginal) => {
-    const m = await importOriginal<typeof import('../src/network.js')>()
-    return {
-        ...m,
-        resolveNetwork: (n: Parameters<typeof m.resolveNetwork>[0]) =>
-            n?.rail === 'solana' ? { ...m.resolveNetwork({ ...n, rail: 'algorand' }), rail: 'solana' as const } : m.resolveNetwork(n),
-    }
-})
-
-const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, testnet } = await import('../src/index.js')
+const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, solanaDevnet, testnet } = await import('../src/index.js')
 const { dispatchDepsOf, partsOf } = await import('../src/client-parts.js')
 const { testOperator } = await import('./fixtures.js')
 type Config = import('../src/index.js').Config
@@ -79,6 +68,14 @@ const registry = {
     recordModelDemand: () => {},
 }
 const base: Config = { signer, network: testnet(), registry }
+// A Solana Client with its parts supplied, so nothing reads a cluster.
+const solanaPayer = 'Vote111111111111111111111111111111111111111'
+const solanaBase: Config = {
+    solanaSigner: { address: solanaPayer, signBytes: async () => new Uint8Array(), signTransactionMessage: async () => new Uint8Array() },
+    network: solanaDevnet(),
+    registry,
+    wallet: { payerAddr: () => solanaPayer } as never,
+}
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
@@ -167,7 +164,7 @@ describe('Client.create building the wallet', () => {
     // A reserve client built without the rail would let a Solana payer's node
     // choose its ticket ids.
     it('hands the rail to the reserve client it builds', async () => {
-        const c = await Client.create({ ...base, network: { ...testnet(), rail: 'solana' } })
+        const c = await Client.create(solanaBase)
         const op = testOperator({ ephemeralRecipient: 'age1live', ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600 })
         await expect(
             partsOf.get(c)!.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
@@ -180,7 +177,7 @@ describe('Client.create building the wallet', () => {
     // and the default remedies name the rail's coin and ticket record. Go's
     // TestOpenFailure_NamesTheRailsCoinAndPool.
     it('hands the rail to selection and the remedies', async () => {
-        const c = await Client.create({ ...base, network: { ...testnet(), rail: 'solana' } })
+        const c = await Client.create(solanaBase)
         expect(partsOf.get(c)!.pick.rail).toBe('solana')
         expect(dispatchDepsOf(c, async () => {}).rail).toBe('solana')
         expect(partsOf.get(c)!.cfg.remedies).toMatchObject({

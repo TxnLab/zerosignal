@@ -8,6 +8,7 @@
 // testdata/sdk_vocabulary_vectors.json.
 
 import { defaultFetch } from '#default-fetch'
+import { publicKeyBytes } from '@txnlab/zs-proto/solana'
 
 import { configError } from './errors.js'
 import { withHeaderBackstop } from './header-backstop.js'
@@ -20,8 +21,10 @@ import {
     type Clock,
     type Fetch,
     type Logger,
+    type PayerSigner,
     RESPONSE_HEADER_BACKSTOP_MS,
     type Signer,
+    type SolanaSigner,
     type StorageAdapter,
     discardLogger,
     memoryCache,
@@ -128,9 +131,14 @@ export class DuplicateTicketError extends Error {
     }
 }
 
-/** Config configures a Client. signer is required. */
+/**
+ * Config configures a Client. The payer's key on the network's rail is
+ * required: signer on Algorand, solanaSigner on Solana, and never the other
+ * rail's.
+ */
 export interface Config {
-    signer: Signer
+    signer?: Signer | undefined
+    solanaSigner?: SolanaSigner | undefined
     /** Mainnet when absent. */
     network?: Network
 
@@ -242,7 +250,11 @@ export interface Config {
 
 /** ResolvedConfig is a Config with every default applied. */
 export interface ResolvedConfig {
-    signer: Signer
+    /** Set on Algorand, and solanaSigner on Solana. */
+    signer: Signer | undefined
+    solanaSigner: SolanaSigner | undefined
+    /** The one of the two the network's rail signs with. */
+    payerSigner: PayerSigner
     network: ResolvedNetwork
     privacy: Privacy
     allowPrivacyOverride: boolean
@@ -336,14 +348,33 @@ function idleBudget(v: number | undefined, def: number): number {
     return Math.min(orDefault(v, def), MAX_TIMER_MS)
 }
 
+/**
+ * checkSigner returns the payer's key on the network's rail. The other rail's
+ * signer is refused rather than ignored: a host that sets it has most likely
+ * left the rail unset.
+ */
+function checkSigner(c: Config): PayerSigner {
+    if (c.network?.rail === 'solana') {
+        if (c.signer) throw configError("signer is the Algorand rail's; a Solana Network takes solanaSigner")
+        if (!c.solanaSigner) throw configError('solanaSigner is required on the Solana rail')
+        const addr = c.solanaSigner.address
+        if (!addr) throw configError('solanaSigner has no address')
+        try {
+            publicKeyBytes(addr)
+        } catch {
+            throw configError(`solanaSigner's address ${JSON.stringify(addr)} is not a Solana public key`)
+        }
+        return c.solanaSigner
+    }
+    if (c.solanaSigner) throw configError("solanaSigner is the Solana rail's; set Network.rail to solana, or pass signer")
+    if (!c.signer) throw configError('signer is required')
+    if (!c.signer.address) throw configError('signer has no address')
+    return c.signer
+}
+
 /** resolveConfig applies the defaults and validates, or throws a ZsError. */
 export function resolveConfig(c: Config): ResolvedConfig {
-    if (!c.signer) {
-        throw configError('signer is required')
-    }
-    if (!c.signer.address) {
-        throw configError('signer has no address')
-    }
+    const payerSigner = checkSigner(c)
     // || rather than ??: an empty string is unset in Go, where it is the zero value.
     const privacy = c.privacy || 'relay_required'
     if (privacy !== 'relay_required' && privacy !== 'direct') {
@@ -409,6 +440,8 @@ export function resolveConfig(c: Config): ResolvedConfig {
     const r = c.remedies ?? {}
     return {
         signer: c.signer,
+        solanaSigner: c.solanaSigner,
+        payerSigner,
         network,
         privacy,
         allowPrivacyOverride: c.allowPrivacyOverride ?? false,

@@ -23,6 +23,7 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/types"
 
 	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -308,10 +309,19 @@ type otherSigner struct{ fakeSigner }
 
 func (otherSigner) HasAccount(string) bool { return false }
 
+// addrSolanaSigner is a Solana signer reporting another address.
+type addrSolanaSigner struct {
+	testSolanaSigner
+	addr string
+}
+
+func (s addrSolanaSigner) Address() string { return s.addr }
+
 // Each refusal names its own message fragment, so deleting one check cannot
 // pass on a later check's identical code.
 func TestConfigValidate(t *testing.T) {
 	signer := fakeSigner{addr: "PAYER"}
+	sol := newTestSolanaSigner()
 	cases := []struct {
 		name    string
 		cfg     Config
@@ -334,7 +344,15 @@ func TestConfigValidate(t *testing.T) {
 		{name: "signer without its key", cfg: Config{Signer: otherSigner{signer}, Network: Testnet()}, wantErr: "cannot sign for its own address"},
 		{name: "unknown privacy", cfg: Config{Signer: signer, Network: Testnet(), Privacy: "off"}, wantErr: "unknown Privacy"},
 		{name: "unknown affinity", cfg: Config{Signer: signer, Network: Testnet(), Affinity: Affinity{Policy: "sticky"}}, wantErr: "unknown Affinity.Policy"},
-		{name: "solana not yet", cfg: Config{Signer: signer, Network: Network{Rail: ticket.RailSolana, Algod: Testnet().Algod}}, wantErr: "Rail solana is not supported"},
+		{name: "solana devnet", cfg: Config{SolanaSigner: sol, Network: SolanaDevnet()}},
+		{name: "solana takes SolanaSigner", cfg: Config{Signer: signer, Network: SolanaDevnet()}, wantErr: "Signer is the Algorand rail's"},
+		{name: "solana needs its signer", cfg: Config{Network: SolanaDevnet()}, wantErr: "SolanaSigner is required"},
+		{name: "solana signer address not a key", cfg: Config{SolanaSigner: addrSolanaSigner{sol, "PAYER"}, Network: SolanaDevnet()}, wantErr: "not a Solana public key"},
+		{name: "solana signer without address", cfg: Config{SolanaSigner: addrSolanaSigner{sol, ""}, Network: SolanaDevnet()}, wantErr: "SolanaSigner has no address"},
+		{name: "algorand refuses a solana signer", cfg: Config{Signer: signer, SolanaSigner: sol, Network: Testnet()}, wantErr: "SolanaSigner is the Solana rail's"},
+		{name: "solana refuses algod settings", cfg: Config{SolanaSigner: sol, Network: Network{Rail: ticket.RailSolana, Algod: Testnet().Algod}}, wantErr: "the Algorand rail's"},
+		{name: "solana settings need the rail", cfg: Config{Signer: signer, Network: Network{Solana: SolanaNetwork{Cluster: "devnet"}}}, wantErr: "set Network.Rail"},
+		{name: "unknown rail", cfg: Config{Signer: signer, Network: Network{Rail: 3}}, wantErr: "Rail rail3 is not supported"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -369,6 +387,13 @@ func TestConfigValidateWarnings(t *testing.T) {
 	overridden.Algod.Endpoint = "https://mainnet-api.example"
 	pinned := overridden
 	pinned.EscrowAppID = 42
+	sol := newTestSolanaSigner()
+	solOverridden := SolanaDevnet()
+	solOverridden.Solana.RPCEndpoint = "https://rpc.example"
+	solPinned := solOverridden
+	solPinned.Solana.Program = solana.MustPublicKey("Vote111111111111111111111111111111111111111")
+	solSame := SolanaDevnet()
+	solSame.Solana.RPCEndpoint = "https://api.devnet.solana.com"
 
 	cases := []struct {
 		name string
@@ -378,6 +403,10 @@ func TestConfigValidateWarnings(t *testing.T) {
 		{name: "defaults", cfg: Config{Signer: signer, Network: Testnet()}},
 		{name: "endpoint over a preset app id", cfg: Config{Signer: signer, Network: overridden}, want: "still that preset's (765860477)"},
 		{name: "endpoint with its own app id", cfg: Config{Signer: signer, Network: pinned}},
+		{name: "solana preset", cfg: Config{SolanaSigner: sol, Network: SolanaDevnet()}},
+		{name: "solana endpoint over a preset program", cfg: Config{SolanaSigner: sol, Network: solOverridden}, want: "still that preset's (2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1)"},
+		{name: "solana endpoint with its own program", cfg: Config{SolanaSigner: sol, Network: solPinned}},
+		{name: "solana endpoint naming the preset's own", cfg: Config{SolanaSigner: sol, Network: solSame}},
 		{name: "diverging ceiling", cfg: Config{Signer: signer, Network: Testnet(), MaxOutputCeiling: 8192}, want: "MaxOutputCeiling 8192 differs"},
 		{name: "ceiling unused when max output is required", cfg: Config{Signer: signer, Network: Testnet(), MaxOutputCeiling: 8192, RequireMaxOutput: true}},
 		{name: "TEE required with verification off", cfg: Config{Signer: signer, Network: Testnet(), RequireTEEModels: []string{"m"}, DisableTEE: true}, want: "[m] have no route"},

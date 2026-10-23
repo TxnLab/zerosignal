@@ -10,7 +10,9 @@
 import type algosdk from 'algosdk'
 
 import { IDAffinity } from './affinity.js'
-import { type BuiltDiscovery, buildDiscovery, chainAlgod } from './assemble.js'
+import { Deployment } from '@txnlab/zs-proto/solana/zsescrow'
+
+import { type BuiltDiscovery, buildDiscovery, chainAlgod, solanaRpc } from './assemble.js'
 import { type Parts, dispatchDepsOf, partsOf } from './client-parts.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
 import { type RunSealed, dispatch } from './dispatch.js'
@@ -37,7 +39,8 @@ import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
 import { type JournalDeps, Reconciler, boxSweep, journalOpen, journalReceipt, journalSigned, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
-import { deploymentOrFail, readDeploymentId } from './registry/chain.js'
+import { type ChainReader, deploymentOrFail, readDeploymentId } from './registry/chain.js'
+import { SolanaChainReader } from './registry/solana.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
 import { Settles } from './settles.js'
@@ -46,7 +49,8 @@ import { IdleWatchdog } from './idle.js'
 import { type GenComplete, forwardStream, frameFactory } from './stream.js'
 import { type Request, type Stream, TurnStream, turnOf } from './turn.js'
 import { solanaSweep } from './solana/reconcile.js'
-import { SolanaWallet } from './solana/wallet.js'
+import type { SolanaRpcClient } from './solana/rpc.js'
+import { SolanaWallet, readSolanaConfig } from './solana/wallet.js'
 import { Wallet } from './wallet.js'
 
 /** Bounds the escrow config read a built wallet needs, as Go's escrowConfigTimeout. */
@@ -101,25 +105,18 @@ export class Client {
     static async create(config: Config, signal?: AbortSignal): Promise<Client> {
         const cfg = resolveConfig(config)
         for (const w of cfg.warnings) cfg.logger.warn(w)
-        const algod = cfg.wallet === undefined || cfg.registry === undefined ? chainAlgod(cfg) : undefined
+        const chain = cfg.wallet === undefined || cfg.registry === undefined ? railChain(cfg) : undefined
         // The wallet first, as in Go: its read is the one that fails create,
         // so it fails before the slow discovery rather than after.
         const builtWallet = cfg.wallet === undefined
-        const wallet = cfg.wallet ?? (await buildWallet(cfg, algod!, signal))
+        const wallet = cfg.wallet ?? (await chain!.wallet(signal))
         const deployment =
-            algod === undefined
-                ? undefined
-                : await deploymentOrFail(
-                      () => readDeploymentId(algod, cfg.network.escrowAppId, ESCROW_CONFIG_TIMEOUT_MS, signal),
-                      builtWallet,
-                      cfg.logger,
-                      signal,
-                  )
+            chain === undefined ? undefined : await deploymentOrFail(() => chain.deployment(signal), builtWallet, cfg.logger, signal)
         const reserveClient =
             cfg.reserveClient ??
             httpReserveClient({
                 fetch: cfg.fetch,
-                signer: payerBytesSigner(cfg.signer),
+                signer: payerBytesSigner(cfg.payerSigner),
                 timeoutMs: cfg.reserveTimeout,
                 clock: cfg.clock,
                 deployment,
@@ -130,7 +127,7 @@ export class Client {
         let registry = cfg.registry
         let built: BuiltDiscovery | undefined
         if (registry === undefined) {
-            built = buildDiscovery(cfg, algod!, deployment)
+            built = buildDiscovery(cfg, chain!.reader, deployment)
             try {
                 await untilAborted(built.registry.ready, signal)
             } catch (err) {
@@ -468,20 +465,84 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
     return deps
 }
 
+/** RailChain is what create reads one rail's chain through: Go's railChain. */
+interface RailChain {
+    /** What discovery reads: algod, or the Solana program's reader. */
+    reader: algosdk.Algodv2 | ChainReader
+    wallet(signal?: AbortSignal): Promise<WalletOpener>
+    deployment(signal?: AbortSignal): Promise<Uint8Array>
+}
+
+function railChain(cfg: ResolvedConfig): RailChain {
+    if (cfg.network.rail === 'solana') {
+        const rpc = solanaRpc(cfg)
+        const reader = new SolanaChainReader({
+            rpc,
+            programId: cfg.network.program,
+            operatorIds: cfg.discovery.operatorIds?.map((id) => BigInt(id)),
+            logger: cfg.logger,
+            clock: cfg.clock,
+        })
+        return {
+            reader,
+            wallet: (signal) => buildSolanaWallet(cfg, rpc, signal),
+            deployment: (signal) => reader.readDeployment(withTimeout(signal, ESCROW_CONFIG_TIMEOUT_MS)),
+        }
+    }
+    const algod = chainAlgod(cfg)
+    return {
+        reader: algod,
+        wallet: (signal) => buildWallet(cfg, algod, signal),
+        deployment: (signal) => readDeploymentId(algod, cfg.network.escrowAppId, ESCROW_CONFIG_TIMEOUT_MS, signal),
+    }
+}
+
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+    const timeout = AbortSignal.timeout(ms)
+    return signal ? AbortSignal.any([signal, timeout]) : timeout
+}
+
 /** buildWallet reads the escrow's config and builds the wallet that opens tickets against it. */
 async function buildWallet(cfg: ResolvedConfig, algod: algosdk.Algodv2, signal?: AbortSignal): Promise<Wallet> {
+    // resolveConfig requires it on Algorand.
+    const signer = cfg.signer!
     const chain = new AlgodEscrowChain({
         algod,
         appId: cfg.network.escrowAppId,
-        signer: cfg.signer,
+        signer,
         logger: cfg.logger,
         clock: cfg.clock,
     })
-    const timeout = AbortSignal.timeout(ESCROW_CONFIG_TIMEOUT_MS)
     try {
-        await chain.refreshConfig(signal ? AbortSignal.any([signal, timeout]) : timeout)
+        await chain.refreshConfig(withTimeout(signal, ESCROW_CONFIG_TIMEOUT_MS))
     } catch (err) {
         throw new Error(`read escrow config: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
     }
-    return new Wallet({ chain, signer: cfg.signer, depositSlots: cfg.concurrentSlots, logger: cfg.logger })
+    return new Wallet({ chain, signer, depositSlots: cfg.concurrentSlots, logger: cfg.logger })
+}
+
+/**
+ * buildSolanaWallet reads the program's Config for its mint, then builds the
+ * wallet, which checks every offer's transfer against that mint.
+ */
+async function buildSolanaWallet(cfg: ResolvedConfig, rpc: SolanaRpcClient, signal?: AbortSignal): Promise<SolanaWallet> {
+    const s = withTimeout(signal, ESCROW_CONFIG_TIMEOUT_MS)
+    let config
+    try {
+        config = await readSolanaConfig(rpc, new Deployment(cfg.network.program, ''), s)
+    } catch (err) {
+        throw new Error(`read escrow config: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+    }
+    return SolanaWallet.create(
+        {
+            rpc,
+            deployment: new Deployment(cfg.network.program, config.usdcMint),
+            // resolveConfig requires it on Solana.
+            signer: cfg.solanaSigner!,
+            depositSlots: cfg.concurrentSlots,
+            clock: cfg.clock,
+            log: cfg.logger,
+        },
+        s,
+    )
 }

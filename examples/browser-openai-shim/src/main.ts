@@ -62,7 +62,7 @@ async function start(phrase: string, network: NetworkName) {
     const models = await openai.models.list()
     for (const m of models.data) modelSelect.add(new Option(m.id, m.id))
     modelSelect.disabled = send.disabled = models.data.length === 0
-    status.textContent = `${models.data.length} models. Paying from ${zs.config.signer.address} on ${network}.`
+    status.textContent = `${models.data.length} models. Paying from ${zs.config.payerSigner.address} on ${network}.`
 
     send.onclick = async () => {
         send.disabled = true

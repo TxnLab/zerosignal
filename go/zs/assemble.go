@@ -13,6 +13,9 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -38,22 +41,34 @@ type networkParts struct {
 	stop   func()
 }
 
+// railChain is what buildNetworkParts reads one rail's chain through.
+type railChain struct {
+	wallet     func(context.Context) (WalletOpener, error)
+	deployment func(context.Context) (ticket.DeploymentID, error)
+	source     func(ticket.DeploymentID) *ChainOperatorSource
+}
+
 // buildNetworkParts builds each nil network part. The registry's refresh loop
 // starts last; New, failing after this returns, calls the parts' stop, so a
 // failed New leaves nothing running. The wallet goes first because its chain read is the one
 // that fails New outright; it fails before the slow discovery, not after.
-func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID uint64) (networkParts, error) {
+func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (networkParts, error) {
 	p := networkParts{registry: cfg.Registry, reserve: cfg.ReserveClient, wallet: cfg.Wallet}
-	var chain algod.Client
+	var chain *railChain
 	if p.registry == nil || p.wallet == nil {
 		var err error
-		if chain, err = algod.NewClient(ac.ResolvedEndpoint, ac.ResolvedToken, algod.WithTransport(cfg.algodTransport())); err != nil {
-			return networkParts{}, configError(err.Error())
+		if dep.Rail == ticket.RailSolana {
+			chain, err = solanaRailChain(cfg, dep.Solana)
+		} else {
+			chain, err = algorandRailChain(cfg, dep.Algod, dep.EscrowAppID)
+		}
+		if err != nil {
+			return networkParts{}, err
 		}
 	}
 	builtWallet := p.wallet == nil
 	if builtWallet {
-		w, err := buildWallet(ctx, cfg, ac, appID, chain)
+		w, err := chain.wallet(ctx)
 		if err != nil {
 			return networkParts{}, err
 		}
@@ -61,7 +76,7 @@ func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID u
 	}
 	var deployment ticket.DeploymentID
 	if chain != nil {
-		d, err := readDeploymentID(ctx, chain, appID)
+		d, err := chain.deployment(ctx)
 		if deployment, err = deploymentOrFail(d, err, builtWallet, cfg.Logger); err != nil {
 			return networkParts{}, err
 		}
@@ -70,7 +85,7 @@ func buildNetworkParts(ctx context.Context, cfg Config, ac algod.Config, appID u
 		p.reserve = newReserveClient(cfg, deployment)
 	}
 	if p.registry == nil {
-		p.source = newChainSource(cfg, appID, chain, deployment)
+		p.source = chain.source(deployment)
 		reg, err := bootRegistry(ctx, cfg, p.source)
 		if err != nil {
 			return networkParts{}, err
@@ -98,6 +113,69 @@ func deploymentOrFail(d ticket.DeploymentID, err error, builtWallet bool, log *s
 		log.Warn("could not read the network genesis hash; reserving without a deployment binding", slog.Any("err", err))
 		return ticket.DeploymentID{}, nil
 	}
+}
+
+// algorandRailChain reads the escrow app through one algod client.
+func algorandRailChain(cfg Config, ac algod.Config, appID uint64) (*railChain, error) {
+	chain, err := algod.NewClient(ac.ResolvedEndpoint, ac.ResolvedToken, algod.WithTransport(cfg.algodTransport()))
+	if err != nil {
+		return nil, configError(err.Error())
+	}
+	return &railChain{
+		wallet: func(ctx context.Context) (WalletOpener, error) {
+			w, err := buildWallet(ctx, cfg, ac, appID, chain)
+			if err != nil {
+				return nil, err
+			}
+			return w, nil
+		},
+		deployment: func(ctx context.Context) (ticket.DeploymentID, error) { return readDeploymentID(ctx, chain, appID) },
+		source:     func(d ticket.DeploymentID) *ChainOperatorSource { return newChainSource(cfg, appID, chain, d) },
+	}, nil
+}
+
+// solanaRailChain reads the zs_escrow program through one RPC client, whose
+// confirmations poll: a pubsub socket ends on its first drop, and a Client
+// lives far longer than a public endpoint keeps an idle socket.
+func solanaRailChain(cfg Config, sn SolanaNetwork) (*railChain, error) {
+	rc, err := rpc.NewClient(sn.RPCEndpoint, rpc.WithTransport(cfg.solanaTransport()))
+	if err != nil {
+		return nil, configError(err.Error())
+	}
+	reader := &SolanaChainReader{RPC: rc, Program: sn.Program, OperatorIDs: cfg.Discovery.OperatorIDs, Log: cfg.Logger}
+	return &railChain{
+		wallet: func(ctx context.Context) (WalletOpener, error) {
+			w, err := buildSolanaWallet(ctx, cfg, rc, sn.Program)
+			if err != nil {
+				return nil, err
+			}
+			return w, nil
+		},
+		deployment: reader.ReadDeployment,
+		source: func(d ticket.DeploymentID) *ChainOperatorSource {
+			s := newDiscoverySource(cfg, d)
+			s.Chain = reader
+			return s
+		},
+	}, nil
+}
+
+// buildSolanaWallet reads the program's Config for its mint, then builds the
+// wallet, which checks every offer's transfer against that mint.
+func buildSolanaWallet(ctx context.Context, cfg Config, rc rpc.Client, program solana.PublicKey) (*SolanaWallet, error) {
+	rctx, cancel := context.WithTimeout(ctx, escrowConfigTimeout)
+	defer cancel()
+	c, err := readSolanaConfig(rctx, rc, zsescrow.Deployment{Program: program})
+	if err != nil {
+		return nil, fmt.Errorf("zs: read escrow config: %w", err)
+	}
+	return NewSolanaWallet(rctx, SolanaWalletConfig{
+		RPC:          rc,
+		Deployment:   zsescrow.Deployment{Program: program, Mint: c.USDCMint},
+		Signer:       cfg.SolanaSigner,
+		DepositSlots: uint64(cfg.ConcurrentSlots),
+		Logger:       cfg.Logger,
+	})
 }
 
 // buildWallet reads the escrow's config and builds the wallet that opens
@@ -157,23 +235,29 @@ func readDeploymentID(ctx context.Context, chain algod.Client, appID uint64) (ti
 func newReserveClient(cfg Config, deployment ticket.DeploymentID) *HTTPReserveClient {
 	return &HTTPReserveClient{
 		HTTPClient: cfg.nodeHTTPClient(cfg.ReserveTimeout, 0),
-		Signer:     cfg.Signer,
+		Signer:     cfg.payerSigner(),
 		Deployment: deployment,
 		Rail:       cfg.Network.Rail,
 	}
 }
 
-// newChainSource maps Config onto discovery. The details and attestation
-// probes dial node-registered addresses too, so they get the dial guard.
+// newChainSource maps Config onto discovery of the escrow app on Algorand.
 func newChainSource(cfg Config, appID uint64, chain algod.Client, deployment ticket.DeploymentID) *ChainOperatorSource {
+	s := newDiscoverySource(cfg, deployment)
+	s.EscrowAppID, s.Algod = appID, chain
+	s.OperatorIDs = cfg.Discovery.OperatorIDs
+	s.ProxyPayerAddr = cfg.Signer.Address()
+	return s
+}
+
+// newDiscoverySource maps Config onto discovery, leaving the chain read to
+// the rail. The details and attestation probes dial node-registered addresses
+// too, so they get the dial guard.
+func newDiscoverySource(cfg Config, deployment ticket.DeploymentID) *ChainOperatorSource {
 	d := cfg.Discovery
 	probe := cfg.nodeHTTPClient(0, 0)
 	return &ChainOperatorSource{
-		EscrowAppID:        appID,
 		Deployment:         deployment,
-		OperatorIDs:        d.OperatorIDs,
-		ProxyPayerAddr:     cfg.Signer.Address(),
-		Algod:              chain,
 		DetailsTimeout:     d.DetailsTimeout,
 		DetailsConcurrency: d.DetailsConcurrency,
 		LatencyStateMax:    d.LatencyStateMax,

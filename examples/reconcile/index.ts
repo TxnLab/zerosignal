@@ -126,7 +126,7 @@ try {
         // The sweep reports what it does on each ticket here.
         logger: consoleLogger(),
     })
-    const payer = zs.config.signer.address
+    const payer = zs.config.payerSigner.address
     const deployment = zs.config.network
 
     const stop = new AbortController()

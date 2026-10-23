@@ -17,6 +17,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/httpx"
 	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
 	"github.com/TxnLab/zerosignal/go/zs/tokenize"
@@ -58,16 +59,50 @@ type SolanaSigner interface {
 //
 // Nothing here reads a wallet's recorded network (wallet.Metadata.Network):
 // a caller holding a testnet wallet passes Testnet() itself.
+//
+// Rail zero is Algorand, which reads Algod and EscrowAppID; ticket.RailSolana
+// reads Solana instead. Each rail refuses the other's fields, so a Solana
+// setting without the rail fails New rather than paying on Algorand mainnet.
 type Network struct {
-	// Rail zero is Algorand, the only rail New supports today.
 	Rail        ticket.Rail
 	Algod       algod.Config
 	EscrowAppID uint64
+	Solana      SolanaNetwork
+}
+
+// SolanaNetwork selects the cluster and the zs_escrow program on the Solana
+// rail. Naming a preset in Cluster ("devnet" or "localnet", case-insensitive)
+// is enough; RPCEndpoint overrides its JSON-RPC endpoint, verbatim, since a
+// provider's key may ride in its path or query. There is no zero-value
+// cluster: a Solana Network names its cluster or its endpoint. A zero Program
+// takes the preset's, so an endpoint alone must set it. The USDC mint is never
+// configured: it is read from the program's Config.
+type SolanaNetwork struct {
+	Cluster     string
+	RPCEndpoint string
+	Program     solana.PublicKey
 }
 
 func Testnet() Network  { return Network{Algod: algod.Config{Network: string(algod.NetworkTestnet)}} }
 func Mainnet() Network  { return Network{Algod: algod.Config{Network: string(algod.NetworkMainnet)}} }
 func Localnet() Network { return Network{Algod: algod.Config{Network: string(algod.NetworkLocalnet)}} }
+
+func SolanaDevnet() Network {
+	return Network{Rail: ticket.RailSolana, Solana: SolanaNetwork{Cluster: SolanaClusterDevnet}}
+}
+
+func SolanaLocalnet() Network {
+	return Network{Rail: ticket.RailSolana, Solana: SolanaNetwork{Cluster: SolanaClusterLocalnet}}
+}
+
+// Name is the preset a resolved Network names on its rail, as Client.Config
+// returns it, and empty when only an endpoint named the chain.
+func (n Network) Name() string {
+	if n.Rail == ticket.RailSolana {
+		return n.Solana.Cluster
+	}
+	return string(n.Algod.ResolvedNetwork)
+}
 
 // Privacy is the transport-privacy mode. The zero value is PrivacyRelayRequired.
 type Privacy string
@@ -161,11 +196,13 @@ type Stores struct {
 	ResponseAffinity *IDAffinity
 }
 
-// Config configures a Client. Signer and Network are required; every other
-// zero value means the default noted on the field.
+// Config configures a Client. Network and the payer's key on its rail are
+// required: Signer on Algorand, SolanaSigner on Solana, and never the other
+// rail's. Every other zero value means the default noted on the field.
 type Config struct {
-	Signer  Signer
-	Network Network
+	Signer       Signer
+	SolanaSigner SolanaSigner
+	Network      Network
 
 	Privacy Privacy // PrivacyRelayRequired
 	// AllowPrivacyOverride lets a request's relay preference turn relaying
@@ -246,7 +283,7 @@ type Config struct {
 
 	// Registry, ReserveClient and Wallet are the network-facing parts:
 	// operator discovery, the reserve call, and escrow. New builds each nil
-	// one from Signer and Network; a supplied one is used as is, so the
+	// one from Network and the payer's key; a supplied one is used as is, so the
 	// settings only a built part reads (Discovery, TEEVerifier, and
 	// ReserveTimeout, UseEnvProxy and AllowPrivateHosts for the discovery
 	// probes and the reserve) do not reach it. A supplied Registry must apply
@@ -348,6 +385,16 @@ func (c Config) algodTransport() *algod.RetryRoundTripper {
 	return rt
 }
 
+// solanaTransport is the Solana RPC's pooled transport, with no environment
+// proxy unless UseEnvProxy, as algodTransport.
+func (c Config) solanaTransport() *http.Transport {
+	t := rpc.DefaultTransport()
+	if !c.UseEnvProxy {
+		t.Proxy = nil
+	}
+	return t
+}
+
 const (
 	defaultAffinityTTL = 10 * time.Minute
 	defaultAffinityMax = 1024
@@ -410,17 +457,8 @@ func orDefault[T int | uint64 | time.Duration](v, def T) T {
 // validate checks a defaulted Config and returns its resolved deployment,
 // plus warnings for settings that work but are probably mistakes.
 func (c Config) validate() (d Deployment, warnings []string, err error) {
-	if c.Signer == nil {
-		return d, nil, configError("Signer is required")
-	}
-	addr := c.Signer.Address()
-	if addr == "" {
-		return d, nil, configError("Signer has no address")
-	}
-	// Checked up front because the first transaction signature comes at
-	// escrow open, after a node has already spent a reservation on us.
-	if !c.Signer.HasAccount(addr) {
-		return d, nil, configError(fmt.Sprintf("Signer cannot sign for its own address %s", addr))
+	if err := c.validateSigner(); err != nil {
+		return d, nil, err
 	}
 	switch c.Privacy {
 	case PrivacyRelayRequired, PrivacyDirect:
@@ -449,6 +487,52 @@ func (c Config) validate() (d Deployment, warnings []string, err error) {
 			c.RequireTEEModels))
 	}
 	return d, warnings, nil
+}
+
+// validateSigner checks that the payer's key is the one Network's rail signs
+// with. The other rail's signer is refused rather than ignored: a host that
+// sets it has most likely left the rail unset.
+func (c Config) validateSigner() error {
+	if c.Network.Rail == ticket.RailSolana {
+		if c.Signer != nil {
+			return configError("Signer is the Algorand rail's; a Solana Network takes SolanaSigner")
+		}
+		if c.SolanaSigner == nil {
+			return configError("SolanaSigner is required on the Solana rail")
+		}
+		addr := c.SolanaSigner.Address()
+		if addr == "" {
+			return configError("SolanaSigner has no address")
+		}
+		if _, err := solana.ParsePublicKey(addr); err != nil {
+			return configError(fmt.Sprintf("SolanaSigner's address %q is not a Solana public key", addr))
+		}
+		return nil
+	}
+	if c.SolanaSigner != nil {
+		return configError("SolanaSigner is the Solana rail's; set Network.Rail to ticket.RailSolana, or pass Signer")
+	}
+	if c.Signer == nil {
+		return configError("Signer is required")
+	}
+	addr := c.Signer.Address()
+	if addr == "" {
+		return configError("Signer has no address")
+	}
+	// Checked up front because the first transaction signature comes at
+	// escrow open, after a node has already spent a reservation on us.
+	if !c.Signer.HasAccount(addr) {
+		return configError(fmt.Sprintf("Signer cannot sign for its own address %s", addr))
+	}
+	return nil
+}
+
+// payerSigner is the payer's key on Network's rail, after validate.
+func (c Config) payerSigner() PayerSigner {
+	if c.Network.Rail == ticket.RailSolana {
+		return c.SolanaSigner
+	}
+	return c.Signer
 }
 
 func configError(msg string) *Error {

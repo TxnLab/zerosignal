@@ -284,6 +284,16 @@
       "fee_sink": "A7NMWS3NT3IUDMLVO26ULGXGIIOUQ3ND2TXSER6EBGRZNOBOUIQXHIBGDE"
     }
   },
+  "solana_networks": {
+    "devnet": {
+      "rpc_endpoint": "https://api.devnet.solana.com",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    "localnet": {
+      "rpc_endpoint": "http://127.0.0.1:8899",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    }
+  },
   "defaults": {
     "affinityMax": 1024,
     "affinityTtlMs": 600000,

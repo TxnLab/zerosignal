@@ -225,13 +225,17 @@ const DISCOVERY_TIMEOUT_MS = 60_000
  * would need: algod, the escrow app, the account's ALGO and USDC, the prepaid
  * ticket pool, and one discovery cycle over the fleet. config is read as
  * Client.create reads it, without a signer. It throws a ZsError for a config
- * it can't run on; every failed read is a check in the report instead.
+ * it can't run on; every failed read is a check in the report instead. It
+ * reads Algorand only.
  */
 export async function diagnose(config: Omit<Config, 'signer'>, address: string, signal?: AbortSignal): Promise<DoctorReport> {
+    if (config.network?.rail === 'solana') {
+        throw configError('diagnose reads the Algorand rail only; Network.rail is solana')
+    }
     if (!algosdk.isValidAddress(address)) {
         throw configError(`address ${JSON.stringify(address)} is not an Algorand address`)
     }
-    const cfg = resolveConfig({ ...config, signer: readOnlySigner(address) })
+    const cfg = resolveConfig({ ...config, signer: readOnlySigner(address), solanaSigner: undefined })
     const r = await gatherDoctorReadings(algodDoctorChain(cfg, address), doctorBase(cfg, address), signal)
     const checks = doctorChecks(r)
     return { network: r.network, address, checks, failed: checks.some((c) => c.status === 'fail'), warnings: cfg.warnings }

@@ -29,9 +29,11 @@ import {
     IDAffinity,
     type RegistryProvider,
     type Signer,
+    type SolanaSigner,
     type SpendGuard,
     type TicketJournal,
     memoryJournal,
+    solanaDevnet,
     testnet,
 } from '../src/index.js'
 import { retryable } from '../src/codes.js'
@@ -62,16 +64,6 @@ vi.mock('../src/parts.js', async (importOriginal) => {
             defaultFetchHook.reserveFetches.push(o.fetch)
             return m.httpReserveClient(o)
         },
-    }
-})
-// Only Algorand resolves until a Solana host is wired, so a Solana network
-// stands on Algorand's here: enough for a turn to run on its rail.
-vi.mock('../src/network.js', async (importOriginal) => {
-    const m = await importOriginal<typeof import('../src/network.js')>()
-    return {
-        ...m,
-        resolveNetwork: (n: Parameters<typeof m.resolveNetwork>[0]) =>
-            n?.rail === 'solana' ? { ...m.resolveNetwork({ ...n, rail: 'algorand' }), rail: 'solana' as const } : m.resolveNetwork(n),
     }
 })
 vi.mock('#default-fetch', () => ({
@@ -386,7 +378,18 @@ describe('Client.stream', () => {
     // A Client that left its rail out of the turn would read the open_seq as
     // a malformed Algorand group and send the ack standalone.
     it("reads the settle slot by the Client's rail", async () => {
-        const h = await harness({ stream: true, group: true, slot: '7', outcomes: ['landed'], config: { network: { ...testnet(), rail: 'solana' } } })
+        const solanaSigner: SolanaSigner = {
+            address: 'Vote111111111111111111111111111111111111111',
+            signBytes: async () => new Uint8Array(),
+            signTransactionMessage: async () => new Uint8Array(),
+        }
+        const h = await harness({
+            stream: true,
+            group: true,
+            slot: '7',
+            outcomes: ['landed'],
+            config: { network: solanaDevnet(), signer: undefined, solanaSigner },
+        })
         const st = h.c.stream({ endpoint: CHAT, body: h.body })
         expect(await st.text()).toBe('hi')
         await st.wait()

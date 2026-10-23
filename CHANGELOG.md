@@ -31,10 +31,49 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — a Client runs on Solana from its Network (0.11.0)
+
+A Solana Network now resolves, and `New` ↔ `Client.create` build every part on it, so a host
+needs only the network and the payer's Solana key:
+- **Network.** `Rail` ↔ `rail` set to Solana reads `Network.Solana` (`Cluster`, `RPCEndpoint`,
+  `Program`) ↔ `network`, `rpcEndpoint` and `program`. There are two presets, `devnet` and
+  `localnet` (`SolanaDevnet()` / `SolanaLocalnet()` ↔ `solanaDevnet()` / `solanaLocalnet()`),
+  both on program `2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1`, the localnet one the cluster
+  contracts-solana's `make localnet` starts. There is no zero-value cluster: a Solana Network
+  names its cluster or its endpoint, and an endpoint alone sets the program. The endpoint is
+  used verbatim. The USDC mint is read from the program's Config.
+- **Each rail refuses the other's fields.** A Solana setting on an Algorand Network, or an algod
+  setting or app id on a Solana one, is `invalid_config`, so a Solana setting without the rail
+  fails rather than paying on Algorand mainnet. The zero Network is still Algorand mainnet.
+- **The deployment key** is `solana-<cluster>-<program>`, or `solana-custom-<program>` for an
+  endpoint alone. Unlike an app id the program is the same on every cluster, so the cluster the
+  config names is the label. `deployment_vectors.json` pins the keys, and
+  `sdk_vocabulary_vectors.json` the presets.
+- **The payer's key** is `Config.SolanaSigner` ↔ `solanaSigner` on Solana, and `Signer` ↔
+  `signer` on Algorand; a Config carrying the other rail's signer is refused. TS `Config.signer`
+  is optional now, and `ResolvedConfig` carries both and `payerSigner`, the one the rail signs
+  with. A host that read the payer's address from `client.config.signer.address` reads
+  `client.config.payerSigner.address`.
+- **What is built:** one RPC client, the `SolanaWallet` on the Config's mint, the reserve client
+  signing as the Solana payer and binding the deployment from the cluster's genesis hash and the
+  program, and discovery through `SolanaChainReader`, which also runs the lamports balance pass.
+  Confirmations poll: there is no pubsub socket, since one ends on its first drop. The Go RPC
+  client takes the environment proxy only under `UseEnvProxy`, as algod's does. TS exports
+  `solanaRpc(config)`, and `buildDiscovery` takes a `ChainReader` in place of algod.
+- `Network.Name()` is the preset on either rail, which the funding messages and the handler's
+  funding hint read.
+- **TS types widen.** `Network.network` and `ResolvedNetwork.network` take `SolanaClusterName`
+  (`devnet`) too, so a switch over them or an index into a `Record<NetworkName, …>` needs the
+  new case, and a Solana field without `rail: 'solana'` compiles and is refused when resolved.
+- An all-zero program id is the unset one in both SDKs, as Go's zero `solana.PublicKey` is.
+
+The doctor reads Algorand only, and now refuses a Solana network in so many words; a
+`SolanaSigner` ↔ `solanaSigner` left on an Algorand config is ignored, as the `Signer` is.
+
 ### 2026-10-23 — `no_funded_operator` and the funding remedies name the rail's coin (0.11.0)
 
-Messages a payer reads named ALGO on every rail. On a Solana Client, which a host can build
-once a Solana network resolves (it doesn't yet), they now name the Solana rail's own:
+Messages a payer reads named ALGO on every rail. On a Solana Client they now name the Solana
+rail's own:
 - The `no_funded_operator` refusal and the two pin refusals behind it (a `previous_response_id`
   pin, a strict tool-affinity pin) say "less than 10120 lamports", the floor
   `MinSignerSpendableLamports` ↔ `MIN_SIGNER_SPENDABLE_LAMPORTS` gates on, where they said

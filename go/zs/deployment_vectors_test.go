@@ -20,30 +20,50 @@ import (
 	"testing"
 
 	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 const deploymentVectorsPath = "../../testdata/deployment_vectors.json"
 
+// solanaOtherProgram is a program id no preset has: the vote program's.
+const solanaOtherProgram = "Vote111111111111111111111111111111111111111"
+
+// solanaZeroProgram is the all-zero key in base58.
+const solanaZeroProgram = "11111111111111111111111111111111"
+
 // deploymentInput is a Network in the fixture's terms; rail is a RailName, or
-// empty for the zero value.
+// empty for the zero value. network is the preset on either rail, as the TS
+// Network has one name field; endpoint, token and escrow_app_id are always
+// Algorand's, and rpc_endpoint and program Solana's, so a vector can set the
+// other rail's.
 type deploymentInput struct {
 	Rail        string `json:"rail,omitempty"`
 	Network     string `json:"network,omitempty"`
 	Endpoint    string `json:"endpoint,omitempty"`
 	Token       string `json:"token,omitempty"`
 	EscrowAppID uint64 `json:"escrow_app_id,omitempty"`
+	RPCEndpoint string `json:"rpc_endpoint,omitempty"`
+	Program     string `json:"program,omitempty"`
 }
 
 func (in deploymentInput) network(t *testing.T) Network {
 	t.Helper()
-	n := Network{Algod: algod.Config{Network: in.Network, Endpoint: in.Endpoint, Token: in.Token}, EscrowAppID: in.EscrowAppID}
+	n := Network{Algod: algod.Config{Endpoint: in.Endpoint, Token: in.Token}, EscrowAppID: in.EscrowAppID}
+	n.Solana.RPCEndpoint = in.RPCEndpoint
+	if in.Program != "" {
+		n.Solana.Program = solana.MustPublicKey(in.Program)
+	}
 	switch in.Rail {
-	case "":
-	case "algorand":
-		n.Rail = ticket.RailAlgorand
+	case "", "algorand":
+		if in.Rail != "" {
+			n.Rail = ticket.RailAlgorand
+		}
+		n.Algod.Network = in.Network
 	case "solana":
 		n.Rail = ticket.RailSolana
+		n.Solana.Cluster = in.Network
 	default:
 		t.Fatalf("unknown rail %q", in.Rail)
 	}
@@ -59,6 +79,9 @@ type deploymentResolveCase struct {
 	Label     string `json:"label,omitempty"`
 	Key       string `json:"key,omitempty"`
 	LegacyKey string `json:"legacy_key,omitempty"`
+	// RPCEndpoint and Program are a Solana deployment's, resolved.
+	RPCEndpoint string `json:"rpc_endpoint,omitempty"`
+	Program     string `json:"program,omitempty"`
 }
 
 type deploymentRow struct {
@@ -99,7 +122,24 @@ func buildDeploymentVectors(t *testing.T) deploymentVectors {
 		{"an app id alone names no chain", deploymentInput{EscrowAppID: 7}},
 		{"a token alone names no chain", deploymentInput{Token: "t"}},
 		{"unknown network", deploymentInput{Network: "devnet"}},
-		{"solana is not supported yet", deploymentInput{Rail: "solana", Network: "testnet"}},
+		{"solana devnet preset", deploymentInput{Rail: "solana", Network: "devnet"}},
+		{"solana localnet preset", deploymentInput{Rail: "solana", Network: "localnet"}},
+		{"solana names are case-insensitive", deploymentInput{Rail: "solana", Network: "DevNet"}},
+		{"another program on localnet keeps localnet", deploymentInput{Rail: "solana", Network: "localnet", Program: solanaOtherProgram}},
+		{"a solana endpoint overriding a preset keeps the preset", deploymentInput{Rail: "solana", Network: "devnet", RPCEndpoint: "https://rpc.example/?api-key=k"}},
+		{"a solana endpoint with a program is custom", deploymentInput{Rail: "solana", RPCEndpoint: "http://127.0.0.1:8899", Program: solanaOtherProgram}},
+		{"a solana endpoint needs a program", deploymentInput{Rail: "solana", RPCEndpoint: "http://127.0.0.1:8899"}},
+		{"the zero solana network names no cluster", deploymentInput{Rail: "solana"}},
+		{"a program alone names no cluster", deploymentInput{Rail: "solana", Program: solanaOtherProgram}},
+		// The all-zero key is Go's zero Program, so it reads as unset.
+		{"the zero program takes the preset's", deploymentInput{Rail: "solana", Network: "devnet", Program: solanaZeroProgram}},
+		{"the zero program is no program for an endpoint", deploymentInput{Rail: "solana", RPCEndpoint: "http://127.0.0.1:8899", Program: solanaZeroProgram}},
+		{"testnet is no solana preset", deploymentInput{Rail: "solana", Network: "testnet"}},
+		{"solana refuses an algod endpoint", deploymentInput{Rail: "solana", Network: "devnet", Endpoint: "http://localhost:4001"}},
+		{"solana refuses an algod token", deploymentInput{Rail: "solana", Network: "devnet", Token: "t"}},
+		{"solana refuses an app id", deploymentInput{Rail: "solana", Network: "devnet", EscrowAppID: 7}},
+		{"algorand refuses a solana endpoint", deploymentInput{Network: "testnet", RPCEndpoint: "http://127.0.0.1:8899"}},
+		{"algorand refuses a program", deploymentInput{Network: "testnet", Program: solanaOtherProgram}},
 	}
 	var v deploymentVectors
 	for _, c := range inputs {
@@ -113,6 +153,9 @@ func buildDeploymentVectors(t *testing.T) deploymentVectors {
 			rc.Error = zerr.Code
 		} else {
 			rc.Rail, rc.Label, rc.Key, rc.LegacyKey = RailName(d.Rail), d.Network, d.Key(), d.LegacyKey()
+			if d.Rail == ticket.RailSolana {
+				rc.RPCEndpoint, rc.Program = d.Solana.RPCEndpoint, d.Solana.Program.String()
+			}
 		}
 		v.Resolve = append(v.Resolve, rc)
 	}
@@ -140,6 +183,15 @@ func buildDeploymentVectors(t *testing.T) deploymentVectors {
 			{Deployment: "algorand-localnet-1001", EscrowAppID: 1001},
 			{EscrowAppID: 1001},
 			{Deployment: "algorand-custom-1001", EscrowAppID: 1001},
+		}},
+		// A Solana row always names its deployment: a row without one is
+		// Algorand's, whatever its app id.
+		{"solana devnet", deploymentInput{Rail: "solana", Network: "devnet"}, []TicketRecord{
+			{Deployment: "solana-devnet-" + zsescrow.ProgramID.String()},
+			{Deployment: "solana-localnet-" + zsescrow.ProgramID.String()},
+			{Deployment: "solana-devnet-" + solanaOtherProgram},
+			{},
+			{EscrowAppID: 1001},
 		}},
 	}
 	for _, s := range scopes {
@@ -186,6 +238,9 @@ func TestDeploymentKeysPinned(t *testing.T) {
 		{Network: "localnet", EscrowAppID: 5}:  "algorand-localnet-5",
 		{Network: "testnet", EscrowAppID: 42}:  "algorand-testnet-42",
 		{Endpoint: "http://x", EscrowAppID: 5}: "algorand-custom-5",
+		{Rail: "solana", Network: "devnet"}:    "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+		{Rail: "solana", Network: "localnet"}:  "solana-localnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+		{Rail: "solana", RPCEndpoint: "http://x", Program: solanaOtherProgram}: "solana-custom-" + solanaOtherProgram,
 	} {
 		d, _, err := ResolveNetwork(in.network(t))
 		if err != nil {

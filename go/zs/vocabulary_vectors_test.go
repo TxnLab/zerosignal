@@ -46,6 +46,11 @@ type vocabularyNetwork struct {
 	FeeSink       string `json:"fee_sink"`
 }
 
+type vocabularySolanaNetwork struct {
+	RPCEndpoint string `json:"rpc_endpoint"`
+	Program     string `json:"program"`
+}
+
 type vocabulary struct {
 	// Events maps each event type to its fields, in declaration order.
 	Events map[string][]string `json:"events"`
@@ -53,6 +58,8 @@ type vocabulary struct {
 	Records map[string][]string          `json:"records"`
 	Enums   map[string][]string          `json:"enums"`
 	Network map[string]vocabularyNetwork `json:"networks"`
+	// SolanaNetwork are the Solana rail's cluster presets.
+	SolanaNetwork map[string]vocabularySolanaNetwork `json:"solana_networks"`
 	// Defaults are Config's, durations in milliseconds.
 	Defaults map[string]int64 `json:"defaults"`
 }
@@ -169,8 +176,9 @@ func buildVocabulary(t *testing.T) vocabulary {
 			"TicketRecord": fieldNames(TicketRecord{}),
 			"SettleArgs":   fieldNames(SettleArgs{}),
 		},
-		Enums:   map[string][]string{},
-		Network: map[string]vocabularyNetwork{},
+		Enums:         map[string][]string{},
+		Network:       map[string]vocabularyNetwork{},
+		SolanaNetwork: map[string]vocabularySolanaNetwork{},
 		Defaults: map[string]int64{
 			"reserveTimeoutMs":          DefaultReserveTimeout.Milliseconds(),
 			"concurrentSlots":           DefaultDepositSlots,
@@ -227,6 +235,13 @@ func buildVocabulary(t *testing.T) vocabulary {
 			EscrowAppID:   algod.EscrowAppID(string(n)),
 			FeeSink:       algod.FeeSink(string(n)),
 		}
+	}
+	for _, n := range SolanaClusters() {
+		rpcEndpoint, program, ok := SolanaClusterPreset(n)
+		if !ok {
+			t.Fatalf("SolanaClusters lists %q, which has no preset", n)
+		}
+		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String()}
 	}
 	return v
 }
