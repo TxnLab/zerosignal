@@ -493,6 +493,12 @@ describe('the protest precompile in solana_tx_vectors.json', () => {
     it('refuses a signature of any length but 64', () => {
         for (const n of [63, 65]) expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(n), new Uint8Array(32))).toThrow(RangeError)
     })
+    // The offsets record carries the message size as a u16, as Go's
+    // TestEd25519Verify_MessageSizeBound has it.
+    it('takes a message of 65535 bytes and refuses one past it', () => {
+        expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(64), new Uint8Array(0xffff))).not.toThrow()
+        expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(64), new Uint8Array(0x10000))).toThrow(RangeError)
+    })
 })
 
 // ClaimFields as the program's fixtures write them.
