@@ -4,11 +4,19 @@
  */
 
 // The chain and escrow application, mirroring proto/go/zs Network and
-// proto/go/algod's presets (pinned by testdata/sdk_vocabulary_vectors.json).
+// proto/go/algod's presets, and zs's Solana cluster presets (pinned by
+// testdata/sdk_vocabulary_vectors.json).
+
+import { publicKeyBytes } from '@txnlab/zs-proto/solana'
+import { PROGRAM_ID } from '@txnlab/zs-proto/solana/zsescrow'
 
 import { configError } from './errors.js'
 
+/** An Algorand preset. */
 export type NetworkName = 'localnet' | 'testnet' | 'mainnet'
+
+/** A Solana cluster preset. */
+export type SolanaClusterName = 'devnet' | 'localnet'
 
 /** The chain family an escrow runs on, as Go's zs.RailName spells it. */
 export type Rail = 'algorand' | 'solana'
@@ -33,23 +41,37 @@ export function feeUnitOf(rail: Rail): FeeUnit {
  * and algodToken override its algod. escrowAppId is embedded for testnet and
  * mainnet only, so localnet or a private deployment must set it. Asset ids
  * are never configured: they are read from the contract's global state.
+ *
+ * rail solana reads network as a cluster preset (devnet or localnet), and
+ * rpcEndpoint and program in place of the algod fields; there is no
+ * zero-value cluster, so a Solana Network names its cluster or its endpoint.
+ * rpcEndpoint is used verbatim, since a provider's key may ride in its path or
+ * query. program is embedded for both presets, so only an endpoint alone must
+ * set it. The USDC mint is never configured: it is read from the program's
+ * Config. Each rail refuses the other's fields, so a Solana setting without
+ * the rail fails rather than paying on Algorand mainnet.
  */
 export interface Network {
-    /** Absent is algorand, the only rail supported today. */
+    /** Absent is algorand. */
     rail?: Rail
-    network?: NetworkName
+    network?: NetworkName | SolanaClusterName
     algodEndpoint?: string
     algodToken?: string
     escrowAppId?: bigint
+    /** The Solana cluster's JSON-RPC endpoint, overriding the preset's. */
+    rpcEndpoint?: string
+    /** The zs_escrow program id, base58; absent takes the preset's. */
+    program?: string
 }
 
 export interface ResolvedNetwork {
     rail: Rail
     /** Empty when the chain was named only by its endpoint. */
-    network: NetworkName | ''
+    network: NetworkName | SolanaClusterName | ''
     /**
-     * The network key names, which follows the app id rather than the name
-     * the config used (see resolveNetwork).
+     * The network key names. On Algorand it follows the app id rather than
+     * the name the config used; on Solana it is the cluster, or custom (see
+     * resolveNetwork).
      */
     label: string
     /**
@@ -64,9 +86,13 @@ export interface ResolvedNetwork {
      * the bare app id on Algorand, empty on a rail that had none.
      */
     legacyKey: string
+    /** The Algorand rail's; empty or 0n on Solana. */
     algodEndpoint: string
     algodToken: string
     escrowAppId: bigint
+    /** The Solana rail's; empty on Algorand. */
+    rpcEndpoint: string
+    program: string
     /**
      * The genesis fee sink of a public network, the sender of read-only
      * simulates that must succeed before the payer holds any ALGO. Empty for
@@ -103,9 +129,21 @@ export const networkNames: readonly NetworkName[] = ['localnet', 'testnet', 'mai
 
 const MAX_UINT64 = (1n << 64n) - 1n
 
+// One program id: devnet's deployment, which a localnet started by
+// contracts-solana's `make localnet` loads at the same address.
+const solanaPresets: Record<SolanaClusterName, { rpcEndpoint: string; program: string }> = {
+    devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: PROGRAM_ID },
+    localnet: { rpcEndpoint: 'http://127.0.0.1:8899', program: PROGRAM_ID },
+}
+
+/** The Solana presets, in the order Go lists them. */
+export const solanaClusterNames: readonly SolanaClusterName[] = ['devnet', 'localnet']
+
 export const mainnet = (): Network => ({ network: 'mainnet' })
 export const testnet = (): Network => ({ network: 'testnet' })
 export const localnet = (): Network => ({ network: 'localnet' })
+export const solanaDevnet = (): Network => ({ rail: 'solana', network: 'devnet' })
+export const solanaLocalnet = (): Network => ({ rail: 'solana', network: 'localnet' })
 
 /**
  * resolveNetwork applies the preset and the overrides, or throws a ZsError.
@@ -116,11 +154,20 @@ export const localnet = (): Network => ({ network: 'localnet' })
  * app 42 is not mainnet's. Only an endpoint alone is "custom", which splits
  * that config's state from the same deployment named as localnet; the cost is
  * rows left under the other key, not rows lost.
+ *
+ * On Solana the label is the cluster the config names, or "custom" for an
+ * endpoint alone: the program id is the same on every cluster, so unlike an
+ * app id it says nothing about which chain it is on.
  */
 export function resolveNetwork(n: Network = {}): ResolvedNetwork {
     const rail = n.rail ?? 'algorand'
+    if (rail === 'solana') return resolveSolana(n)
     if (rail !== 'algorand') {
-        throw configError(`Network.rail ${String(rail)} is not supported yet`)
+        throw configError(`Network.rail ${String(rail)} is not supported`)
+    }
+    // || rather than !== undefined: an empty string is unset in Go, where it is the zero value.
+    if (n.rpcEndpoint || n.program) {
+        throw configError("Network.rpcEndpoint and Network.program are the Solana rail's; set Network.rail to solana")
     }
     // Lowered but not trimmed, as Go's algod.Config.Resolve does: a blank
     // name is a mistake to refuse, not an absent one to read as mainnet.
@@ -164,7 +211,65 @@ export function resolveNetwork(n: Network = {}): ResolvedNetwork {
         algodEndpoint: n.algodEndpoint ? n.algodEndpoint.replace(/\/+$/, '') : (p?.algodEndpoint ?? ''),
         algodToken: n.algodToken || (p?.algodToken ?? ''),
         escrowAppId,
+        rpcEndpoint: '',
+        program: '',
         feeSink: p?.feeSink ?? '',
+        warnings,
+    }
+}
+
+function resolveSolana(n: Network): ResolvedNetwork {
+    if (n.algodEndpoint || n.algodToken || n.escrowAppId) {
+        throw configError("Network.algodEndpoint, algodToken and escrowAppId are the Algorand rail's; a Solana Network sets rpcEndpoint and program")
+    }
+    // Lowered but not trimmed, as on Algorand.
+    const name = n.network?.toLowerCase() ?? ''
+    const rpcEndpoint = n.rpcEndpoint ?? ''
+    if (name === '' && rpcEndpoint === '') {
+        throw configError('Network.network or rpcEndpoint is required on the Solana rail')
+    }
+    if (name !== '' && !Object.hasOwn(solanaPresets, name)) {
+        throw configError(
+            `network must be one of ${solanaClusterNames.join('|')} (case-insensitive) on the Solana rail, got ${JSON.stringify(n.network)}`,
+        )
+    }
+    const p = name === '' ? undefined : solanaPresets[name as SolanaClusterName]
+    const warnings: string[] = []
+    let program = n.program ?? ''
+    if (program !== '') {
+        let key: Uint8Array
+        try {
+            key = publicKeyBytes(program)
+        } catch {
+            throw configError(`Network.program ${JSON.stringify(program)} is not a Solana public key`)
+        }
+        // The all-zero key is Go's zero Program, which reads as unset there.
+        if (key.every((b) => b === 0)) program = ''
+    }
+    if (program === '') {
+        program = p?.program ?? ''
+        if (p && rpcEndpoint !== '' && rpcEndpoint !== p.rpcEndpoint) {
+            warnings.push(
+                `Network.rpcEndpoint overrides the ${name} preset but the program is still that preset's (${program}); set Network.program if the endpoint is another cluster`,
+            )
+        }
+    }
+    if (program === '') {
+        throw configError('Network.program is required for this network')
+    }
+    const label = name === '' ? 'custom' : name
+    return {
+        rail: 'solana',
+        network: name as SolanaClusterName | '',
+        label,
+        key: `solana-${label}-${program}`,
+        legacyKey: '',
+        algodEndpoint: '',
+        algodToken: '',
+        escrowAppId: 0n,
+        rpcEndpoint: rpcEndpoint || (p?.rpcEndpoint ?? ''),
+        program,
+        feeSink: '',
         warnings,
     }
 }

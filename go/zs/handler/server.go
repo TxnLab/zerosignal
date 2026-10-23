@@ -74,7 +74,7 @@ func New(c *zs.Client, cfg *Config, log *slog.Logger, reqTx transform.RequestTra
 		log:              log,
 		registryProvider: c.Registry(),
 		allowStaging:     zc.AllowStaging,
-		network:          string(zc.Network.Algod.ResolvedNetwork),
+		network:          zc.Network.Name(),
 		reqTx:            reqTx,
 		respTx:           respTx,
 		mux:              http.NewServeMux(),

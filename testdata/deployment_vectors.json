@@ -140,10 +140,173 @@
       "error": "invalid_config"
     },
     {
-      "name": "solana is not supported yet",
+      "name": "solana devnet preset",
+      "input": {
+        "rail": "solana",
+        "network": "devnet"
+      },
+      "rail": "solana",
+      "label": "devnet",
+      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "rpc_endpoint": "https://api.devnet.solana.com",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    {
+      "name": "solana localnet preset",
+      "input": {
+        "rail": "solana",
+        "network": "localnet"
+      },
+      "rail": "solana",
+      "label": "localnet",
+      "key": "solana-localnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "rpc_endpoint": "http://127.0.0.1:8899",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    {
+      "name": "solana names are case-insensitive",
+      "input": {
+        "rail": "solana",
+        "network": "DevNet"
+      },
+      "rail": "solana",
+      "label": "devnet",
+      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "rpc_endpoint": "https://api.devnet.solana.com",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    {
+      "name": "another program on localnet keeps localnet",
+      "input": {
+        "rail": "solana",
+        "network": "localnet",
+        "program": "Vote111111111111111111111111111111111111111"
+      },
+      "rail": "solana",
+      "label": "localnet",
+      "key": "solana-localnet-Vote111111111111111111111111111111111111111",
+      "rpc_endpoint": "http://127.0.0.1:8899",
+      "program": "Vote111111111111111111111111111111111111111"
+    },
+    {
+      "name": "a solana endpoint overriding a preset keeps the preset",
+      "input": {
+        "rail": "solana",
+        "network": "devnet",
+        "rpc_endpoint": "https://rpc.example/?api-key=k"
+      },
+      "rail": "solana",
+      "label": "devnet",
+      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "rpc_endpoint": "https://rpc.example/?api-key=k",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    {
+      "name": "a solana endpoint with a program is custom",
+      "input": {
+        "rail": "solana",
+        "rpc_endpoint": "http://127.0.0.1:8899",
+        "program": "Vote111111111111111111111111111111111111111"
+      },
+      "rail": "solana",
+      "label": "custom",
+      "key": "solana-custom-Vote111111111111111111111111111111111111111",
+      "rpc_endpoint": "http://127.0.0.1:8899",
+      "program": "Vote111111111111111111111111111111111111111"
+    },
+    {
+      "name": "a solana endpoint needs a program",
+      "input": {
+        "rail": "solana",
+        "rpc_endpoint": "http://127.0.0.1:8899"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "the zero solana network names no cluster",
+      "input": {
+        "rail": "solana"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "a program alone names no cluster",
+      "input": {
+        "rail": "solana",
+        "program": "Vote111111111111111111111111111111111111111"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "the zero program takes the preset's",
+      "input": {
+        "rail": "solana",
+        "network": "devnet",
+        "program": "11111111111111111111111111111111"
+      },
+      "rail": "solana",
+      "label": "devnet",
+      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "rpc_endpoint": "https://api.devnet.solana.com",
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+    },
+    {
+      "name": "the zero program is no program for an endpoint",
+      "input": {
+        "rail": "solana",
+        "rpc_endpoint": "http://127.0.0.1:8899",
+        "program": "11111111111111111111111111111111"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "testnet is no solana preset",
       "input": {
         "rail": "solana",
         "network": "testnet"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "solana refuses an algod endpoint",
+      "input": {
+        "rail": "solana",
+        "network": "devnet",
+        "endpoint": "http://localhost:4001"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "solana refuses an algod token",
+      "input": {
+        "rail": "solana",
+        "network": "devnet",
+        "token": "t"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "solana refuses an app id",
+      "input": {
+        "rail": "solana",
+        "network": "devnet",
+        "escrow_app_id": 7
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "algorand refuses a solana endpoint",
+      "input": {
+        "network": "testnet",
+        "rpc_endpoint": "http://127.0.0.1:8899"
+      },
+      "error": "invalid_config"
+    },
+    {
+      "name": "algorand refuses a program",
+      "input": {
+        "network": "testnet",
+        "program": "Vote111111111111111111111111111111111111111"
       },
       "error": "invalid_config"
     }
@@ -230,6 +393,40 @@
         },
         {
           "deployment": "algorand-custom-1001",
+          "escrow_app_id": 1001,
+          "owns": false
+        }
+      ]
+    },
+    {
+      "name": "solana devnet",
+      "input": {
+        "rail": "solana",
+        "network": "devnet"
+      },
+      "rows": [
+        {
+          "deployment": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "escrow_app_id": 0,
+          "owns": true
+        },
+        {
+          "deployment": "solana-localnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "escrow_app_id": 0,
+          "owns": false
+        },
+        {
+          "deployment": "solana-devnet-Vote111111111111111111111111111111111111111",
+          "escrow_app_id": 0,
+          "owns": false
+        },
+        {
+          "deployment": "",
+          "escrow_app_id": 0,
+          "owns": false
+        },
+        {
+          "deployment": "",
           "escrow_app_id": 1001,
           "owns": false
         }

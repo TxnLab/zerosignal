@@ -28,6 +28,22 @@ func TestDiagnose_RefusesAnAddressItCantRead(t *testing.T) {
 	}
 }
 
+// The doctor reads Algorand only, and says so rather than blaming a signer
+// the caller never passed. A SolanaSigner left on an Algorand Config is one
+// of the signers it ignores.
+func TestDiagnose_RefusesSolanaAndIgnoresItsSigner(t *testing.T) {
+	_, err := Diagnose(context.Background(), Config{Network: SolanaDevnet()}, testPayerAddr)
+	if e, ok := err.(*Error); !ok || e.Code != "invalid_config" || !strings.Contains(e.Message, "Algorand rail only") {
+		t.Fatalf("err = %v, want the Algorand-only refusal", err)
+	}
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	cfg := Config{SolanaSigner: newTestSolanaSigner(), Network: Network{Algod: algod.Config{Endpoint: srv.URL}, EscrowAppID: 1}}
+	if _, err := Diagnose(context.Background(), cfg, testPayerAddr); err != nil {
+		t.Fatalf("Diagnose with a stray SolanaSigner: %v", err)
+	}
+}
+
 // With algod down every check that needs it is skipped rather than failed,
 // so the report names the one cause.
 func TestDiagnose_UnreachableAlgod(t *testing.T) {

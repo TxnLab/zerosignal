@@ -36,8 +36,9 @@ func TestEnvProxyOnlyWithUseEnvProxy(t *testing.T) {
 		c := Config{UseEnvProxy: use}
 		node := c.nodeHTTPClient(0, 0).Transport.(*http.Transport).Proxy != nil
 		chain := c.algodTransport().Transport.Proxy != nil
-		if node != use || chain != use {
-			t.Errorf("UseEnvProxy %v: node client proxy %v, algod proxy %v", use, node, chain)
+		sol := c.solanaTransport().Proxy != nil
+		if node != use || chain != use || sol != use {
+			t.Errorf("UseEnvProxy %v: node client proxy %v, algod proxy %v, solana rpc proxy %v", use, node, chain, sol)
 		}
 	}
 }

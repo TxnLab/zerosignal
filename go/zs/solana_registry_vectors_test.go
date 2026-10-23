@@ -150,6 +150,9 @@ type fakeSolanaRPC struct {
 	operators []solanaRegistryAccount
 	nodes     []solanaRegistryAccount
 
+	// accounts answers getAccountInfo by address; one it lacks has no account.
+	accounts map[string]solanaRegistryAccount
+
 	mu            sync.Mutex
 	opParams      json.RawMessage
 	nodeParams    json.RawMessage
@@ -176,6 +179,20 @@ func (f *fakeSolanaRPC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case "getGenesisHash":
 		result = f.genesis.String()
+	case "getAccountInfo":
+		var addr string
+		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &addr) != nil {
+			http.Error(w, "unexpected getAccountInfo params", http.StatusBadRequest)
+			return
+		}
+		var value any
+		if a, ok := f.accounts[addr]; ok {
+			value = map[string]any{
+				"data": []string{a.DataBase64, "base64"}, "executable": false,
+				"lamports": a.Lamports, "owner": a.Owner, "rentEpoch": 0, "space": len(a.DataBase64) * 3 / 4,
+			}
+		}
+		result = map[string]any{"context": map[string]any{"slot": 1}, "value": value}
 	case "getBalance":
 		var addr string
 		if len(req.Params) == 0 || json.Unmarshal(req.Params[0], &addr) != nil {

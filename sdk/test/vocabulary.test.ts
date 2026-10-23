@@ -50,6 +50,8 @@ import {
     networkNames,
     receiptViolations,
     resolveNetwork,
+    type SolanaClusterName,
+    solanaClusterNames,
 } from '../src/index.js'
 
 interface Vocabulary {
@@ -57,6 +59,7 @@ interface Vocabulary {
     records: Record<string, string[]>
     enums: Record<string, string[]>
     networks: Record<string, { algod_endpoint: string; algod_token: string; escrow_app_id: number; fee_sink: string }>
+    solana_networks: Record<string, { rpc_endpoint: string; program: string }>
     defaults: Record<string, number>
 }
 
@@ -267,6 +270,14 @@ describe('vocabulary shared with the Go SDK', () => {
         expect([...networkNames].sort()).toEqual(Object.keys(vocab.networks).sort())
         // localnet embeds none, which is why it needs one passed above.
         expect(vocab.networks.localnet!.escrow_app_id).toBe(0)
+    })
+
+    it('has the Solana cluster presets Go has', () => {
+        for (const [name, want] of Object.entries(vocab.solana_networks)) {
+            const net = resolveNetwork({ rail: 'solana', network: name as SolanaClusterName })
+            expect([net.rpcEndpoint, net.program], name).toEqual([want.rpc_endpoint, want.program])
+        }
+        expect([...solanaClusterNames].sort()).toEqual(Object.keys(vocab.solana_networks).sort())
     })
 
     it('defaults Config as Go does', () => {

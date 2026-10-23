@@ -37,7 +37,8 @@ through `Config`:
 
 | Port | Default | Purpose |
 |---|---|---|
-| `signer` | required | The payer's key: raw Ed25519 `signBytes` and algosdk `signTransactions`, for one address. |
+| `signer` | required on Algorand | The payer's key: raw Ed25519 `signBytes` and algosdk `signTransactions`, for one address. |
+| `solanaSigner` | required on Solana | The payer's Solana key: raw Ed25519 `signBytes` and `signTransactionMessage`, for one base58 address (`solanaSigner` in `@txnlab/zerosignal/accounts/solana` is the in-memory one). |
 | `storage` | `memoryStorage()` | Durable key-value storage for state that should survive a reload: the operator catalog a built registry saves. |
 | `cache` | `memoryCache()` | Shared, single-flight fetch cache. Adapt TanStack Query or similar here. |
 | `logger` | discards | slog-style `debug` / `info` / `warn` / `error`. Never receives prompt or response content. |
@@ -117,7 +118,7 @@ the payer's slot; `testdata/solana_sign_vectors.json` pins the signed bytes to G
 The SDK signs a 32-byte sha256 digest of a domain-tagged canonical body, verbatim. This is
 **not** go-algorand-sdk's `SignBytes` (which prepends `MX`) and not ARC-1 `signData`. A wallet
 whose sign-bytes flow tags or prefixes the message cannot implement the port. The SDK also
-refuses to sign for any address but `signer.address` (`payerBytesSigner`), so a multi-account
+refuses to sign for any address but the payer's (`payerBytesSigner`), so a multi-account
 signer cannot sign a reserve with the wrong key.
 
 ## Configuration
@@ -132,17 +133,33 @@ const config = resolveConfig({ signer, network: testnet() })
 and private deployments set `network.escrowAppId`. Durations are milliseconds. A config the SDK
 cannot run with throws a `ZsError` with kind `invalid_request` and code `invalid_config`.
 
+On Solana, pass the payer's Solana key as `solanaSigner` and a Solana network. `signer` is
+for Algorand only, and each rail refuses the other's signer and network fields:
+
+```ts
+import { resolveConfig, solanaDevnet } from '@txnlab/zerosignal'
+import { solanaSigner } from '@txnlab/zerosignal/accounts/solana'
+
+const config = resolveConfig({ solanaSigner: solanaSigner(key), network: solanaDevnet() })
+```
+
+The `devnet` and `localnet` presets embed the `zs_escrow` program id and an RPC endpoint.
+`rpcEndpoint` overrides the endpoint, verbatim. An endpoint with no preset must set `program`.
+The USDC mint is read from the program's Config.
+
 ## Client
 
 `Client.create(config)` builds the payer. One Client serves every concurrent turn. It builds
 the operator registry, the reserve client and the wallet when `Config` leaves them out. Building
-the wallet reads the escrow's config from chain, so `create` fails if algod can't be reached.
+the wallet reads the escrow's config from chain, so `create` fails if algod, or on Solana the
+RPC endpoint, can't be reached.
 
 ### Discovery
 
 Without `Config.registry`, `Client.create` builds the SDK's discovery, as the Go SDK's `zs.New`
 does: a `ChainOperatorSource` reading the escrow's operator and node boxes from the network's
-algod, and a `DiscoveryRegistry` that refreshes it. Once started it reads the chain and probes a
+algod, or on Solana the program's operator and node accounts through `SolanaChainReader`, and a
+`DiscoveryRegistry` that refreshes it. Once started it reads the chain and probes a
 bounded set of nodes every `refreshInterval`, and a read older than `maxCacheAge` refreshes
 first. A node it did not reach keeps its last-known models for `maxCarryAge`. The catalog is
 saved to `Config.storage` in the Go SDK's format, under `zs.catalog.<deployment key>` since
@@ -532,8 +549,9 @@ for one payer serializes them, or both may deposit.
 
 ## Doctor
 
-`npx @txnlab/zerosignal doctor --address <address> [--network testnet]` checks what a payer
-address needs before a request can succeed, without signing anything: algod, the escrow app,
+`npx @txnlab/zerosignal doctor --address <address> [--network testnet]` checks what an Algorand
+payer address needs before a request can succeed, without signing anything (a Solana network is
+refused): algod, the escrow app,
 the account's ALGO, its USDC opt-in and balance, the prepaid MBR pool (and what the first
 request will deposit), and one discovery cycle over the fleet. It exits 1 when a check fails,
 2 on a usage error and 3 when the doctor itself fails. `--json` prints the report, `--direct`

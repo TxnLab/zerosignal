@@ -11,8 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/TxnLab/zerosignal/go/algod"
+	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -23,9 +26,40 @@ type Deployment struct {
 	Rail ticket.Rail
 	// Network is the label Key carries (see ResolveNetwork), not necessarily
 	// the network the config named.
-	Network     string
+	Network string
+	// Algod and EscrowAppID are the Algorand rail's, Solana the Solana
+	// rail's; each is zero on the other rail.
 	Algod       algod.Config // resolved
 	EscrowAppID uint64
+	Solana      SolanaNetwork // resolved: the cluster lowered, the preset applied
+}
+
+// The Solana cluster presets.
+const (
+	SolanaClusterDevnet   = "devnet"
+	SolanaClusterLocalnet = "localnet"
+)
+
+type solanaPreset struct {
+	rpcEndpoint string
+	program     solana.PublicKey
+}
+
+// solanaPresets have one program id: devnet's deployment, which a localnet
+// started by contracts-solana's `make localnet` loads at the same address.
+var solanaPresets = map[string]solanaPreset{
+	SolanaClusterDevnet:   {rpcEndpoint: "https://api.devnet.solana.com", program: zsescrow.ProgramID},
+	SolanaClusterLocalnet: {rpcEndpoint: "http://127.0.0.1:8899", program: zsescrow.ProgramID},
+}
+
+// SolanaClusters are the preset names.
+func SolanaClusters() []string { return []string{SolanaClusterDevnet, SolanaClusterLocalnet} }
+
+// SolanaClusterPreset is a preset's RPC endpoint and program id, and false
+// for a name that is none.
+func SolanaClusterPreset(name string) (rpcEndpoint string, program solana.PublicKey, ok bool) {
+	p, ok := solanaPresets[name]
+	return p.rpcEndpoint, p.program, ok
 }
 
 // RailName is a rail as Key and the TS SDK spell it.
@@ -71,8 +105,14 @@ func algoOnly[T uint64 | float64](u FeeUnit, v T) T {
 // FeeUnit is the coin the deployment's network fees are paid in.
 func (d Deployment) FeeUnit() FeeUnit { return FeeUnitOf(d.Rail) }
 
-// Escrow is the escrow's id on its rail, as text.
-func (d Deployment) Escrow() string { return strconv.FormatUint(d.EscrowAppID, 10) }
+// Escrow is the escrow's id on its rail, as text: the app id, or the program
+// id in base58.
+func (d Deployment) Escrow() string {
+	if d.Rail == ticket.RailSolana {
+		return d.Solana.Program.String()
+	}
+	return strconv.FormatUint(d.EscrowAppID, 10)
+}
 
 // Key names the deployment's local state: journal, catalog and spend files,
 // storage keys. Readable rather than the hash of ticket.DeploymentID, because
@@ -140,14 +180,25 @@ func AdoptLegacyFile(legacy, current string) error {
 // find. Only an endpoint alone is "custom", which splits that config's state
 // from the same deployment named as localnet; the cost is rows left in the
 // other's file, not rows lost.
+//
+// On Solana the label is the cluster the config names, or "custom" for an
+// endpoint alone: the program id is the same on every cluster, so unlike an
+// app id it says nothing about which chain it is on.
 func ResolveNetwork(n Network) (Deployment, []string, error) {
-	rail := n.Rail
-	if rail == 0 {
-		rail = ticket.RailAlgorand
+	switch n.Rail {
+	case 0, ticket.RailAlgorand:
+		return resolveAlgorand(n)
+	case ticket.RailSolana:
+		return resolveSolana(n)
 	}
-	if rail != ticket.RailAlgorand {
-		return Deployment{}, nil, configError(fmt.Sprintf("Network.Rail %s is not supported yet", RailName(rail)))
+	return Deployment{}, nil, configError(fmt.Sprintf("Network.Rail %s is not supported", RailName(n.Rail)))
+}
+
+func resolveAlgorand(n Network) (Deployment, []string, error) {
+	if n.Solana != (SolanaNetwork{}) {
+		return Deployment{}, nil, configError("Network.Solana is the Solana rail's; set Network.Rail to ticket.RailSolana")
 	}
+	rail := ticket.RailAlgorand
 	ac := n.Algod
 	if ac.Network == "" && ac.Endpoint == "" {
 		// Only a Network left wholly unset means mainnet. A token or an app id
@@ -180,6 +231,46 @@ func ResolveNetwork(n Network) (Deployment, []string, error) {
 		Algod:       ac,
 		EscrowAppID: appID,
 	}, warnings, nil
+}
+
+func resolveSolana(n Network) (Deployment, []string, error) {
+	if n.Algod != (algod.Config{}) || n.EscrowAppID != 0 {
+		return Deployment{}, nil, configError("Network.Algod and Network.EscrowAppID are the Algorand rail's; a Solana Network sets Network.Solana")
+	}
+	s := n.Solana
+	// Lowered but not trimmed, as algod.Config.Resolve does.
+	s.Cluster = strings.ToLower(s.Cluster)
+	if s.Cluster == "" && s.RPCEndpoint == "" {
+		return Deployment{}, nil, configError("Network.Solana.Cluster or RPCEndpoint is required on the Solana rail")
+	}
+	var p solanaPreset
+	if s.Cluster != "" {
+		var ok bool
+		if p, ok = solanaPresets[s.Cluster]; !ok {
+			return Deployment{}, nil, configError(fmt.Sprintf("Network.Solana.Cluster must be one of %s (case-insensitive), got %q",
+				strings.Join(SolanaClusters(), "|"), n.Solana.Cluster))
+		}
+	}
+	var warnings []string
+	if s.Program.IsZero() {
+		s.Program = p.program
+		if s.Cluster != "" && s.RPCEndpoint != "" && s.RPCEndpoint != p.rpcEndpoint {
+			warnings = append(warnings, fmt.Sprintf(
+				"Network.Solana.RPCEndpoint overrides the %s preset but the program is still that preset's (%s); set Network.Solana.Program if the endpoint is another cluster",
+				s.Cluster, s.Program))
+		}
+	}
+	if s.Program.IsZero() {
+		return Deployment{}, nil, configError("Network.Solana.Program is required for this network")
+	}
+	if s.RPCEndpoint == "" {
+		s.RPCEndpoint = p.rpcEndpoint
+	}
+	label := s.Cluster
+	if label == "" {
+		label = "custom"
+	}
+	return Deployment{Rail: ticket.RailSolana, Network: label, Solana: s}, warnings, nil
 }
 
 func deploymentLabel(appID uint64, named algod.Network) string {

@@ -11,6 +11,7 @@ import {
     type RegistryProvider,
     type ReserveClient,
     type Signer,
+    type SolanaSigner,
     type SpendGuard,
     type Stores,
     type WalletOpener,
@@ -22,6 +23,7 @@ import {
     memoryJournal,
     memoryStorage,
     resolveConfig,
+    solanaDevnet,
     testnet,
 } from '../src/index.js'
 import { TargetBackoffStore } from '../src/routing/backoff.js'
@@ -65,6 +67,39 @@ describe('resolveConfig', () => {
     it('requires a signer with an address', () => {
         expect(() => resolveConfig({} as Config)).toThrow(ZsError)
         expect(() => resolveConfig({ signer: { ...signer, address: '' } })).toThrow(ZsError)
+    })
+
+    // Each refusal names its own message fragment, as Go's TestConfigValidate.
+    it("takes the network rail's signer and refuses the other's", () => {
+        const sol: SolanaSigner = {
+            address: 'Vote111111111111111111111111111111111111111',
+            signBytes: async () => new Uint8Array(),
+            signTransactionMessage: async () => new Uint8Array(),
+        }
+        const c = resolveConfig({ solanaSigner: sol, network: solanaDevnet() })
+        expect(c.payerSigner).toBe(sol)
+        expect(c.signer).toBeUndefined()
+        expect(resolveConfig(base).payerSigner).toBe(signer)
+        const refusals: [Config, string][] = [
+            [{ signer, network: solanaDevnet() }, "signer is the Algorand rail's"],
+            [{ network: solanaDevnet() }, 'solanaSigner is required'],
+            [{ solanaSigner: { ...sol, address: 'PAYER' }, network: solanaDevnet() }, 'is not a Solana public key'],
+            [{ solanaSigner: { ...sol, address: '' }, network: solanaDevnet() }, 'solanaSigner has no address'],
+            [{ signer, solanaSigner: sol, network: testnet() }, "solanaSigner is the Solana rail's"],
+            [{ solanaSigner: sol, network: { ...solanaDevnet(), algodToken: 't' } }, "the Algorand rail's"],
+            [{ signer, network: { network: 'testnet', rpcEndpoint: 'http://127.0.0.1:8899' } }, 'set Network.rail to solana'],
+            [{ signer, network: { rail: 'tron' as 'solana' } }, 'Network.rail tron is not supported'],
+        ]
+        for (const [cfg, want] of refusals) {
+            let err: unknown
+            try {
+                resolveConfig(cfg)
+            } catch (e) {
+                err = e
+            }
+            expect(err, want).toBeInstanceOf(ZsError)
+            expect((err as ZsError).message, want).toContain(want)
+        }
     })
 
     it('fills every default', () => {

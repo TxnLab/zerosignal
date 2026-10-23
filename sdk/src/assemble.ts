@@ -30,14 +30,16 @@ import type algosdk from 'algosdk'
 
 import { retryingAlgod } from './algod-transport.js'
 import type { ResolvedConfig } from './config.js'
+import { configError } from './errors.js'
 import type { ResolvedNetwork } from './network.js'
-import { ChainOperatorSource } from './registry/chain.js'
+import { type ChainReader, ChainOperatorSource } from './registry/chain.js'
 import { CATALOG_STORAGE_KEY } from './registry/persist.js'
 import { DiscoveryRegistry } from './registry/registry.js'
 import { TargetBackoffStore } from './routing/backoff.js'
 import { NodeExclusionStore } from './routing/exclusion.js'
 import { RelayLatencyStore } from './routing/latency.js'
 import { RelayReputationStore } from './routing/reputation.js'
+import { SolanaRpcClient } from './solana/rpc.js'
 
 /** The routing stores a built registry's probes record to, for its Clients to route with. */
 export interface RoutingStores {
@@ -59,16 +61,30 @@ export function chainAlgod(cfg: ResolvedConfig): algosdk.Algodv2 {
 }
 
 /**
+ * solanaRpc is the one RPC client a Client's Solana wallet and discovery
+ * share. Confirmations poll: a pubsub socket ends on its first drop, and a
+ * Client lives far longer than a public endpoint keeps an idle socket.
+ */
+export function solanaRpc(cfg: ResolvedConfig): SolanaRpcClient {
+    try {
+        return new SolanaRpcClient({ endpoint: cfg.network.rpcEndpoint, logger: cfg.logger })
+    } catch (err) {
+        throw configError(err instanceof Error ? err.message : String(err))
+    }
+}
+
+/**
  * buildDiscovery is the registry a Client builds when Config supplies none,
- * over a chain source reading algod, with every Discovery setting live, and
- * the routing stores its probes record to: Config.stores' own where set. Its
- * boot starts at once; the caller awaits ready, starts it, and stops it. A
- * host sharing it passes the registry and the stores to each Client, with
- * cfg.teeVerifier so the evidence checks share one collateral cache.
+ * over a chain source reading algod, or on Solana a ChainReader such as
+ * SolanaChainReader, with every Discovery setting live, and the routing
+ * stores its probes record to: Config.stores' own where set. Its boot starts
+ * at once; the caller awaits ready, starts it, and stops it. A host sharing it
+ * passes the registry and the stores to each Client, with cfg.teeVerifier so
+ * the evidence checks share one collateral cache.
  */
 export function buildDiscovery(
     cfg: ResolvedConfig,
-    algod: algosdk.Algodv2,
+    chain: algosdk.Algodv2 | ChainReader,
     deployment?: Uint8Array,
 ): BuiltDiscovery {
     const st = cfg.stores
@@ -85,10 +101,12 @@ export function buildDiscovery(
         targetBackoff: st.targetBackoff ?? new TargetBackoffStore(cfg.clock),
         nodeExclusions: st.nodeExclusions ?? new NodeExclusionStore(),
     }
+    // With a ChainReader the restriction to some operators is the reader's.
+    const read = isChainReader(chain)
+        ? { chain }
+        : { algod: chain, escrowAppId: cfg.network.escrowAppId, operatorIds: d.operatorIds?.map((id) => BigInt(id)) }
     source = new ChainOperatorSource({
-        algod,
-        escrowAppId: cfg.network.escrowAppId,
-        operatorIds: d.operatorIds?.map((id) => BigInt(id)),
+        ...read,
         // The probes dial node-registered addresses, so they get the dial
         // guard and no header backstop, as Go's newChainSource.
         fetch: cfg.fetch,
@@ -116,6 +134,10 @@ export function buildDiscovery(
         clock: cfg.clock,
     })
     return { registry, source, stores }
+}
+
+function isChainReader(c: algosdk.Algodv2 | ChainReader): c is ChainReader {
+    return typeof (c as ChainReader).readChain === 'function'
 }
 
 /**

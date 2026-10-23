@@ -12,7 +12,16 @@ import { describe, expect, it } from 'vitest'
 
 import { catalogStorageKey } from '../src/assemble.js'
 import { ZsError } from '../src/errors.js'
-import { type Network, type NetworkName, type Rail, feeUnitOf, ownsRecord, resolveNetwork } from '../src/network.js'
+import {
+    type Network,
+    type NetworkName,
+    type Rail,
+    type SolanaClusterName,
+    feeUnitOf,
+    ownsRecord,
+    resolveNetwork,
+    solanaDevnet,
+} from '../src/network.js'
 
 interface Input {
     rail?: Rail
@@ -20,20 +29,34 @@ interface Input {
     endpoint?: string
     token?: string
     escrow_app_id?: number
+    rpc_endpoint?: string
+    program?: string
 }
 
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/deployment_vectors.json', import.meta.url), 'utf8')) as {
-    resolve: { name: string; input: Input; error?: string; rail?: string; label?: string; key?: string; legacy_key?: string }[]
+    resolve: {
+        name: string
+        input: Input
+        error?: string
+        rail?: string
+        label?: string
+        key?: string
+        legacy_key?: string
+        rpc_endpoint?: string
+        program?: string
+    }[]
     scope: { name: string; input: Input; rows: { deployment: string; escrow_app_id: number; owns: boolean }[] }[]
 }
 
 function networkOf(in_: Input): Network {
     const n: Network = {}
     if (in_.rail !== undefined) n.rail = in_.rail
-    if (in_.network !== undefined) n.network = in_.network as NetworkName
+    if (in_.network !== undefined) n.network = in_.network as NetworkName | SolanaClusterName
     if (in_.endpoint !== undefined) n.algodEndpoint = in_.endpoint
     if (in_.token !== undefined) n.algodToken = in_.token
     if (in_.escrow_app_id !== undefined) n.escrowAppId = BigInt(in_.escrow_app_id)
+    if (in_.rpc_endpoint !== undefined) n.rpcEndpoint = in_.rpc_endpoint
+    if (in_.program !== undefined) n.program = in_.program
     return n
 }
 
@@ -52,7 +75,15 @@ describe('deployment vectors', () => {
                 return
             }
             const d = resolveNetwork(networkOf(c.input))
-            expect([d.rail, d.label, d.key, d.legacyKey]).toEqual([c.rail, c.label, c.key, c.legacy_key])
+            // Go omits the empty fields.
+            expect([d.rail, d.label, d.key, d.legacyKey, d.rpcEndpoint, d.program]).toEqual([
+                c.rail,
+                c.label,
+                c.key,
+                c.legacy_key ?? '',
+                c.rpc_endpoint ?? '',
+                c.program ?? '',
+            ])
         })
     }
 
@@ -69,6 +100,31 @@ describe('deployment vectors', () => {
     it('treats an empty deployment as a row from before rows named one', () => {
         const d = resolveNetwork({ network: 'localnet', escrowAppId: 7n })
         expect(ownsRecord(d, { deployment: '', escrowAppId: 7n })).toBe(true)
+    })
+
+    // Go's program is a typed key; here a mistyped one is refused at resolve,
+    // not at the first read that names it.
+    it('refuses a Solana program that is not a key', () => {
+        let err: unknown
+        try {
+            resolveNetwork({ ...solanaDevnet(), program: 'not-a-key' })
+        } catch (e) {
+            err = e
+        }
+        expect((err as ZsError).code).toBe('invalid_config')
+        expect((err as ZsError).message).toContain('is not a Solana public key')
+    })
+
+    it('warns when a Solana endpoint overrides a preset but keeps its program', () => {
+        expect(resolveNetwork({ ...solanaDevnet(), rpcEndpoint: 'https://rpc.example' }).warnings).toEqual([
+            "Network.rpcEndpoint overrides the devnet preset but the program is still that preset's (2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1); set Network.program if the endpoint is another cluster",
+        ])
+        expect(resolveNetwork(solanaDevnet()).warnings).toEqual([])
+        expect(resolveNetwork({ ...solanaDevnet(), rpcEndpoint: 'https://api.devnet.solana.com' }).warnings).toEqual([])
+        expect(
+            resolveNetwork({ ...solanaDevnet(), rpcEndpoint: 'https://rpc.example', program: 'Vote111111111111111111111111111111111111111' })
+                .warnings,
+        ).toEqual([])
     })
 
     it('claims an unnamed row by its app id only on Algorand', () => {
