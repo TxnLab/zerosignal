@@ -112,7 +112,7 @@ function concat(...parts: Uint8Array[]): Uint8Array {
     return out
 }
 
-/** The hash a ticket stores for the first half's fields, and the one the other half and settle_lapsed must match. */
+/** The hash of a claim's fields that the payer's ack digest binds. */
 export function claimHash(f: ClaimFields): Uint8Array {
     const w = new Writer()
     putClaim(w, f)
@@ -508,9 +508,9 @@ export class Deployment extends Addresses {
         return this.ending('ack', e, (w) => putClaim(w, f))
     }
 
-    /** Pays a node's claim the payer did not answer by the deadline; the claim fields are resupplied and checked against the stored hash. */
-    settleLapsed(e: Ending, f: ClaimFields): Instruction {
-        return this.ending('settle_lapsed', e, (w) => putClaim(w, f))
+    /** Pays a node's claim the payer did not answer by the deadline, the claim the ticket holds. */
+    settleLapsed(e: Ending): Instruction {
+        return this.ending('settle_lapsed', e, () => {})
     }
 
     /** Refunds the whole escrow of a ticket the node never claimed, or whose payer-posted first half the node never answered, after the deadline. */
@@ -533,26 +533,14 @@ export class Deployment extends Addresses {
 
     /**
      * Freezes a ticket on the node's receipt, which the payer proves the node signed with an Ed25519 precompile
-     * instruction beside it. On a ticket with a pending half, `pending` must be that half's claim fields, and the
-     * receipt the one whose digest they carry, as Algorand requires the protested digest to equal the pending one;
-     * the program ignores it on an open ticket. The ticket keeps only the fields' hash: a payer has its own half's
-     * fields, and the node's from the node's claim instruction, which are claimFromReceipt(receipt) only when the
-     * node claimed exactly its receipt.
+     * instruction beside it. On a ticket with a pending half, the receipt must be the one whose digest that half
+     * carries, as Algorand requires the protested digest to equal the pending one.
      */
-    protest(
-        payerKey: PublicKey,
-        operatorId: bigint,
-        nodeId: bigint,
-        ticketId: Uint8Array,
-        receipt: Uint8Array,
-        reason: number,
-        pending: ClaimFields | null,
-    ): Instruction {
+    protest(payerKey: PublicKey, operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, receipt: Uint8Array, reason: number): Instruction {
         const w = new Writer()
         w.fixed(ticketId, 16)
         w.vec(receipt)
         w.u8(reason)
-        w.option(pending, (f) => putClaim(w, f))
         const d = this
         const node = d.node(operatorId, nodeId)
         return this.ix(

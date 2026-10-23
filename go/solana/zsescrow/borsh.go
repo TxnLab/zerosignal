@@ -100,3 +100,12 @@ func (r *reader) vec() []byte {
 }
 
 func (r *reader) array(dst []byte) { copy(dst, r.take(len(dst))) }
+
+// claim reads ClaimFields in their Borsh order, ClaimFields.put's.
+func (r *reader) claim() (f ClaimFields) {
+	f.Amount = r.u64()
+	r.array(f.ReceiptDigest[:])
+	f.TTFTMs, f.DecodeMs, f.InputUnits, f.OutputUnits = r.u64(), r.u64(), r.u64(), r.u64()
+	f.OutputUsageType, f.AuxUsageType, f.AuxCount = r.u8(), r.u8(), r.u64()
+	return f
+}

@@ -120,13 +120,13 @@ func judgeClaim(a SettleArgs, box *escrow.TicketRecord) ClaimVerdict {
 }
 
 // judgeSolanaClaim is judgeClaim for a Solana ticket account (nil when
-// closed). The account keeps the first half's hash, not its fields, so a
-// claim matches when the payer's own fields hash to it.
+// closed): a claim matches when it is the payer's own fields, every one, as
+// the program compares the halves.
 func judgeSolanaClaim(a SettleArgs, t *zsescrow.Ticket) ClaimVerdict {
 	if t == nil {
 		return ClaimNone
 	}
-	return weighClaim(t.View().Status, t.PendingAmount, a.AmountCharged, zsescrow.ClaimHash(solanaClaimFields(a)) == t.ClaimHash)
+	return weighClaim(t.View().Status, t.Pending.Amount, a.AmountCharged, solanaClaimFields(a) == t.Pending)
 }
 
 // weighClaim is the verdict on a ticket of status carrying an operator claim

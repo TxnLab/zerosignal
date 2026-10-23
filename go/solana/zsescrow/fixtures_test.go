@@ -455,7 +455,7 @@ func TestInstructionFixtures(t *testing.T) {
 			case "ack":
 				ix = d.Ack(ending(), args.claim("fields"))
 			case "settle_lapsed":
-				ix = d.SettleLapsed(ending(), args.claim("fields"))
+				ix = d.SettleLapsed(ending())
 			case "refund_inactive":
 				ix = d.RefundInactive(ending())
 			case "resolve_frozen":
@@ -466,7 +466,7 @@ func TestInstructionFixtures(t *testing.T) {
 				if d.Ticket(acct["node"], id) != acct["ticket"] {
 					t.Error("the protest's ticket id names another ticket")
 				}
-				ix = d.Protest(acct["payer"], op, n, id, args.bytes("receipt"), uint8(args.num("reason")), optional(args, "pending", args.claim))
+				ix = d.Protest(acct["payer"], op, n, id, args.bytes("receipt"), uint8(args.num("reason")))
 			case "withdraw_payout":
 				op, n := nodeIDs()
 				ix = d.WithdrawPayout(op, n, ownerOf("owner_usdc"))
@@ -572,18 +572,16 @@ func TestAckDigestFixture(t *testing.T) {
 	}
 }
 
-// The protest of a pending ticket the program accepted. Its pending claim
-// fields hash to the ticket's claim, the node's Ed25519 instruction signs the
-// receipt's digest, and the fields carry that same digest: sha256 of the
-// receipt's canonical bytes, as ticket.ReceiptSigDigest computes it and
-// ClaimFromReceipt puts it in a claim. A payer computing another digest would
-// pass fields the program refuses (ClaimMismatch against the node's claim, or
-// ReceiptNotPending against fields copied from it).
+// The protest of a pending ticket the program accepted. The protest carries
+// no claim fields, the node's Ed25519 instruction signs the receipt's digest,
+// and the pending claim the ticket holds carries that same digest: sha256 of
+// the receipt's canonical bytes, as ticket.ReceiptSigDigest computes it and
+// ClaimFromReceipt puts it in a claim. A payer computing another digest
+// would protest a receipt the program refuses as ReceiptNotPending.
 func TestProtestPendingFixture(t *testing.T) {
 	type protestTx struct {
 		txFixture
 		Program       string `json:"program"`
-		ClaimHash     string `json:"claim_hash_hex"`
 		ReceiptDigest string `json:"receipt_digest_hex"`
 	}
 	var f struct {
@@ -611,21 +609,19 @@ func TestProtestPendingFixture(t *testing.T) {
 		if protest == nil || precompile == nil {
 			t.Fatal("no protest beside an Ed25519 instruction")
 		}
-		// ticket_id, then the receipt as a u32-prefixed vector, the reason,
-		// and the pending fields as Some.
+		// ticket_id, then the receipt as a u32-prefixed vector and the
+		// reason, and nothing after.
 		args := protest.Data[8+16:]
 		n := int(binary.LittleEndian.Uint32(args))
-		if len(args) < 4+n+2 {
+		if len(args) != 4+n+1 {
 			t.Fatalf("protest arguments of %d bytes, receipt of %d", len(args), n)
 		}
-		receipt, rest := args[4:4+n], args[4+n+1:]
-		if rest[0] != 1 {
-			t.Fatal("the protest passes no pending fields")
+		receipt := args[4 : 4+n]
+		var fields map[string]any
+		if err := json.Unmarshal(tx.ClaimFields, &fields); err != nil {
+			t.Fatal(err)
 		}
-		pending := claimFieldsOf(t, rest[1:])
-		if claim := zsescrow.ClaimHash(pending); hex.EncodeToString(claim[:]) != tx.ClaimHash {
-			t.Errorf("claim hash %x, fixture %s", claim, tx.ClaimHash)
-		}
+		pending := argReader{t, map[string]any{"pending": fields}}.claim("pending")
 		var r ticket.UsageReceipt
 		if err := json.Unmarshal(tx.Receipt, &r); err != nil {
 			t.Fatal(err)

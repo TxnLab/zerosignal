@@ -43,7 +43,7 @@ const (
 	ConfigSize   = 349
 	OperatorSize = 171
 	NodeSize     = 880
-	TicketSize   = 233
+	TicketSize   = 275
 	RentPoolSize = 82
 )
 
@@ -282,25 +282,26 @@ const (
 )
 
 type Ticket struct {
-	Version       uint8            `json:"version"`
-	Status        TicketStatus     `json:"status"`
-	Bump          uint8            `json:"bump"`
-	FeeBps        uint16           `json:"fee_bps"`
-	Grace         uint32           `json:"grace"`
-	OpenSeq       uint64           `json:"open_seq"`
-	MaxPrice      uint64           `json:"max_price"`
-	PendingAmount uint64           `json:"pending_amount"`
-	OpenedAt      int64            `json:"opened_at"`
-	ExpiresAt     int64            `json:"expires_at"`
-	Payer         solana.PublicKey `json:"payer"`
-	Node          solana.PublicKey `json:"node"`
+	Version  uint8        `json:"version"`
+	Status   TicketStatus `json:"status"`
+	Bump     uint8        `json:"bump"`
+	FeeBps   uint16       `json:"fee_bps"`
+	Grace    uint32       `json:"grace"`
+	OpenSeq  uint64       `json:"open_seq"`
+	MaxPrice uint64       `json:"max_price"`
+	// Pending is the first half's claim, all zero on an open ticket, as
+	// Algorand's box keeps its pending fields: the other side's half must
+	// equal it, settle_lapsed pays it, and a protest's receipt must carry its
+	// digest.
+	Pending   ClaimFields      `json:"pending"`
+	OpenedAt  int64            `json:"opened_at"`
+	ExpiresAt int64            `json:"expires_at"`
+	Payer     solana.PublicKey `json:"payer"`
+	Node      solana.PublicKey `json:"node"`
 	// NodeSigning is the node's key at open, which signs this ticket's
 	// receipt; a protest checks the receipt against it, not the current key.
 	NodeSigning solana.PublicKey `json:"node_signing"`
 	RentPayer   solana.PublicKey `json:"rent_payer"`
-	// ClaimHash is the first half's; the other side's half, and
-	// settle_lapsed, resupply its fields.
-	ClaimHash [32]byte `json:"claim_hash"`
 	// FrozenAt and FreezeOrigin (FreezeOrigin*) are Algorand's frozenAt and
 	// freezeOrigin, for whoever resolves the ticket.
 	FrozenAt     int64   `json:"frozen_at"`
@@ -325,10 +326,9 @@ func DecodeTicket(data []byte) (*Ticket, error) {
 	}
 	t := &Ticket{
 		Version: r.u8(), Status: TicketStatus(r.u8()), Bump: r.u8(), FeeBps: r.u16(), Grace: r.u32(),
-		OpenSeq: r.u64(), MaxPrice: r.u64(), PendingAmount: r.u64(), OpenedAt: r.i64(), ExpiresAt: r.i64(),
+		OpenSeq: r.u64(), MaxPrice: r.u64(), Pending: r.claim(), OpenedAt: r.i64(), ExpiresAt: r.i64(),
 		Payer: r.key(), Node: r.key(), NodeSigning: r.key(), RentPayer: r.key(),
 	}
-	r.array(t.ClaimHash[:])
 	t.FrozenAt, t.FreezeOrigin = r.i64(), r.u8()
 	r.array(t.Reserve[:])
 	return t, r.err

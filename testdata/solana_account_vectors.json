@@ -153,12 +153,11 @@
     {
       "address": "EHQ4j6CtFMDzq53BtdeNmBJxF1SUiD8Brbb9HKmgSzCn",
       "bump": 255,
-      "data_base64": "KeQYpU5a68gBAP/0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-      "data_len": 233,
+      "data_base64": "KeQYpU5a68gBAP/0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1QAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 275,
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 255,
-        "claim_hash": "0000000000000000000000000000000000000000000000000000000000000000",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 0,
@@ -170,12 +169,22 @@
         "open_seq": "0",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "0",
+        "pending": {
+          "amount": "0",
+          "aux_count": "0",
+          "aux_usage_type": 0,
+          "decode_ms": "0",
+          "input_units": "0",
+          "output_units": "0",
+          "output_usage_type": 0,
+          "receipt_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "ttft_ms": "0"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "Open",
         "version": 1
       },
-      "lamports": "1833880",
+      "lamports": "2047240",
       "name": "ticket_open",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [
@@ -188,12 +197,11 @@
     {
       "address": "2rvFdosqnbzmWPUM5uDJcfnLDkzc42KtLihJe8xeEaLZ",
       "bump": 255,
-      "data_base64": "KeQYpU5a68gBAf/0AXgAAAABAAAAAAAAAJDQAwAAAAAAwNQBAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69WRlN/ju13Hc69mFvExdXcG8UVIn9RA60pq+3fieacs0AAAAAAAAAAAAAAAAAAAAAA=",
-      "data_len": 233,
+      "data_base64": "KeQYpU5a68gBAf/0AXgAAAABAAAAAAAAAJDQAwAAAAAAwNQBAAAAAAAGz/U9q4tUG0quTrJ1QREqZVWLZUTCsnQ7XNfwgJ7x5aQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQIDAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1QAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 275,
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 255,
-        "claim_hash": "9194dfe3bb5dc773af6616f131757706f145489fd440eb4a6afb77e279a72cd0",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 0,
@@ -205,12 +213,22 @@
         "open_seq": "1",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "120000",
+        "pending": {
+          "amount": "120000",
+          "aux_count": "3",
+          "aux_usage_type": 2,
+          "decode_ms": "3000",
+          "input_units": "1200",
+          "output_units": "600",
+          "output_usage_type": 1,
+          "receipt_digest": "06cff53dab8b541b4aae4eb27541112a65558b6544c2b2743b5cd7f0809ef1e5",
+          "ttft_ms": "420"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "PendingByOperator",
         "version": 1
       },
-      "lamports": "1833880",
+      "lamports": "2047240",
       "name": "ticket_pending",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [
@@ -223,12 +241,11 @@
     {
       "address": "6Axko1Zb8tWfrzMs9fvzSwKaY18U6Q1TdgJiittYHKG4",
       "bump": 254,
-      "data_base64": "KeQYpU5a68gBA/70AXgAAAACAAAAAAAAAJDQAwAAAAAAsK0BAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69XqsDpQGBXlOQQCrof0QpdbK7sh9tOi5vkNVIiPlurniAAAAAAAAAAAAAAAAAAAAAA=",
-      "data_len": 233,
+      "data_base64": "KeQYpU5a68gBA/70AXgAAAACAAAAAAAAAJDQAwAAAAAAsK0BAAAAAADYgi2lT9FjqKTn30VK27Q6jB2wvoEZXyM8kZ5thRDuE6QBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1QAAAAAAAAAAAAAAAAAAAAA=",
+      "data_len": 275,
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 254,
-        "claim_hash": "eab03a501815e5390402ae87f442975b2bbb21f6d3a2e6f90d54888f96eae788",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 0,
@@ -240,12 +257,22 @@
         "open_seq": "2",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "110000",
+        "pending": {
+          "amount": "110000",
+          "aux_count": "0",
+          "aux_usage_type": 0,
+          "decode_ms": "3000",
+          "input_units": "1200",
+          "output_units": "600",
+          "output_usage_type": 1,
+          "receipt_digest": "d8822da54fd163a8a4e7df454adbb43a8c1db0be81195f233c919e6d8510ee13",
+          "ttft_ms": "420"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "PendingByPayer",
         "version": 1
       },
-      "lamports": "1833880",
+      "lamports": "2047240",
       "name": "ticket_pending_by_payer",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [
@@ -258,12 +285,11 @@
     {
       "address": "2i8g3diPaESdumvkGCcyg3ex3vQ7ia8WiEU9ZBqAK946",
       "bump": 254,
-      "data_base64": "KeQYpU5a68gBAv70AXgAAAADAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA7sWoAAAAAAgAAAAAAAAA=",
-      "data_len": 233,
+      "data_base64": "KeQYpU5a68gBAv70AXgAAAADAAAAAAAAAJDQAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1YA7sWoAAAAAAgAAAAAAAAA=",
+      "data_len": 275,
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 254,
-        "claim_hash": "0000000000000000000000000000000000000000000000000000000000000000",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 2,
@@ -275,12 +301,22 @@
         "open_seq": "3",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "0",
+        "pending": {
+          "amount": "0",
+          "aux_count": "0",
+          "aux_usage_type": 0,
+          "decode_ms": "0",
+          "input_units": "0",
+          "output_units": "0",
+          "output_usage_type": 0,
+          "receipt_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "ttft_ms": "0"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "Frozen",
         "version": 1
       },
-      "lamports": "1833880",
+      "lamports": "2047240",
       "name": "ticket_frozen",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [
@@ -293,12 +329,11 @@
     {
       "address": "97AzSGMHYf67K4rpWKPXaYjEtU7GJEXFtRSikvMLtMQW",
       "bump": 254,
-      "data_base64": "KeQYpU5a68gBAv70AXgAAAAFAAAAAAAAAJDQAwAAAAAAoIYBAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69Usmhr1ftZFi/YYE+5WqQlKoUpyMZ+jBt9Kzrjk8MqHDYA7sWoAAAAAAQAAAAAAAAA=",
-      "data_len": 233,
+      "data_base64": "KeQYpU5a68gBAv70AXgAAAAFAAAAAAAAAJDQAwAAAAAAoIYBAAAAAACvLQFt88rUQiKF/mbZNO3QTX9Thqe7bOFcZc1zPNC5iqQBAAAAAAAAuAsAAAAAAACwBAAAAAAAAFgCAAAAAAAAAQAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1YA7sWoAAAAAAQAAAAAAAAA=",
+      "data_len": 275,
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 254,
-        "claim_hash": "2c9a1af57ed6458bf61813ee56a9094aa14a72319fa306df4aceb8e4f0ca870d",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 1,
@@ -310,12 +345,22 @@
         "open_seq": "5",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "100000",
+        "pending": {
+          "amount": "100000",
+          "aux_count": "0",
+          "aux_usage_type": 0,
+          "decode_ms": "3000",
+          "input_units": "1200",
+          "output_units": "600",
+          "output_usage_type": 1,
+          "receipt_digest": "af2d016df3cad4422285fe66d934edd04d7f5386a7bb6ce15c65cd733cd0b98a",
+          "ttft_ms": "420"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "Frozen",
         "version": 1
       },
-      "lamports": "1833880",
+      "lamports": "2047240",
       "name": "ticket_disputed",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [
@@ -472,7 +517,7 @@
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "version": 1
       },
-      "lamports": "1223558600",
+      "lamports": "1220358200",
       "name": "rent_pool_live",
       "owner": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
       "seeds_hex": [

@@ -34,14 +34,13 @@ func (f *solanaAckFixture) handle(deliver func(context.Context, wire.SettleAck) 
 // The ticket account's offsets of the fields a claim is judged on, after the
 // 8-byte discriminator.
 const (
-	ticketStatusOffset        = 9
-	ticketPendingAmountOffset = 33
-	ticketClaimHashOffset     = 185
+	ticketStatusOffset  = 9
+	ticketPendingOffset = 33
 )
 
 // setTicket rewrites the fixture's ticket account: status, and a claim of
-// pending whose hash is the receipt's fields with the amount set to pending,
-// as a node claiming pending would write it.
+// the receipt's fields with the amount set to pending, as a node claiming
+// pending would write it.
 func (f *solanaAckFixture) setTicket(t *testing.T, status zsescrow.TicketStatus, pending uint64, edit func(*zsescrow.ClaimFields)) {
 	t.Helper()
 	data := append([]byte(nil), f.ticketAcct.Data...)
@@ -50,12 +49,17 @@ func (f *solanaAckFixture) setTicket(t *testing.T, status zsescrow.TicketStatus,
 	if edit != nil {
 		edit(&fields)
 	}
-	h := zsescrow.ClaimHash(fields)
 	data[ticketStatusOffset] = byte(status)
-	binary.LittleEndian.PutUint64(data[ticketPendingAmountOffset:], pending)
-	copy(data[ticketClaimHashOffset:], h[:])
+	at := data[ticketPendingOffset:]
+	binary.LittleEndian.PutUint64(at, fields.Amount)
+	copy(at[8:40], fields.ReceiptDigest[:])
+	for i, v := range []uint64{fields.TTFTMs, fields.DecodeMs, fields.InputUnits, fields.OutputUnits} {
+		binary.LittleEndian.PutUint64(at[40+8*i:], v)
+	}
+	at[72], at[73] = fields.OutputUsageType, fields.AuxUsageType
+	binary.LittleEndian.PutUint64(at[74:], fields.AuxCount)
 	tk, err := zsescrow.DecodeTicket(data)
-	if err != nil || tk.Status != status || tk.PendingAmount != pending || tk.ClaimHash != h {
+	if err != nil || tk.Status != status || tk.Pending != fields {
 		t.Fatalf("the ticket offsets are off: %+v, %v", tk, err)
 	}
 	f.cluster.accounts[f.ticketAddr] = &rpc.Account{Owner: f.cluster.d.Program, Data: data}

@@ -32,7 +32,7 @@
       "name": "ticket_as_config",
       "type": "Config",
       "about": "a Ticket's bytes",
-      "data_base64": "KeQYpU5a68gBAP/0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      "data_base64": "KeQYpU5a68gBAP/0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1QAAAAAAAAAAAAAAAAAAAAA="
     },
     {
       "name": "config_as_ticket",
@@ -169,11 +169,10 @@
       "name": "ticket_status_unknown",
       "type": "Ticket",
       "about": "a status a later program might add, read as unknown",
-      "data_base64": "KeQYpU5a68gBB//0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAACAO7FqAAAAAKw8sWoAAAAA0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzf/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDMeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "data_base64": "KeQYpU5a68gBB//0AXgAAAAAAAAAAAAAAJDQAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA7sWoAAAAArDyxagAAAADQSrIydCu0qzoTaL1GFeTm0CJKtxoBa6+FIKMyyXeHN/8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5C+71qeZ55qPhNP4ng3v/MsfLX11E6gm8sOVCutakwMx41vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1QAAAAAAAAAAAAAAAAAAAAA=",
       "decoded": {
         "_reserve": "00000000000000",
         "bump": 255,
-        "claim_hash": "0000000000000000000000000000000000000000000000000000000000000000",
         "expires_at": "1790000300",
         "fee_bps": 500,
         "freeze_origin": 0,
@@ -185,7 +184,17 @@
         "open_seq": "0",
         "opened_at": "1790000000",
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
-        "pending_amount": "0",
+        "pending": {
+          "amount": "0",
+          "aux_count": "0",
+          "aux_usage_type": 0,
+          "decode_ms": "0",
+          "input_units": "0",
+          "output_units": "0",
+          "output_usage_type": 0,
+          "receipt_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "ttft_ms": "0"
+        },
         "rent_payer": "98i3DYHqSifNTpGT8gGVXNP4Gyrtv5xEyWzG1mRKQMi4",
         "status": "TicketStatus(7)",
         "version": 1

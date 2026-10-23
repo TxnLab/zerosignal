@@ -404,8 +404,7 @@ const (
 	ackTag   = "zs-settle-ack-v3\x00"
 )
 
-// ClaimHash is the hash a ticket stores for the first half's fields, and the
-// one the other half and settle_lapsed must match.
+// ClaimHash is the hash of a claim's fields that the payer's ack digest binds.
 func ClaimHash(f ClaimFields) [32]byte {
 	w := writer{b: []byte(claimTag)}
 	f.put(&w)
@@ -517,10 +516,10 @@ func (d Deployment) Ack(e Ending, f ClaimFields) solana.Instruction {
 	return d.ending("ack", e, f.put)
 }
 
-// SettleLapsed pays a node's claim the payer did not answer by the deadline;
-// the claim fields are resupplied and checked against the stored hash.
-func (d Deployment) SettleLapsed(e Ending, f ClaimFields) solana.Instruction {
-	return d.ending("settle_lapsed", e, f.put)
+// SettleLapsed pays a node's claim the payer did not answer by the deadline,
+// the claim the ticket holds.
+func (d Deployment) SettleLapsed(e Ending) solana.Instruction {
+	return d.ending("settle_lapsed", e, func(*writer) {})
 }
 
 // RefundInactive refunds the whole escrow of a ticket the node never claimed,
@@ -543,18 +542,14 @@ func (d Deployment) ResolveFrozen(e Ending, operatorShareBps uint16, reason stri
 
 // Protest freezes a ticket on the node's receipt, which the payer proves the
 // node signed with an Ed25519 precompile instruction beside it. On a ticket
-// with a pending half, pending must be that half's claim fields, and the
-// receipt the one whose digest they carry, as Algorand requires the protested
-// digest to equal the pending one; the program ignores it on an open ticket.
-// The ticket keeps only the fields' hash: a payer has its own half's fields,
-// and the node's from the node's claim instruction, which are
-// ClaimFromReceipt(receipt) only when the node claimed exactly its receipt.
-func (d Deployment) Protest(payerKey solana.PublicKey, operatorID, nodeID uint64, ticketID [16]byte, receipt []byte, reason uint8, pending *ClaimFields) solana.Instruction {
+// with a pending half, the receipt must be the one whose digest that half
+// carries, as Algorand requires the protested digest to equal the pending
+// one.
+func (d Deployment) Protest(payerKey solana.PublicKey, operatorID, nodeID uint64, ticketID [16]byte, receipt []byte, reason uint8) solana.Instruction {
 	w := writer{}
 	w.bytes(ticketID[:])
 	w.vec(receipt)
 	w.u8(reason)
-	option(&w, pending, func(f ClaimFields) { f.put(&w) })
 	node := d.Node(operatorID, nodeID)
 	return d.ix("protest", w.b, append([]solana.AccountMeta{
 		signer(payerKey),

@@ -1205,16 +1205,6 @@
         {
           "name": "reason",
           "type": "u8"
-        },
-        {
-          "name": "pending",
-          "type": {
-            "option": {
-              "defined": {
-                "name": "ClaimFields"
-              }
-            }
-          }
         }
       ]
     },
@@ -1805,14 +1795,6 @@
         }
       ],
       "args": [
-        {
-          "name": "fields",
-          "type": {
-            "defined": {
-              "name": "ClaimFields"
-            }
-          }
-        },
         {
           "name": "bumps",
           "type": {
@@ -3585,8 +3567,20 @@
             "type": "u64"
           },
           {
-            "name": "pending_amount",
-            "type": "u64"
+            "name": "pending",
+            "docs": [
+              "The first half's claim fields, all zero on an open ticket, as",
+              "Algorand's box keeps pendingAmount, pendingDigest and the rest: the",
+              "other side's half is compared with them, settle_lapsed pays them, and",
+              "a protest checks its receipt against their digest, so neither ending",
+              "needs a party to resupply them. A frozen ticket keeps them for whoever",
+              "resolves it."
+            ],
+            "type": {
+              "defined": {
+                "name": "ClaimFields"
+              }
+            }
           },
           {
             "name": "opened_at",
@@ -3625,19 +3619,6 @@
               "the rent."
             ],
             "type": "pubkey"
-          },
-          {
-            "name": "claim_hash",
-            "docs": [
-              "sha256 of the first half's claim fields; the other side's half, and",
-              "settle_lapsed, resupply them."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           },
           {
             "name": "frozen_at",

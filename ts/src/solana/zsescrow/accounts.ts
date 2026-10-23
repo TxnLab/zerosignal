@@ -11,6 +11,7 @@
 import { equalBytes } from '../../util/bytes.js'
 import { type Hash, type PublicKey, encodeBase58 } from '../key.js'
 import { DecodeError, Reader, decodeUtf8 } from './borsh.js'
+import type { ClaimFields } from './instructions.js'
 import { ACCOUNT_VERSION, BASE_URL_MAX, discriminator } from './program.js'
 
 export class DiscriminatorError extends Error {
@@ -31,7 +32,7 @@ export class AccountVersionError extends Error {
 export const CONFIG_SIZE = 349
 export const OPERATOR_SIZE = 171
 export const NODE_SIZE = 880
-export const TICKET_SIZE = 233
+export const TICKET_SIZE = 275
 export const RENT_POOL_SIZE = 82
 export const TOKEN_ACCOUNT_SIZE = 165
 
@@ -264,7 +265,11 @@ export interface Ticket {
     grace: number
     openSeq: bigint
     maxPrice: bigint
-    pendingAmount: bigint
+    /**
+     * The first half's claim, all zero on an open ticket, as Algorand's box keeps its pending fields: the other
+     * side's half must equal it, settle_lapsed pays it, and a protest's receipt must carry its digest.
+     */
+    pending: ClaimFields
     openedAt: bigint
     expiresAt: bigint
     payer: PublicKey
@@ -272,8 +277,6 @@ export interface Ticket {
     /** The node's key at open, which signs this ticket's receipt; a protest checks the receipt against it, not the current key. */
     nodeSigning: PublicKey
     rentPayer: PublicKey
-    /** The first half's; the other side's half, and settle_lapsed, resupply its fields. */
-    claimHash: Uint8Array
     /** Algorand's frozenAt and freezeOrigin (FREEZE_ORIGIN_*), for whoever resolves the ticket. */
     frozenAt: bigint
     freezeOrigin: number
@@ -298,14 +301,23 @@ export function decodeTicket(data: Uint8Array): Ticket {
         grace: r.u32(),
         openSeq: r.u64(),
         maxPrice: r.u64(),
-        pendingAmount: r.u64(),
+        pending: {
+            amount: r.u64(),
+            receiptDigest: r.array(32),
+            ttftMs: r.u64(),
+            decodeMs: r.u64(),
+            inputUnits: r.u64(),
+            outputUnits: r.u64(),
+            outputUsageType: r.u8(),
+            auxUsageType: r.u8(),
+            auxCount: r.u64(),
+        },
         openedAt: r.i64(),
         expiresAt: r.i64(),
         payer: r.key(),
         node: r.key(),
         nodeSigning: r.key(),
         rentPayer: r.key(),
-        claimHash: r.array(32),
         frozenAt: r.i64(),
         freezeOrigin: r.u8(),
         reserve: r.array(7),
