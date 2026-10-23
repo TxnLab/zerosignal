@@ -88,7 +88,7 @@ func NewSolanaWallet(ctx context.Context, cfg SolanaWalletConfig) (*SolanaWallet
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: payer address: %w", err)
 	}
-	acct, err := cfg.RPC.GetAccountInfo(ctx, cfg.Deployment.Config(), rentCommitment)
+	acct, err := getAccount(ctx, cfg.RPC, cfg.Deployment.Config())
 	if err != nil {
 		return nil, fmt.Errorf("solana wallet: read config: %w", err)
 	}

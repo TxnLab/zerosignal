@@ -26,7 +26,8 @@ import (
 )
 
 // walletCluster is rentChain with the deployment's Config and whatever other
-// accounts a test puts in accounts, counting the reads of the pool. An ack it
+// accounts a test puts in accounts, counting the reads of the pool. A missing
+// account is rpc.ErrNotFound, as the real client answers. An ack it
 // is sent lands as ackLand says (nil: confirmed) and moves nothing.
 type walletCluster struct {
 	*rentChain
@@ -51,12 +52,16 @@ func (c *walletCluster) GetAccountInfo(ctx context.Context, k solana.PublicKey, 
 	c.accountReads = append(c.accountReads, k)
 	a, ok := c.accounts[k]
 	c.mu.Unlock()
+	// A missing account is rpc.ErrNotFound, as HTTPClient reports it.
 	switch {
 	case k == c.d.Config():
+		if c.config == nil {
+			return nil, rpc.ErrNotFound
+		}
 		return c.config, nil
 	case ok:
 		if a == nil {
-			return nil, nil
+			return nil, rpc.ErrNotFound
 		}
 		cp := *a
 		return &cp, nil

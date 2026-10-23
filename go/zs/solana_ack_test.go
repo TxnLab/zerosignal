@@ -311,8 +311,13 @@ func TestSolanaWallet_AckForfeitNeedsTheConfig(t *testing.T) {
 			f.cluster.accounts[f.wallet.payerUSDC] = nil
 			tk := f.ticket(t)
 			f.cluster.config = c.config(f.cluster.config)
-			if _, err := f.ack(t, tk); err == nil {
+			_, err := f.ack(t, tk)
+			if err == nil {
 				t.Fatal("an ack with no treasury to forfeit to was sent")
+			}
+			// A missing or foreign Config is no Config, not a failed read.
+			if c.name != "truncated" && !strings.Contains(err.Error(), "has no Config") {
+				t.Fatalf("err = %v", err)
 			}
 			if len(f.cluster.acks) != 0 || f.signer.asked.Load() != 0 {
 				t.Fatalf("%d sent, %d signed", len(f.cluster.acks), f.signer.asked.Load())

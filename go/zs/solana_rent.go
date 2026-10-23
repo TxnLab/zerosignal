@@ -47,6 +47,17 @@ const solanaSignatureFee uint64 = 5_000
 // funded its wallet sees the lamports in about a second.
 const rentCommitment = rpc.Confirmed
 
+// getAccount reads key at rentCommitment, nil when it has no account: the RPC
+// client reports that as rpc.ErrNotFound, and every account the payer reads
+// may be absent (a first-time payer's pool, a closed ticket or token account).
+func getAccount(ctx context.Context, c rpc.Client, key solana.PublicKey) (*rpc.Account, error) {
+	a, err := c.GetAccountInfo(ctx, key, rentCommitment)
+	if errors.Is(err, rpc.ErrNotFound) {
+		return nil, nil
+	}
+	return a, err
+}
+
 // rentPoolReading is the payer's rent pool as the chain shows it.
 type rentPoolReading struct {
 	// exists is a pool the program owns. Lamports someone sent to the
@@ -124,7 +135,7 @@ func (p *SolanaRentPool) read(ctx context.Context) (rentPoolState, error) {
 	if s.poolRent, err = p.RPC.GetMinimumBalanceForRentExemption(ctx, zsescrow.RentPoolSize, rentCommitment); err != nil {
 		return s, fmt.Errorf("solana rent pool: pool rent: %w", err)
 	}
-	acct, err := p.RPC.GetAccountInfo(ctx, p.Deployment.RentPool(payer), rentCommitment)
+	acct, err := getAccount(ctx, p.RPC, p.Deployment.RentPool(payer))
 	if err != nil {
 		return s, fmt.Errorf("solana rent pool: read pool: %w", err)
 	}

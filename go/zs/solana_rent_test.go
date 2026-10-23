@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -100,10 +101,45 @@ func (c *rentChain) GetAccountInfo(_ context.Context, k solana.PublicKey, cm rpc
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.pool == nil {
-		return nil, nil
+		return nil, rpc.ErrNotFound
 	}
 	a := *c.pool
 	return &a, nil
+}
+
+// accountReader answers every GetAccountInfo with its account and err.
+type accountReader struct {
+	rpc.Client
+	acct *rpc.Account
+	err  error
+}
+
+func (r accountReader) GetAccountInfo(context.Context, solana.PublicKey, rpc.Commitment) (*rpc.Account, error) {
+	return r.acct, r.err
+}
+
+// getAccount reads no account only from rpc.ErrNotFound, wrapped or not; any
+// other failure stays one, or a pool the RPC failed to read would be created
+// again and a refund the payer could take forfeited.
+func TestGetAccountReadsOnlyNotFoundAsAbsent(t *testing.T) {
+	acct := &rpc.Account{Lamports: 1}
+	down := errors.New("rpc down")
+	for _, c := range []struct {
+		name    string
+		r       accountReader
+		want    *rpc.Account
+		wantErr error
+	}{
+		{"not found", accountReader{err: rpc.ErrNotFound}, nil, nil},
+		{"not found, wrapped", accountReader{err: fmt.Errorf("call: %w", rpc.ErrNotFound)}, nil, nil},
+		{"another error", accountReader{err: down}, nil, down},
+		{"an account", accountReader{acct: acct}, acct, nil},
+	} {
+		got, err := getAccount(t.Context(), c.r, solana.PublicKey{})
+		if got != c.want || !errors.Is(err, c.wantErr) || (c.wantErr == nil) != (err == nil) {
+			t.Errorf("%s: %v, %v", c.name, got, err)
+		}
+	}
 }
 
 func (c *rentChain) GetBalance(_ context.Context, k solana.PublicKey, cm rpc.Commitment) (uint64, error) {
