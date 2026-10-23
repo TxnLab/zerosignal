@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/selection"
 	"github.com/TxnLab/zerosignal/go/solana"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
@@ -66,4 +67,13 @@ func requestTicketID(rail ticket.Rail) (string, error) {
 		return "", fmt.Errorf("ticket id: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(id[:]), nil
+}
+
+// signerFloorText is the signing-account floor as a no_funded_operator
+// refusal names it, in the rail's own unit.
+func signerFloorText(rail ticket.Rail) string {
+	if rail == ticket.RailSolana {
+		return fmt.Sprintf("%d lamports", selection.MinSignerSpendableLamports)
+	}
+	return fmt.Sprintf("%d ALGO", selection.MinSignerSpendableMicroAlgos/1_000_000)
 }

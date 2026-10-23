@@ -17,7 +17,6 @@ import {
 } from '@txnlab/zs-proto/inject'
 import {
     type Operator as SelectionOperator,
-    MIN_SIGNER_SPENDABLE_MICROALGOS,
     RELAY_OFF,
     extractModel,
     extractRoutingPreferences,
@@ -34,6 +33,7 @@ import { DuplicateTicketError, type Remedies, type SpendGuard } from './config.j
 import { ZsError, findError } from './errors.js'
 import { type Estimate, type EstimatePolicy, MaxOutputRequiredError, estimate } from './estimate.js'
 import { MbrDepositUnaffordableError } from './mbr.js'
+import type { Rail } from './network.js'
 import { type ReserveSizeRejection, noFitMessage, reserveSizeFailureMessage } from './nofit.js'
 import { AsyncSpendGuardError, guardDecides } from './spend-guard.js'
 import { type Operator, isTeeAttested, refOf, servesImageEdit, servesImageGen } from './operator.js'
@@ -56,6 +56,7 @@ import {
     relayPool,
 } from './pick.js'
 import type { Clock, LogAttrs } from './ports.js'
+import { signerFloorText } from './rail.js'
 import { parseImageEditMultipart, parseImageRequestN, streamableRequest } from './request-parse.js'
 import { operatorPricingOf, verifyReservePrice } from './reserve-price.js'
 import { reserveWithTransientRetry } from './reserve-retry.js'
@@ -111,6 +112,8 @@ export interface DispatchDeps {
     remedies: Remedies
     /** The network's name, as failure messages give it. Empty when named only by endpoint. */
     network: string
+    /** The payer's rail, which failure messages name the coin and floor of; absent is algorand. */
+    rail?: Rail | undefined
     /** The whole request's transient-retry budget, in milliseconds. */
     retryBudget: number
     sweepDelay?: ((sweep: number) => number) | undefined
@@ -165,7 +168,7 @@ async function prepareDeposit(deps: DispatchDeps, em: Emitter, endpoint: Endpoin
             isUnderfundedOpenError(err)
         ) {
             log.error('prepaid pool could not be funded before reserve', { endpoint, err: errText(err) })
-            em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err))
+            em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err, deps.rail))
             return false
         }
         log.warn('prepaid pool check failed before reserve; continuing', { endpoint, err: errText(err) })
@@ -330,7 +333,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         return
     }
     if (pick.operators.length === 0) {
-        em.fail(emptyPickError(endpoint, model, sizing, pick))
+        em.fail(emptyPickError(endpoint, model, sizing, pick, deps.rail))
         return
     }
     let candidates = pick.operators
@@ -957,7 +960,7 @@ function asyncGuardFailure(err: AsyncSpendGuardError): ZsError {
     return newError('spend_cap_exceeded', `${err.message}. No payment was made. The host's SpendGuard must decide before the SDK reserves or opens.`)
 }
 
-function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest, pick: PickResult): ZsError {
+function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest, pick: PickResult, rail: Rail | undefined): ZsError {
     const q = quoted(model)
     if (pick.versionBlocked) {
         // Upgrade required: retrying against the same fleet keeps failing.
@@ -982,7 +985,7 @@ function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest
         // Clears when an operator tops up; there is no knob the payer can turn.
         const msg =
             pick.signerUnderfundedReason ||
-            `every node serving the model ${q} has less than ${Math.floor(MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000)} ALGO spendable in its signing account to pay network fees; retry later or pick another model`
+            `every node serving the model ${q} has less than ${signerFloorText(rail)} spendable in its signing account to pay network fees; retry later or pick another model`
         return newError('no_funded_operator', msg)
     }
     if (pick.registryCount === 0) {

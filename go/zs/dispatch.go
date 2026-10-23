@@ -385,8 +385,8 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			// no knob the payer can turn.
 			msg := pick.SignerUnderfundedReason
 			if msg == "" {
-				msg = fmt.Sprintf("every node serving the model %q has less than %d ALGO spendable in its signing account to pay network fees; retry later or pick another model",
-					model, selection.MinSignerSpendableMicroAlgos/1_000_000)
+				msg = fmt.Sprintf("every node serving the model %q has less than %s spendable in its signing account to pay network fees; retry later or pick another model",
+					model, signerFloorText(s.deployment.Rail))
 			}
 			em.fail(newError("no_funded_operator", msg))
 		case pick.RegistryCount == 0:
@@ -1332,8 +1332,8 @@ type pickResult struct {
 	StagingBlocked bool
 
 	// SignerUnderfundedBlocked is set when every otherwise-eligible node has a
-	// signing account known to hold less than
-	// selection.MinSignerSpendableMicroAlgos spendable, or when an affinity pin
+	// signing account known to be below its rail's floor
+	// (selection.SignerReadingsUnderfunded), or when an affinity pin
 	// (strict tool-call, or previous_response_id) lands on such a node. Surfaced
 	// as 503 no_funded_operator.
 	SignerUnderfundedBlocked bool
@@ -1728,9 +1728,9 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 				// the client can retry the same pin once the operator tops up.
 				res.SignerUnderfundedBlocked = true
 				res.SignerUnderfundedReason = fmt.Sprintf(
-					"previous_response_id %q is pinned to operator %d node %d, whose signing account has less than %d ALGO "+
+					"previous_response_id %q is pinned to operator %d node %d, whose signing account has less than %s "+
 						"spendable to pay network fees; retry once the operator tops up, or start a new conversation",
-					rid, op.ID, op.NodeID, selection.MinSignerSpendableMicroAlgos/1_000_000)
+					rid, op.ID, op.NodeID, signerFloorText(s.deployment.Rail))
 				return res, nil
 			} else {
 				res.Operators = []Operator{op}
@@ -1853,8 +1853,8 @@ func (s *Client) pickCandidates(ctx context.Context, endpoint, model string, bod
 		s.cfg.Affinity.Policy == AffinityStrict {
 		res.SignerUnderfundedReason = fmt.Sprintf(
 			"this tool-call continuation is pinned (strict affinity) to operator %d node %d, whose signing account "+
-				"has less than %d ALGO spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it",
-			preferredOp.ID, preferredOp.NodeID, selection.MinSignerSpendableMicroAlgos/1_000_000)
+				"has less than %s spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it",
+			preferredOp.ID, preferredOp.NodeID, signerFloorText(s.deployment.Rail))
 	}
 	res.ImageEndpointUnsupported = tr.Diagnostics.ImageEndpointUnsupported
 	res.AffinityBlocked = tr.Diagnostics.AffinityBlocked
@@ -3534,9 +3534,15 @@ func (s *Client) openFailure(err error) *Error {
 	// Checked before exhaustion: Wallet.Open wraps the pool revert with the
 	// top-up that failed, and that revert alone reads as exhaustion.
 	if errors.Is(err, ErrDepositUnaffordable) || errors.Is(err, ErrDepositBelowTarget) {
+		// A Solana rent pool's shortfall wraps these sentinels, and its coin
+		// and pool are SOL and ticket rent.
+		coin, pool := "ALGO", "prepaid ticket-MBR pool"
+		if s.deployment.Rail == ticket.RailSolana {
+			coin, pool = "SOL", "prepaid ticket rent pool"
+		}
 		return newError("mbr_pool_underfunded",
-			fmt.Sprintf("zerosignal wallet %s needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on %s — %v. "+
-				"To fix it, %s.", s.wallet.PayerAddr(), s.networkName(), err, s.remedies().Fund))
+			fmt.Sprintf("zerosignal wallet %s needs more %s (not USDC) to fund the %s on %s — %v. "+
+				"To fix it, %s.", s.wallet.PayerAddr(), coin, pool, s.networkName(), err, s.remedies().Fund))
 	}
 	// Pool exhaustion (vs a balance shortfall): the wallet HOLDS the ALGO,
 	// but every prepaid-pool slot is reserved by an in-flight ticket, so

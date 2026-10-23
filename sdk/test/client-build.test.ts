@@ -66,7 +66,7 @@ vi.mock('../src/network.js', async (importOriginal) => {
 })
 
 const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, testnet } = await import('../src/index.js')
-const { partsOf } = await import('../src/client-parts.js')
+const { dispatchDepsOf, partsOf } = await import('../src/client-parts.js')
 const { testOperator } = await import('./fixtures.js')
 type Config = import('../src/index.js').Config
 
@@ -174,5 +174,26 @@ describe('Client.create building the wallet', () => {
         ).rejects.toThrow('captured')
         expect(base64.decode(h.reserveCalls[0]!.request.ticket_id ?? '')).toHaveLength(16)
         c.close()
+    })
+
+    // Selection names the signer floor in the rail's unit, lamports on Solana,
+    // and the default remedies name the rail's coin and ticket record. Go's
+    // TestOpenFailure_NamesTheRailsCoinAndPool.
+    it('hands the rail to selection and the remedies', async () => {
+        const c = await Client.create({ ...base, network: { ...testnet(), rail: 'solana' } })
+        expect(partsOf.get(c)!.pick.rail).toBe('solana')
+        expect(dispatchDepsOf(c, async () => {}).rail).toBe('solana')
+        expect(partsOf.get(c)!.cfg.remedies).toMatchObject({
+            fund: 'fund the payer address: SOL for fees and the ticket rent pool, and USDC for requests',
+            recoverTicket:
+                "read its ticket account from the escrow program and, once the deadline passes, send refund_inactive on an open ticket or settle_lapsed on an operator's claim",
+        })
+        c.close()
+        const a = await Client.create({ ...base, network: testnet() })
+        expect(partsOf.get(a)!.pick.rail).toBe('algorand')
+        expect(partsOf.get(a)!.cfg.remedies.fund).toBe(
+            'fund the payer address: ALGO for fees and the ticket pool, and USDC for requests once the address has opted in to the USDC asset',
+        )
+        a.close()
     })
 })

@@ -262,7 +262,7 @@ func TestDispatch_AdmitRefusalReservesNothing(t *testing.T) {
 	if ze.Code != "spend_cap_exceeded" || ze.Kind != KindSpendCap {
 		t.Errorf("code %q kind %q, want spend_cap_exceeded / spend_cap", ze.Code, ze.Kind)
 	}
-	if want := (Remedies{}).withDefaults().RaiseSpendCap; !strings.Contains(ze.Message, want) {
+	if want := (Remedies{}).withDefaults(ticket.RailAlgorand).RaiseSpendCap; !strings.Contains(ze.Message, want) {
 		t.Errorf("message %q, want it to end with the remedy %q", ze.Message, want)
 	}
 	if rc.calls() != 0 {

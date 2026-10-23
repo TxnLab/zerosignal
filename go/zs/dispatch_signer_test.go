@@ -7,11 +7,13 @@ package zs
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
 // signerOp is a serving node with its signing account's spendable ALGO set, or
@@ -177,5 +179,109 @@ func TestPickCandidates_ToolAffinityPrefer_UnderfundedNotFloated(t *testing.T) {
 	srv2.toolAffinity = srv.toolAffinity
 	if got := pickChat(t, srv2, model, body); len(got.Operators) != 2 || got.Operators[0].ID != 7 {
 		t.Fatalf("funded pin: got order %v, want 7 first", got.Operators)
+	}
+}
+
+// A payer short of its rail's coin for the ticket pool is told which coin and
+// which pool: a Solana payer funds SOL for ticket rent, with no USDC opt-in to
+// make. The default remedies follow the rail too. The texts are the TS twin's.
+func TestOpenFailure_NamesTheRailsCoinAndPool(t *testing.T) {
+	for _, c := range []struct {
+		rail          ticket.Rail
+		err           error
+		want          string
+		recoverTicket string
+	}{
+		{ticket.RailAlgorand, fmt.Errorf("short: %w", ErrDepositUnaffordable),
+			"zerosignal wallet PAYER needs more ALGO (not USDC) to fund the prepaid ticket-MBR pool on  — short: " + ErrDepositUnaffordable.Error() + ". " +
+				"To fix it, fund the payer address: ALGO for fees and the ticket pool, and USDC for requests once the address has opted in to the USDC asset.",
+			"read its box with escrow.Client.ReadTicketBox and, once the deadline passes, call refundInactive on an open ticket or settleLapsed on an operator's claim"},
+		{ticket.RailSolana, fmt.Errorf("short: %w", ErrRentDepositUnaffordable),
+			"zerosignal wallet PAYER needs more SOL (not USDC) to fund the prepaid ticket rent pool on  — short: " + ErrRentDepositUnaffordable.Error() + ". " +
+				"To fix it, fund the payer address: SOL for fees and the ticket rent pool, and USDC for requests.",
+			"read its ticket account from the escrow program and, once the deadline passes, send refund_inactive on an open ticket or settle_lapsed on an operator's claim"},
+		{ticket.RailSolana, fmt.Errorf("short: %w", ErrRentDepositBelowTarget),
+			"zerosignal wallet PAYER needs more SOL (not USDC) to fund the prepaid ticket rent pool on  — short: " + ErrRentDepositBelowTarget.Error() + ". " +
+				"To fix it, fund the payer address: SOL for fees and the ticket rent pool, and USDC for requests.",
+			""},
+	} {
+		s := &Client{wallet: failingOpenWallet{}, deployment: Deployment{Rail: c.rail}}
+		ze := s.openFailure(c.err)
+		if ze.Code != "mbr_pool_underfunded" || ze.Message != c.want {
+			t.Errorf("%s:\n got %s %q\nwant mbr_pool_underfunded %q", RailName(c.rail), ze.Code, ze.Message, c.want)
+		}
+		if c.recoverTicket != "" {
+			if got := (Config{Network: Network{Rail: c.rail}}).withDefaults().Remedies.RecoverTicket; got != c.recoverTicket {
+				t.Errorf("%s RecoverTicket:\n got %q\nwant %q", RailName(c.rail), got, c.recoverTicket)
+			}
+		}
+	}
+	// A Solana payer built its own wallet from SolanaWalletConfig.
+	for rail, want := range map[ticket.Rail]string{
+		ticket.RailAlgorand: "raise Config.ConcurrentSlots (WalletConfig.DepositSlots for a Wallet you built) and rebuild the Client; the next request funds the larger pool",
+		ticket.RailSolana:   "raise Config.ConcurrentSlots (SolanaWalletConfig.DepositSlots for a SolanaWallet you built) and rebuild the Client; the next request funds the larger pool",
+	} {
+		if got := (Config{Network: Network{Rail: rail}}).withDefaults().Remedies.RaiseSlots; got != want {
+			t.Errorf("%s RaiseSlots:\n got %q\nwant %q", RailName(rail), got, want)
+		}
+	}
+}
+
+// Each no_funded_operator refusal names the floor in the Client's own rail's
+// unit: a Solana node's signer pays its fees in lamports, and "5 ALGO" would
+// send its operator to fund the wrong chain. The texts are the TS twin's too.
+func TestNoFundedOperator_NamesTheRailsFloor(t *testing.T) {
+	const model = "gpt-4o-mini"
+	for _, c := range []struct {
+		rail  ticket.Rail
+		floor string
+		drain func(*Operator)
+	}{
+		{ticket.RailAlgorand, "5 ALGO", func(op *Operator) { op.SignerSpendableMicroAlgos = micro(0) }},
+		{ticket.RailSolana, "10120 lamports", func(op *Operator) { op.SignerSpendableLamports = micro(0) }},
+	} {
+		t.Run(RailName(c.rail), func(t *testing.T) {
+			drained := func(id uint64) Operator {
+				op := signerOp(id, model, nil)
+				c.drain(&op)
+				return op
+			}
+
+			srv := minimalTEEServer(t, []Operator{drained(1)})
+			srv.tokenizer = testTokenizer()
+			srv.deployment.Rail = c.rail
+			ze := turnErr(t, srv, `{"model":"gpt-4o-mini","max_completion_tokens":100}`)
+			if want := `every node serving the model "gpt-4o-mini" has less than ` + c.floor +
+				` spendable in its signing account to pay network fees; retry later or pick another model`; ze.Message != want {
+				t.Errorf("model-wide:\n got %q\nwant %q", ze.Message, want)
+			}
+
+			pinned := drained(7)
+			srv = minimalTEEServer(t, []Operator{pinned, signerOp(8, model, nil)})
+			srv.deployment.Rail = c.rail
+			srv.responseAffinity = NewIDAffinity(16, time.Minute, time.Now)
+			srv.responseAffinity.Record(pinned.ID, pinned.NodeID, []string{"resp_pinned"})
+			pick, err := srv.pickCandidates(context.Background(), endpointResponses, model,
+				[]byte(`{"model":"gpt-4o-mini","previous_response_id":"resp_pinned","input":[]}`),
+				SizingRequest{Model: model, InputTokens: 1, MaxOutputTokens: 1}, false, selection.ImageToolBudgets{}, selection.RoutingPreferences{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `previous_response_id "resp_pinned" is pinned to operator 7 node 0, whose signing account has less than ` + c.floor +
+				` spendable to pay network fees; retry once the operator tops up, or start a new conversation`; pick.SignerUnderfundedReason != want {
+				t.Errorf("response pin:\n got %q\nwant %q", pick.SignerUnderfundedReason, want)
+			}
+
+			srv = minimalTEEServer(t, []Operator{pinned, signerOp(8, model, nil)})
+			srv.deployment.Rail = c.rail
+			srv.cfg.Affinity.Policy = AffinityStrict
+			srv.toolAffinity = NewIDAffinity(16, time.Minute, time.Now)
+			srv.toolAffinity.Record(pinned.ID, pinned.NodeID, []string{"call_1"})
+			pick = pickChat(t, srv, model, []byte(`{"model":"gpt-4o-mini","messages":[{"role":"tool","tool_call_id":"call_1","content":"x"}]}`))
+			if want := `this tool-call continuation is pinned (strict affinity) to operator 7 node 0, whose signing account has less than ` + c.floor +
+				` spendable to pay network fees; retry later, or set the affinity policy to prefer so another node can continue it`; pick.SignerUnderfundedReason != want {
+				t.Errorf("tool pin:\n got %q\nwant %q", pick.SignerUnderfundedReason, want)
+			}
+		})
 	}
 }

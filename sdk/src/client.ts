@@ -205,6 +205,7 @@ export class Client {
             relayReputation: st.relayReputation,
             logger: cfg.logger,
             weightsWarned: new Set(),
+            rail: cfg.network.rail,
         }
         const guard = cfg.spendGuard
         // Go's Client.barOverclaimer: bars a node the watchdog or the sweep
@@ -441,6 +442,7 @@ function sealedDeps(p: Parts, feeRate: () => number | null, slot: SettleSlot): S
         spendGuard: cfg.spendGuard,
         remedies: cfg.remedies,
         network: cfg.network.network,
+        rail: cfg.network.rail,
         fetch: cfg.inferenceFetch,
         relayReputation: st.relayReputation,
         logger,

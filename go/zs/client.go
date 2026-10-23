@@ -374,7 +374,7 @@ func (s *Client) barOverclaimer(ticketID string, node NodeRef) {
 
 // remedies fills the defaults here rather than trusting New to have, because a
 // Client built in a test skips New.
-func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults() }
+func (s *Client) remedies() Remedies { return s.cfg.Remedies.withDefaults(s.deployment.Rail) }
 
 // Close stops the discovery refresh and the ticket reconciler New started. It
 // does not wait for settlements; see WaitSettles. It ends any watch on a
