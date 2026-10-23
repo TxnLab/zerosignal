@@ -31,7 +31,33 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-22 — a Solana ticket holds its pending claim (unreleased)
+### 2026-10-23 — dstack verifiers refuse debug TDs and pin the boot chain (0.10.0)
+
+Both SDK verifiers, and every caller of `attest`, now run two checks that a dstack quote could
+previously pass without:
+
+- `VerifyNotDebug` ↔ `verifyNotDebug` refuses a quote whose TDATTRIBUTES "TD under debug"
+  byte is non-zero. It runs after the vendor chain and before the replay.
+- `VerifyBootChain` ↔ `verifyBootChain` runs after the OS-image check. MRTD, RTMR1 and RTMR2
+  must equal the measured row for the replayed `os-image-hash`, and RTMR0 must equal one of
+  that row's per-shape values.
+
+Both refusals are `measurement_mismatch`.
+
+`TrustedDstackBootChains` ↔ `trustedDstackBootChains` holds the rows. `TrustedDstackOSImages`
+is now derived from it. The measured pairs are:
+
+- 0.5.12 and 0.6.1 on `tdx.small` and `tdx.large`;
+- 0.5.9 on `tdx.small`, plus Phala's ACI gateway.
+
+`dstack-nvidia-0.5.12` has no measured row, so **every GPU node is refused**, and so is a node
+on any unmeasured instance size.
+
+`DstackVerifier.TrustedBootChains` ↔ `trustedBootChains` takes a caller's table: absent means
+the built-in one, and empty refuses everything. An image added to a host's OS-image list
+without a row is refused.
+
+### 2026-10-22 — a Solana ticket holds its pending claim (0.10.0)
 
 The `zs_escrow` program's `Ticket` account stores the first half's claim fields
 (`Ticket.Pending` ↔ `pending`, a `ClaimFields`) where it stored their hash and the claimed amount,
@@ -44,7 +70,7 @@ digest against the stored one (`Protest` ↔ `protest` lose their `pending` argu
 `ClaimHash` ↔ `claimHash` remains for the ack digest. A deployed program and its tickets must be
 replaced, since old accounts no longer decode.
 
-### 2026-10-22 — Go's Solana wallet reads a missing account as absent (unreleased)
+### 2026-10-22 — Go's Solana wallet reads a missing account as absent (0.10.0)
 
 `rpc.HTTPClient.GetAccountInfo` reports an account that does not exist as `rpc.ErrNotFound`,
 and the Go Solana wallet read that as a failed read, where it means no account. Against a real
@@ -54,7 +80,7 @@ than forfeiting the refund to the treasury. Each read now takes `ErrNotFound` as
 as the TS wallet takes `null`. The test clusters answer a missing account with `ErrNotFound`,
 as the real client does.
 
-### 2026-10-22 — the Solana handle's ack (unreleased)
+### 2026-10-22 — the Solana handle's ack (0.10.0)
 
 A Solana ticket's handle now acks a verified receipt, through the same decision as Algorand's
 (`ackSettle` ↔ `ackSettle`, generalized over what the settle slot decodes to).
@@ -77,7 +103,7 @@ A Solana ticket's handle now acks a verified receipt, through the same decision 
   transaction throws `SentSettleError` (`SolanaAckSendError` is one), carrying the submission.
 - `SolanaWalletConfig.Logger` ↔ `SolanaWalletOptions.log`.
 
-### 2026-10-22 — the payer's own ack on Solana (unreleased)
+### 2026-10-22 — the payer's own ack on Solana (0.10.0)
 
 The Solana wallet can send the payer's half of a settle itself, the Solana form of
 Algorand's standalone settle. Nothing calls it yet; the Solana handle's `AckSettle` is next.
@@ -96,7 +122,7 @@ Algorand's standalone settle. Nothing calls it yet; the Solana handle's `AckSett
 - TS: `solanaClaimFields` moves to `sdk/src/solana/claim.ts`, shared by `judgeSolanaClaim`
   and the ack.
 
-### 2026-10-22 — the claim verdict on a Solana ticket (unreleased)
+### 2026-10-22 — the claim verdict on a Solana ticket (0.10.0)
 
 The Solana ticket account now maps onto the rail-neutral settlement view, and the payer can
 judge an operator's claim on it against its own receipt. Nothing calls either yet; the
@@ -113,7 +139,7 @@ Solana ack is next.
   pending amount alone decides an over-claim. TS args that can't be hashed (a digest that
   isn't 32 bytes, a count past u64) contradict the claim, as `judgeClaim` finds of them.
 
-### 2026-10-22 — the Solana wallet's open (unreleased)
+### 2026-10-22 — the Solana wallet's open (0.10.0)
 
 Both SDKs can open a ticket on Solana: `zs.SolanaWallet` ↔ `SolanaWallet`
 (`sdk/src/solana/wallet.ts`, not in the package's exports). No host builds one yet, since the
@@ -137,7 +163,7 @@ Solana rail can't be configured.
 - **`RentDepositBelowTargetError`** extends `BelowTargetError`, Go's
   `ErrRentDepositBelowTarget`. `BelowTargetError.name` is now typed `string`, not its literal.
 
-### 2026-10-22 — the Solana payer chooses the ticket id (unreleased)
+### 2026-10-22 — the Solana payer chooses the ticket id (0.10.0)
 
 SPEC § 3a "The open and the ack on Solana" closes the precondition the entry below left open:
 the payer must never sign two opens with one ticket id at a node. On Solana the payer now
@@ -156,7 +182,7 @@ chooses the id.
   from `HTTPReserveClient.Rail` ↔ `HttpReserveClientOptions.rail` and the client's deployment,
   and only Algorand is reachable until the Solana rail can be configured.
 
-### 2026-10-22 — the Solana open and ack on the wire (unreleased)
+### 2026-10-22 — the Solana open and ack on the wire (0.10.0)
 
 SPEC § 3a "The open and the ack on Solana" defines what the rail-neutral fields carry on
 Solana, and `solana/zsescrow` (`wire.go` ↔ `wire.ts`) writes and reads each value. Nothing
