@@ -332,6 +332,16 @@ function setTicket(f: Awaited<ReturnType<typeof fixture>>, status: number, pendi
 
 const ticketReads = (f: Awaited<ReturnType<typeof fixture>>) => f.state.reads.filter((k) => k === TICKET_ADDR).length
 
+// A copy of the ticket account data with payer in its payer's place.
+function withPayer(ticket: Uint8Array, payer: string): Uint8Array {
+    const data = ticket.slice()
+    const was = publicKeyBytes(decodeTicket(ticket).payer)
+    const i = data.findIndex((_, j) => was.every((b, k) => data[j + k] === b))
+    data.set(publicKeyBytes(payer), i)
+    expect(decodeTicket(data).payer).toBe(payer)
+    return data
+}
+
 describe('Solana handle ackSettle', () => {
     // With the node's open_seq the payer hands the node its ack: its
     // signature over the receipt's ack digest at that open_seq, as
@@ -542,14 +552,7 @@ describe('Solana handle protest', () => {
         ['no ticket', (f) => f.state.accounts.set(f.at, null), ProtestReason.bodyHash, /no ticket account/],
         [
             "another payer's ticket",
-            (f) => {
-                const t = decodeTicket(TICKET_DATA)
-                const data = TICKET_DATA.slice()
-                const payer = publicKeyBytes(t.payer)
-                const i = data.findIndex((_, j) => payer.every((b, k) => data[j + k] === b))
-                data.set(publicKeyBytes(OTHER), i)
-                f.state.accounts.set(f.at, { lamports: 1n, owner: PROGRAM_ID, data, executable: false })
-            },
+            (f) => f.state.accounts.set(f.at, { lamports: 1n, owner: PROGRAM_ID, data: withPayer(TICKET_DATA, OTHER), executable: false }),
             ProtestReason.bodyHash,
             /not this wallet's/,
         ],
@@ -594,12 +597,15 @@ describe('Solana handle endings', () => {
             expect(sig).toBe(encodeBase58(f.state.sent[0]!.signatures[0]!))
         })
 
-        // An ending of a ticket that isn't there sends nothing; one that
-        // landed and failed hands back its signature.
+        // An ending of a ticket that isn't there, or isn't the payer's, asks
+        // the signer nothing and sends nothing; one that landed and failed
+        // hands back its signature.
         it('refuses or reports', async () => {
             const f = await fixture()
             f.state.accounts.set(TICKET_ADDR, null)
             await expect(call(handleOf(f))).rejects.toThrow(/no ticket account/)
+            f.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data: withPayer(TICKET_DATA, OTHER), executable: false })
+            await expect(call(handleOf(f))).rejects.toThrow(/not this wallet's/)
             expect(f.state.sent).toHaveLength(0)
             expect(f.signer.asked).toBe(0)
 

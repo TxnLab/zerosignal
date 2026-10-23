@@ -262,8 +262,9 @@ func TestSolanaHandle_EndsTheTicket(t *testing.T) {
 	}
 }
 
-// An ending of a ticket that isn't there, or isn't the payer's, sends
-// nothing; one that landed and failed hands back its signature.
+// An ending of a ticket that isn't there, or isn't the payer's, asks the
+// signer nothing and sends nothing; one that landed and failed hands back its
+// signature.
 func TestSolanaHandle_EndingRefusesOrReports(t *testing.T) {
 	f := newSolanaAckFixture(t)
 	f.cluster.accounts[f.ticketAddr] = nil
@@ -275,6 +276,22 @@ func TestSolanaHandle_EndingRefusesOrReports(t *testing.T) {
 	}
 	if len(f.cluster.acks) != 0 || f.signer.asked.Load() != 0 {
 		t.Fatalf("%d sent, %d signed", len(f.cluster.acks), f.signer.asked.Load())
+	}
+
+	f = newSolanaAckFixture(t)
+	tk := *f.ticket(t)
+	data := append([]byte(nil), f.ticketAcct.Data...)
+	other := solana.MustPublicKey("3Atsbq9N5EaCc9YWmqD2rUVedX4pqDe7hyk6JSyWRTrG")
+	copy(data[bytes.Index(data, tk.Payer[:]):], other[:])
+	f.cluster.accounts[f.ticketAddr] = &rpc.Account{Owner: f.ticketAcct.Owner, Data: data}
+	if _, err := f.handle(nil).RefundInactive(t.Context()); err == nil || !strings.Contains(err.Error(), "not this wallet's") {
+		t.Fatalf("another payer's refund: err = %v", err)
+	}
+	if _, err := f.handle(nil).SettleLapsed(t.Context()); err == nil || !strings.Contains(err.Error(), "not this wallet's") {
+		t.Fatalf("another payer's lapse: err = %v", err)
+	}
+	if len(f.cluster.acks) != 0 || f.signer.asked.Load() != 0 {
+		t.Fatalf("another payer's ticket: %d sent, %d signed", len(f.cluster.acks), f.signer.asked.Load())
 	}
 
 	f = newSolanaAckFixture(t)
