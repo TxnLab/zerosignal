@@ -31,6 +31,32 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — dstack verifiers refuse debug TDs and pin the boot chain (0.10.0)
+
+Both SDK verifiers, and every caller of `attest`, now run two checks that a dstack quote could
+previously pass without:
+
+- `VerifyNotDebug` ↔ `verifyNotDebug` refuses a quote whose TDATTRIBUTES "TD under debug"
+  byte is non-zero. It runs after the vendor chain and before the replay.
+- `VerifyBootChain` ↔ `verifyBootChain` runs after the OS-image check. MRTD, RTMR1 and RTMR2
+  must equal the measured row for the replayed `os-image-hash`, and RTMR0 must equal one of
+  that row's per-shape values.
+
+Both refusals are `measurement_mismatch`.
+
+`TrustedDstackBootChains` ↔ `trustedDstackBootChains` holds the rows. `TrustedDstackOSImages`
+is now derived from it. The measured pairs are:
+
+- 0.5.12 and 0.6.1 on `tdx.small` and `tdx.large`;
+- 0.5.9 on `tdx.small`, plus Phala's ACI gateway.
+
+`dstack-nvidia-0.5.12` has no measured row, so **every GPU node is refused**, and so is a node
+on any unmeasured instance size.
+
+`DstackVerifier.TrustedBootChains` ↔ `trustedBootChains` takes a caller's table: absent means
+the built-in one, and empty refuses everything. An image added to a host's OS-image list
+without a row is refused.
+
 ### 2026-10-22 — a Solana ticket holds its pending claim (0.10.0)
 
 The `zs_escrow` program's `Ticket` account stores the first half's claim fields
