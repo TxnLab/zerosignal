@@ -2081,6 +2081,8 @@ The reference proxy and client do not send challenges yet.
 
   **Since 9.9 the upper half closes this.** The aux binding hashes `be64(node_id)` and the verifier supplies the chain-resolved id, so a sibling's bundle recomputes to a different value and is refused. The lower half still omits `node_id`, for the two reasons above.
 
+**Why `report_data` carries no TLS-certificate binding.** Some attested-inference designs pin the serving certificate into the quote so that no TLS-terminating proxy can sit in front of the node. Here TLS is not the confidentiality boundary. The payer seals to the ephemeral recipient that the lower half binds, so a gateway, load balancer or CDN in front of the node (a dstack gateway, a GCP L7 LB) relays ciphertext it cannot open. What such a front end still sees is transport metadata, which relays address. A certificate pin would also be unverifiable for a payer whose TLS ends at a relay, and for a browser, which cannot read the peer certificate.
+
 **Evidence age.**
 
 - `generated_at` is a self-report because it is not inside the quote, which carries no timestamp of its own.
