@@ -25,6 +25,8 @@
 
 import { sha256, sha384 } from '@noble/hashes/sha2.js'
 
+import type { BootChain } from './trust-lists.js'
+
 // The event type dstack stamps on the runtime events it extends into
 // RTMR3.
 //
@@ -100,6 +102,15 @@ export type AttestErrorCode =
      * verifyStorageEncrypted, not by the replay.
      */
     | 'storage_unencrypted'
+    /** The quote was taken in a debug TD. Raised by verifyNotDebug. */
+    | 'debug_td'
+    /**
+     * No row names the replayed os-image-hash, or its row is not yet
+     * measured. Raised by verifyBootChain.
+     */
+    | 'boot_chain_unknown'
+    /** A boot register differs from the image's row. Raised by verifyBootChain. */
+    | 'boot_chain_mismatch'
     /**
      * The quote is too short to hold the register the log would be
      * compared against.
@@ -551,6 +562,7 @@ export function verifyEventLog(rawLog: string, quote: Uint8Array): Record<string
 // TDX v4 quote layout: a 48-byte header followed by the TD report body.
 // Offsets are into the body.
 const QUOTE_HEADER_LEN = 48
+const BODY_TD_ATTRIBUTES = 120
 const BODY_MRTD = 136
 const BODY_RTMR0 = 328
 const BODY_REPORT_DATA = 520
@@ -595,6 +607,83 @@ export function quoteMRTD(quote: Uint8Array): Uint8Array | null {
     if (quote.length < off + RTMR_LEN) return null
     return quote.subarray(off, off + RTMR_LEN)
 }
+
+/** The width of the TD report's TDATTRIBUTES field. */
+export const TD_ATTRIBUTES_LEN = 8
+
+/**
+ * quoteTDAttributes extracts TDATTRIBUTES, the TD's launch-time attribute
+ * bits, as the 8 little-endian bytes the report carries.
+ */
+export function quoteTDAttributes(quote: Uint8Array): Uint8Array | null {
+    const off = QUOTE_HEADER_LEN + BODY_TD_ATTRIBUTES
+    if (quote.length < off + TD_ATTRIBUTES_LEN) return null
+    return quote.subarray(off, off + TD_ATTRIBUTES_LEN)
+}
+
+/**
+ * verifyNotDebug throws when the quote's TD runs under debug. Mirrors Go's
+ * attest.VerifyNotDebug, whose godoc carries why the whole TUD byte (bits
+ * 7:0) is refused rather than bit 0 alone.
+ */
+export function verifyNotDebug(quote: Uint8Array): void {
+    const attrs = quoteTDAttributes(quote)
+    if (!attrs) {
+        throw new AttestError('short_quote', `attest: quote is too short to hold TDATTRIBUTES: got ${quote.length} bytes`)
+    }
+    if (attrs[0] !== 0) {
+        throw new AttestError('debug_td', `attest: the quote was taken in a debug TD (TDATTRIBUTES ${bytesToHex(attrs)})`)
+    }
+}
+
+/**
+ * verifyBootChain throws unless the quote's MRTD and RTMR0-2 match the row
+ * for osImage, the os-image-hash the RTMR3 replay recovered. Mirrors Go's
+ * attest.VerifyBootChain, whose godoc carries why the row is chosen by the
+ * replay and the hardware registers must then agree with it. Values compare
+ * by ASCII lowercase, as Go's do.
+ */
+export function verifyBootChain(quote: Uint8Array, osImage: string, chains: readonly BootChain[]): void {
+    const row = osImage === '' ? undefined : chains.find((c) => sameHex(c.osImage, osImage))
+    if (row === undefined) {
+        throw new AttestError(
+            'boot_chain_unknown',
+            `attest: no measured boot chain for this OS image (os-image-hash ${JSON.stringify(osImage)})`,
+        )
+    }
+    if (row.mrtd === '' || row.rtmr1 === '' || row.rtmr2 === '' || row.rtmr0.length === 0) {
+        throw new AttestError(
+            'boot_chain_unknown',
+            `attest: no measured boot chain for this OS image (${row.name} is trusted but not yet measured)`,
+        )
+    }
+    const reg = (name: string, got: Uint8Array | null): string => {
+        if (!got) {
+            throw new AttestError('short_quote', `attest: quote is too short to hold ${name}: got ${quote.length} bytes`)
+        }
+        return bytesToHex(got)
+    }
+    const mismatch = (name: string, got: string) =>
+        new AttestError('boot_chain_mismatch', `attest: the quote's boot chain is not the image's: ${name} ${got} is not ${row.name}'s`)
+
+    const mrtd = reg('MRTD', quoteMRTD(quote))
+    if (!sameHex(mrtd, row.mrtd)) throw mismatch('MRTD', mrtd)
+    const rtmr1 = reg('RTMR1', quoteRTMR(quote, 1))
+    if (!sameHex(rtmr1, row.rtmr1)) throw mismatch('RTMR1', rtmr1)
+    const rtmr2 = reg('RTMR2', quoteRTMR(quote, 2))
+    if (!sameHex(rtmr2, row.rtmr2)) throw mismatch('RTMR2', rtmr2)
+    const rtmr0 = reg('RTMR0', quoteRTMR(quote, 0))
+    if (row.rtmr0.some((v) => sameHex(rtmr0, v))) return
+    throw new AttestError(
+        'boot_chain_mismatch',
+        `attest: the quote's boot chain is not the image's: RTMR0 ${rtmr0} matches no measured instance shape of ${row.name} ` +
+            '(MRTD, RTMR1 and RTMR2 match, so this is a host configuration nobody measured)',
+    )
+}
+
+// ASCII only: toLowerCase folds non-ASCII letters Go's comparison leaves alone.
+const asciiLower = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase())
+const sameHex = (a: string, b: string) => asciiLower(a) === asciiLower(b)
 
 /** quoteReportData extracts the full 64-byte REPORTDATA field. */
 export function quoteReportData(quote: Uint8Array): Uint8Array | null {

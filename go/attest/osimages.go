@@ -28,7 +28,8 @@ package attest
 // THIS VALUE IS ON NO AUTOMATION. It moves when Phala ships a guest image, and
 // nothing anywhere notices a stale entry: the deploy succeeds, the quote
 // verifies, and payers route elsewhere with nothing logged. Re-read it from
-// `phala os-images`, regenerate the TypeScript twin
+// `phala os-images`, measure the image's boot chain on every shape the fleet
+// uses (dstackprobe.sh `matrix`), regenerate the TypeScript twin
 // (`go test ./attest -run TestTrustListTwinVectors -update-trust-lists`) and
 // the compose vectors, and update the two hand copies in the same change: the
 // live test's assets table (which fails while it is missing an entry) and
@@ -40,52 +41,38 @@ package attest
 // Removing an entry de-routes every node still on that image, and refuses any
 // ACI upstream on it too, since node's upstream attestation reads this list.
 //
+// DERIVED FROM TrustedDstackBootChains, where each entry and its provenance is
+// written, so an image cannot be trusted without a boot-chain row. A row the
+// grid has not measured yet keeps the image here and refuses it at the boot
+// chain, which says why in a way an absent entry would not.
+//
+// What pins the digests in the DEFAULT suite is weaker than it looks:
+// testdata/compose_vectors.json and the TypeScript twin are both generated
+// from this list, so a changed digit goes red in TestComposeVectors and
+// TestTrustListTwinVectors only as a DISAGREEMENT with a stale copy.
+// Regenerating satisfies them, and a digit wrong here is wrong in every copy
+// and invisible to both. TestLive_TrustedOSImages_MatchTheVendorRelease
+// (`-tags osimageslive`) is the only check that the value is right. Run it
+// when adding or changing an entry.
+//
+// Every entry was confirmed against the vendor release: digest.txt is this
+// exact string AND equals sha256(sha256sum.txt). The second equality is what
+// makes the value mean something, because sha256sum.txt commits to ovmf.fd,
+// bzImage, initramfs.cpio.gz and metadata.json, and metadata.json carries the
+// dm-verity rootfs hash. So the one number dstack measures transitively fixes
+// firmware, kernel, initramfs and rootfs — and the boot chain is what makes the
+// guest's claim of that number trustworthy.
+//
 // Returns a fresh slice per call: it lands in config structs callers mutate,
 // and a shared backing array would let one embedder's append be observed by
 // the next.
 func TrustedDstackOSImages() []string {
-	return []string{
-		// What pins these in the DEFAULT suite is weaker than it looks:
-		// testdata/compose_vectors.json and the TypeScript twin are both
-		// generated from this list, so a changed digit goes red in
-		// TestComposeVectors and TestTrustListTwinVectors only as a
-		// DISAGREEMENT with a stale copy. Regenerating satisfies them, and
-		// a digit wrong here is wrong in every copy and invisible to both.
-		// TestLive_TrustedOSImages_MatchTheVendorRelease
-		// (`-tags osimageslive`) is the only check that the value is right.
-		// Run it when adding or changing an entry.
-		//
-		// Every entry below was confirmed against the vendor release:
-		// digest.txt is this exact string AND equals sha256(sha256sum.txt).
-		// The second equality is what makes the value mean something,
-		// because sha256sum.txt commits to ovmf.fd, bzImage,
-		// initramfs.cpio.gz and metadata.json, and metadata.json carries the
-		// dm-verity rootfs hash. So the one number dstack measures
-		// transitively fixes firmware, kernel, initramfs and rootfs.
-
-		// dstack-0.5.9 (meta-dstack v0.5.9, confirmed 2026-09-25). No
-		// longer offered by `phala os-images`, and kept for two reasons:
-		// Phala's ACI gateway (inference.phala.com) still replays this
-		// digest as of 2026-10-19, and it is in OSImagesWithoutSSHDaemon,
-		// which must stay a subset of this list. Drop it once the gateway and our own
-		// fleet have moved off it. The same digest is pinned by
-		// proto/testdata/attest_vectors.json and the dstack verifier's
-		// tests, which were captured on it.
-		"bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033",
-
-		// dstack-0.5.12 (meta-dstack v0.5.12, confirmed 2026-10-19).
-		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd",
-
-		// dstack-nvidia-0.5.12, the GPU line (meta-dstack v0.5.12,
-		// confirmed 2026-10-19). It replaced dstack-nvidia-0.5.9, which was
-		// removed here: a GPU node still on that image is refused.
-		"91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829",
-
-		// dstack-0.6.1 (Dstack-TEE/dstack mkosi-os-v0.6.1, confirmed
-		// 2026-10-19; also the os_image_hash in that release's
-		// image-hashes.txt). CPU only: the release ships no nvidia image.
-		"ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6",
+	chains := TrustedDstackBootChains()
+	out := make([]string, len(chains))
+	for i, c := range chains {
+		out[i] = c.OSImage
 	}
+	return out
 }
 
 // OSImagesWithoutSSHDaemon are the guest images whose filesystems were
@@ -150,8 +137,8 @@ func TrustedDstackOSImages() []string {
 // systemd-run-generator and systemd-debug-generator, so `systemd.run=` or
 // `systemd.unit=emergency.target` plus `SYSTEMD_SULOGIN_FORCE` on a host-chosen
 // cmdline would give root with every name above unchanged. The cmdline is
-// measured into RTMR2, and this package's verifier checks os-image-hash from
-// the RTMR3 replay but does not appraise RTMR0-2. Second, the scan covers the
+// measured into RTMR2, which VerifyBootChain pins per image, so this premise
+// holds for every verifier that runs it. Second, the scan covers the
 // IMAGE, not the upstream's own containers; see ComposePolicy
 // .RootBackdoorSafeOSImages for that half.
 //
