@@ -220,6 +220,16 @@ func TestNewSolanaKeys(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "obey") || strings.Count(err.Error(), "keystore:") != 1 {
 		t.Fatalf("a bad phrase: %v", err)
 	}
+
+	// Algorand mnemonics and nothing else fail the load, naming the first, as
+	// New fails on Solana phrases and nothing else.
+	_, err = NewSolanaKeys(ctx, staticProvider{entries: []MnemonicEntry{{Name: "ALGO", Mnemonic: algo}, {Name: "E", Mnemonic: ""}}})
+	if err == nil || !strings.Contains(err.Error(), `"ALGO"`) || !strings.Contains(err.Error(), "has no Solana key") {
+		t.Fatalf("only an Algorand mnemonic: %v", err)
+	}
+	if ks, err := NewSolanaKeys(ctx); err != nil || len(ks.Addresses()) != 0 {
+		t.Fatalf("no providers: %v %v", ks, err)
+	}
 }
 
 // The Algorand store and the Solana store read one provider chain, so each

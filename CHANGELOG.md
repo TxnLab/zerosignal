@@ -31,6 +31,18 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — Go loaders for a Solana payer key (0.11.0)
+
+`keystore.LoadSolanaFromEnv` is `LoadFromEnv` for Solana: the same `<NAME>_MNEMONIC` and
+`ZS_MNEMONIC_URLS` providers and timeout, each phrase derived at m/44'/501'/0'/0' by
+`NewSolanaKeys`. `wallet.LoadSolanaPayer` is `LoadPayer`'s twin: it opens the same local
+wallet and environment and returns a `SolanaPayer` whose `Signer` is a `zs.SolanaSigner`, so a
+wallet's 24-word phrase pays as the address Phantom shows for it. A 25-word Algorand mnemonic
+has no Solana key and is skipped; `NewSolanaKeys`, and so both loaders, now fail naming it
+when Algorand mnemonics are all the providers held, as `New` fails on Solana phrases alone.
+`SolanaPayer` carries no network: the wallet's descriptor names its Algorand address, so it
+never says which Solana key is the wallet's (`ReadMetadata` still reads it).
+
 ### 2026-10-23 — a Client runs on Solana from its Network (0.11.0)
 
 A Solana Network now resolves, and `New` ↔ `Client.create` build every part on it, so a host

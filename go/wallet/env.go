@@ -14,7 +14,8 @@ import (
 
 // The environment the zerosignal CLIs read. The package reads neither unless
 // a caller passes OverrideFromEnv or EnvOrPromptPassphrase, or calls
-// LoadPayer, so an app that embeds it chooses its own sources.
+// LoadPayer or LoadSolanaPayer, so an app that embeds it chooses its own
+// sources.
 const (
 	// EnvBackend is a KeyringOptions.Override: BackendOS, BackendFile, or a
 	// 99designs/keyring backend name.

@@ -14,10 +14,11 @@ import (
 	"github.com/TxnLab/zerosignal/go/keystore"
 )
 
-// PayerOptions chooses the key LoadPayer pays with. The zero value loads the
+// PayerOptions chooses the key LoadPayer or LoadSolanaPayer pays with. The zero value loads the
 // wallet in DefaultDir and the environment's keys, and pays with the only one.
 type PayerOptions struct {
-	// Address is the paying address; "" takes the only key loaded.
+	// Address is the paying address, base58 for LoadSolanaPayer; "" takes the
+	// only key loaded.
 	Address string
 	// Dir holds the wallet; "" is DefaultDir.
 	Dir string
@@ -38,11 +39,33 @@ type Payer struct {
 	Network string
 }
 
+// SolanaPayer is the key LoadSolanaPayer chose. Signer satisfies
+// zs.SolanaSigner. It carries no network: the wallet's descriptor names its
+// Algorand address, so it never says which key is the wallet's here; a host
+// that wants the recorded network reads ReadMetadata.
+type SolanaPayer struct {
+	Signer keystore.SolanaAccountSigner
+}
+
 // LoadPayer loads the wallet in opts.Dir, when one exists, and the
 // environment's keys (keystore.ProvidersFromEnv, bounded by
 // keystore.LoadTimeout), and picks the paying one. The wallet's backend
 // honors OverrideFromEnv.
 func LoadPayer(ctx context.Context, opts PayerOptions) (Payer, error) {
+	kr, env := payerSources(opts)
+	return loadPayer(ctx, opts, kr, env)
+}
+
+// LoadSolanaPayer is LoadPayer for the Solana rail: the same wallet and
+// environment, each phrase derived at m/44'/501'/0'/0' (keystore.NewSolanaKeys),
+// so a wallet's 24-word phrase pays as the address Phantom shows for it. A
+// 25-word Algorand mnemonic has no Solana key and is skipped.
+func LoadSolanaPayer(ctx context.Context, opts PayerOptions) (SolanaPayer, error) {
+	kr, env := payerSources(opts)
+	return loadSolanaPayer(ctx, opts, kr, env)
+}
+
+func payerSources(opts PayerOptions) (KeyringOptions, []keystore.SecretProvider) {
 	kr := KeyringOptions{
 		Backend:    opts.Backend,
 		Override:   OverrideFromEnv(),
@@ -55,7 +78,7 @@ func LoadPayer(ctx context.Context, opts PayerOptions) (Payer, error) {
 	for _, p := range keystore.ProvidersFromEnv() {
 		env = append(env, timedProvider{p})
 	}
-	return loadPayer(ctx, opts, kr, env)
+	return kr, env
 }
 
 // timedProvider bounds one environment provider by keystore.LoadTimeout, so a
@@ -73,30 +96,11 @@ func (t timedProvider) Mnemonics(ctx context.Context) ([]keystore.MnemonicEntry,
 }
 
 func loadPayer(ctx context.Context, opts PayerOptions, kr KeyringOptions, env []keystore.SecretProvider) (Payer, error) {
-	dir := opts.Dir
-	if dir == "" {
-		d, err := DefaultDir()
-		if err != nil {
-			return Payer{}, err
-		}
-		dir = d
+	dir, meta, providers, err := payerProviders(opts, kr, env)
+	if err != nil {
+		return Payer{}, err
 	}
-	var providers []keystore.SecretProvider
-	var meta Metadata
-	// Checked through the descriptor, so a machine without a wallet never
-	// touches a keychain. A wallet that is there but does not open is an
-	// error, never a reason to pay with another key.
-	if ExistsIn(dir) {
-		w, err := Open(dir, kr)
-		if err != nil {
-			return Payer{}, fmt.Errorf("open wallet in %s: %w", dir, err)
-		}
-		if meta, err = w.Metadata(); err != nil {
-			return Payer{}, fmt.Errorf("read wallet in %s: %w", dir, err)
-		}
-		providers = append(providers, w.Provider())
-	}
-	ks, err := keystore.New(ctx, append(providers, env...)...)
+	ks, err := keystore.New(ctx, providers...)
 	if err != nil {
 		return Payer{}, fmt.Errorf("load keys: %w", err)
 	}
@@ -109,6 +113,50 @@ func loadPayer(ctx context.Context, opts PayerOptions, kr KeyringOptions, env []
 		p.Network = meta.Network
 	}
 	return p, nil
+}
+
+func loadSolanaPayer(ctx context.Context, opts PayerOptions, kr KeyringOptions, env []keystore.SecretProvider) (SolanaPayer, error) {
+	dir, _, providers, err := payerProviders(opts, kr, env)
+	if err != nil {
+		return SolanaPayer{}, err
+	}
+	ks, err := keystore.NewSolanaKeys(ctx, providers...)
+	if err != nil {
+		return SolanaPayer{}, fmt.Errorf("load keys: %w", err)
+	}
+	addr, err := choosePayer(opts.Address, ks.Addresses(), dir)
+	if err != nil {
+		return SolanaPayer{}, err
+	}
+	return SolanaPayer{Signer: ks.Signer(addr)}, nil
+}
+
+// payerProviders opens the wallet in opts.Dir, when one exists, ahead of env.
+func payerProviders(opts PayerOptions, kr KeyringOptions, env []keystore.SecretProvider) (string, Metadata, []keystore.SecretProvider, error) {
+	dir := opts.Dir
+	if dir == "" {
+		d, err := DefaultDir()
+		if err != nil {
+			return "", Metadata{}, nil, err
+		}
+		dir = d
+	}
+	var providers []keystore.SecretProvider
+	var meta Metadata
+	// Checked through the descriptor, so a machine without a wallet never
+	// touches a keychain. A wallet that is there but does not open is an
+	// error, never a reason to pay with another key.
+	if ExistsIn(dir) {
+		w, err := Open(dir, kr)
+		if err != nil {
+			return "", Metadata{}, nil, fmt.Errorf("open wallet in %s: %w", dir, err)
+		}
+		if meta, err = w.Metadata(); err != nil {
+			return "", Metadata{}, nil, fmt.Errorf("read wallet in %s: %w", dir, err)
+		}
+		providers = append(providers, w.Provider())
+	}
+	return dir, meta, append(providers, env...), nil
 }
 
 func choosePayer(want string, addrs []string, dir string) (string, error) {
