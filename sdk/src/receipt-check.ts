@@ -12,7 +12,7 @@
 
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
-import { NoResolveFrozenError } from './ack.js'
+import { NoResolveFrozenError, ProtestAfterDeadlineError, SentSettleError } from './ack.js'
 import type { SpendGuard } from './config.js'
 import { findError } from './errors.js'
 import { APPROVAL_ASSERT, ApprovalError } from './escrow/revert.js'
@@ -407,6 +407,10 @@ export async function checkTurnReceipt(
             try {
                 call = await handle.protest(receipt, excerpt, protestReasonFor(violation), signal)
             } catch (perr) {
+                // A Solana protest that landed and failed paid its fee, which
+                // the turn reports as the ack path reports a failed settle's.
+                const sent = findError(perr, SentSettleError)?.submission
+                const protest = { txid: sent?.txid ?? '', fee: Number(sent?.payerFeeMicroalgos ?? 0) }
                 // A turn that outlived expires_at + grace can no longer freeze
                 // the ticket, and no retry changes that. The same deadline bars
                 // settle, so no freeze fallback either: the ticket goes to
@@ -414,15 +418,18 @@ export async function checkTurnReceipt(
                 // refundInactive if not; the refund watchdog stays armed and
                 // drives whichever applies. Logged apart from a submit fault so
                 // it doesn't read as one.
-                if (findError(perr, ApprovalError)?.assert === APPROVAL_ASSERT.protestAfterDeadline) {
+                if (
+                    findError(perr, ApprovalError)?.assert === APPROVAL_ASSERT.protestAfterDeadline ||
+                    findError(perr, ProtestAfterDeadlineError) !== undefined
+                ) {
                     log.warn('protest window closed; the ticket lapses on chain', {
                         ticket_id: ticketId,
                         reason: violation,
                         verification_err: errText(verifyErr),
                     })
-                    return { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: perr }
+                    return { settlement: settlementOf(deps, ticketId, 'protest', protest.txid, protest.fee), err: perr }
                 }
-                const fallback = await freezeOverclaim(deps, t, check, perr, signal)
+                const fallback = await freezeOverclaim(deps, t, check, perr, protest, signal)
                 if ('settled' in fallback) return fallback.settled
                 log.warn('protest failed', {
                     ticket_id: ticketId,
@@ -431,7 +438,7 @@ export async function checkTurnReceipt(
                     submit_err: errText(perr),
                     ...(fallback.claimErr !== undefined ? { claim_err: errText(fallback.claimErr) } : {}),
                 })
-                return { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: perr }
+                return { settlement: settlementOf(deps, ticketId, 'protest', protest.txid, protest.fee), err: perr }
             }
             log.warn('protest submitted', {
                 ticket_id: ticketId,
@@ -466,13 +473,16 @@ function excludeOverclaim(deps: ReceiptCheckDeps, check: TurnCheck, op: Operator
  * the operator's claim on it takes more than the receipt, through the handle's
  * freezeOverclaim, and bars the node as the ack path does. Without a settled
  * outcome, when the handle has no fallback or the claim is anything else, the
- * protest's own failure stands; claimErr is then a box read that failed.
+ * protest's own failure stands; claimErr is then a box read that failed. A
+ * settled outcome reports the fee of each transaction that paid one: the
+ * protest's, sent and failed, and the freeze's.
  */
 async function freezeOverclaim(
     deps: ReceiptCheckDeps,
     t: TurnReceipt,
     check: TurnCheck,
     protestErr: unknown,
+    protest: { txid: string; fee: number },
     signal: AbortSignal,
 ): Promise<{ settled: SettleResult } | { claimErr?: unknown }> {
     const { handle, op, receipt } = t
@@ -490,7 +500,7 @@ async function freezeOverclaim(
             "protest refused; the operator's claim exceeds the receipt it signed, but the deployed escrow has no resolveFrozen, so no freeze was sent",
             { ticket_id: ticketId, ...opAttrs(op), protest_err: errText(protestErr) },
         )
-        return { settled: { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err: protestErr } }
+        return { settled: { settlement: settlementOf(deps, ticketId, 'protest', protest.txid, protest.fee), err: protestErr } }
     }
     if (res.call === undefined) {
         const err = res.err ?? new Error('freeze: no settle sent')
@@ -500,7 +510,9 @@ async function freezeOverclaim(
             protest_err: errText(protestErr),
             submit_err: errText(err),
         })
-        return { settled: { settlement: { ...emptySettlement(ticketId), kind: 'protest' }, err } }
+        const sent = findError(err, SentSettleError)?.submission
+        const fee = protest.fee + Number(sent?.payerFeeMicroalgos ?? 0)
+        return { settled: { settlement: settlementOf(deps, ticketId, 'protest', sent?.txid || protest.txid, fee), err } }
     }
     log.warn(
         "protest refused; the operator's claim exceeds the receipt it signed, so submitted the payer's settle at the receipt to freeze the ticket instead",
@@ -513,7 +525,8 @@ async function freezeOverclaim(
         },
     )
     deps.resolveRefund?.(ticketId)
-    return { settled: { settlement: settlementOf(deps, ticketId, 'protest', res.call.txid, Number(res.call.payerFeeMicroalgos), true) } }
+    const fee = protest.fee + Number(res.call.payerFeeMicroalgos)
+    return { settled: { settlement: settlementOf(deps, ticketId, 'protest', res.call.txid, fee, true) } }
 }
 
 /** protestReasonFor is the reason code a protest of violation carries. */

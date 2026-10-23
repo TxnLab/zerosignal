@@ -27,6 +27,7 @@ import {
     SolanaRpcError,
     solanaRpcBackoffMs,
     solanaRpcShouldRetry,
+    txCustomError,
     txErrorName,
 } from '../src/solana/rpc.js'
 
@@ -48,8 +49,8 @@ const vectors = JSON.parse(readFileSync(new URL('../../testdata/solana_rpc_vecto
     wait_min_ms: number
     wait_max_ms: number
     statuses: { status: number; retry: boolean }[]
-    rpc_errors: { method: string; status: number; code: number; data: unknown; retry: boolean; tx_err_name: string }[]
-    tx_error_names: { err: unknown; name: string }[]
+    rpc_errors: { method: string; status: number; code: number; data: unknown; retry: boolean; tx_err_name: string; tx_custom: number | null }[]
+    tx_error_names: { err: unknown; name: string; custom: number | null }[]
     schedule_ms: number[]
     now_unix_ms: number
     backoff: { attempt: number; retry_after: string; wait_ms: number }[]
@@ -185,17 +186,21 @@ describe('solana_rpc vectors', () => {
 
     it('has rpc error cases', () => expect(vectors.rpc_errors.length).toBeGreaterThan(40))
 
-    it.each(vectors.rpc_errors.map((c) => [c.method, c.status, c.code, c.data, c.retry, c.tx_err_name] as const))(
-        '%s %i code %i data %j: retried %s, variant %j',
-        (method, s, code, data, retry, name) => {
+    it.each(vectors.rpc_errors.map((c) => [c.method, c.status, c.code, c.data, c.retry, c.tx_err_name, c.tx_custom] as const))(
+        '%s %i code %i data %j: retried %s, variant %j, code %j',
+        (method, s, code, data, retry, name, custom) => {
             const e = new SolanaRpcError(method, code, 'm', data === null ? undefined : data)
             expect(e.txErrName).toBe(name)
+            expect(txCustomError(e.txErr)).toBe(custom)
             expect(solanaRpcShouldRetry(method, s, e)).toBe(retry)
         },
     )
 
-    it.each(vectors.tx_error_names.map((c) => [c.err, c.name] as const))('variant of %j is %j', (err, name) => {
+    it('has a program error code in an rpc error', () => expect(vectors.rpc_errors.some((c) => c.tx_custom !== null)).toBe(true))
+
+    it.each(vectors.tx_error_names.map((c) => [c.err, c.name, c.custom] as const))('variant of %j is %j, code %j', (err, name, custom) => {
         expect(txErrorName(err)).toBe(name)
+        expect(txCustomError(err)).toBe(custom)
     })
 
     it('waits the linear schedule with no Retry-After', () => {

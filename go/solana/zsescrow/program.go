@@ -41,6 +41,15 @@ const AccountVersion = 1
 // BaseURLMax is the longest node URL the program stores.
 const BaseURLMax = 248
 
+// The program's error codes a payer acts on: the custom code of a failed
+// transaction (rpc.TxCustomError), Anchor's 6000 plus the error's place in the
+// program's ErrorCode, which keeps retired errors so the numbers never move.
+const (
+	// ErrPastDeadline: the settle window has closed, so no half, cooperative
+	// settle or protest is accepted any more.
+	ErrPastDeadline uint32 = 6011
+)
+
 // Deployment is one deployment of the program: its id and the USDC mint its
 // Config names. The mint is a parameter because a test cluster has its own.
 type Deployment struct {

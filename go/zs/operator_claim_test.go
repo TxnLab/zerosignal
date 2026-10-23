@@ -150,10 +150,14 @@ type freezingHandle struct {
 	claim      ClaimVerdict
 	freezeErr  error
 	freezes    int
+	// A protest, or a freeze, that was sent and failed, as a Solana
+	// transaction that lands and fails is: its id and the fee it paid.
+	protestTx, failedFreezeTx   string
+	protestFee, failedFreezeFee uint64
 }
 
 func (h *freezingHandle) Protest(context.Context, *ticket.UsageReceipt, []byte, escrow.ProtestReasonCode) (string, uint64, error) {
-	return "", 0, h.protestErr
+	return h.protestTx, h.protestFee, h.protestErr
 }
 
 func (h *freezingHandle) freezeOverclaim(context.Context, *ticket.UsageReceipt) (string, uint64, ClaimVerdict, error) {
@@ -162,9 +166,48 @@ func (h *freezingHandle) freezeOverclaim(context.Context, *ticket.UsageReceipt) 
 	}
 	h.freezes++
 	if h.freezeErr != nil {
-		return "", 0, h.claim, h.freezeErr
+		return h.failedFreezeTx, h.failedFreezeFee, h.claim, h.freezeErr
 	}
 	return "FREEZETX", 4000, h.claim, nil
+}
+
+// A protest that was sent and failed paid its fee, and so did a freeze after
+// it, sent and failed or not: the turn's settlement reports the fee of every
+// transaction the payer paid for, under the last one's id, as the ack path
+// reports a failed settle's.
+func TestCheckReceipt_ReportsWhatAFailedProtestPaid(t *testing.T) {
+	late := fmt.Errorf("protest: %w", escrow.ErrProtestAfterDeadline)
+	refused := errors.New("refused")
+	freezeFailed := errors.New("freeze failed")
+	paid := func(tx string, fee uint64, frozen bool) Settlement {
+		return Settlement{Kind: SettleProtest, TxID: tx, FeesMicroAlgos: fee, NetworkFees: fee, Frozen: frozen}
+	}
+	for _, tc := range []struct {
+		name    string
+		h       freezingHandle
+		want    Settlement
+		wantErr error
+	}{
+		{"past the deadline", freezingHandle{protestErr: late, claim: ClaimOverclaims}, paid("PROTESTTX", 10000, false), late},
+		{"refused, nothing to freeze", freezingHandle{protestErr: refused, claim: ClaimOpen}, paid("PROTESTTX", 10000, false), refused},
+		{"refused, then frozen", freezingHandle{protestErr: refused, claim: ClaimOverclaims}, paid("FREEZETX", 14000, true), nil},
+		{"refused, then a freeze sent and failed", freezingHandle{protestErr: refused, claim: ClaimOverclaims, freezeErr: freezeFailed,
+			failedFreezeTx: "FAILEDFREEZE", failedFreezeFee: 5000}, paid("FAILEDFREEZE", 15000, false), freezeFailed},
+		{"refused, then a freeze never sent", freezingHandle{protestErr: refused, claim: ClaimOverclaims, freezeErr: freezeFailed},
+			paid("PROTESTTX", 10000, false), freezeFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSettleFixture(t)
+			c := settleClient()
+			h := tc.h
+			h.protestTx, h.protestFee = "PROTESTTX", 10000
+			r, err := f.check(c, newSettleSlot(), &h, false, "")()
+			tc.want.TicketID = f.tkt.TicketID
+			if r != tc.want || !errors.Is(err, tc.wantErr) || (tc.wantErr == nil) != (err == nil) {
+				t.Errorf("submit = %+v, %v; want %+v, %v", r, err, tc.want, tc.wantErr)
+			}
+		})
+	}
 }
 
 // A protest the contract refuses falls back to the receipt's settle only when

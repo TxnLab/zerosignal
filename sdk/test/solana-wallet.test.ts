@@ -282,19 +282,16 @@ describe('SolanaWallet', () => {
         await expect(SolanaWallet.create({ rpc: c.rpc, deployment: new Deployment(PROGRAM_ID, mint), signer: countingSigner() })).rejects.toThrow(want)
     })
 
-    it('hands back a handle that acks but has no other settle path yet, and says so', async () => {
+    // A receipt the handle can't read is the ack's or the freeze's error,
+    // never a rejection, as each promises.
+    it('hands back a handle whose ack and freeze never reject', async () => {
         const f = await fixture(1_000_000_000n, 3n)
         const h = await f.open()
-        const want = 'on Solana is not supported yet'
-        // A receipt it can't read is the ack's error, never a rejection.
         const r = await h.ackSettle({} as never, null)
         expect(String(r.err)).toContain('wallet: ack-settle')
-        await expect(h.refundInactive()).rejects.toThrow(want)
-        await expect(h.protest({} as never, new Uint8Array(), 1 as never)).rejects.toThrow(want)
-        await expect(h.settleLapsed()).rejects.toThrow(want)
         const freeze = await h.freezeOverclaim!({} as never)
         expect(freeze.claim).toBe('unreadable')
-        expect(String(freeze.err)).toContain(want)
+        expect(freeze.err).toBeDefined()
     })
 
     // A ticket already signed for is refused before the pool is read, so a

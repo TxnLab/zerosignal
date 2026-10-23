@@ -130,15 +130,23 @@ func (w *SolanaWallet) readTicket(ctx context.Context, operatorID, nodeID uint64
 // open ticket it is the first half, which the node answers or
 // refund_inactive refunds. What to send is the caller's decision; this only
 // refuses a ticket that isn't the payer's before asking the signer, since the
-// program refuses it. A transaction sent but not confirmed returns its
-// signature beside the error, so a caller can look before it sends another;
-// rpc.ErrExpired in the chain says it never can land.
+// program refuses it.
 func (w *SolanaWallet) sendAck(ctx context.Context, t *zsescrow.Ticket, operatorID, nodeID uint64, id [16]byte, a SettleArgs) (solanaAck, error) {
-	if t == nil {
-		return solanaAck{}, errors.New("solana wallet: ack: no ticket account")
+	e, err := w.ending(ctx, "ack", t, operatorID, nodeID, id)
+	if err != nil {
+		return solanaAck{}, err
 	}
-	if t.Payer != w.payer {
-		return solanaAck{}, fmt.Errorf("solana wallet: ack: the ticket's payer is %s, not this wallet's %s", t.Payer, w.payer)
+	return w.send(ctx, "ack", []solana.Instruction{w.deployment.Ack(e, solanaClaimFields(a))}, solanaSignatureFee)
+}
+
+// ending is the Ending of t, the ticket account for id at the node, for the
+// payer to submit, with the treasury fallback a refund to the payer needs. It
+// refuses a ticket that isn't the payer's, since the program refuses the
+// payer's ack or protest there and a refund or lapse there is not this
+// wallet's to pay for.
+func (w *SolanaWallet) ending(ctx context.Context, what string, t *zsescrow.Ticket, operatorID, nodeID uint64, id [16]byte) (zsescrow.Ending, error) {
+	if err := w.ownsTicket(what, t); err != nil {
+		return zsescrow.Ending{}, err
 	}
 	e := zsescrow.Ending{
 		Submitter:  w.payer,
@@ -148,69 +156,87 @@ func (w *SolanaWallet) sendAck(ctx context.Context, t *zsescrow.Ticket, operator
 		RentPayer:  t.RentPayer,
 		Payer:      w.payer,
 	}
-	if err := w.refundFallback(ctx, &e); err != nil {
-		return solanaAck{}, err
+	if err := w.refundFallback(ctx, what, &e); err != nil {
+		return zsescrow.Ending{}, err
 	}
+	return e, nil
+}
+
+func (w *SolanaWallet) ownsTicket(what string, t *zsescrow.Ticket) error {
+	if t == nil {
+		return fmt.Errorf("solana wallet: %s: no ticket account", what)
+	}
+	if t.Payer != w.payer {
+		return fmt.Errorf("solana wallet: %s: the ticket's payer is %s, not this wallet's %s", what, t.Payer, w.payer)
+	}
+	return nil
+}
+
+// send signs ixs as the payer's own transaction, sends it and waits for it to
+// confirm. fee is what the transaction costs: the payer sets no priority fee,
+// so it is the signature fee for each signature the runtime verifies, its own
+// and any precompile's. A transaction sent but not confirmed returns its
+// signature beside the error, so a caller can look before it sends another;
+// rpc.ErrExpired in the chain says it never can land.
+func (w *SolanaWallet) send(ctx context.Context, what string, ixs []solana.Instruction, fee uint64) (solanaAck, error) {
 	bh, err := w.rpc.GetLatestBlockhash(ctx, rentCommitment)
 	if err != nil {
-		return solanaAck{}, fmt.Errorf("solana wallet: ack: blockhash: %w", err)
+		return solanaAck{}, fmt.Errorf("solana wallet: %s: blockhash: %w", what, err)
 	}
-	msg, err := solana.Compile(w.payer, bh.Hash, []solana.Instruction{w.deployment.Ack(e, solanaClaimFields(a))}, solana.Legacy)
+	msg, err := solana.Compile(w.payer, bh.Hash, ixs, solana.Legacy)
 	if err != nil {
-		return solanaAck{}, fmt.Errorf("solana wallet: ack: %w", err)
+		return solanaAck{}, fmt.Errorf("solana wallet: %s: %w", what, err)
 	}
 	tx := solana.NewTransaction(msg)
 	if err := tx.SignWith(ctx, w.payer, w.signer); err != nil {
-		return solanaAck{}, fmt.Errorf("solana wallet: ack: %w", err)
+		return solanaAck{}, fmt.Errorf("solana wallet: %s: %w", what, err)
 	}
 	raw, err := tx.MarshalBinary()
 	if err != nil {
-		return solanaAck{}, fmt.Errorf("solana wallet: ack: %w", err)
+		return solanaAck{}, fmt.Errorf("solana wallet: %s: %w", what, err)
 	}
 	// Preflight at the commitment the ticket was read at, which the RPC's
 	// finalized default may not have reached.
 	sig, err := w.rpc.SendTransaction(ctx, raw, rpc.SendOptions{PreflightCommitment: rentCommitment})
 	if err != nil {
-		return solanaAck{}, fmt.Errorf("solana wallet: send ack: %w", err)
+		return solanaAck{}, fmt.Errorf("solana wallet: send %s: %w", what, err)
 	}
 	r, err := rpc.Confirm(ctx, w.rpc, sig, bh.LastValidBlockHeight, rentCommitment, w.confirm)
 	if err != nil {
-		return solanaAck{Sig: sig.String()}, fmt.Errorf("solana wallet: ack %s: %w", sig, err)
+		return solanaAck{Sig: sig.String()}, fmt.Errorf("solana wallet: %s %s: %w", what, sig, err)
 	}
-	// The payer's signature is the transaction's only one, and it sets no
-	// priority fee.
-	res := solanaAck{Sig: sig.String(), FeeLamports: solanaSignatureFee}
+	res := solanaAck{Sig: sig.String(), FeeLamports: fee}
 	if r.Err != nil {
 		res.TxErr = r.Err
-		return res, fmt.Errorf("solana wallet: ack %s failed: %s %s", sig, rpc.TxErrName(r.Err), r.Err)
+		return res, fmt.Errorf("solana wallet: %s %s failed: %s %s", what, sig, rpc.TxErrName(r.Err), r.Err)
 	}
 	return res, nil
 }
 
 // refundFallback passes the treasury's USDC account, writable, when the
-// payer's own token account can't take a refund the ack may pay, so the refund
-// is forfeited to it as Algorand's payOrForfeit forfeits it. Otherwise the ack
-// leaves it out: a write lock on the one protocol-wide account would put every
-// settle in one lane. The treasury comes from the Config, which set_config can
-// change.
-func (w *SolanaWallet) refundFallback(ctx context.Context, e *zsescrow.Ending) error {
+// payer's own token account can't take a refund the ending may pay, so the
+// refund is forfeited to it as Algorand's payOrForfeit forfeits it. Otherwise
+// the ending leaves it out: a write lock on the one protocol-wide account
+// would put every settle in one lane. The treasury comes from the Config,
+// which set_config can change.
+func (w *SolanaWallet) refundFallback(ctx context.Context, what string, e *zsescrow.Ending) error {
 	acct, err := getAccount(ctx, w.rpc, w.payerUSDC)
 	if err != nil {
-		return fmt.Errorf("solana wallet: ack: read the payer's token account: %w", err)
+		return fmt.Errorf("solana wallet: %s: read the payer's token account: %w", what, err)
 	}
 	if canReceiveRefund(acct, w.deployment.Mint, w.payer) {
 		return nil
 	}
 	cfg, err := getAccount(ctx, w.rpc, w.deployment.Config())
 	if err != nil {
-		return fmt.Errorf("solana wallet: ack: read config: %w", err)
+		return fmt.Errorf("solana wallet: %s: read config: %w", what, err)
 	}
 	if cfg == nil || cfg.Owner != w.deployment.Program {
-		return fmt.Errorf("solana wallet: ack: program %s has no Config", w.deployment.Program)
+		return fmt.Errorf("solana wallet: %s: program %s has no Config", what, w.deployment.Program)
 	}
 	c, err := zsescrow.DecodeConfig(cfg.Data)
 	if err != nil {
-		return fmt.Errorf("solana wallet: ack: %w", err)
+		return fmt.Errorf("solana wallet: %s: %w", what, err)
 	}
 	e.Treasury, e.Fallback = c.Treasury, zsescrow.FallbackWritable
 	return nil

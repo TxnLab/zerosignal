@@ -22,7 +22,8 @@
 //     them case-insensitively. An Agave node sends them in one case.
 //   - A lamports of 5.0 or 5e0 reads as 5, which Go refuses, and account data
 //     with a line break in its base64 is refused, which Go's decoder skips.
-//     An Agave node sends neither.
+//     So does a TransactionError's instruction index or Custom code
+//     (txCustomError). An Agave node sends neither.
 //   - The transport is the runtime's. A browser's fetch speaks HTTP/2 where
 //     the endpoint offers it; Node's speaks HTTP/1.1, so there concurrent
 //     calls each hold a connection, against the public endpoints' cap of 40
@@ -71,6 +72,26 @@ export function txErrorName(err: unknown): string {
     return ''
 }
 
+/**
+ * txCustomError is the code a program returned, when the TransactionError is
+ * {InstructionError: [index, {Custom: code}]}: an Anchor program's error code,
+ * which names why it refused. null for any other error. Go's TxCustomError.
+ */
+export function txCustomError(err: unknown): number | null {
+    const one = (v: unknown, key: string): unknown => {
+        if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+        const keys = Object.keys(v)
+        return keys.length === 1 && keys[0] === key ? (v as Record<string, unknown>)[key] : undefined
+    }
+    const ie = one(err, 'InstructionError')
+    if (!Array.isArray(ie) || ie.length !== 2) return null
+    const [index, custom] = ie as [unknown, unknown]
+    if (!Number.isInteger(index) || (index as number) < 0 || (index as number) > 0xff) return null
+    const code = one(custom, 'Custom')
+    if (!Number.isInteger(code) || (code as number) < 0 || (code as number) > 0xffffffff) return null
+    return code as number
+}
+
 /** A JSON-RPC error in a 2xx answer. */
 export class SolanaRpcError extends Error {
     constructor(
@@ -90,10 +111,15 @@ export class SolanaRpcError extends Error {
      * simulation as "AlreadyProcessed": the cluster has it.
      */
     get txErrName(): string {
-        if (this.code !== CODE_PREFLIGHT_FAILURE) return ''
+        return txErrorName(this.txErr)
+    }
+
+    /** A failed simulation's TransactionError as sent, undefined for any other error. */
+    get txErr(): unknown {
+        if (this.code !== CODE_PREFLIGHT_FAILURE) return undefined
         const d = this.data
-        if (typeof d !== 'object' || d === null || Array.isArray(d)) return ''
-        return txErrorName((d as Record<string, unknown>).err)
+        if (typeof d !== 'object' || d === null || Array.isArray(d)) return undefined
+        return (d as Record<string, unknown>).err
     }
 }
 

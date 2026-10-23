@@ -31,6 +31,15 @@ export const ACCOUNT_VERSION = 1
 /** The longest node URL the program stores. */
 export const BASE_URL_MAX = 248
 
+/**
+ * The settle window has closed, so no half, cooperative settle or protest is
+ * accepted any more: one of the program's error codes a payer acts on, the
+ * custom code of a failed transaction, Anchor's 6000 plus the error's place in
+ * the program's ErrorCode, which keeps retired errors so the numbers never
+ * move. Go's ErrPastDeadline.
+ */
+export const ERR_PAST_DEADLINE = 6011
+
 export function u64le(v: bigint): Uint8Array {
     if (v < 0n || v >= 1n << 64n) throw new RangeError(`zsescrow: ${v} is not a u64`)
     const out = new Uint8Array(8)

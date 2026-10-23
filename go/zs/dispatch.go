@@ -4263,6 +4263,10 @@ func (s *Client) checkReceipt(
 	return withSettleCtx(func(settleCtx context.Context) (Settlement, error) {
 		txid, fee, perr := handle.Protest(settleCtx, receipt, excerpt, protestReasonForViolation(re.Violation))
 		if perr != nil {
+			// txid and fee name a Solana protest that landed and failed, which
+			// paid its fee; each return below reports it, as the ack path
+			// reports a failed settle's.
+			//
 			// A turn that outlived expires_at + grace (a long stream, mostly)
 			// can no longer freeze the ticket, and no retry changes that. The
 			// same deadline bars settle, so no freeze fallback either: the
@@ -4275,7 +4279,7 @@ func (s *Client) checkReceipt(
 					slog.String("ticket_id", ticket.TicketID),
 					slog.String("reason", re.Violation.String()),
 					slog.Any("verification_err", err))
-				return Settlement{Kind: SettleProtest}, perr
+				return s.settlement(SettleProtest, txid, fee), perr
 			}
 			// A box read that failed, which leaves the protest's own failure
 			// to report.
@@ -4291,7 +4295,7 @@ func (s *Client) checkReceipt(
 							slog.String("ticket_id", ticket.TicketID),
 							opAttr(op),
 							slog.Any("protest_err", perr))
-						return Settlement{Kind: SettleProtest}, perr
+						return s.settlement(SettleProtest, txid, fee), perr
 					}
 					if ferr != nil {
 						s.log.Warn("protest refused, and the settle to freeze an operator claim above the receipt failed",
@@ -4299,7 +4303,10 @@ func (s *Client) checkReceipt(
 							opAttr(op),
 							slog.Any("protest_err", perr),
 							slog.Any("submit_err", ferr))
-						return Settlement{Kind: SettleProtest}, ferr
+						if ftx == "" {
+							ftx = txid
+						}
+						return s.settlement(SettleProtest, ftx, fee+ffee), ferr
 					}
 					s.log.Warn("protest refused; the operator's claim exceeds the receipt it signed, so submitted the payer's settle at the receipt to freeze the ticket instead",
 						slog.String("ticket_id", ticket.TicketID),
@@ -4308,7 +4315,7 @@ func (s *Client) checkReceipt(
 						slog.Uint64("receipt_microusdc", receipt.AmountCharged),
 						slog.Any("protest_err", perr))
 					s.refunds.Resolve(ticket.TicketID)
-					settled := s.settlement(SettleProtest, ftx, ffee)
+					settled := s.settlement(SettleProtest, ftx, fee+ffee)
 					settled.Frozen = true
 					return settled, nil
 				}
@@ -4324,7 +4331,7 @@ func (s *Client) checkReceipt(
 				attrs = append(attrs, slog.Any("claim_err", claimErr))
 			}
 			s.log.Warn("protest failed", attrs...)
-			return Settlement{Kind: SettleProtest}, perr
+			return s.settlement(SettleProtest, txid, fee), perr
 		}
 		s.log.Warn("protest submitted",
 			slog.String("ticket_id", ticket.TicketID),
