@@ -226,11 +226,8 @@ describe('diagnose', () => {
         expect(err).toMatchObject({ code: 'invalid_config' })
     })
 
-    // As Go's TestDiagnose_RefusesSolanaAndIgnoresItsSigner.
-    it('refuses a Solana network and ignores a stray solanaSigner', async () => {
-        const err = await diagnose({ network: { rail: 'solana', network: 'devnet' } }, ADDR).catch((e: unknown) => e)
-        expect(err).toBeInstanceOf(ZsError)
-        expect((err as ZsError).message).toContain('Algorand rail only')
+    // As Go's TestDiagnose_IgnoresAStraySolanaSigner.
+    it('ignores a stray solanaSigner', async () => {
         const solanaSigner = {
             address: 'Vote111111111111111111111111111111111111111',
             signBytes: async () => new Uint8Array(),

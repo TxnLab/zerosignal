@@ -31,6 +31,29 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — the doctor reads Solana (0.11.0)
+
+`zs.Diagnose` ↔ `diagnose` on a Solana network read that rail for a base58 address, where they
+refused it, and return the same `DoctorReport`. The checks are `SolanaDoctorChecks` ↔
+`solanaDoctorChecks` over `SolanaDoctorReadings`, in order:
+- `rpc`: the RPC answers (its block height).
+- `program`: the program's Config reads, the cluster quotes a ticket's rent, and the Config's
+  genesis hash, which every ack digest binds, is the one the RPC serves; an RPC on another
+  cluster fails here.
+- `sol`: the payer's lamports, and what is spendable above its own reserve. No SOL is a
+  warning rather than Algorand's failure: the node pays the open's fee, so a payer whose rent
+  pool is already at its working set still pays for requests.
+- `usdc_account`: the payer's token account for the Config's mint exists and is not frozen.
+- `usdc_balance`: as on Algorand.
+- `rent_pool`: the ticket rent pool, judged by the wallet's own top-up plan
+  (`planRentDeposit`), as `prepaid_pool` judges the MBR pool.
+- `operators`: as on Algorand, against the lamports floor. `DoctorNode` gains
+  `SignerSpendableLamports` ↔ `signerSpendableLamports`, and a node short of it is counted as
+  "with a signing account short of fee SOL".
+
+The `solanaCases` of `doctor_vectors.json` pin the checks' statuses and wording across the two.
+The `zerosignal doctor` command still takes Algorand flags only.
+
 ### 2026-10-23 — Go loaders for a Solana payer key (0.11.0)
 
 `keystore.LoadSolanaFromEnv` is `LoadFromEnv` for Solana: the same `<NAME>_MNEMONIC` and
@@ -79,8 +102,8 @@ needs only the network and the payer's Solana key:
   new case, and a Solana field without `rail: 'solana'` compiles and is refused when resolved.
 - An all-zero program id is the unset one in both SDKs, as Go's zero `solana.PublicKey` is.
 
-The doctor reads Algorand only, and now refuses a Solana network in so many words; a
-`SolanaSigner` ↔ `solanaSigner` left on an Algorand config is ignored, as the `Signer` is.
+A `SolanaSigner` ↔ `solanaSigner` left on an Algorand config is ignored by the doctor, as the
+`Signer` is (see "the doctor reads Solana").
 
 ### 2026-10-23 — `no_funded_operator` and the funding remedies name the rail's coin (0.11.0)
 
@@ -461,7 +484,8 @@ rail, and a host opts in by building its own registry over it.
   `floor_lamports` for a Solana node. Still Algorand-only: the doctor copies only the
   microAlgo reading, so it would count a Solana node short of lamports as usable (it reads
   only algod today). From 0.11.0 the `no_funded_operator` refusals name the rail's floor (see
-  "`no_funded_operator` and the funding remedies name the rail's coin").
+  "`no_funded_operator` and the funding remedies name the rail's coin"), and the doctor reads
+  Solana and judges its nodes against the lamports floor (see "the doctor reads Solana").
 - **The Solana reader.** `zs.SolanaChainReader` ↔ `SolanaChainReader` read the `Operator` and
   `Node` accounts with two confirmed `getProgramAccounts` calls, each filtered on its account
   discriminator, decode them with `solana/zsescrow`, and build the Operator the Algorand read

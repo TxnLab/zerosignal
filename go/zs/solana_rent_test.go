@@ -77,14 +77,19 @@ func newRentChain(t *testing.T, s testSolanaSigner, balance uint64) *rentChain {
 }
 
 func (c *rentChain) withPool(lamports, open uint64) *rentChain {
+	c.pool = &rpc.Account{Lamports: lamports, Owner: c.d.Program, Data: encodeRentPool(c.payer, open)}
+	return c
+}
+
+// encodeRentPool writes payer's RentPool account in the program's layout.
+func encodeRentPool(payer solana.PublicKey, open uint64) []byte {
 	data := make([]byte, zsescrow.RentPoolSize)
 	disc := sha256.Sum256([]byte("account:RentPool"))
 	copy(data, disc[:8])
 	data[8], data[9] = zsescrow.AccountVersion, 255
 	binary.LittleEndian.PutUint64(data[10:], open)
-	copy(data[18:], c.payer[:])
-	c.pool = &rpc.Account{Lamports: lamports, Owner: c.d.Program, Data: data}
-	return c
+	copy(data[18:], payer[:])
+	return data
 }
 
 func (c *rentChain) GetMinimumBalanceForRentExemption(_ context.Context, n uint64, cm rpc.Commitment) (uint64, error) {

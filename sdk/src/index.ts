@@ -37,6 +37,7 @@ export {
     diagnose,
     doctorChecks,
 } from './doctor.js'
+export { type SolanaDoctorReadings, solanaDoctorChecks } from './solana/doctor.js'
 export * from './errors.js'
 export * from './escrow/index.js'
 export * from './estimate.js'
