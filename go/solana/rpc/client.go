@@ -51,6 +51,17 @@ type Client interface {
 	GetSignatureStatuses(ctx context.Context, sigs []solana.Signature, searchHistory bool) ([]*SignatureStatus, error)
 }
 
+// AccountAtReader reads an account as of a slot no older than minContextSlot.
+// HTTPClient is one; a Client need not be.
+type AccountAtReader interface {
+	// GetAccountInfoAt is GetAccountInfo from a node at minContextSlot or
+	// later (0 asks for none), with the slot the answer is as of. A node
+	// behind a load balancer can be slots behind the one that answered the
+	// last read, so an account a read saw can read as missing on the next;
+	// a caller that acts on its absence asks for the slot it saw it at.
+	GetAccountInfoAt(ctx context.Context, key solana.PublicKey, c Commitment, minContextSlot uint64) (*Account, uint64, error)
+}
+
 // ErrNotFound is an account the RPC reports does not exist (a null value).
 var ErrNotFound = errors.New("solana rpc: account not found")
 
@@ -145,7 +156,10 @@ type HTTPClient struct {
 	ids      atomic.Uint64
 }
 
-var _ Client = (*HTTPClient)(nil)
+var (
+	_ Client          = (*HTTPClient)(nil)
+	_ AccountAtReader = (*HTTPClient)(nil)
+)
 
 // NewClient returns a client for the RPC at endpoint, an http or https URL
 // with any path and query a provider needs. No error spells the endpoint,

@@ -68,6 +68,12 @@ type settleFixture struct {
 
 func newSettleFixture(t *testing.T) settleFixture {
 	t.Helper()
+	return newSettleFixtureFor(t, "dGlja2V0LXdhaXQtMDAwMA==")
+}
+
+// newSettleFixtureFor is newSettleFixture for the ticket ticketID.
+func newSettleFixtureFor(t *testing.T, ticketID string) settleFixture {
+	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +81,7 @@ func newSettleFixture(t *testing.T) settleFixture {
 	var addr types.Address
 	copy(addr[:], pub)
 	op := Operator{ID: 7, NodeID: 3, SigningAddr: addr.String(), TicketSigningKey: pub}
-	tkt := &ticket.Ticket{TicketID: "dGlja2V0LXdhaXQtMDAwMA==", OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000}
+	tkt := &ticket.Ticket{TicketID: ticketID, OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000}
 	plaintext := []byte("hello world")
 	receipt := &ticket.UsageReceipt{TicketID: tkt.TicketID, ActualInputCount: 10, ActualOutputCount: 5, AmountCharged: 50_000}
 	receipt.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
@@ -442,6 +448,8 @@ func (h *watchedSettleHandle) settleOutcome(_ context.Context, txid string) (Set
 	s := h.script[min(n, len(h.script))-1]
 	return s.out, s.err
 }
+
+func (*watchedSettleHandle) settleWatch() (time.Duration, bool) { return settleConfirmTimeout, false }
 
 func shortConfirmWatch(t *testing.T, timeout time.Duration) {
 	t.Helper()

@@ -54,7 +54,7 @@ import {
 import { findError } from '../errors.js'
 import { MbrDepositUnaffordableError } from '../mbr.js'
 import type { Operator } from '../operator.js'
-import type { EscrowCall, OpenHandle, OverclaimFreeze, WalletOpener } from '../parts.js'
+import type { EscrowCall, OpenHandle, OverclaimFreeze, SettleOutcome, WalletOpener } from '../parts.js'
 import { type Logger, type SolanaSigner, discardLogger } from '../ports.js'
 import { type ClaimVerdict, type SettleArgs, judgeSolanaClaim } from '../reconcile.js'
 import { refundSources } from '../refund-watchdog.js'
@@ -63,7 +63,7 @@ import { decodeReceiptSig, decodeTicketId, followUpSignal, slotCount } from '../
 import { solanaClaimFields } from './claim.js'
 import { type ConfirmOptions, confirmSignature } from './confirm.js'
 import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE, SolanaRentPool } from './rent.js'
-import { type SolanaRpc, SolanaRpcError, txCustomError, txErrorName } from './rpc.js'
+import { type Account, type SolanaRpc, SolanaRpcError, txCustomError, txErrorName } from './rpc.js'
 
 // Confirmed, as the rent pool reads and sends.
 const COMMITMENT = 'confirmed'
@@ -85,6 +85,12 @@ export const SIGNED_OPEN_RETENTION_MS = 10 * 60_000
  * returns once algod accepts it. Go's solanaEndingTimeout.
  */
 export const SOLANA_ENDING_TIMEOUT_MS = 3 * 60_000
+
+/**
+ * @internal Bounds the read before an ack goes to the node, which holds up the
+ * delivery; a field so a test can shorten it. Go's solanaSettleBaselineTimeout.
+ */
+export const solanaSettleBaselineTiming = { timeoutMs: 2000 }
 
 export interface SolanaWalletOptions {
     rpc: SolanaRpc
@@ -109,6 +115,12 @@ export class SolanaWallet implements WalletOpener {
     readonly #confirm: Omit<ConfirmOptions, 'signal'> | undefined
     readonly #deployment: Deployment
     readonly #signer: SolanaSigner
+    /**
+     * The latest slot each handle's settle watch read the payer's own ticket
+     * account at; absent (0n) before it has, since no ticket is open at
+     * genesis. Go's OpenHandle.ticketSeenSlot.
+     */
+    readonly #ticketSeenSlot = new WeakMap<OpenHandle, bigint>()
     readonly #payerUsdc: PublicKey
     readonly #decimals: number
     /** The Config's genesis hash, which the ack digest binds. The program fixes it at initialize. */
@@ -335,7 +347,12 @@ export class SolanaWallet implements WalletOpener {
         } catch (err) {
             throw new Error(`solana wallet: read ticket: ${message(err)}`, { cause: err })
         }
-        if (acct === null || acct.owner !== d.program) return null
+        return this.#ticketOf(acct)
+    }
+
+    // Decodes a ticket account read, null for none. Go's ticketOf.
+    #ticketOf(acct: Account | null): TicketAccount | null {
+        if (acct === null || acct.owner !== this.#deployment.program) return null
         try {
             return decodeTicket(acct.data)
         } catch (err) {
@@ -536,12 +553,78 @@ export class SolanaWallet implements WalletOpener {
         }
     }
 
+    // Where the node's settle of a delivered ack stands, read off h's ticket
+    // account, since the node builds that transaction and the payer never
+    // learns its signature. An account closed after the watch saw it open is
+    // landed: the settle closed it, or another ending did, and either way the
+    // row has nothing left to finish. One not seen yet is pending: the node
+    // serves on an open still confirming, which can land after the reply, so
+    // an account not there yet may be one about to open, and dropping its row
+    // then would leave nothing to refund it. There is no dropped: a settle
+    // that never lands leaves the account open, and the watch times out.
+    //
+    // Closed means missing as of a slot after the one the watch saw it at:
+    // each read asks for that slot as its minContextSlot, and an answer as of
+    // it or earlier is pending. A provider balances reads across nodes slots
+    // apart, so a node behind the one that showed the account can answer that
+    // it is missing. Go's solanaSettleOutcome.
+    async #settleOutcome(h: OpenHandle, signal: AbortSignal | undefined): Promise<SettleOutcome> {
+        const { ticketId, opId, nodeId } = handleIds('settle outcome', h)
+        const seen = this.#ticketSeenSlot.get(h) ?? 0n
+        const { ticket: t, slot } = await this.#readTicketAt(opId, nodeId, ticketId, seen, signal)
+        if (t === null) return seen !== 0n && slot > seen ? 'landed' : 'pending'
+        if (t.payer === this.#signer.address && slot > seen) this.#ticketSeenSlot.set(h, slot)
+        return 'pending'
+    }
+
+    // Reads h's ticket account before its ack goes to the node, so the settle
+    // watch has seen it open even when the node's settle lands before the
+    // watch's first read. The node cannot settle cooperatively without the
+    // ack, so an account open now is one only an ending can close. A failed
+    // or slow read leaves the watch to see it itself. Go's
+    // solanaSettleBaseline.
+    async #settleBaseline(h: OpenHandle, signal: AbortSignal | undefined): Promise<void> {
+        if (this.#rpc.getAccountInfoAt === undefined) return
+        const timeout = AbortSignal.timeout(solanaSettleBaselineTiming.timeoutMs)
+        try {
+            await this.#settleOutcome(h, signal === undefined ? timeout : AbortSignal.any([signal, timeout]))
+        } catch {
+            // The watch reads it again.
+        }
+    }
+
+    // readTicket from a node at minContextSlot or later (0n asks for none),
+    // with the slot the answer is as of. It reads at confirmed, as readTicket
+    // does: an open seen only at processed could be on a fork that is
+    // dropped, and its absence later would drop the row of an open still to
+    // land. Go's readTicketAt.
+    async #readTicketAt(
+        operatorId: bigint,
+        nodeId: bigint,
+        ticketId: Uint8Array,
+        minContextSlot: bigint,
+        signal: AbortSignal | undefined,
+    ): Promise<{ ticket: TicketAccount | null; slot: bigint }> {
+        const rpc = this.#rpc
+        if (rpc.getAccountInfoAt === undefined) throw new Error('solana wallet: rpc client has no slot-aware account read')
+        const d = this.#deployment
+        let at
+        try {
+            at = await rpc.getAccountInfoAt(d.ticket(d.node(operatorId, nodeId), ticketId), { commitment: COMMITMENT, minContextSlot, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: read ticket: ${message(err)}`, { cause: err })
+        }
+        return { ticket: this.#ticketOf(at.account), slot: at.slot }
+    }
+
     /**
      * @internal A Solana open's handle, which openForNode returns and a test
      * builds for a ticket it holds. Each settle path is the payer's own
      * transaction, as Go's Solana handle sends it.
      */
-    handleFor(fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'freezeOverclaim' | 'refundInactive' | 'settleLapsed'>): OpenHandle {
+    handleFor(
+        fields: Omit<OpenHandle, 'ackSettle' | 'protest' | 'freezeOverclaim' | 'refundInactive' | 'settleLapsed' | 'settleOutcome' | 'settleByTicket'>,
+    ): OpenHandle {
         const d = this.#deployment
         const h: OpenHandle = {
             ...fields,
@@ -552,6 +635,11 @@ export class SolanaWallet implements WalletOpener {
             // whichever lands second fails on the closed ticket.
             refundInactive: (signal) => this.#end(h, 'refund-inactive', (e) => d.refundInactive(e), signal),
             settleLapsed: (signal) => this.#end(h, 'settle-lapsed', (e) => d.settleLapsed(e), signal),
+            settleOutcome: (_txId, signal) => this.#settleOutcome(h, signal),
+            // The node's settle can take a blockhash's life to land. Without
+            // the slot-aware read no absence can be trusted, so there is no
+            // watch, and the row stays with the reconciler.
+            ...(this.#rpc.getAccountInfoAt !== undefined && { settleByTicket: { timeoutMs: SOLANA_ENDING_TIMEOUT_MS } }),
         }
         // The ticket takes the Config's default_grace as it stood when the
         // wallet read it; the ticket's own deadline, which the watchdog
@@ -617,6 +705,7 @@ export class SolanaWallet implements WalletOpener {
                     const deliver = h.deliverAck
                     if (!deliver) throw new NoSettleAckRouteError()
                     const sig = await signReceiptAck(this.#signer, this.#signer.address, this.#deployment, this.#genesis, opId, nodeId, ticketId, openSeq, receipt)
+                    await this.#settleBaseline(h, signal)
                     // The node submits its settle with the ack and pays its fee.
                     await deliver({ ticket_id: h.ticketId, settle_group: sig }, signal)
                     return { txid: '', payerFeeMicroalgos: 0n }

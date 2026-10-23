@@ -43,7 +43,7 @@ import {
     ticketDeadline,
 } from '@txnlab/zs-proto/solana/zsescrow'
 import type { UsageReceipt } from '@txnlab/zs-proto/ticket'
-import type { SettleAck } from '@txnlab/zs-proto/wire'
+import { type SettleAck, bodyHashOfBody } from '@txnlab/zs-proto/wire'
 import { describe, expect, it, vi } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
@@ -51,7 +51,11 @@ import { partsOf } from '../src/client-parts.js'
 import { Client, type RegistryProvider, isMemoryJournal, memoryJournal, resolveNetwork } from '../src/index.js'
 import { Reconciler } from '../src/reconciler.js'
 import type { SettleArgs, TicketRecord } from '../src/reconcile.js'
+import { Settles } from '../src/settles.js'
 import { solanaSweep } from '../src/solana/reconcile.js'
+import { feeUnitOf } from '../src/network.js'
+import { checkTurnReceipt } from '../src/receipt-check.js'
+import { fixture as turnFixture, recLogger } from './turn-fixtures.js'
 import { NoSettleAckRouteError, ProtestAfterDeadlineError, settleArgsOf } from '../src/ack.js'
 import type { Operator } from '../src/operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from '../src/parts.js'
@@ -63,7 +67,7 @@ import { solanaClaimFields } from '../src/solana/claim.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
 import { type Account, CODE_PREFLIGHT_FAILURE, type SignatureStatus, type SolanaRpc, SolanaRpcError } from '../src/solana/rpc.js'
-import { SOLANA_ENDING_TIMEOUT_MS, SolanaAckSendError, SolanaWallet } from '../src/solana/wallet.js'
+import { SOLANA_ENDING_TIMEOUT_MS, SolanaAckSendError, SolanaWallet, solanaSettleBaselineTiming } from '../src/solana/wallet.js'
 
 type Json = Record<string, any>
 
@@ -1129,3 +1133,191 @@ describe('Solana reconciler', () => {
         }
     })
 })
+
+describe('Solana settle confirmation', () => {
+    // A delivered Solana ack's settle is the node's transaction, whose
+    // signature the payer never learns, so the watch reads the ticket
+    // account instead: once it closes after the watch saw it open, the
+    // journal row goes, as on Algorand once the group confirms. An account
+    // not seen yet may be an open still confirming, since the node serves
+    // before it lands, so its absence keeps the row, as do an account that
+    // stays open, one of another payer's, and a failed read; the reconciler
+    // finishes each. Closed counts only as of a slot after the one the account
+    // was last seen at, which each read asks for: a provider's node behind the
+    // one that showed it can answer that it is missing.
+    it.each([
+        ['open, then closed', 'o-', undefined, false, 2, [0n, 11n]],
+        ['open for three reads, then closed', 'ooo-', undefined, false, 4, [0n, 11n, 12n, 13n]],
+        ['failed reads, open, then closed', 'xxo-', undefined, false, 4, [0n, 0n, 0n, 13n]],
+        ['not open yet, open, then closed', '--o-', undefined, false, 4, [0n, 0n, 0n, 13n]],
+        ['never seen open', '-', undefined, true, 0, undefined],
+        ['never closed', 'o', undefined, true, 0, undefined],
+        ["another payer's, then closed", 'p-', undefined, true, 0, undefined],
+        ['reads keep failing', 'x', undefined, true, 0, undefined],
+        ['closed as of the slot it was seen at, then after', 'o--', [20n, 20n, 21n], false, 3, [0n, 20n, 20n]],
+        ['closed as of an earlier slot, then after', 'o--', [20n, 19n, 21n], false, 3, undefined],
+        ['only ever closed as of the slot it was seen at', 'o-', [20n, 20n, 20n], true, 0, undefined],
+        // A stale answer that still shows the account does not move the slot
+        // back for the closed reads after it.
+        ['seen, seen as of an earlier slot, closed between', 'oo-', [20n, 5n, 6n, 21n], false, 4, [0n, 20n, 20n, 20n]],
+    ] as const)('%s', async (_name, script, slots, wantRow, wantReads, wantSent) => {
+        const f = await fixture()
+        const s = scriptTicket(f, script, slots)
+        const h = handleOf(f)
+        expect(h.settleByTicket).toEqual({ timeoutMs: SOLANA_ENDING_TIMEOUT_MS })
+        h.settleByTicket = { timeoutMs: 300 }
+        const journal = memoryJournal()
+        await journal.put(rowOf('settle_pending', ARGS))
+        const settles = new Settles({ logger: recLogger(), journal, confirmPollMs: 5 })
+        settles.confirmSettled(h.ticketId, '', h)
+        await settles.wait(AbortSignal.timeout(5000))
+        expect((await journal.list(PAYER, sweepDeployment)).length === 1).toBe(wantRow)
+        if (wantRow) expect(s.reads()).toBeGreaterThanOrEqual(2)
+        else expect(s.reads()).toBe(wantReads)
+        if (wantSent !== undefined) expect(s.sent.slice(0, wantSent.length)).toEqual(wantSent)
+        expect(new Set(s.commitments)).toEqual(new Set(['confirmed']))
+    })
+
+    // A Solana handle's own budget outlasts a host's shorter confirmTimeoutMs,
+    // which is sized for Algorand's few seconds.
+    it("watches on the handle's budget over the host's", async () => {
+        const f = await fixture()
+        const s = scriptTicket(f, 'oooooooo-')
+        const h = handleOf(f)
+        h.settleByTicket = { timeoutMs: 2000 }
+        const journal = memoryJournal()
+        await journal.put(rowOf('settle_pending', ARGS))
+        const settles = new Settles({ logger: recLogger(), journal, confirmPollMs: 5, confirmTimeoutMs: 1 })
+        settles.confirmSettled(h.ticketId, '', h)
+        await settles.wait(AbortSignal.timeout(5000))
+        expect(await journal.list(PAYER, sweepDeployment)).toHaveLength(0)
+        expect(s.reads()).toBe(9)
+    })
+
+    // An RPC client without the slot-aware read gets no watch, since no
+    // absence it reports can be trusted, and the row stays with the reconciler.
+    it('does not watch over an RPC without the slot-aware read', async () => {
+        const f = await fixture()
+        expect(f.rpc.getAccountInfoAt).toBeUndefined()
+        const h = handleOf(f)
+        expect(h.settleByTicket).toBeUndefined()
+        await expect(h.settleOutcome!('', undefined)).rejects.toThrow(/no slot-aware account read/)
+        const journal = memoryJournal()
+        await journal.put(rowOf('settle_pending', ARGS))
+        const settles = new Settles({ logger: recLogger(), journal, confirmPollMs: 5 })
+        settles.confirmSettled(h.ticketId, '', h)
+        await settles.wait(AbortSignal.timeout(5000))
+        expect(await journal.list(PAYER, sweepDeployment)).toHaveLength(1)
+    })
+
+    // The receipt check watches a Solana ack it delivered to the node, which
+    // has no txId, and drops the ticket's row once the account closes. The
+    // ticket is read once before the ack goes, since the node cannot settle
+    // without it: a settle that lands before the watch's first read is then
+    // still seen closing. A failed read there leaves the watch to see the
+    // account itself.
+    it.each([
+        ["seen before the delivery, closed at the watch's first read", 'o-', 2],
+        ['unread before the delivery, seen by the watch, then closed', 'xo-', 3],
+    ] as const)('runs from the receipt check after a delivered ack: %s', async (_name, script, wantReads) => {
+        const f = await fixture()
+        const s = scriptTicket(f, script)
+        const delivered: SettleAck[] = []
+        const readsBefore: number[] = []
+        const h = handleOf(f, async (ack) => {
+            delivered.push(ack)
+            readsBefore.push(s.reads())
+        })
+        const t = await turnFixture({ ticket_id: h.ticketId })
+        t.ticket.ticket_id = h.ticketId
+        const journal = memoryJournal()
+        await journal.put(rowOf('settle_pending', ARGS))
+        const settles = new Settles({ logger: recLogger(), journal, confirmPollMs: 5 })
+        const { submit } = await checkTurnReceipt(
+            { logger: recLogger(), feeUnit: feeUnitOf('solana'), confirmSettled: (id, tx, hh) => settles.confirmSettled(id, tx, hh) },
+            {
+                endpoint: '/v1/chat/completions',
+                model: 'm',
+                ticket: t.ticket,
+                op: t.op,
+                handle: h,
+                receipt: t.receipt,
+                computedHash: bodyHashOfBody(t.plaintext),
+                plaintext: t.plaintext,
+                settleGroup: '7',
+                hop: null,
+            },
+        )
+        const res = await submit!()
+        expect(res.err).toBeUndefined()
+        expect(delivered).toHaveLength(1)
+        expect(readsBefore).toEqual([1])
+        await settles.wait(AbortSignal.timeout(5000))
+        expect(await journal.list(PAYER, sweepDeployment)).toHaveLength(0)
+        expect(s.reads()).toBe(wantReads)
+        expect(new Set(s.commitments)).toEqual(new Set(['confirmed']))
+    })
+
+    // The read before an ack goes holds up the delivery only for its own
+    // budget, and an RPC client without the slot-aware read makes none.
+    it('bounds the read before the delivery', async () => {
+        const prev = solanaSettleBaselineTiming.timeoutMs
+        solanaSettleBaselineTiming.timeoutMs = 20
+        try {
+            const f = await fixture()
+            const read = f.rpc.getAccountInfo.bind(f.rpc)
+            f.rpc.getAccountInfoAt = async (k, o = {}) => {
+                if (k !== TICKET_ADDR) return { account: await read(k, o), slot: 0n }
+                return new Promise((_, reject) => o.signal?.addEventListener('abort', () => reject(o.signal!.reason)))
+            }
+            const delivered: SettleAck[] = []
+            const h = handleOf(f, async (ack) => void delivered.push(ack))
+            const t = await turnFixture({ ticket_id: h.ticketId })
+            const res = await Promise.race([h.ackSettle(t.receipt, '7'), new Promise<'held'>((r) => setTimeout(() => r('held'), 1000))])
+            expect(res).not.toBe('held')
+            expect(res !== 'held' && res.err).toBeUndefined()
+            expect(delivered).toHaveLength(1)
+
+            const plain = await fixture()
+            let ticketReads = 0
+            const plainRead = plain.rpc.getAccountInfo.bind(plain.rpc)
+            plain.rpc.getAccountInfo = async (k, o) => {
+                if (k === TICKET_ADDR) ticketReads++
+                return plainRead(k, o)
+            }
+            const ph = handleOf(plain, async () => {})
+            expect((await ph.ackSettle(t.receipt, '7')).err).toBeUndefined()
+            expect(ticketReads).toBe(0)
+        } finally {
+            solanaSettleBaselineTiming.timeoutMs = prev
+        }
+    })
+})
+
+/**
+ * Gives f's RPC the slot-aware read, answering each read of the ticket account
+ * by the next step of script, the last repeating: 'o' the payer's account, 'p'
+ * another payer's, '-' none, 'x' a failure. The n-th read (from 1) is as of
+ * slot 10+n, or by slots, its last repeating, when set. sent is the
+ * minContextSlot each read asked for. Go's walletClusterTicketScript.
+ */
+function scriptTicket(f: Awaited<ReturnType<typeof fixture>>, script: string, slots?: readonly bigint[]) {
+    const read = f.rpc.getAccountInfo.bind(f.rpc)
+    const other = { lamports: 1n, owner: PROGRAM_ID, data: withPayer(TICKET_DATA, OTHER), executable: false }
+    let reads = 0
+    const sent: bigint[] = []
+    // An open seen at processed could be on a fork that is dropped.
+    const commitments: (string | undefined)[] = []
+    f.rpc.getAccountInfoAt = async (k, o = {}) => {
+        if (k !== TICKET_ADDR) return { account: await read(k, o), slot: 0n }
+        reads++
+        sent.push(o.minContextSlot ?? 0n)
+        commitments.push(o.commitment)
+        const slot = slots === undefined ? BigInt(10 + reads) : slots[Math.min(reads, slots.length) - 1]!
+        const step = script[Math.min(reads, script.length) - 1]
+        if (step === 'x') throw new Error('rpc down')
+        if (step === 'p') return { account: other, slot }
+        return { account: step === 'o' ? await read(k, o) : null, slot }
+    }
+    return { reads: () => reads, sent, commitments }
+}

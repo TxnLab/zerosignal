@@ -109,6 +109,7 @@ type config struct {
 	PreflightCommitment      Commitment `json:"preflightCommitment,omitempty"`
 	MaxRetries               *uint64    `json:"maxRetries,omitempty"`
 	SearchTransactionHistory bool       `json:"searchTransactionHistory,omitempty"`
+	MinContextSlot           uint64     `json:"minContextSlot,omitempty"`
 }
 
 // wireAccount holds each field so that a missing or null one is seen: read as
@@ -147,29 +148,54 @@ func (w *wireAccount) account() (Account, error) {
 }
 
 func (c *HTTPClient) GetAccountInfo(ctx context.Context, key solana.PublicKey, cm Commitment) (*Account, error) {
+	a, _, err := c.getAccountInfo(ctx, key, cm, 0, false)
+	return a, err
+}
+
+func (c *HTTPClient) GetAccountInfoAt(ctx context.Context, key solana.PublicKey, cm Commitment, minContextSlot uint64) (*Account, uint64, error) {
+	return c.getAccountInfo(ctx, key, cm, minContextSlot, true)
+}
+
+// getAccountInfo reads key, sending minContextSlot when it is not 0. withSlot
+// refuses an answer without its context slot, which GetAccountInfoAt returns.
+func (c *HTTPClient) getAccountInfo(ctx context.Context, key solana.PublicKey, cm Commitment, minContextSlot uint64, withSlot bool) (*Account, uint64, error) {
 	var r struct {
+		// Raw, so a read that does not want the slot never refuses an answer
+		// over it, as the TS twin's does not.
+		Context json.RawMessage `json:"context"`
 		// Raw, so a missing value is told from a null one: only null means
 		// the account does not exist.
 		Value json.RawMessage `json:"value"`
 	}
-	if err := c.call(ctx, "getAccountInfo", []any{key.String(), config{Encoding: "base64", Commitment: cm}}, &r); err != nil {
-		return nil, err
+	cfg := config{Encoding: "base64", Commitment: cm, MinContextSlot: minContextSlot}
+	if err := c.call(ctx, "getAccountInfo", []any{key.String(), cfg}, &r); err != nil {
+		return nil, 0, err
+	}
+	var slot uint64
+	if withSlot {
+		var cx struct {
+			Slot *uint64 `json:"slot"`
+		}
+		if json.Unmarshal(r.Context, &cx) != nil || cx.Slot == nil {
+			return nil, 0, fmt.Errorf("solana rpc getAccountInfo %s: answer has no context slot", key)
+		}
+		slot = *cx.Slot
 	}
 	switch string(r.Value) {
 	case "":
-		return nil, fmt.Errorf("solana rpc getAccountInfo %s: answer has no value", key)
+		return nil, 0, fmt.Errorf("solana rpc getAccountInfo %s: answer has no value", key)
 	case "null":
-		return nil, ErrNotFound
+		return nil, slot, ErrNotFound
 	}
 	var w wireAccount
 	if err := json.Unmarshal(r.Value, &w); err != nil {
-		return nil, fmt.Errorf("solana rpc getAccountInfo %s: decode account: %w", key, err)
+		return nil, 0, fmt.Errorf("solana rpc getAccountInfo %s: decode account: %w", key, err)
 	}
 	a, err := w.account()
 	if err != nil {
-		return nil, fmt.Errorf("solana rpc getAccountInfo %s: %w", key, err)
+		return nil, 0, fmt.Errorf("solana rpc getAccountInfo %s: %w", key, err)
 	}
-	return &a, nil
+	return &a, slot, nil
 }
 
 func (c *HTTPClient) GetProgramAccounts(ctx context.Context, program solana.PublicKey, cm Commitment, filters ...Filter) ([]KeyedAccount, error) {

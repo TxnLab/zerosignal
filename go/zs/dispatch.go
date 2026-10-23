@@ -3695,6 +3695,9 @@ func settleOutcomeOf(info models.PendingTransactionInfoResponse) SettleOutcome {
 // settleWatcher is a settlementHandle that can look up a submitted settle.
 type settleWatcher interface {
 	settleOutcome(ctx context.Context, txid string) (SettleOutcome, error)
+	// settleWatch is how long confirmSettled watches the settle, and whether
+	// it looks the settle up by its ticket, needing no txid.
+	settleWatch() (timeout time.Duration, byTicket bool)
 }
 
 // The real handle must stay a watcher: confirmSettled finds it by type
@@ -3702,17 +3705,32 @@ type settleWatcher interface {
 var _ settleWatcher = (*OpenHandle)(nil)
 
 func (h *OpenHandle) settleOutcome(ctx context.Context, txid string) (SettleOutcome, error) {
+	if h.solana != nil {
+		return h.solanaSettleOutcome(ctx)
+	}
 	if h.wallet == nil || h.wallet.chain == nil {
 		return SettlePending, errors.New("zs: handle has no escrow chain")
 	}
 	return h.wallet.chain.SettleOutcome(ctx, txid)
 }
 
+func (h *OpenHandle) settleWatch() (time.Duration, bool) {
+	if h.solana != nil {
+		// Without the slot-aware read no absence can be trusted, so there is
+		// nothing to watch for: the row stays with the reconciler.
+		return solanaSettleConfirmTimeout, h.solana.slotReads()
+	}
+	return settleConfirmTimeout, false
+}
+
 // How long confirmSettled watches a settle, and how often it looks. Algorand
-// confirms in a few seconds; vars so a test can shorten them.
+// confirms in a few seconds. A Solana node's settle can take a blockhash's
+// life to land, so its watch has the watchdog's budget. Vars so a test can
+// shorten them.
 var (
-	settleConfirmTimeout = 20 * time.Second
-	settleConfirmPoll    = time.Second
+	settleConfirmTimeout       = 20 * time.Second
+	solanaSettleConfirmTimeout = solanaEndingTimeout
+	settleConfirmPoll          = time.Second
 )
 
 // confirmingSuffix marks a settlesInFlight key as a confirmation, not a
@@ -3721,12 +3739,18 @@ const confirmingSuffix = " (confirming)"
 
 // confirmSettled watches, in the background WaitSettles drains, for the
 // atomic settle txid just submitted for ticketID to be confirmed, then
-// deletes the ticket's journal row. A settle dropped from the pool, one not
-// confirmed by the deadline, or one whose lookups keep failing keeps its row
-// for the reconciler, which re-settles or refunds it. Close ends the watch.
+// deletes the ticket's journal row. On Solana the node builds and sends its
+// settle, so there is no txid and the watch reads the ticket instead. A
+// settle dropped from the pool, one not confirmed by the deadline, or one
+// whose lookups keep failing keeps its row for the reconciler, which
+// re-settles or refunds it. Close ends the watch.
 func (s *Client) confirmSettled(ticketID, txid string, handle settlementHandle) {
 	sw, ok := handle.(settleWatcher)
-	if !ok || s.journal == nil || txid == "" {
+	if !ok || s.journal == nil {
+		return
+	}
+	timeout, byTicket := sw.settleWatch()
+	if txid == "" && !byTicket {
 		return
 	}
 	life := s.life
@@ -3743,7 +3767,7 @@ func (s *Client) confirmSettled(ticketID, txid string, handle settlementHandle) 
 					slog.String("ticket_id", ticketID), slog.Any("panic", r))
 			}
 		}()
-		ctx, cancel := context.WithTimeout(life, settleConfirmTimeout)
+		ctx, cancel := context.WithTimeout(life, timeout)
 		defer cancel()
 		var lastErr error
 		for {

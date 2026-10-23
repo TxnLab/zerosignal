@@ -54,6 +54,8 @@ export const SOLANA_RPC_RETRY_WAIT_MAX_MS = 10_000
 export const CODE_PREFLIGHT_FAILURE = -32002
 /** A node behind the cluster, or not yet knowing whether it is. */
 export const CODE_NODE_UNHEALTHY = -32005
+/** A node that has not reached the minContextSlot a read asked for. */
+export const CODE_MIN_CONTEXT_SLOT_NOT_REACHED = -32016
 
 /** How settled the state a call reads must be; absent sends none, so the RPC applies its default, finalized. */
 export type Commitment = 'processed' | 'confirmed' | 'finalized'
@@ -152,6 +154,8 @@ export function solanaRpcShouldRetry(method: string, status: number | undefined,
             return true
         case CODE_PREFLIGHT_FAILURE:
             return method === 'sendTransaction' && rpcError.txErrName === 'BlockhashNotFound'
+        case CODE_MIN_CONTEXT_SLOT_NOT_REACHED:
+            return method === 'getAccountInfo'
     }
     return false
 }
@@ -183,6 +187,12 @@ export interface Account {
 export interface KeyedAccount {
     key: PublicKey
     account: Account
+}
+
+/** A slot-aware account read: the account, null when it does not exist, and the slot the answer is as of. */
+export interface AccountAt {
+    account: Account | null
+    slot: bigint
 }
 
 /** A getProgramAccounts filter: data exactly dataSize bytes, or holding bytes (at most 128) at offset. */
@@ -220,6 +230,15 @@ export interface SendOptions {
 /** The RPC surface the rail depends on; SolanaRpcClient backs it, a test hands in a fake. */
 export interface SolanaRpc {
     getAccountInfo(key: PublicKey, o?: CallOptions): Promise<Account | null>
+    /**
+     * getAccountInfo from a node at minContextSlot or later (absent or 0n asks
+     * for none), with the slot the answer is as of. A node behind a load
+     * balancer can be slots behind the one that answered the last read, so an
+     * account a read saw can read as missing on the next; a caller that acts on
+     * its absence asks for the slot it saw it at. SolanaRpcClient has it; a
+     * SolanaRpc need not. Go's AccountAtReader.
+     */
+    getAccountInfoAt?(key: PublicKey, o?: CallOptions & { minContextSlot?: bigint | undefined }): Promise<AccountAt>
     getProgramAccounts(program: PublicKey, o?: CallOptions & { filters?: Filter[] | undefined }): Promise<KeyedAccount[]>
     getBalance(key: PublicKey, o?: CallOptions): Promise<bigint>
     getLatestBlockhash(o?: CallOptions): Promise<Blockhash>
@@ -343,6 +362,21 @@ export class SolanaRpcClient implements SolanaRpc {
         const m = 'getAccountInfo'
         const r = obj(m, await this.#call(m, [key, { encoding: 'base64', ...commitmentConfig(o.commitment) }], o.signal), 'result')
         return r.value === null ? null : account(m, r.value)
+    }
+
+    async getAccountInfoAt(key: PublicKey, o: CallOptions & { minContextSlot?: bigint | undefined } = {}): Promise<AccountAt> {
+        const m = 'getAccountInfo'
+        const cfg: Record<string, unknown> = { encoding: 'base64', ...commitmentConfig(o.commitment) }
+        if (o.minContextSlot !== undefined && o.minContextSlot !== 0n) {
+            // A slot past 2^53 would go as another number; this client reads none.
+            if (o.minContextSlot < 0n || o.minContextSlot > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`solana rpc ${m}: minContextSlot out of range`)
+            cfg.minContextSlot = Number(o.minContextSlot)
+        }
+        const r = obj(m, await this.#call(m, [key, cfg], o.signal), 'result')
+        // Refused rather than read as 0, which any later comparison would pass
+        // as no older than the slot asked for.
+        const slot = u64(m, obj(m, r.context, 'context').slot, 'context slot')
+        return { account: r.value === null ? null : account(m, r.value), slot }
     }
 
     async getProgramAccounts(program: PublicKey, o: CallOptions & { filters?: Filter[] | undefined } = {}): Promise<KeyedAccount[]> {
