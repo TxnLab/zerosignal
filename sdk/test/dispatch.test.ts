@@ -1814,6 +1814,8 @@ describe('the Client’s parts', () => {
             'refundSources',
             'Reconciler',
             'walletChain',
+            'boxSweep',
+            'solanaSweep',
             'walletParts',
             'journalOpen',
             'journalReceipt',

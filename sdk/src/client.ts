@@ -35,7 +35,7 @@ import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
-import { type JournalDeps, Reconciler, journalOpen, journalReceipt, journalSigned, walletChain } from './reconciler.js'
+import { type JournalDeps, Reconciler, boxSweep, journalOpen, journalReceipt, journalSigned, walletChain } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { deploymentOrFail, readDeploymentId } from './registry/chain.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
@@ -45,6 +45,8 @@ import { untilAborted } from './sleep.js'
 import { IdleWatchdog } from './idle.js'
 import { type GenComplete, forwardStream, frameFactory } from './stream.js'
 import { type Request, type Stream, TurnStream, turnOf } from './turn.js'
+import { solanaSweep } from './solana/reconcile.js'
+import { SolanaWallet } from './solana/wallet.js'
 import { Wallet } from './wallet.js'
 
 /** Bounds the escrow config read a built wallet needs, as Go's escrowConfigTimeout. */
@@ -164,19 +166,20 @@ export class Client {
         const toolAffinity = st.toolAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
         const responseAffinity = st.responseAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
 
-        // Only the SDK's own wallet runs the sweep that deletes rows; with a
+        // Only the SDK's own wallets run the sweep that deletes rows; with a
         // caller's wallet a default journal would only grow.
-        const sdkWallet = wallet instanceof Wallet
+        const boxes = walletChain(wallet)
+        const sweep = wallet instanceof SolanaWallet ? solanaSweep(wallet) : boxes && boxSweep(boxes)
         // Go can't be handed its memory journal; TS exports memoryJournal.
         const durableJournal = st.journal !== undefined && !isMemoryJournal(st.journal)
         let journal = st.journal
-        if (journal === undefined && sdkWallet) {
+        if (journal === undefined && sweep !== undefined) {
             journal = memoryJournal()
             cfg.logger.info(
                 'open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.journal to keep them',
             )
         }
-        if (sdkWallet && journal !== undefined && journalsSwept.has(journal)) {
+        if (sweep !== undefined && journal !== undefined && journalsSwept.has(journal)) {
             throw configError(
                 'Stores.journal is already swept by another Client in this process: each Client that builds or is handed a Wallet needs its own journal',
             )
@@ -233,14 +236,12 @@ export class Client {
         })
         const life = new AbortController()
         const settles = new Settles({ logger: cfg.logger, journal, life: life.signal })
-        // Only the SDK's own wallet runs the sweep, which is what deletes rows.
-        const chain = walletChain(wallet)
         let reconciler: Reconciler | undefined
-        if (chain !== undefined && journal !== undefined) {
+        if (sweep !== undefined && journal !== undefined) {
             journalsSwept.add(journal)
             reconciler = new Reconciler({
                 journal,
-                chain,
+                chain: sweep,
                 payer: wallet.payerAddr(),
                 deployment: cfg.network,
                 watching: (ticketId) => refunds.watching(ticketId),

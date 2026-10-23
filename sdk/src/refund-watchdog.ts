@@ -34,9 +34,7 @@ import { idle } from './sleep.js'
  * and settle_lapsed.
  *
  * State is in memory. A ticket outlives a restart through the journal, whose
- * sweep takes any row the watchdog isn't watching. No sweep reads a Solana
- * wallet's rows yet, so a Solana ticket in flight at a restart is left to a
- * manual refund_inactive.
+ * sweep takes any row the watchdog isn't watching.
  */
 export interface RefundWatchdog {
     /**

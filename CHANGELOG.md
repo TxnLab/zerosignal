@@ -31,6 +31,22 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — the reconciler sweeps Solana tickets (0.11.0)
+
+The journal's reconciler in both SDKs now runs for a Solana wallet, which got none, and so did
+not get the default in-memory journal either. It reads each row's ticket account where
+Algorand reads the box, and decides as it does on Algorand: `refund_inactive` on an open ticket
+past its deadline, `settle_lapsed` on a node's claim left past the lapse fallback, the payer's
+own `ack` at the recorded receipt to re-fire a settle or to freeze a claim above it, and the
+row forgotten once the ticket is gone or frozen. A node whose claim exceeds the receipt is
+barred, as on Algorand. A Solana submit gets the watchdog's three-minute budget, so a refund or
+lapse that confirms late still releases its spend reservation in the same sweep.
+
+`decideSolanaTicket` ↔ `decideSolanaTicket` is the Solana wrapper over the reconciler's core
+beside `decideTicket`. `reconcile_vectors.json` pins it: every case has a Solana twin, the
+ticket account carrying the box's state or closed where there is no box, which must reach the
+same action.
+
 ### 2026-10-23 — the refund watchdog on a Solana ticket (0.11.0)
 
 The refund watchdog in both SDKs now tracks a Solana handle, which it left untracked. It reads
@@ -43,9 +59,6 @@ out the ticket's own deadline when that is later. A Solana refund or lapse waits
 transaction to confirm, for up to three minutes, past a blockhash's life, where the watchdog
 gives an Algorand call 30 seconds: cut short, a refund that landed late would never be reported
 refunded, so its spend reservation would never be released.
-
-No sweep reads a Solana wallet's journal rows yet, so a Solana ticket in flight at a restart is
-still left to a manual `refund_inactive`.
 
 The watchdog's read is rail-neutral now: each wallet hands it the ticket as a `settle.Ticket`
 ↔ `TicketView` with the amount of its pending claim, in place of the Algorand box.

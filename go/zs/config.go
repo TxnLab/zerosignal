@@ -118,9 +118,10 @@ type Discovery struct {
 type Stores struct {
 	// Journal records open tickets. The in-memory default forgets them on
 	// exit, so a long-running process should supply a durable one. Rows are
-	// finished and deleted only when the SDK builds the wallet; with a
-	// caller's Wallet there is no default, and a supplied journal is the
-	// caller's to drain. A Client that finishes rows needs a journal no other
+	// finished and deleted only when the wallet is one of the SDK's own types,
+	// *Wallet or *SolanaWallet, whoever built it; with any other Wallet there
+	// is no default, and a supplied journal is the caller's to drain. A Client
+	// that finishes rows needs a journal no other
 	// open Client in the process writes for the same payer: New refuses a
 	// second Client that finishes rows, but not one with a caller's Wallet,
 	// whose live tickets the first would then race its watchdog to refund.

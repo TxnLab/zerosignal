@@ -235,11 +235,30 @@ export function decideTicket(
     return decideSettlement(rec, ticketView(box), claim, clock, lapseFallbackMs)
 }
 
+/** The Solana ticket account fields decideSolanaTicket reads. */
+export type SolanaSweptTicket = Pick<SolanaTicket, 'status' | 'expiresAt' | 'grace' | 'pending'>
+
+/**
+ * decideSolanaTicket is decideTicket for a zs_escrow ticket account (null
+ * when closed). Mirrors Go's decideSolanaTicket.
+ */
+export function decideSolanaTicket(
+    rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle' | 'signed'>,
+    t: SolanaSweptTicket | null,
+    clock: { nowMs: number; chainMs?: number },
+    lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
+): ReconcileAction {
+    if (t === null) return decideSettlement(rec, null, '', clock, lapseFallbackMs)
+    const a = signedArgs(rec)
+    const claim = a !== undefined ? judgeSolanaClaim(a, t) : ''
+    return decideSettlement(rec, solanaTicketView(t), claim, clock, lapseFallbackMs)
+}
+
 // decideSettlement is decideTicket over the rail-neutral view of the ticket
 // (null when gone), with the rail's answer to how the operator's pending claim
-// stands against the payer's recorded receipt. Module-private, like Go's: a
-// second rail's wrapper calls it from inside the SDK, and exporting it would
-// make it semver surface before that rail exists.
+// stands against the payer's recorded receipt. Module-private, like Go's:
+// each rail's wrapper calls it, and exporting it would make semver surface of
+// what is the wrappers' shared core.
 function decideSettlement(
     rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle' | 'signed'>,
     view: TicketView | null,

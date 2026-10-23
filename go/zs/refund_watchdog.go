@@ -58,9 +58,7 @@ import (
 // State is in-memory only. A ticket outlives a restart through the journal
 // (Stores.Journal): the reconciler picks up any row the watchdog is not
 // watching. With the in-memory default journal, a restart leaves the escrowed
-// USDC to a manual refundInactive (the ticket id is in the logs). No
-// reconciler sweeps a Solana wallet's rows yet, so a Solana ticket in flight
-// at a restart is left to a manual refund_inactive the same way.
+// USDC to a manual refundInactive (the ticket id is in the logs).
 type RefundWatchdog struct {
 	log *slog.Logger
 

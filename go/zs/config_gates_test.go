@@ -260,7 +260,9 @@ func TestNew_BuildsTheWalletFromTheEscrowConfig(t *testing.T) {
 	if r == nil || c.journal == nil || r.journal != c.journal || r.payer != "PAYER" || r.deployment.EscrowAppID != 1 || r.deployment != c.Deployment() {
 		t.Fatalf("reconciler %+v over journal %v, want one over the client's journal for PAYER on app 1", r, c.journal)
 	}
-	if wc, ok := r.chain.(walletChain); !ok || wc.w != w {
+	if bc, ok := r.chain.(boxChain); !ok {
+		t.Errorf("reconciler chain %#v, want the built wallet", r.chain)
+	} else if wc, ok := bc.ticketChain.(walletChain); !ok || wc.w != w {
 		t.Errorf("reconciler chain %#v, want the built wallet", r.chain)
 	}
 	never := func(context.Context) (string, error) { return "", errors.New("unused") }

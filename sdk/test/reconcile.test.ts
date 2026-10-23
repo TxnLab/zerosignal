@@ -3,13 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// decideTicket, checked against testdata/reconcile_vectors.json, which Go
-// generates from its own decideTicket with times on every boundary it draws.
+// decideTicket and decideSolanaTicket, checked against
+// testdata/reconcile_vectors.json, which Go generates from its own with times
+// on every boundary it draws.
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import { type ReconcileAction, type SettleArgs, type TicketBoxView, decideTicket } from '../src/index.js'
+import {
+    type ReconcileAction,
+    type SettleArgs,
+    type SolanaSweptTicket,
+    type TicketBoxView,
+    decideSolanaTicket,
+    decideTicket,
+} from '../src/index.js'
 import type { TicketStatus } from '../src/types.js'
 
 interface VectorSettle {
@@ -40,6 +48,23 @@ interface VectorBox {
     pending_aux_output_count: number
 }
 
+interface VectorTicket {
+    status: number
+    expires_at: number
+    grace: number
+    pending: {
+        amount: number
+        receipt_digest: string
+        ttft_ms: number
+        decode_ms: number
+        input_units: number
+        output_units: number
+        output_usage_type: number
+        aux_usage_type: number
+        aux_count: number
+    }
+}
+
 interface Vector {
     name: string
     status: TicketStatus
@@ -48,6 +73,10 @@ interface Vector {
     settle: VectorSettle | null
     signed?: VectorSettle
     box: VectorBox | null
+    /** A Solana ticket account in place of the box: decideSolanaTicket's case. */
+    ticket?: VectorTicket
+    /** A Solana ticket with no account: decideSolanaTicket's case too. */
+    ticket_closed?: boolean
     now_ms: number
     lapse_fallback_ms: number
     action: ReconcileAction
@@ -91,6 +120,26 @@ function boxOf(b: VectorBox): TicketBoxView {
     }
 }
 
+function ticketOf(t: VectorTicket): SolanaSweptTicket {
+    const p = t.pending
+    return {
+        status: t.status,
+        expiresAt: BigInt(t.expires_at),
+        grace: t.grace,
+        pending: {
+            amount: BigInt(p.amount),
+            receiptDigest: b64(p.receipt_digest),
+            ttftMs: BigInt(p.ttft_ms),
+            decodeMs: BigInt(p.decode_ms),
+            inputUnits: BigInt(p.input_units),
+            outputUnits: BigInt(p.output_units),
+            outputUsageType: p.output_usage_type,
+            auxUsageType: p.aux_usage_type,
+            auxCount: BigInt(p.aux_count),
+        },
+    }
+}
+
 describe('decideTicket', () => {
     it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
         const rec = {
@@ -100,16 +149,13 @@ describe('decideTicket', () => {
             ...(v.settle && { settle: settleOf(v.settle) }),
             ...(v.signed && { signed: settleOf(v.signed) }),
         }
-        const got = decideTicket(rec, v.box ? boxOf(v.box) : null, { nowMs: v.now_ms }, v.lapse_fallback_ms)
-        expect(got).toBe(v.action)
+        const decide = (clock: { nowMs: number; chainMs?: number }) =>
+            v.ticket || v.ticket_closed
+                ? decideSolanaTicket(rec, v.ticket ? ticketOf(v.ticket) : null, clock, v.lapse_fallback_ms)
+                : decideTicket(rec, v.box ? boxOf(v.box) : null, clock, v.lapse_fallback_ms)
+        expect(decide({ nowMs: v.now_ms })).toBe(v.action)
         // One clock given twice is Go's one clock.
-        const both = decideTicket(
-            rec,
-            v.box ? boxOf(v.box) : null,
-            { nowMs: v.now_ms, chainMs: v.now_ms },
-            v.lapse_fallback_ms,
-        )
-        expect(both).toBe(v.action)
+        expect(decide({ nowMs: v.now_ms, chainMs: v.now_ms })).toBe(v.action)
     })
 
     describe('with a chain clock apart from the local one', () => {
@@ -252,8 +298,13 @@ describe('decideTicket', () => {
 
     // Go's generator guarantees this too; a fixture that lost an action would
     // leave the port's branch for it unchecked.
-    it('has a vector for every action', () => {
+    it('has a vector for every action, on each rail', () => {
         const actions: ReconcileAction[] = ['wait', 'forget', 'refundInactive', 'settleLapsed', 'settle', 'freeze']
-        expect(new Set(vectors.map((v) => v.action))).toEqual(new Set(actions))
+        for (const solana of [false, true]) {
+            const rail = vectors.filter((v) => (v.ticket !== undefined || v.ticket_closed === true) === solana)
+            expect(new Set(rail.map((v) => v.action))).toEqual(new Set(actions))
+        }
+        // A closed account is the no-box case on Solana, its own branch.
+        expect(vectors.some((v) => v.ticket_closed === true)).toBe(true)
     })
 })
