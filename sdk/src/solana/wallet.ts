@@ -37,6 +37,7 @@ import {
     encodeOpenPayment,
     parseOpenSeq,
     signReceiptAck,
+    ticketView,
 } from '@txnlab/zs-proto/solana/zsescrow'
 import { type Ticket, type UsageReceipt, receiptCanonicalBytes, receiptSigDigest } from '@txnlab/zs-proto/ticket'
 import { RAIL_NEUTRAL_NAMES_MIN_VERSION, usesRailNeutralNames } from '@txnlab/zs-proto/wire'
@@ -56,6 +57,7 @@ import type { Operator } from '../operator.js'
 import type { EscrowCall, OpenHandle, OverclaimFreeze, WalletOpener } from '../parts.js'
 import { type Logger, type SolanaSigner, discardLogger } from '../ports.js'
 import { type ClaimVerdict, type SettleArgs, judgeSolanaClaim } from '../reconcile.js'
+import { refundSources } from '../refund-watchdog.js'
 import { untilAborted } from '../sleep.js'
 import { decodeReceiptSig, decodeTicketId, followUpSignal, slotCount } from '../wallet.js'
 import { solanaClaimFields } from './claim.js'
@@ -73,6 +75,16 @@ const COMMITMENT = 'confirmed'
  * the wallet one map entry. Go's signedOpenRetention.
  */
 export const SIGNED_OPEN_RETENTION_MS = 10 * 60_000
+
+/**
+ * Bounds the refund watchdog's refund_inactive or settle_lapsed, which waits
+ * for its transaction to confirm. A blockhash lives about 150 blocks, a
+ * minute or so, and the wait ends once the confirmed height passes it, so this
+ * outlasts it: cut short, a refund that landed late would read as a ticket
+ * gone and the watchdog would never report it refunded, where Algorand's
+ * returns once algod accepts it. Go's solanaEndingTimeout.
+ */
+export const SOLANA_ENDING_TIMEOUT_MS = 3 * 60_000
 
 export interface SolanaWalletOptions {
     rpc: SolanaRpc
@@ -101,6 +113,8 @@ export class SolanaWallet implements WalletOpener {
     readonly #decimals: number
     /** The Config's genesis hash, which the ack digest binds. The program fixes it at initialize. */
     readonly #genesis: string
+    /** The Config's default_grace in seconds, the settle window of a ticket the payer opens: its offer must carry grace 0. */
+    readonly #defaultGrace: number
     readonly #pool: SolanaRentPool
     readonly #slots: bigint
     readonly #clock: () => number
@@ -116,7 +130,7 @@ export class SolanaWallet implements WalletOpener {
      */
     readonly #signed = new Map<string, number>()
 
-    private constructor(o: SolanaWalletOptions, decimals: number, genesis: string) {
+    private constructor(o: SolanaWalletOptions, decimals: number, genesis: string, defaultGrace: number) {
         this.#rpc = o.rpc
         this.#confirm = o.confirm
         this.#deployment = o.deployment
@@ -124,6 +138,7 @@ export class SolanaWallet implements WalletOpener {
         this.#payerUsdc = o.deployment.tokenAccount(o.signer.address)
         this.#decimals = decimals
         this.#genesis = genesis
+        this.#defaultGrace = defaultGrace
         this.#pool = new SolanaRentPool({ rpc: o.rpc, deployment: o.deployment, signer: o.signer, confirm: o.confirm })
         this.#slots = slotCount(o.depositSlots)
         this.#clock = o.clock ?? Date.now
@@ -160,7 +175,7 @@ export class SolanaWallet implements WalletOpener {
         if (config.usdcMint !== o.deployment.mint) {
             throw new Error(`solana wallet: the Config's mint is ${config.usdcMint}, not the deployment's ${o.deployment.mint}`)
         }
-        return new SolanaWallet(o, config.usdcDecimals, config.genesisHash)
+        return new SolanaWallet(o, config.usdcDecimals, config.genesisHash, config.defaultGrace)
     }
 
     payerAddr(): string {
@@ -520,6 +535,18 @@ export class SolanaWallet implements WalletOpener {
             refundInactive: (signal) => this.#end(h, 'refund-inactive', (e) => d.refundInactive(e), signal),
             settleLapsed: (signal) => this.#end(h, 'settle-lapsed', (e) => d.settleLapsed(e), signal),
         }
+        // The ticket takes the Config's default_grace as it stood when the
+        // wallet read it; the ticket's own deadline, which the watchdog
+        // re-arms to, is the one that counts. Go's solanaRefundSource.
+        refundSources.set(h, {
+            callTimeoutMs: SOLANA_ENDING_TIMEOUT_MS,
+            graceSeconds: BigInt(this.#defaultGrace),
+            readTicket: async (signal) => {
+                const { ticketId, opId, nodeId } = handleIds('refund watchdog', h)
+                const t = await this.readTicket(opId, nodeId, ticketId, signal)
+                return t === null ? null : { view: ticketView(t), pendingAmount: t.pending.amount }
+            },
+        })
         return h
     }
 

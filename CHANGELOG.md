@@ -31,6 +31,25 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — the refund watchdog on a Solana ticket (0.11.0)
+
+The refund watchdog in both SDKs now tracks a Solana handle, which it left untracked. It reads
+the ticket account where Algorand reads the box, and acts as it does on Algorand:
+`refund_inactive` on a ticket past its deadline with no node claim, `settle_lapsed` on a node's
+claim the node never lapsed, nothing on a ticket gone or frozen, and no lapse of a claim above
+the receipt the node signed, whose node it bars. It first reads the ticket at expires_at plus
+the Config's `default_grace`, which a payer's open takes, and the watchdog's margin, and waits
+out the ticket's own deadline when that is later. A Solana refund or lapse waits for its
+transaction to confirm, for up to three minutes, past a blockhash's life, where the watchdog
+gives an Algorand call 30 seconds: cut short, a refund that landed late would never be reported
+refunded, so its spend reservation would never be released.
+
+No sweep reads a Solana wallet's journal rows yet, so a Solana ticket in flight at a restart is
+still left to a manual `refund_inactive`.
+
+The watchdog's read is rail-neutral now: each wallet hands it the ticket as a `settle.Ticket`
+↔ `TicketView` with the amount of its pending claim, in place of the Algorand box.
+
 ### 2026-10-23 — the Solana handle's protest, refund, lapse and freeze (0.11.0)
 
 A Solana ticket's handle now has every settle path an Algorand one has, each the payer's own
@@ -57,7 +76,6 @@ transaction, where each returned "not supported yet":
   A freeze after it adds its own fee, under its id. An Algorand protest that fails has sent
   nothing, so its report is unchanged.
 
-The refund watchdog still skips Solana tickets, so nothing yet calls the refund or the lapse.
 The program's protest fixtures in `solana_tx_vectors.json` now carry the node's signature.
 
 ### 2026-10-23 — dstack verifiers refuse debug TDs and pin the boot chain (0.10.0)

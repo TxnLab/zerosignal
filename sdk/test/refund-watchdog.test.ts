@@ -6,7 +6,7 @@
 // The refund watchdog, porting go/zs refund_watchdog_test.go. Timings are
 // shortened and the probe, refund and lapse calls faked, as Go's tests do.
 
-import { PENDING_BY_OPERATOR, STATUS_OPEN, STATUS_PENDING_SETTLE, type TicketRecord, type Verdict } from '@txnlab/zs-proto/escrow'
+import { PENDING_BY_OPERATOR, STATUS_OPEN, STATUS_PENDING_SETTLE, type TicketRecord, type Verdict, ticketView } from '@txnlab/zs-proto/escrow'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { OpenHandle } from '../src/parts.js'
@@ -729,9 +729,10 @@ describe('RefundWatchdog.track', () => {
         } as unknown as OpenHandle
         refundSources.set(h, {
             graceSeconds,
-            readTicketBox: async (signal) => {
+            readTicket: async (signal) => {
                 reads.push(signal)
-                return box()
+                const rec = box()
+                return rec === null ? null : { view: ticketView(rec), pendingAmount: rec.pendingAmount }
             },
         })
         return { h, reads, refunds, lapses }
@@ -760,6 +761,9 @@ describe('RefundWatchdog.track', () => {
         expect(w.reads).toHaveLength(0)
         await waitFor('the refund', () => w.refunds.length === 1)
         expect(refunded).toEqual(['TICKET'])
+        // On the watchdog's callTimeoutMs, not a budget already spent.
+        await sleep(5)
+        expect(w.refunds[0]!.aborted).toBe(false)
     })
 
     // The grace was rotated up after the open: the box's own deadline, in

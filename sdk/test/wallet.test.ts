@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 import algosdk from 'algosdk'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { PENDING_BY_OPERATOR, STATUS_OPEN, STATUS_PENDING_SETTLE, type TicketRecord } from '@txnlab/zs-proto/escrow'
+import { PENDING_BY_OPERATOR, STATUS_OPEN, STATUS_PENDING_SETTLE, type TicketRecord, ticketView } from '@txnlab/zs-proto/escrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 
@@ -1197,9 +1197,20 @@ describe('OpenHandle', () => {
         const src = refundSources.get(h)!
         expect(src.graceSeconds).toBe(7n)
         const signal = new AbortController().signal
-        expect(await src.readTicketBox(signal)).toBeNull()
+        expect(await src.readTicket(signal)).toBeNull()
         expect(chain.calls.readTicketBox).toEqual([decodeTicketId(s.ticket_id_b64)])
         expect(chain.signals.readTicketBox).toBe(signal)
+        // A live box reads as its view and the amount of its claim.
+        const box = {
+            status: STATUS_PENDING_SETTLE,
+            pendingBy: PENDING_BY_OPERATOR,
+            pendingAmount: 42n,
+            expiresAt: 1_000n,
+            settlementGraceSeconds: 5n,
+        } as TicketRecord
+        chain.readTicketBox = async () => box
+        expect(await src.readTicket(signal)).toEqual({ view: ticketView(box), pendingAmount: 42n })
+        expect(ticketView(box).deadline).toBe(1_005n)
     })
 })
 

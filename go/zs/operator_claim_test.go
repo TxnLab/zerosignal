@@ -595,13 +595,17 @@ func TestRefundWatchdog_RefusesToLapseAnOverclaim(t *testing.T) {
 	}
 }
 
-// lapseChain is an ackChain that also records each settleLapsed.
+// lapseChain is an ackChain that also records each settleLapsed, and refuses
+// one on a spent context, as algod would.
 type lapseChain struct {
 	ackChain
 	lapses atomic.Int32
 }
 
-func (c *lapseChain) ComposeSettleLapsed(context.Context, escrow.SettleLapsedArgs, transaction.TransactionSigner, string) (escrow.CallResult, error) {
+func (c *lapseChain) ComposeSettleLapsed(ctx context.Context, _ escrow.SettleLapsedArgs, _ transaction.TransactionSigner, _ string) (escrow.CallResult, error) {
+	if err := ctx.Err(); err != nil {
+		return escrow.CallResult{}, err
+	}
 	c.lapses.Add(1)
 	return escrow.CallResult{TxID: "LAPSETX"}, nil
 }

@@ -12,7 +12,7 @@
 
 import { base64 } from '@scure/base'
 import algosdk from 'algosdk'
-import type { TicketRecord } from '@txnlab/zs-proto/escrow'
+import { type TicketRecord, ticketView } from '@txnlab/zs-proto/escrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { receiptSigDigest } from '@txnlab/zs-proto/ticket'
 
@@ -648,7 +648,10 @@ export class Wallet implements WalletOpener {
         }
         refundSources.set(h, {
             graceSeconds,
-            readTicketBox: (signal) => chain.readTicketBox(decodeTicketId(fields.ticketId), signal),
+            readTicket: async (signal) => {
+                const rec = await chain.readTicketBox(decodeTicketId(fields.ticketId), signal)
+                return rec === null ? null : { view: ticketView(rec), pendingAmount: rec.pendingAmount }
+            },
         })
         return h
     }
