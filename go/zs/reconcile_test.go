@@ -219,7 +219,7 @@ func (f *fakeChain) seen() []string {
 var journalDeployment = Deployment{Rail: ticket.RailAlgorand, Network: "custom", EscrowAppID: 7}
 
 func testReconciler(j TicketJournal, chain ticketChain, watching ...string) *reconciler {
-	r := newReconciler(j, chain, "PAYER", journalDeployment, func(id string) bool { return slices.Contains(watching, id) }, nil, discardLogger())
+	r := newReconciler(j, boxChain{chain}, "PAYER", journalDeployment, func(id string) bool { return slices.Contains(watching, id) }, nil, discardLogger())
 	r.now = func() time.Time { return reconcileNow }
 	return r
 }
@@ -302,6 +302,53 @@ func TestReconciler_SubmitsTheVerdictsCall(t *testing.T) {
 		testReconciler(j, chain).sweep()
 		if got := chain.seen(); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: calls %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// boxRecordingChain records the box each lapse, re-settle and freeze is handed.
+type boxRecordingChain struct {
+	fakeChain
+	handed []*escrow.TicketRecord
+}
+
+func (c *boxRecordingChain) lapse(ctx context.Context, rec TicketRecord, b *escrow.TicketRecord) (string, error) {
+	c.handed = append(c.handed, b)
+	return c.fakeChain.lapse(ctx, rec, b)
+}
+func (c *boxRecordingChain) resettle(ctx context.Context, rec TicketRecord, b *escrow.TicketRecord) (string, error) {
+	c.handed = append(c.handed, b)
+	return c.fakeChain.resettle(ctx, rec, b)
+}
+func (c *boxRecordingChain) freeze(ctx context.Context, rec TicketRecord, b *escrow.TicketRecord, a SettleArgs) (string, error) {
+	c.handed = append(c.handed, b)
+	return c.fakeChain.freeze(ctx, rec, b, a)
+}
+
+// Each call that names the box gets the one the sweep read: walletChain takes
+// the operator's owner address, which the contract pays, from it.
+func TestReconciler_HandsTheChainTheBoxItRead(t *testing.T) {
+	over := withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), settled)
+	over.PendingAmount++
+	for _, tc := range []struct {
+		name string
+		rec  TicketRecord
+		box  *escrow.TicketRecord
+		want string
+	}{
+		{"lapse", openRec(), box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute), "lapse T"},
+		{"re-settle", pendingRec(time.Hour), box(escrow.StatusOpen, 0, time.Hour), "settle T"},
+		{"freeze", pendingRec(time.Hour), over, "freeze T"},
+	} {
+		j := newMemJournal()
+		put(t, j, tc.rec)
+		chain := &boxRecordingChain{fakeChain: fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}}}
+		testReconciler(j, chain).sweep()
+		if got := chain.seen(); !slices.Equal(got, []string{tc.want}) {
+			t.Fatalf("%s: calls %v, want %s", tc.name, got, tc.want)
+		}
+		if len(chain.handed) != 1 || chain.handed[0] != tc.box {
+			t.Errorf("%s: handed %v, want the box read", tc.name, chain.handed)
 		}
 	}
 }

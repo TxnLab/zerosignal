@@ -44,9 +44,14 @@ import {
 } from '@txnlab/zs-proto/solana/zsescrow'
 import type { UsageReceipt } from '@txnlab/zs-proto/ticket'
 import type { SettleAck } from '@txnlab/zs-proto/wire'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
+import { partsOf } from '../src/client-parts.js'
+import { Client, type RegistryProvider, isMemoryJournal, memoryJournal, resolveNetwork } from '../src/index.js'
+import { Reconciler } from '../src/reconciler.js'
+import type { SettleArgs, TicketRecord } from '../src/reconcile.js'
+import { solanaSweep } from '../src/solana/reconcile.js'
 import { NoSettleAckRouteError, ProtestAfterDeadlineError, settleArgsOf } from '../src/ack.js'
 import type { Operator } from '../src/operator.js'
 import { type OpenHandle, ProtestReason, type ProtestReasonCode } from '../src/parts.js'
@@ -856,5 +861,271 @@ describe('Solana refund watchdog', () => {
         await untilDone(rw, h.ticketId)
         expect(f.state.sent).toHaveLength(1)
         expect(refunded).toEqual([h.ticketId])
+    })
+})
+
+const sweepNetwork = { network: 'localnet', escrowAppId: 7n } as const
+const sweepDeployment = resolveNetwork(sweepNetwork)
+
+// The fixture ticket's journal row, its open long expired.
+function rowOf(status: TicketRecord['status'], settle?: SettleArgs): TicketRecord {
+    const hourAgo = Date.now() - 3_600_000
+    return {
+        ticketId: base64.encode(TICKET_ID),
+        openTxId: '',
+        escrowAppId: sweepDeployment.escrowAppId,
+        deployment: sweepDeployment.key,
+        target: { op: Number(OPERATOR_ID), node: Number(NODE_ID) },
+        payer: PAYER,
+        maxPrice: 1n,
+        expiresAt: hourAgo,
+        status,
+        createdAt: hourAgo,
+        updatedAt: hourAgo,
+        ...(settle && { settle }),
+    }
+}
+
+// A reconciler over the fixture's wallet and a journal holding rec, with
+// what its spend guard heard.
+async function solanaReconciler(f: Awaited<ReturnType<typeof fixture>>, rec: TicketRecord) {
+    const journal = memoryJournal()
+    await journal.put(rec)
+    const spend: string[] = []
+    const barred: NodeRef[] = []
+    const r = new Reconciler({
+        journal,
+        chain: solanaSweep(f.wallet),
+        payer: PAYER,
+        deployment: sweepDeployment,
+        watching: () => false,
+        spend: {
+            admit() {},
+            reserve() {},
+            settle: (id, charged) => void spend.push(`settle ${id} ${charged}`),
+            release: (id) => void spend.push(`release ${id}`),
+        },
+        overclaimed: (rec) => void barred.push(rec.target),
+    })
+    const kept = async () => (await journal.list(PAYER, sweepDeployment)).length === 1
+    return { r, spend, barred, kept }
+}
+
+describe('Solana reconciler', () => {
+    // The reconciler finishes a journaled Solana ticket as it does an
+    // Algorand one, reading the ticket account where Algorand reads the box:
+    // it refunds an open ticket past its deadline, lapses a node's claim the
+    // node left, re-fires the payer's ack against a claim at the receipt,
+    // freezes one above it with the receipt's ack, and forgets a ticket
+    // frozen or gone. It tells the spend guard how each refund and lapse
+    // ended, and bars a node whose claim is above the receipt, inside the
+    // window or past it.
+    const over = (c: ClaimFields) => void (c.amount += 1n)
+    const cases: {
+        name: string
+        status?: number
+        edit?: (c: ClaimFields) => void
+        deadlineIn?: bigint
+        rec: TicketRecord['status']
+        receipt?: boolean
+        ending?: (e: Ending) => Instruction
+        ack?: boolean
+        kept?: boolean
+        spend?: 'release' | 'settle'
+        barred?: boolean
+    }[] = [
+        { name: 'open past its deadline', status: TICKET_OPEN, deadlineIn: -3600n, rec: 'open', ending: (e) => d.refundInactive(e), kept: true, spend: 'release' },
+        { name: "a node's claim left to lapse", status: TICKET_PENDING_BY_OPERATOR, deadlineIn: -3600n, rec: 'open', ending: (e) => d.settleLapsed(e), kept: true, spend: 'settle' },
+        {
+            name: "a node's claim left to lapse, with a receipt",
+            status: TICKET_PENDING_BY_OPERATOR,
+            deadlineIn: -3600n,
+            rec: 'settle_pending',
+            receipt: true,
+            ending: (e) => d.settleLapsed(e),
+            kept: true,
+            spend: 'release',
+        },
+        { name: "a node's claim at the receipt", status: TICKET_PENDING_BY_OPERATOR, deadlineIn: 3600n, rec: 'settle_pending', receipt: true, ack: true, kept: true },
+        { name: 'an open ticket with a receipt', status: TICKET_OPEN, deadlineIn: 3600n, rec: 'settle_pending', receipt: true, ack: true, kept: true },
+        {
+            name: "a node's claim above the receipt",
+            status: TICKET_PENDING_BY_OPERATOR,
+            edit: over,
+            deadlineIn: 3600n,
+            rec: 'settle_pending',
+            receipt: true,
+            ack: true,
+            kept: true,
+            barred: true,
+        },
+        {
+            name: "a node's claim above the receipt past the window",
+            status: TICKET_PENDING_BY_OPERATOR,
+            edit: over,
+            deadlineIn: -3600n,
+            rec: 'settle_pending',
+            receipt: true,
+            kept: true,
+            barred: true,
+        },
+        { name: 'frozen', status: TICKET_FROZEN, deadlineIn: 3600n, rec: 'settle_pending', receipt: true },
+        { name: 'gone', rec: 'settle_pending', receipt: true, spend: 'release' },
+        { name: 'gone without a receipt', rec: 'open' },
+    ]
+    it.each(cases)('sweeps $name', async (c) => {
+        const f = await fixture()
+        let t = null
+        if (c.status === undefined) {
+            f.state.accounts.set(TICKET_ADDR, null)
+        } else {
+            setTicket(f, c.status, c.status === TICKET_OPEN ? 0n : ARGS.amountCharged, c.edit)
+            setTicketDeadline(f, nowSeconds() + c.deadlineIn!)
+            t = await f.ticket()
+        }
+        const rec = rowOf(c.rec, c.receipt ? ARGS : undefined)
+        const { r, spend, barred, kept } = await solanaReconciler(f, rec)
+        await r.sweep()
+
+        if (c.ending !== undefined) {
+            expect(f.state.sent).toHaveLength(1)
+            const e: Ending = { submitter: PAYER, operatorId: OPERATOR_ID, nodeId: NODE_ID, ticketId: TICKET_ID, rentPayer: t!.rentPayer, payer: PAYER }
+            const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [c.ending(e)], 'legacy')
+            expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+        } else if (c.ack) {
+            expect(f.state.sent).toHaveLength(1)
+            expect(base64.encode(encodeTransaction(f.state.sent[0]!))).toBe(ACK.wire_base64)
+        } else {
+            expect(f.state.sent).toHaveLength(0)
+        }
+        expect(await kept()).toBe(c.kept === true)
+        const want = { release: [`release ${rec.ticketId}`], settle: [`settle ${rec.ticketId} ${ARGS.amountCharged}`] }
+        expect(spend).toEqual(c.spend ? want[c.spend] : [])
+        expect(barred).toEqual(c.barred ? [rec.target] : [])
+    })
+
+    // A Solana submit waits for its confirmation, which can outlast the
+    // sweep's callTimeoutMs. It is waited for, so a refund that lands late
+    // frees its reservation that sweep, rather than read as a ticket gone on
+    // the next.
+    it('waits for a submit to confirm', async () => {
+        expect(solanaSweep(await (await fixture()).wallet).submitTimeoutMs).toBe(SOLANA_ENDING_TIMEOUT_MS)
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        setTicketDeadline(f, nowSeconds() - 3600n)
+        const landAt = Date.now() + 150
+        const land = f.state.land
+        f.rpc.getSignatureStatuses = async () => [Date.now() < landAt ? null : land]
+        f.rpc.getBlockHeight = async () => 0n
+        const rec = rowOf('open')
+        const { r, spend } = await solanaReconciler(f, rec)
+        r.callTimeoutMs = 20
+        await r.sweep()
+        expect(f.state.sent).toHaveLength(1)
+        expect(spend).toEqual([`release ${rec.ticketId}`])
+    })
+
+    // It reads the ticket at the row's node, operator id then node id, as
+    // the open put it there.
+    it.each([
+        ['refunds', TICKET_OPEN, 0n, (e: Ending) => d.refundInactive(e)],
+        ['lapses', TICKET_PENDING_BY_OPERATOR, ARGS.amountCharged, (e: Ending) => d.settleLapsed(e)],
+    ] as const)('%s the ticket at its node', async (_name, status, claim, ix) => {
+        const f = await fixture()
+        setTicket(f, status, claim)
+        setTicketDeadline(f, nowSeconds() - 3600n)
+        const t = await f.ticket()
+        const [opId, nodeId] = [7n, 9n]
+        f.state.accounts.set(d.ticket(d.node(opId, nodeId), TICKET_ID), f.state.accounts.get(TICKET_ADDR)!)
+        f.state.accounts.set(d.ticket(d.node(nodeId, opId), TICKET_ID), null)
+        f.state.accounts.set(TICKET_ADDR, null)
+        const rec = { ...rowOf('open'), target: { op: Number(opId), node: Number(nodeId) } }
+        const { r } = await solanaReconciler(f, rec)
+        await r.sweep()
+        expect(f.state.sent).toHaveLength(1)
+        const e: Ending = { submitter: PAYER, operatorId: opId, nodeId, ticketId: TICKET_ID, rentPayer: t.rentPayer, payer: PAYER }
+        const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [ix(e)], 'legacy')
+        expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+    })
+
+    // A ticket the sweep cannot read is no ticket gone: a failed read, or a
+    // row whose ticket id does not decode, keeps the row past its expiry,
+    // with nothing sent or released, for the next sweep to retry.
+    it.each(['a failed read', 'an undecodable ticket id'])('keeps a row after %s', async (what) => {
+        const f = await fixture()
+        let rec = rowOf('settle_pending', ARGS)
+        if (what === 'a failed read') {
+            f.rpc.getAccountInfo = async () => {
+                throw new Error('rpc down')
+            }
+        } else {
+            rec = { ...rec, ticketId: 'not a ticket id' }
+        }
+        const { r, spend, kept } = await solanaReconciler(f, rec)
+        await r.sweep()
+        expect(await kept()).toBe(true)
+        expect(f.state.sent).toHaveLength(0)
+        expect(spend).toEqual([])
+    })
+
+    // A re-settle or freeze that fails says which, over the cause.
+    it.each([
+        ['re-settle', (s: ReturnType<typeof solanaSweep>, rec: TicketRecord) => s.resettle(rec, null, new AbortController().signal)],
+        ['freeze', (s: ReturnType<typeof solanaSweep>, rec: TicketRecord) => s.freeze(rec, null, ARGS, new AbortController().signal)],
+    ] as const)('wraps a failed %s', async (what, call) => {
+        const f = await fixture()
+        const err = await call(solanaSweep(f.wallet), rowOf('settle_pending', ARGS)).catch((x: unknown) => x)
+        expect(err).toBeInstanceOf(Error)
+        expect((err as Error).message).toMatch(new RegExp(`^wallet: ${what}: .*no ticket account`))
+        expect(((err as Error).cause as Error).message).toMatch(/no ticket account/)
+    })
+
+    const registry: RegistryProvider = {
+        operators: async () => [],
+        resolve: async () => undefined,
+        allOperators: async () => [],
+        reprobeEphemeral: async () => null,
+        recordModelDemand: () => {},
+    }
+    const signer = { address: PAYER, signBytes: async () => new Uint8Array(), signTransactions: async () => [] }
+
+    // A Client over a SolanaWallet sweeps its journal from create, as one
+    // over the SDK's Algorand Wallet does.
+    it('runs from a Client over a SolanaWallet', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_OPEN, 0n)
+        setTicketDeadline(f, nowSeconds() - 3600n)
+        const journal = memoryJournal()
+        await journal.put(rowOf('open'))
+        const c = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })
+        try {
+            await vi.waitFor(() => expect(f.state.sent).toHaveLength(1))
+        } finally {
+            await c.close()
+        }
+    })
+
+    // With no journal it gets the in-memory default and a sweep over it, and
+    // a second such Client on one journal is refused, as with the Algorand
+    // Wallet.
+    it('journals a SolanaWallet in memory and sweeps one journal once', async () => {
+        const f = await fixture()
+        const c = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet })
+        try {
+            expect(isMemoryJournal(c.config.stores.journal!)).toBe(true)
+            expect(partsOf.get(c)!.reconciler).toBeDefined()
+        } finally {
+            await c.close()
+        }
+        const journal = memoryJournal()
+        const a = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })
+        try {
+            await expect(Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })).rejects.toMatchObject({
+                code: 'invalid_config',
+                message: expect.stringContaining('already swept by another Client'),
+            })
+        } finally {
+            await a.close()
+        }
     })
 })

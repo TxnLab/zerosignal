@@ -6,8 +6,8 @@
 package zs
 
 // Generates / verifies proto/testdata/reconcile_vectors.json: a journaled
-// ticket, its box (or none) and the time in, the sweep's action out. Times sit
-// on every boundary decideTicket draws: the skew either side of the deadline,
+// ticket, its Algorand box or Solana ticket account (or none) and the time
+// in, the sweep's action out. Times sit on every boundary decideTicket draws: the skew either side of the deadline,
 // the lapse fallback, the settle-pending grace and the record's own expiry.
 //
 //	cd proto/go && go test ./zs -run TestReconcileVectors -update
@@ -18,10 +18,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
 
@@ -65,11 +67,75 @@ type reconcileVectorCase struct {
 	// Signed is the receipt that failed a check, absent when none.
 	Signed *reconcileVectorSettle `json:"signed,omitempty"`
 	// Box is null when the ticket has no box on chain.
-	Box             *reconcileVectorBox `json:"box"`
-	NowMs           int64               `json:"now_ms"`
-	LapseFallbackMs int64               `json:"lapse_fallback_ms"`
+	Box *reconcileVectorBox `json:"box"`
+	// Ticket, when present, is a Solana ticket account in place of the box,
+	// and TicketClosed a Solana ticket with no account: either makes the case
+	// decideSolanaTicket's.
+	Ticket          *reconcileVectorTicket `json:"ticket,omitempty"`
+	TicketClosed    bool                   `json:"ticket_closed,omitempty"`
+	NowMs           int64                  `json:"now_ms"`
+	LapseFallbackMs int64                  `json:"lapse_fallback_ms"`
 
 	Action string `json:"action"`
+}
+
+// reconcileVectorTicket is the zs_escrow ticket account fields
+// decideSolanaTicket reads.
+type reconcileVectorTicket struct {
+	Status    uint8                `json:"status"`
+	ExpiresAt int64                `json:"expires_at"`
+	Grace     uint32               `json:"grace"`
+	Pending   reconcileVectorClaim `json:"pending"`
+}
+
+type reconcileVectorClaim struct {
+	Amount          uint64 `json:"amount"`
+	ReceiptDigest   string `json:"receipt_digest"` // base64, 32 bytes
+	TtftMs          uint64 `json:"ttft_ms"`
+	DecodeMs        uint64 `json:"decode_ms"`
+	InputUnits      uint64 `json:"input_units"`
+	OutputUnits     uint64 `json:"output_units"`
+	OutputUsageType uint8  `json:"output_usage_type"`
+	AuxUsageType    uint8  `json:"aux_usage_type"`
+	AuxCount        uint64 `json:"aux_count"`
+}
+
+// rvUnknownSolanaStatus is a ticket status the program never writes.
+const rvUnknownSolanaStatus = 7
+
+// solanaTwin is c with its box as the Solana ticket account carrying the same
+// state: the same status, deadline and pending claim, or a closed account for
+// no box. The program has no settled status and no pending status without a
+// side, so those read as one it never writes, unrecognized as on Algorand.
+func solanaTwin(c reconcileVectorCase) reconcileVectorCase {
+	b := c.Box
+	c.Name = "solana/" + c.Name
+	if b == nil {
+		c.TicketClosed = true
+		return c
+	}
+	status := uint8(rvUnknownSolanaStatus)
+	switch {
+	case b.Status == escrow.StatusOpen:
+		status = uint8(zsescrow.TicketOpen)
+	case b.Status == escrow.StatusFrozen:
+		status = uint8(zsescrow.TicketFrozen)
+	case b.Status == escrow.StatusPendingSettle && b.PendingBy == escrow.PendingByOperator:
+		status = uint8(zsescrow.TicketPendingByOperator)
+	case b.Status == escrow.StatusPendingSettle && b.PendingBy == escrow.PendingByPayer:
+		status = uint8(zsescrow.TicketPendingByPayer)
+	}
+	c.Box = nil
+	c.Ticket = &reconcileVectorTicket{
+		Status: status, ExpiresAt: int64(b.ExpiresAt), Grace: uint32(b.SettlementGraceSeconds),
+		Pending: reconcileVectorClaim{
+			Amount: b.PendingAmount, ReceiptDigest: b.PendingDigest, TtftMs: b.PendingTtftMs, DecodeMs: b.PendingDecodeMs,
+			InputUnits: b.PendingInputCount, OutputUnits: b.PendingOutputCount,
+			OutputUsageType: uint8(b.PendingOutputUsageType), AuxUsageType: uint8(b.PendingAuxOutputUsageType),
+			AuxCount: b.PendingAuxOutputCount,
+		},
+	}
+	return c
 }
 
 const (
@@ -244,13 +310,58 @@ func reconcileVectorInputs() []reconcileVectorCase {
 			cases = append(cases, mk(fmt.Sprintf("no_box/%s at expiry%+dms", r.name, off), r, nil, expiryMs+off))
 		}
 	}
+
+	// Every case again on Solana, the ticket account carrying the box's state
+	// or closed where there is no box, which must be decided the same way
+	// (TestReconcileVectors_SolanaDecidesAsAlgorand).
+	for _, c := range slices.Clone(cases) {
+		cases = append(cases, solanaTwin(c))
+	}
 	return cases
 }
 
 func runReconcileVector(t *testing.T, c reconcileVectorCase) string {
 	t.Helper()
 	rec, box := reconcileVectorInputsOf(t, c)
-	return decideTicket(rec, box, time.UnixMilli(c.NowMs), time.Duration(c.LapseFallbackMs)*time.Millisecond).String()
+	now, fallback := time.UnixMilli(c.NowMs), time.Duration(c.LapseFallbackMs)*time.Millisecond
+	switch {
+	case c.TicketClosed:
+		return decideSolanaTicket(rec, nil, now, fallback).String()
+	case c.Ticket != nil:
+		return decideSolanaTicket(rec, rvTicket(t, c.Ticket), now, fallback).String()
+	}
+	return decideTicket(rec, box, now, fallback).String()
+}
+
+func rvTicket(t *testing.T, v *reconcileVectorTicket) *zsescrow.Ticket {
+	t.Helper()
+	p := v.Pending
+	return &zsescrow.Ticket{
+		Status: zsescrow.TicketStatus(v.Status), ExpiresAt: v.ExpiresAt, Grace: v.Grace,
+		Pending: zsescrow.ClaimFields{
+			Amount: p.Amount, ReceiptDigest: rvDecode32(t, p.ReceiptDigest), TTFTMs: p.TtftMs, DecodeMs: p.DecodeMs,
+			InputUnits: p.InputUnits, OutputUnits: p.OutputUnits, OutputUsageType: p.OutputUsageType,
+			AuxUsageType: p.AuxUsageType, AuxCount: p.AuxCount,
+		},
+	}
+}
+
+// A Solana ticket account is decided as the Algorand box carrying the same
+// state, and a closed one as no box, on every boundary the vectors draw.
+func TestReconcileVectors_SolanaDecidesAsAlgorand(t *testing.T) {
+	n := 0
+	for _, c := range reconcileVectorInputs() {
+		if c.Ticket != nil || c.TicketClosed {
+			continue
+		}
+		n++
+		if got, want := runReconcileVector(t, solanaTwin(c)), runReconcileVector(t, c); got != want {
+			t.Errorf("%s: Solana %s, Algorand %s", c.Name, got, want)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no Algorand cases")
+	}
 }
 
 // reconcileVectorInputsOf decodes a case into the record and box (nil when
@@ -321,7 +432,7 @@ func TestReconcileVectors(t *testing.T) {
 		t.Fatalf("read vectors (regenerate with -update): %v", err)
 	}
 	if !bytes.Equal(want, out) {
-		t.Fatalf("decideTicket differs from %s; if the change is intended, regenerate with -update and review the diff", reconcileVectorsPath)
+		t.Fatalf("decideTicket or decideSolanaTicket differs from %s; if the change is intended, regenerate with -update and review the diff", reconcileVectorsPath)
 	}
 }
 

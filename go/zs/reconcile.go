@@ -45,8 +45,8 @@ type reconcileAction uint8
 
 const (
 	reconcileWait reconcileAction = iota
-	// reconcileForget: the box is gone, or frozen, which no payer call can
-	// change.
+	// reconcileForget: the box or ticket account is gone, or frozen, which no
+	// payer call can change.
 	reconcileForget
 	reconcileRefund
 	reconcileLapse
@@ -164,15 +164,71 @@ func solanaClaimFields(a SettleArgs) zsescrow.ClaimFields {
 	}
 }
 
+// sweptTicket is one read of a journaled ticket on its rail: the Algorand box
+// or the Solana ticket account. A nil sweptTicket is a ticket gone.
+type sweptTicket interface {
+	view() settle.Ticket
+	// pendingAmount is the amount of the claim the ticket carries.
+	pendingAmount() uint64
+	// judge is how the operator's claim stands against a.
+	judge(a SettleArgs) ClaimVerdict
+}
+
+type boxTicket struct{ *escrow.TicketRecord }
+
+func (b boxTicket) view() settle.Ticket             { return b.View() }
+func (b boxTicket) pendingAmount() uint64           { return b.PendingAmount }
+func (b boxTicket) judge(a SettleArgs) ClaimVerdict { return judgeClaim(a, b.TicketRecord) }
+
+// sweptBox is box as a sweptTicket: nil, not a typed nil, when gone.
+func sweptBox(box *escrow.TicketRecord) sweptTicket {
+	if box == nil {
+		return nil
+	}
+	return boxTicket{box}
+}
+
+type solanaSweptTicket struct{ *zsescrow.Ticket }
+
+func (t solanaSweptTicket) view() settle.Ticket             { return t.View() }
+func (t solanaSweptTicket) pendingAmount() uint64           { return t.Pending.Amount }
+func (t solanaSweptTicket) judge(a SettleArgs) ClaimVerdict { return judgeSolanaClaim(a, t.Ticket) }
+
+// sweptSolana is t as a sweptTicket: nil, not a typed nil, when closed.
+func sweptSolana(t *zsescrow.Ticket) sweptTicket {
+	if t == nil {
+		return nil
+	}
+	return solanaSweptTicket{t}
+}
+
+// judgeSwept is the verdict on t's claim against a, ClaimNone when t is gone.
+func judgeSwept(a SettleArgs, t sweptTicket) ClaimVerdict {
+	if t == nil {
+		return ClaimNone
+	}
+	return t.judge(a)
+}
+
 // decideTicket is decideSettlement for a ZeroSignalEscrow box (nil when gone).
 func decideTicket(rec TicketRecord, box *escrow.TicketRecord, now time.Time, lapseFallback time.Duration) reconcileAction {
-	if box == nil {
+	return decideSwept(rec, sweptBox(box), now, lapseFallback)
+}
+
+// decideSolanaTicket is decideSettlement for a zs_escrow ticket account (nil
+// when closed).
+func decideSolanaTicket(rec TicketRecord, t *zsescrow.Ticket, now time.Time, lapseFallback time.Duration) reconcileAction {
+	return decideSwept(rec, sweptSolana(t), now, lapseFallback)
+}
+
+func decideSwept(rec TicketRecord, t sweptTicket, now time.Time, lapseFallback time.Duration) reconcileAction {
+	if t == nil {
 		return decideSettlement(rec, nil, ClaimUnread, now, lapseFallback)
 	}
-	view := box.View()
+	view := t.view()
 	claim := ClaimUnread
 	if a := rec.signedArgs(); a != nil {
-		claim = judgeClaim(*a, box)
+		claim = t.judge(*a)
 	}
 	return decideSettlement(rec, &view, claim, now, lapseFallback)
 }
@@ -268,6 +324,52 @@ type ticketChain interface {
 	freezes() bool
 }
 
+// sweepChain is what the sweep does on chain for one ticket, on either rail:
+// ticketChain with the ticket read as a sweptTicket. boxChain adapts an
+// Algorand ticketChain; solanaChain is the Solana wallet's.
+type sweepChain interface {
+	read(ctx context.Context, rec TicketRecord) (sweptTicket, error)
+	refund(ctx context.Context, rec TicketRecord) (string, error)
+	lapse(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error)
+	resettle(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error)
+	freeze(ctx context.Context, rec TicketRecord, t sweptTicket, a SettleArgs) (string, error)
+	freezes() bool
+	// submitTimeout bounds each submit in place of the reconciler's
+	// callTimeout, for a rail whose submit waits for its outcome; 0 keeps it.
+	submitTimeout() time.Duration
+}
+
+// boxChain is an Algorand ticketChain as a sweepChain.
+type boxChain struct{ ticketChain }
+
+func (c boxChain) read(ctx context.Context, rec TicketRecord) (sweptTicket, error) {
+	box, err := c.readBox(ctx, rec.TicketID)
+	if err != nil {
+		return nil, err
+	}
+	return sweptBox(box), nil
+}
+
+func (c boxChain) lapse(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error) {
+	return c.ticketChain.lapse(ctx, rec, boxOf(t))
+}
+
+func (c boxChain) resettle(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error) {
+	return c.ticketChain.resettle(ctx, rec, boxOf(t))
+}
+
+func (c boxChain) freeze(ctx context.Context, rec TicketRecord, t sweptTicket, a SettleArgs) (string, error) {
+	return c.ticketChain.freeze(ctx, rec, boxOf(t), a)
+}
+
+func (boxChain) submitTimeout() time.Duration { return 0 }
+
+// boxOf is the box behind t, nil when gone.
+func boxOf(t sweptTicket) *escrow.TicketRecord {
+	b, _ := t.(boxTicket)
+	return b.TicketRecord
+}
+
 // reconciler finishes journaled tickets this process is not watching: those
 // left by an earlier run, and those whose refund watchdog gave up. Each
 // ticket has one driver at a time; a live ticket stays with the watchdog,
@@ -276,7 +378,7 @@ type ticketChain interface {
 // after the ack failed, would otherwise lapse.
 type reconciler struct {
 	journal    TicketJournal
-	chain      ticketChain
+	chain      sweepChain
 	payer      string
 	deployment Deployment
 	watching   func(ticketID string) bool
@@ -312,7 +414,7 @@ type reconciler struct {
 
 // spend is an argument rather than a field set later because start sweeps at
 // once, and that first sweep is the one that finds what a restart left behind.
-func newReconciler(journal TicketJournal, chain ticketChain, payer string, d Deployment, watching func(string) bool, spend SpendGuard, log *slog.Logger) *reconciler {
+func newReconciler(journal TicketJournal, chain sweepChain, payer string, d Deployment, watching func(string) bool, spend SpendGuard, log *slog.Logger) *reconciler {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &reconciler{
 		journal:       journal,
@@ -466,15 +568,15 @@ func (r *reconciler) exhausted(ticketID string) bool {
 // other call is its watchdog's.
 func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
-	box, err := r.chain.readBox(ctx, rec.TicketID)
+	t, err := r.chain.read(ctx, rec)
 	cancel()
 	if err != nil {
-		r.log.Debug("ticket reconciler: box read failed; retrying next sweep",
+		r.log.Debug("ticket reconciler: ticket read failed; retrying next sweep",
 			slog.String("ticket_id", rec.TicketID), slog.Any("err", err))
 		return
 	}
-	action := decideTicket(rec, box, r.now(), r.lapseFallback)
-	if a := rec.signedArgs(); a != nil && r.overclaimed != nil && judgeClaim(*a, box) == ClaimOverclaims {
+	action := decideSwept(rec, t, r.now(), r.lapseFallback)
+	if a := rec.signedArgs(); a != nil && r.overclaimed != nil && judgeSwept(*a, t) == ClaimOverclaims {
 		r.overclaimed(rec)
 	}
 	if action == reconcileFreeze && !r.chain.freezes() {
@@ -490,20 +592,24 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 	case reconcileWait:
 		return
 	case reconcileForget:
-		r.forget(rec, box)
+		r.forget(rec, t)
 		return
 	case reconcileRefund:
 		submit = func(ctx context.Context) (string, error) { return r.chain.refund(ctx, rec) }
 	case reconcileLapse:
-		submit = func(ctx context.Context) (string, error) { return r.chain.lapse(ctx, rec, box) }
+		submit = func(ctx context.Context) (string, error) { return r.chain.lapse(ctx, rec, t) }
 	case reconcileResettle:
-		submit = func(ctx context.Context) (string, error) { return r.chain.resettle(ctx, rec, box) }
+		submit = func(ctx context.Context) (string, error) { return r.chain.resettle(ctx, rec, t) }
 	case reconcileFreeze:
 		// The receipt's values, not the box's: settling at the claim's own
 		// figure would match it and pay it.
-		submit = func(ctx context.Context) (string, error) { return r.chain.freeze(ctx, rec, box, *rec.signedArgs()) }
+		submit = func(ctx context.Context) (string, error) { return r.chain.freeze(ctx, rec, t, *rec.signedArgs()) }
 	}
-	ctx, cancel = context.WithTimeout(r.ctx, r.callTimeout)
+	budget := r.callTimeout
+	if d := r.chain.submitTimeout(); d > 0 {
+		budget = d
+	}
+	ctx, cancel = context.WithTimeout(r.ctx, budget)
 	txid, err := submit(ctx)
 	cancel()
 	if err != nil && r.stopped() {
@@ -517,7 +623,7 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 			// on the operator's doing.
 			r.log.Warn("ticket reconciler: operator's settle claim exceeds its signed receipt; submitted the receipt's settle to freeze the ticket",
 				slog.String("ticket_id", rec.TicketID), slog.String("txid", txid),
-				slog.Uint64("claimed_microusdc", box.PendingAmount), slog.Uint64("receipt_microusdc", rec.signedArgs().AmountCharged))
+				slog.Uint64("claimed_microusdc", t.pendingAmount()), slog.Uint64("receipt_microusdc", rec.signedArgs().AmountCharged))
 			return
 		}
 		r.log.Info("ticket reconciler: submitted "+action.String(),
@@ -532,7 +638,7 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 			case action == reconcileRefund, action == reconcileLapse && rec.Settle != nil:
 				recordSpend(r.log, "release", rec.TicketID, func() { r.spend.Release(rec.TicketID) })
 			case action == reconcileLapse:
-				recordSpend(r.log, "settle", rec.TicketID, func() { r.spend.Settle(rec.TicketID, box.PendingAmount) })
+				recordSpend(r.log, "settle", rec.TicketID, func() { r.spend.Settle(rec.TicketID, t.pendingAmount()) })
 			}
 		}
 		return
@@ -619,8 +725,8 @@ func (s *Client) journalPut(rec TicketRecord) {
 	}
 }
 
-func (r *reconciler) forget(rec TicketRecord, box *escrow.TicketRecord) {
-	if box != nil {
+func (r *reconciler) forget(rec TicketRecord, t sweptTicket) {
+	if t != nil {
 		// Frozen: only the admin's resolveFrozen can close it, so the escrowed
 		// USDC and the MBR slot stay locked until the arbiter acts, and
 		// nothing the payer can call applies. The spend reservation is left

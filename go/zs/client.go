@@ -277,18 +277,24 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 			}
 		}
 	}
-	// Only the SDK's own wallet runs a reconciler, which is what deletes rows;
+	// Only the SDK's own wallets run a reconciler, which is what deletes rows;
 	// with a caller's wallet a default journal would only grow.
-	sdkWallet, _ := cfg.Wallet.(*Wallet)
+	var sweep sweepChain
+	switch w := cfg.Wallet.(type) {
+	case *Wallet:
+		sweep = boxChain{walletChain{w}}
+	case *SolanaWallet:
+		sweep = solanaChain{w}
+	}
 	durableJournal := st.Journal != nil
-	if st.Journal == nil && sdkWallet != nil {
+	if st.Journal == nil && sweep != nil {
 		st.Journal = newMemJournal()
 		if st.JournalPath == "" {
 			cfg.Logger.Info("open tickets are journaled in memory: after a restart, a ticket this process opened is refunded only by hand. Set Stores.JournalPath to keep them")
 		}
 	}
 	var release func()
-	if sdkWallet != nil {
+	if sweep != nil {
 		var ok bool
 		if release, ok = claimJournal(st.Journal); !ok {
 			stopParts()
@@ -334,8 +340,8 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if c.nodeExcluder != nil {
 		c.refunds.overclaimed = c.barOverclaimer
 	}
-	if sdkWallet != nil {
-		c.reconcile = newReconciler(st.Journal, walletChain{sdkWallet}, sdkWallet.PayerAddr(), dep, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
+	if sweep != nil {
+		c.reconcile = newReconciler(st.Journal, sweep, cfg.Wallet.PayerAddr(), dep, c.refunds.watching, cfg.SpendGuard, cfg.Logger)
 		if c.nodeExcluder != nil {
 			c.reconcile.overclaimed = func(rec TicketRecord) { c.barOverclaimer(rec.TicketID, rec.Target) }
 		}

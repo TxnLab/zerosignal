@@ -5,9 +5,10 @@
 
 // Internal: the payer's sweep over its ticket journal, and the request path's
 // journal writes, mirroring proto/go/zs reconcile.go. What the sweep decides
-// per ticket is reconcile.ts's decideTicket.
+// per ticket is reconcile.ts's decideTicket, or decideSolanaTicket.
 
 import type { TicketRecord as TicketBox } from '@txnlab/zs-proto/escrow'
+import type { Ticket as SolanaTicket } from '@txnlab/zs-proto/solana/zsescrow'
 import type { Ticket, UsageReceipt } from '@txnlab/zs-proto/ticket'
 
 import { settleArgsOf } from './ack.js'
@@ -18,12 +19,15 @@ import type { OpenHandle, TicketJournal } from './parts.js'
 import { type Clock, type Logger, discardLogger } from './ports.js'
 import { withJournalTimeout } from './receipt-check.js'
 import {
+    type ClaimVerdict,
     DEFAULT_LAPSE_FALLBACK_MS,
     type ReconcileAction,
     type SettleArgs,
     type TicketRecord,
+    decideSolanaTicket,
     decideTicket,
     judgeClaim,
+    judgeSolanaClaim,
     signedArgs,
 } from './reconcile.js'
 import { idle } from './sleep.js'
@@ -40,7 +44,65 @@ export const RECONCILE_INTERVAL_MS = 60_000
 /** Bounds the failed submits per ticket per process, so a ticket that can never settle doesn't cost a fee every sweep. */
 export const RECONCILE_MAX_FAILURES = 10
 
-/** What the sweep does on chain for one ticket. walletChain provides it; tests fake it. */
+/**
+ * A ticket as the sweep read it: an Algorand box, or a Solana ticket account.
+ * Go's sweptTicket.
+ */
+export type SweptTicket = { box: TicketBox } | { solana: SolanaTicket }
+
+/**
+ * What the sweep does on chain for one ticket, on either rail. boxSweep
+ * provides it over a TicketChain, solanaSweep over a SolanaWallet. Go's
+ * sweepChain.
+ */
+export interface SweepChain {
+    /** The ticket as it stands, or null once it is gone. */
+    read(rec: TicketRecord, signal: AbortSignal): Promise<SweptTicket | null>
+    refund(rec: TicketRecord, signal: AbortSignal): Promise<string>
+    lapse(rec: TicketRecord, t: SweptTicket | null, signal: AbortSignal): Promise<string>
+    resettle(rec: TicketRecord, t: SweptTicket | null, signal: AbortSignal): Promise<string>
+    freeze(rec: TicketRecord, t: SweptTicket | null, args: SettleArgs, signal: AbortSignal): Promise<string>
+    freezes(signal: AbortSignal): Promise<boolean>
+    /**
+     * One submit's budget when it must outlast callTimeoutMs; absent, it is
+     * callTimeoutMs. Go's submitTimeout.
+     */
+    submitTimeoutMs?: number
+}
+
+/** boxSweep is the SweepChain over chain, the Algorand escrow's. Go's boxChain. */
+export function boxSweep(chain: TicketChain): SweepChain {
+    const boxOf = (t: SweptTicket | null) => (t !== null && 'box' in t ? t.box : null)
+    return {
+        read: async (rec, signal) => {
+            const box = await chain.readBox(rec.ticketId, signal)
+            return box === null ? null : { box }
+        },
+        refund: (rec, signal) => chain.refund(rec, signal),
+        lapse: (rec, t, signal) => chain.lapse(rec, boxOf(t), signal),
+        resettle: (rec, t, signal) => chain.resettle(rec, boxOf(t), signal),
+        freeze: (rec, t, args, signal) => chain.freeze(rec, boxOf(t), args, signal),
+        freezes: (signal) => chain.freezes(signal),
+    }
+}
+
+function decideSwept(rec: TicketRecord, t: SweptTicket | null, nowMs: number, lapseFallbackMs: number): ReconcileAction {
+    if (t !== null && 'solana' in t) return decideSolanaTicket(rec, t.solana, { nowMs }, lapseFallbackMs)
+    return decideTicket(rec, t?.box ?? null, { nowMs }, lapseFallbackMs)
+}
+
+// The verdict on t's claim against a, 'none' when t is gone. Go's judgeSwept.
+function judgeSwept(a: SettleArgs, t: SweptTicket | null): ClaimVerdict {
+    if (t !== null && 'solana' in t) return judgeSolanaClaim(a, t.solana)
+    return judgeClaim(a, t?.box ?? null)
+}
+
+function pendingAmountOf(t: SweptTicket | null): bigint {
+    if (t === null) return 0n
+    return 'solana' in t ? t.solana.pending.amount : t.box.pendingAmount
+}
+
+/** What the sweep does on chain for one Algorand ticket. walletChain provides it; tests fake it. */
 export interface TicketChain {
     /** The ticket's box, or null once it is gone. */
     readBox(ticketId: string, signal: AbortSignal): Promise<TicketBox | null>
@@ -113,7 +175,7 @@ export function walletChain(wallet: object): TicketChain | undefined {
 
 export interface ReconcilerOptions {
     journal: TicketJournal
-    chain: TicketChain
+    chain: SweepChain
     payer: string
     deployment: ResolvedNetwork
     /** Whether the refund watchdog still drives a ticket, which the sweep then leaves alone. */
@@ -159,7 +221,7 @@ export class Reconciler {
     handOff = false
 
     readonly #journal: TicketJournal
-    readonly #chain: TicketChain
+    readonly #chain: SweepChain
     readonly #payer: string
     readonly #deployment: ResolvedNetwork
     readonly #watching: (ticketId: string) => boolean
@@ -255,16 +317,16 @@ export class Reconciler {
     // A watched ticket gets a freeze or nothing: every other call is its
     // watchdog's.
     async #reconcile(rec: TicketRecord, watched: boolean, canFreeze: () => Promise<boolean>): Promise<void> {
-        let box: TicketBox | null
+        let t: SweptTicket | null
         try {
-            box = await this.#bounded((signal) => this.#chain.readBox(rec.ticketId, signal))
+            t = await this.#bounded((signal) => this.#chain.read(rec, signal))
         } catch (err) {
-            this.#log.debug('ticket reconciler: box read failed; retrying next sweep', { ticket_id: rec.ticketId, err: message(err) })
+            this.#log.debug('ticket reconciler: ticket read failed; retrying next sweep', { ticket_id: rec.ticketId, err: message(err) })
             return
         }
-        let action = decideTicket(rec, box, { nowMs: this.#clock() }, this.lapseFallbackMs)
+        let action = decideSwept(rec, t, this.#clock(), this.lapseFallbackMs)
         const signed = signedArgs(rec)
-        if (signed !== undefined && this.#overclaimed && judgeClaim(signed, box) === 'overclaims') this.#overclaimed(rec)
+        if (signed !== undefined && this.#overclaimed && judgeSwept(signed, t) === 'overclaims') this.#overclaimed(rec)
         // No freeze, and still no lapse: decideSettlement never lapses an
         // over-claim, which the operator can lapse itself.
         if (action === 'freeze' && !(await canFreeze())) action = 'wait'
@@ -274,28 +336,28 @@ export class Reconciler {
             case 'wait':
                 return
             case 'forget':
-                await this.#forget(rec, box)
+                await this.#forget(rec, t)
                 return
             case 'refundInactive':
                 submit = (signal) => this.#chain.refund(rec, signal)
                 break
             case 'settleLapsed':
-                submit = (signal) => this.#chain.lapse(rec, box, signal)
+                submit = (signal) => this.#chain.lapse(rec, t, signal)
                 break
             case 'settle':
-                submit = (signal) => this.#chain.resettle(rec, box, signal)
+                submit = (signal) => this.#chain.resettle(rec, t, signal)
                 break
             case 'freeze': {
                 // The receipt's values, not the box's: settling at the claim's
                 // own figure would match it and pay it.
                 const args = signedArgs(rec)!
-                submit = (signal) => this.#chain.freeze(rec, box, args, signal)
+                submit = (signal) => this.#chain.freeze(rec, t, args, signal)
                 break
             }
         }
         let txid: string
         try {
-            txid = await this.#bounded(submit)
+            txid = await this.#bounded(submit, this.#chain.submitTimeoutMs)
         } catch (err) {
             if (this.#stopped()) return // cut off by close, not refused
             this.#failed(rec, action, err)
@@ -309,7 +371,7 @@ export class Reconciler {
             this.#log.warn("ticket reconciler: operator's settle claim exceeds its signed receipt; submitted the receipt's settle to freeze the ticket", {
                 ticket_id: rec.ticketId,
                 txid,
-                claimed_microusdc: Number(box?.pendingAmount ?? 0n),
+                claimed_microusdc: Number(pendingAmountOf(t)),
                 receipt_microusdc: Number(signedArgs(rec)?.amountCharged ?? 0n),
             })
             return
@@ -324,7 +386,7 @@ export class Reconciler {
         if (action === 'refundInactive' || (action === 'settleLapsed' && rec.settle !== undefined)) {
             guardRecords(this.#log, 'release', rec.ticketId, () => spend.release(rec.ticketId))
         } else if (action === 'settleLapsed') {
-            guardRecords(this.#log, 'settle', rec.ticketId, () => spend.settle(rec.ticketId, Number(box!.pendingAmount)))
+            guardRecords(this.#log, 'settle', rec.ticketId, () => spend.settle(rec.ticketId, Number(pendingAmountOf(t))))
         }
     }
 
@@ -347,8 +409,8 @@ export class Reconciler {
         })
     }
 
-    async #forget(rec: TicketRecord, box: TicketBox | null): Promise<void> {
-        if (box !== null) {
+    async #forget(rec: TicketRecord, t: SweptTicket | null): Promise<void> {
+        if (t !== null) {
             // Frozen: only the admin's resolveFrozen can close it, so the
             // escrowed USDC and the MBR slot stay locked until the arbiter acts,
             // and nothing the payer can call applies. The spend reservation is
@@ -372,11 +434,12 @@ export class Reconciler {
     }
 
     /**
-     * One call under callTimeoutMs and close. The journal takes no signal, so
-     * its call is abandoned rather than cut off.
+     * One call under timeoutMs (callTimeoutMs when absent) and close. The
+     * journal takes no signal, so its call is abandoned rather than cut off.
      */
-    #bounded<T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> {
-        const signal = AbortSignal.any([this.#stop.signal, AbortSignal.timeout(this.callTimeoutMs)])
+    #bounded<T>(call: (signal: AbortSignal) => Promise<T>, timeoutMs?: number): Promise<T> {
+        const ms = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : this.callTimeoutMs
+        const signal = AbortSignal.any([this.#stop.signal, AbortSignal.timeout(ms)])
         if (signal.aborted) return Promise.reject(signal.reason)
         return new Promise<T>((resolve, reject) => {
             const onAbort = () => reject(signal.reason)

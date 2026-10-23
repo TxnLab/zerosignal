@@ -375,10 +375,11 @@ export function isMemoryJournal(j: TicketJournal): boolean {
  */
 export interface Stores {
     /**
-     * Records open tickets. When the Client builds the wallet, absent is
-     * memoryJournal(), which a restart loses. With a supplied wallet there is
-     * no default: only the Client's own wallet runs the sweep that deletes
-     * rows, so a supplied journal is the host's to drain.
+     * Records open tickets. When the wallet is one of the SDK's own types,
+     * Wallet or SolanaWallet, whoever built it, absent is memoryJournal(),
+     * which a restart loses. With any other wallet there is no default: only
+     * the SDK's own wallets run the sweep that deletes rows, so a supplied
+     * journal is the host's to drain.
      */
     journal?: TicketJournal
     /**

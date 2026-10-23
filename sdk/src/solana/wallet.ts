@@ -452,6 +452,24 @@ export class SolanaWallet implements WalletOpener {
     // ending returns its rent to. Go's solanaEnd.
     async #end(h: OpenHandle, what: string, ix: (e: Ending) => Instruction, signal: AbortSignal | undefined): Promise<string> {
         const { ticketId, opId, nodeId } = handleIds(what, h)
+        return this.#endTicket(opId, nodeId, ticketId, what, ix, signal)
+    }
+
+    /**
+     * @internal refund_inactive on ticketId at the node, for a ticket known
+     * only from the journal: the reconciler's, as the handle's refundInactive
+     * is the watchdog's.
+     */
+    refundTicket(operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, signal?: AbortSignal): Promise<string> {
+        return this.#endTicket(operatorId, nodeId, ticketId, 'refund-inactive', (e) => this.#deployment.refundInactive(e), signal)
+    }
+
+    /** @internal settle_lapsed on ticketId at the node, as refundTicket. */
+    lapseTicket(operatorId: bigint, nodeId: bigint, ticketId: Uint8Array, signal?: AbortSignal): Promise<string> {
+        return this.#endTicket(operatorId, nodeId, ticketId, 'settle-lapsed', (e) => this.#deployment.settleLapsed(e), signal)
+    }
+
+    async #endTicket(opId: bigint, nodeId: bigint, ticketId: Uint8Array, what: string, ix: (e: Ending) => Instruction, signal: AbortSignal | undefined): Promise<string> {
         const t = await this.readTicket(opId, nodeId, ticketId, signal)
         const e = await this.#ending(what, t, opId, nodeId, ticketId, signal)
         return (await this.#send(what, [ix(e)], SOLANA_SIGNATURE_FEE, signal)).signature

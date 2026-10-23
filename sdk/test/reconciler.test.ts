@@ -26,6 +26,7 @@ import {
     RECONCILE_MAX_FAILURES,
     Reconciler,
     type TicketChain,
+    boxSweep,
     journalOpen,
     journalReceipt,
     walletChain,
@@ -107,11 +108,14 @@ class FakeChain implements TicketChain {
         return 'TX'
     }
     refund = (rec: TicketRecord) => this.#record(`refund ${rec.ticketId}`)
-    lapse = (rec: TicketRecord) => this.#record(`lapse ${rec.ticketId}`)
-    resettle = (rec: TicketRecord) => this.#record(`settle ${rec.ticketId}`)
+    /** The box each lapse, re-settle and freeze was handed, in order. */
+    handed: (TicketBox | null)[] = []
+    lapse = (rec: TicketRecord, box: TicketBox | null) => (this.handed.push(box), this.#record(`lapse ${rec.ticketId}`))
+    resettle = (rec: TicketRecord, box: TicketBox | null) => (this.handed.push(box), this.#record(`settle ${rec.ticketId}`))
     /** Each freeze's args, in order. */
     frozeWith: SettleArgs[] = []
-    freeze = (rec: TicketRecord, _box: TicketBox | null, args: SettleArgs) => {
+    freeze = (rec: TicketRecord, box: TicketBox | null, args: SettleArgs) => {
+        this.handed.push(box)
         this.frozeWith.push(args)
         return this.#record(`freeze ${rec.ticketId}`)
     }
@@ -128,7 +132,7 @@ function testReconciler(journal: TicketJournal, chain: TicketChain, watching: st
     const log = recLogger()
     const r = new Reconciler({
         journal,
-        chain,
+        chain: boxSweep(chain),
         payer: 'PAYER',
         deployment: app7,
         watching: (id) => watching.includes(id),
@@ -200,6 +204,29 @@ describe('Reconciler', () => {
             await testReconciler(j, chain).r.sweep()
             expect(chain.calls).toEqual(want)
             expect(await ids(j)).toEqual(['T'])
+        })
+    }
+
+    // Each call that names the box gets the one the sweep read: walletChain
+    // takes the operator's owner address, which the contract pays, from it.
+    for (const [name, rec, b] of [
+        ['lapse', openRec(), box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, -11 * MIN)],
+        ['re-settle', pendingRec(HOUR), box(STATUS_OPEN, 0, HOUR)],
+        [
+            'freeze',
+            pendingRec(HOUR),
+            { ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, HOUR), pendingAmount: settled.amountCharged + 1n } as TicketBox,
+        ],
+    ] as const) {
+        it(`hands the chain the box it read: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, rec)
+            const chain = new FakeChain()
+            chain.boxes.set('T', b)
+            await testReconciler(j, chain).r.sweep()
+            expect(chain.calls).toHaveLength(1)
+            expect(chain.handed).toHaveLength(1)
+            expect(chain.handed[0]).toBe(b)
         })
     }
 
@@ -394,7 +421,7 @@ describe('Reconciler', () => {
             const barred: unknown[] = []
             const r = new Reconciler({
                 journal: j,
-                chain,
+                chain: boxSweep(chain),
                 payer: 'PAYER',
                 deployment: app7,
                 watching: (id) => watched && id === 'T',
@@ -529,7 +556,7 @@ describe('Reconciler', () => {
         let closing: Promise<void> | undefined
         const r = new Reconciler({
             journal: j,
-            chain,
+            chain: boxSweep(chain),
             payer: 'PAYER',
             deployment: app7,
             watching: () => {
@@ -595,7 +622,7 @@ describe('Reconciler', () => {
         const { r, log } = testReconciler(j, chain)
         r.callTimeoutMs = 20
         await r.sweep()
-        expect(log.logged.map((l) => l.msg)).toEqual(['ticket reconciler: box read failed; retrying next sweep'])
+        expect(log.logged.map((l) => l.msg)).toEqual(['ticket reconciler: ticket read failed; retrying next sweep'])
     })
 
     // The journal takes no signal, so a read in flight is abandoned; what
