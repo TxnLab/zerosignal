@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SolanaWallet's readTicket and sendAck, over the program's own ack
-// transaction from the shared transaction vectors: the twin of go/zs
-// solana_ack_test.go.
+// SolanaWallet's readTicket and sendAck, and its handle's settle paths, over
+// the program's own ack and protest transactions from the shared transaction
+// vectors: the twin of go/zs solana_ack_test.go and solana_endings_test.go.
 
 import { readFileSync } from 'node:fs'
 
 import * as ed25519 from '@noble/ed25519'
 import { base64 } from '@scure/base'
 import {
+    type Instruction,
     type Transaction,
     TOKEN_PROGRAM_ID,
     compileMessage,
@@ -43,15 +44,15 @@ import type { SettleAck } from '@txnlab/zs-proto/wire'
 import { describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
-import { NoSettleAckRouteError, settleArgsOf } from '../src/ack.js'
+import { NoSettleAckRouteError, ProtestAfterDeadlineError, settleArgsOf } from '../src/ack.js'
 import type { Operator } from '../src/operator.js'
-import type { OpenHandle } from '../src/parts.js'
+import { type OpenHandle, ProtestReason, type ProtestReasonCode } from '../src/parts.js'
 import type { SolanaSigner } from '../src/ports.js'
 import type { ClaimVerdict } from '../src/reconcile.js'
 import { solanaClaimFields } from '../src/solana/claim.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
-import type { Account, SignatureStatus, SolanaRpc } from '../src/solana/rpc.js'
+import { type Account, CODE_PREFLIGHT_FAILURE, type SignatureStatus, type SolanaRpc, SolanaRpcError } from '../src/solana/rpc.js'
 import { SolanaAckSendError, SolanaWallet } from '../src/solana/wallet.js'
 
 type Json = Record<string, any>
@@ -122,6 +123,9 @@ function cluster() {
         preflight: [] as (string | undefined)[],
         land: { slot: 5n, confirmations: 1n, err: null, confirmationStatus: 'confirmed' } as SignatureStatus | null,
         height: 0n,
+        // Fails the next transaction at sendTransaction, as a failed preflight
+        // does, sending nothing.
+        sendErr: undefined as unknown,
     }
     const unused = () => {
         throw new Error('unused')
@@ -144,6 +148,11 @@ function cluster() {
         sendTransaction: async (raw, o) => {
             const tx = parseTransaction(raw)
             verifySignatures(tx)
+            if (state.sendErr !== undefined) {
+                const err = state.sendErr
+                state.sendErr = undefined
+                throw err
+            }
             state.sent.push(tx)
             state.preflight.push(o?.preflightCommitment)
             return encodeBase58(tx.signatures[0]!)
@@ -323,6 +332,16 @@ function setTicket(f: Awaited<ReturnType<typeof fixture>>, status: number, pendi
 
 const ticketReads = (f: Awaited<ReturnType<typeof fixture>>) => f.state.reads.filter((k) => k === TICKET_ADDR).length
 
+// A copy of the ticket account data with payer in its payer's place.
+function withPayer(ticket: Uint8Array, payer: string): Uint8Array {
+    const data = ticket.slice()
+    const was = publicKeyBytes(decodeTicket(ticket).payer)
+    const i = data.findIndex((_, j) => was.every((b, k) => data[j + k] === b))
+    data.set(publicKeyBytes(payer), i)
+    expect(decodeTicket(data).payer).toBe(payer)
+    return data
+}
+
 describe('Solana handle ackSettle', () => {
     // With the node's open_seq the payer hands the node its ack: its
     // signature over the receipt's ack digest at that open_seq, as
@@ -460,5 +479,183 @@ describe('Solana handle ackSettle', () => {
         expect(res.claim).toBe('none')
         expect(f.state.sent).toHaveLength(0)
         expect(f.signer.asked).toBe(0)
+    })
+})
+
+// One of the program's own protest transactions, with the ack fixture's wallet
+// and cluster. The ticket account is the fixture's pending ticket, moved to the
+// protested ticket's address: the protest reads only its payer and the node key
+// it took at open.
+async function protestFixture(name: string) {
+    const x = txVectors.transactions.find((t: Json) => t.name === name)
+    if (x === undefined) throw new Error(`no ${name} transaction in solana_tx_vectors.json`)
+    if (x.program !== 'ok') throw new Error(`the program refused ${name}: ${x.program}`)
+    const receipt = { ...(x.receipt_value as UsageReceipt) }
+    const f = await fixture()
+    const at = d.ticket(d.node(OPERATOR_ID, NODE_ID), base64.decode(receipt.ticket_id))
+    f.state.accounts.set(at, f.state.accounts.get(TICKET_ADDR)!)
+    const h = f.wallet.handleFor({
+        appCallTxId: '',
+        groupId: '',
+        ticketId: receipt.ticket_id,
+        operator: { id: Number(OPERATOR_ID), nodeId: Number(NODE_ID) } as Operator,
+        maxPrice: 0,
+        openFeesMicroalgos: 0,
+        signedGroup: new Uint8Array(),
+    })
+    const protest = (reason: ProtestReasonCode = ProtestReason.bodyHash) => h.protest(receipt, new TextEncoder().encode('no excerpt on Solana'), reason)
+    return { ...f, x, receipt, at, protest }
+}
+
+describe('Solana handle protest', () => {
+    // The handle's protest is the program's own, byte for byte, of an open
+    // ticket and of a pending one: the compute limit, the node's signature over
+    // the receipt's digest by the key the ticket took at open, and the protest.
+    // It pays for two signatures, its own and the precompile's.
+    it.each(['protest', 'protest_pending'])("sends the program's %s", async (name) => {
+        const f = await protestFixture(name)
+        const res = await f.protest()
+        expect(f.state.sent).toHaveLength(1)
+        expect(base64.encode(encodeTransaction(f.state.sent[0]!))).toBe(f.x.wire_base64)
+        expect(res).toEqual({ txId: f.x.signatures[0], feeMicroalgos: Number(2n * SOLANA_SIGNATURE_FEE) })
+    })
+
+    // A protest the program refuses past the settle window throws
+    // ProtestAfterDeadlineError, whether its preflight refused it or it landed
+    // and failed, so the receipt check skips the freeze no settle could make
+    // either. Any other refusal doesn't.
+    const custom = (code: number) => ({ InstructionError: [2, { Custom: code }] })
+    const preflight = (err: unknown) => new SolanaRpcError('sendTransaction', CODE_PREFLIGHT_FAILURE, 'm', { err, logs: [] })
+    const landed = (err: unknown): SignatureStatus => ({ slot: 5n, confirmations: 1n, err, confirmationStatus: 'confirmed' })
+    const refusals: [string, (f: Awaited<ReturnType<typeof protestFixture>>) => void, boolean, bigint | null][] = [
+        ['preflight past the deadline', (f) => (f.state.sendErr = preflight(custom(6011))), true, null],
+        ['landed past the deadline', (f) => (f.state.land = landed(custom(6011))), true, 2n * SOLANA_SIGNATURE_FEE],
+        ['preflight on another code', (f) => (f.state.sendErr = preflight(custom(6052))), false, null],
+        ['landed on another code', (f) => (f.state.land = landed(custom(6052))), false, 2n * SOLANA_SIGNATURE_FEE],
+        ['another preflight failure', (f) => (f.state.sendErr = preflight('InsufficientFundsForFee')), false, null],
+    ]
+    it.each(refusals)('reads the refusal: %s', async (_name, set, deadline, fee) => {
+        const f = await protestFixture('protest_pending')
+        set(f)
+        const err = await f.protest().catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(Error)
+        expect(err instanceof ProtestAfterDeadlineError).toBe(deadline)
+        const sent = err instanceof ProtestAfterDeadlineError ? err.cause : err
+        if (fee === null) expect(sent).not.toBeInstanceOf(SolanaAckSendError)
+        else expect(sent).toMatchObject({ feeLamports: fee })
+    })
+
+    // A protest that can't land asks the signer nothing: no ticket, a ticket
+    // that isn't the payer's, a receipt with no signature, a reason the
+    // program can't carry.
+    const before: [string, (f: Awaited<ReturnType<typeof protestFixture>>) => void, ProtestReasonCode, RegExp][] = [
+        ['no ticket', (f) => f.state.accounts.set(f.at, null), ProtestReason.bodyHash, /no ticket account/],
+        [
+            "another payer's ticket",
+            (f) => f.state.accounts.set(f.at, { lamports: 1n, owner: PROGRAM_ID, data: withPayer(TICKET_DATA, OTHER), executable: false }),
+            ProtestReason.bodyHash,
+            /not this wallet's/,
+        ],
+        ['no receipt signature', (f) => (f.receipt.sig = ''), ProtestReason.bodyHash, /receipt sig/],
+        ['a reason past a byte', () => {}, 256 as ProtestReasonCode, /past the program's 255/],
+    ]
+    it.each(before)('refuses before signing: %s', async (_name, set, reason, want) => {
+        const f = await protestFixture('protest_pending')
+        set(f)
+        await expect(f.protest(reason)).rejects.toThrow(want)
+        expect(f.state.sent).toHaveLength(0)
+        expect(f.signer.asked).toBe(0)
+    })
+
+    // 255 is the last reason the program's u8 carries, so it goes out.
+    it('sends reason 255', async () => {
+        const f = await protestFixture('protest_pending')
+        await f.protest(0xff as ProtestReasonCode)
+        expect(f.state.sent).toHaveLength(1)
+    })
+})
+
+describe('Solana handle endings', () => {
+    // refund_inactive and settle_lapsed go out as the payer's own transaction
+    // over the ticket account: its rent payer, the payer's token account, and
+    // the treasury's, writable, when the payer's can't take the refund.
+    const endings: [string, (h: OpenHandle) => Promise<string>, (e: Ending) => Instruction][] = [
+        ['refund_inactive', (h) => h.refundInactive(), (e) => d.refundInactive(e)],
+        ['settle_lapsed', (h) => h.settleLapsed(), (e) => d.settleLapsed(e)],
+    ]
+    describe.each(endings)('%s', (_name, call, ix) => {
+        it.each([false, true])('ends the ticket (forfeit %s)', async (forfeit) => {
+            const f = await fixture()
+            if (forfeit) f.state.accounts.set(d.tokenAccount(PAYER), null)
+            const t = await f.ticket()
+            const sig = await call(handleOf(f))
+            expect(f.state.sent).toHaveLength(1)
+            const e: Ending = { submitter: PAYER, operatorId: OPERATOR_ID, nodeId: NODE_ID, ticketId: TICKET_ID, rentPayer: t.rentPayer, payer: PAYER }
+            if (forfeit) Object.assign(e, { treasury: decodeConfig(CONFIG).treasury, fallback: 'writable' })
+            const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [ix(e)], 'legacy')
+            expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+            expect(sig).toBe(encodeBase58(f.state.sent[0]!.signatures[0]!))
+        })
+
+        // An ending of a ticket that isn't there, or isn't the payer's, asks
+        // the signer nothing and sends nothing; one that landed and failed
+        // hands back its signature.
+        it('refuses or reports', async () => {
+            const f = await fixture()
+            f.state.accounts.set(TICKET_ADDR, null)
+            await expect(call(handleOf(f))).rejects.toThrow(/no ticket account/)
+            f.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data: withPayer(TICKET_DATA, OTHER), executable: false })
+            await expect(call(handleOf(f))).rejects.toThrow(/not this wallet's/)
+            expect(f.state.sent).toHaveLength(0)
+            expect(f.signer.asked).toBe(0)
+
+            const g = await fixture()
+            g.state.land = { slot: 5n, confirmations: 1n, err: { InstructionError: [0, { Custom: 6010 }] }, confirmationStatus: 'confirmed' }
+            const err = await call(handleOf(g)).catch((x: unknown) => x)
+            expect(err).toBeInstanceOf(SolanaAckSendError)
+            expect((err as SolanaAckSendError).signature).toBe(encodeBase58(g.state.sent[0]!.signatures[0]!))
+        })
+    })
+})
+
+describe('Solana handle freezeOverclaim', () => {
+    // It sends the payer's ack at the receipt over a node claim above it,
+    // which freezes the ticket, and sends nothing over any other.
+    it('freezes an over-claim', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_PENDING_BY_OPERATOR, ARGS.amountCharged + 1n)
+        const res = await handleOf(f).freezeOverclaim!(RECEIPT)
+        expect(res.err).toBeUndefined()
+        expect(res.claim).toBe('overclaims')
+        expect(f.state.sent).toHaveLength(1)
+        expect(res.call).toEqual({ txid: encodeBase58(f.state.sent[0]!.signatures[0]!), payerFeeMicroalgos: SOLANA_SIGNATURE_FEE })
+        const t = await f.ticket()
+        const e: Ending = { submitter: PAYER, operatorId: OPERATOR_ID, nodeId: NODE_ID, ticketId: TICKET_ID, rentPayer: t.rentPayer, payer: PAYER }
+        const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [d.ack(e, solanaClaimFields(ARGS))], 'legacy')
+        expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+    })
+
+    const others: [string, number, bigint, ClaimVerdict][] = [
+        ['a matching claim', TICKET_PENDING_BY_OPERATOR, ARGS.amountCharged, 'agrees'],
+        ['a claim below', TICKET_PENDING_BY_OPERATOR, ARGS.amountCharged - 1n, 'contradicts'],
+        ['an open ticket', TICKET_OPEN, 0n, 'open'],
+    ]
+    it.each(others)('sends nothing over %s', async (_name, status, pending, claim) => {
+        const f = await fixture()
+        setTicket(f, status, pending)
+        const res = await handleOf(f).freezeOverclaim!(RECEIPT)
+        expect(res).toEqual({ claim })
+        expect(f.state.sent).toHaveLength(0)
+    })
+
+    it('reads no ticket, or an unreadable one, without sending', async () => {
+        const f = await fixture()
+        f.state.accounts.set(TICKET_ADDR, null)
+        expect(await handleOf(f).freezeOverclaim!(RECEIPT)).toEqual({ claim: 'none' })
+        f.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data: TICKET_DATA.slice(0, 20), executable: false })
+        const res = await handleOf(f).freezeOverclaim!(RECEIPT)
+        expect(res.claim).toBe('unreadable')
+        expect(res.err).toBeDefined()
+        expect(f.state.sent).toHaveLength(0)
     })
 })

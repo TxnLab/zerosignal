@@ -100,7 +100,8 @@ var ErrOnlyOperatorClaimsCanLapse = errors.New("escrow: " + AssertOnlyOperatorCl
 // because the block timestamp is past D = expires_at +
 // settlement_grace_seconds, the same ceiling settle() enforces. Past D
 // the ticket belongs to settleLapsed (operator claim pending) or
-// refundInactive, so retrying the protest can never succeed.
+// refundInactive, so retrying the protest can never succeed. A Solana
+// handle wraps it too, over the zs_escrow program's PastDeadline refusal.
 var ErrProtestAfterDeadline = errors.New("escrow: " + AssertProtestAfterDeadline)
 
 // ErrReceiptDigestMismatch is returned (wrapped) when protest() reverts

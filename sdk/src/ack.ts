@@ -179,6 +179,19 @@ export class NoResolveFrozenError extends Error {
     }
 }
 
+/**
+ * ProtestAfterDeadlineError is a Solana protest the program refused because
+ * the settle window had closed (its PastDeadline), which Algorand reports as
+ * an ApprovalError on 'protest after deadline'. Go wraps
+ * escrow.ErrProtestAfterDeadline for both. cause is the send's own failure.
+ */
+export class ProtestAfterDeadlineError extends Error {
+    override readonly name = 'ProtestAfterDeadlineError'
+    constructor(cause: unknown) {
+        super(`escrow: protest after deadline: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    }
+}
+
 export interface AckSettleCall<S = SettleGroupSpec> extends AckSettlePorts<S> {
     /**
      * Whether the node sent a settle group that decodes; check it with

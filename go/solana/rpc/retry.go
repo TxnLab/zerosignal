@@ -95,3 +95,31 @@ func TxErrName(raw json.RawMessage) string {
 	}
 	return ""
 }
+
+// TxCustomError is the code a program returned, when the TransactionError is
+// {"InstructionError":[index,{"Custom":code}]}: an Anchor program's error
+// code, which names why it refused. ok is false for any other error.
+func TxCustomError(raw json.RawMessage) (code uint32, ok bool) {
+	var tagged map[string]json.RawMessage
+	if json.Unmarshal(raw, &tagged) != nil || len(tagged) != 1 {
+		return 0, false
+	}
+	var ie []json.RawMessage
+	if json.Unmarshal(tagged["InstructionError"], &ie) != nil || len(ie) != 2 {
+		return 0, false
+	}
+	// Pointers, since json reads null into a value as nothing at all.
+	var index *uint8
+	if json.Unmarshal(ie[0], &index) != nil || index == nil {
+		return 0, false
+	}
+	var custom map[string]json.RawMessage
+	if json.Unmarshal(ie[1], &custom) != nil || len(custom) != 1 {
+		return 0, false
+	}
+	var c *uint32
+	if json.Unmarshal(custom["Custom"], &c) != nil || c == nil {
+		return 0, false
+	}
+	return *c, true
+}

@@ -204,17 +204,13 @@ type OpenHandle struct {
 	deliverAck func(ctx context.Context, ack wire.SettleAck) error
 
 	wallet *Wallet
-	// solana is the wallet that signed a Solana open, whose handle acks but
-	// has no other settle path yet; nil on Algorand.
+	// solana is the wallet that signed a Solana open, whose settle paths the
+	// handle's methods take; nil on Algorand.
 	solana *SolanaWallet
 }
 
-// detached is the error of a settle path called on a handle without an
-// Algorand wallet.
+// detached is the error of a settle path called on a handle without a wallet.
 func (h *OpenHandle) detached(what string) error {
-	if h.solana != nil {
-		return fmt.Errorf("wallet: %s on Solana is not supported yet", what)
-	}
 	return fmt.Errorf("wallet: %s on detached OpenHandle (test-only or misconstructed)", what)
 }
 
@@ -746,6 +742,9 @@ func (h *OpenHandle) readClaim(ctx context.Context, a SettleArgs) (ClaimVerdict,
 // escrow without resolveFrozen the claim is still read and reported, but
 // nothing is sent.
 func (h *OpenHandle) freezeOverclaim(ctx context.Context, receipt *ticket.UsageReceipt) (txid string, feeMicroalgos uint64, claim ClaimVerdict, err error) {
+	if h.solana != nil {
+		return h.solanaFreezeOverclaim(ctx, receipt)
+	}
 	if h.wallet == nil {
 		return "", 0, ClaimUnreadable, h.detached("freeze")
 	}
@@ -936,6 +935,9 @@ func (h *OpenHandle) settleGroupSpec(receipt *ticket.UsageReceipt) (escrow.Settl
 // so off-chain consumers can categorize the freeze without re-running
 // receipt-vs-plaintext comparisons; the contract rejects 0.
 func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, excerpt []byte, reason escrow.ProtestReasonCode) (string, uint64, error) {
+	if h.solana != nil {
+		return h.solanaProtest(ctx, receipt, reason)
+	}
 	if h.wallet == nil {
 		return "", 0, h.detached("protest")
 	}
@@ -971,6 +973,9 @@ func (h *OpenHandle) Protest(ctx context.Context, receipt *ticket.UsageReceipt, 
 // handle so timeout logic can drive it without re-deriving the
 // ticket id.
 func (h *OpenHandle) RefundInactive(ctx context.Context) (string, error) {
+	if h.solana != nil {
+		return h.solanaRefundInactive(ctx)
+	}
 	if h.wallet == nil {
 		return "", h.detached("refund-inactive")
 	}
@@ -1016,6 +1021,9 @@ func (h *OpenHandle) RefundInactive(ctx context.Context) (string, error) {
 // Racing the node's driver is safe: whichever call lands second reverts on the
 // deleted box, and a reverted app call commits nothing.
 func (h *OpenHandle) SettleLapsed(ctx context.Context) (string, error) {
+	if h.solana != nil {
+		return h.solanaSettleLapsed(ctx)
+	}
 	if h.wallet == nil {
 		return "", h.detached("settle-lapsed")
 	}

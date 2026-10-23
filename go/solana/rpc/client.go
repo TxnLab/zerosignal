@@ -71,16 +71,22 @@ func (e *Error) Error() string {
 // TxErrName), "" for any other error. A resend of a transaction that already
 // landed fails its simulation as "AlreadyProcessed": the cluster has it.
 func (e *Error) TxErrName() string {
+	return TxErrName(e.TxErr())
+}
+
+// TxErr is a failed simulation's TransactionError as sent, nil for any other
+// error.
+func (e *Error) TxErr() json.RawMessage {
 	if e.Code != CodePreflightFailure {
-		return ""
+		return nil
 	}
 	// A map, not a struct: Go matches struct fields case-insensitively, and
 	// the TS twin reads only the exact key.
 	var data map[string]json.RawMessage
 	if json.Unmarshal(e.Data, &data) != nil {
-		return ""
+		return nil
 	}
-	return TxErrName(data["err"])
+	return data["err"]
 }
 
 // HTTPError is a non-2xx answer.

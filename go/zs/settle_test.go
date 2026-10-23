@@ -141,8 +141,10 @@ func TestCheckReceipt_FinishesTheSlotWithTheSubmit(t *testing.T) {
 		// The payer signs the protest, so its fee is the payer's.
 		{"protest", &scriptedSettleHandle{txid: "PROTESTTX", fee: 3000}, false, "",
 			Settlement{Kind: SettleProtest, TxID: "PROTESTTX", FeesMicroAlgos: 3000, NetworkFees: 3000, Frozen: true}, nil, false},
-		{"failed protest", &scriptedSettleHandle{txid: "IGNORED", err: ackErr}, false, "",
-			Settlement{Kind: SettleProtest}, ackErr, true},
+		// So does a failed protest: a Solana protest that landed and failed
+		// paid its fee too.
+		{"failed protest", &scriptedSettleHandle{txid: "SENTTX", fee: 7, err: ackErr}, false, "",
+			Settlement{Kind: SettleProtest, TxID: "SENTTX", FeesMicroAlgos: 7, NetworkFees: 7}, ackErr, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

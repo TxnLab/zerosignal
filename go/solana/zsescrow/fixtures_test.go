@@ -644,6 +644,60 @@ func TestProtestPendingFixture(t *testing.T) {
 	t.Fatal("no protest_pending transaction")
 }
 
+// The Ed25519 instruction of each protest the program accepted is the one
+// solana.Ed25519Verify builds from the receipt: its signature by the node's
+// key over its digest. The program reads that layout and no other, so a
+// builder off by an offset protests nothing.
+func TestProtestPrecompileFixtures(t *testing.T) {
+	type protestTx struct {
+		txFixture
+		Program string `json:"program"`
+	}
+	var f struct {
+		Transactions []protestTx `json:"transactions"`
+	}
+	readFixture(t, "solana_tx_vectors.json", &f)
+	seen := 0
+	for _, tx := range f.Transactions {
+		if tx.Name != "protest" && tx.Name != "protest_pending" {
+			continue
+		}
+		seen++
+		if tx.Program != "ok" {
+			t.Fatalf("%s: the program refused it: %s", tx.Name, tx.Program)
+		}
+		var precompile *solana.Instruction
+		for _, ix := range tx.instructions(t) {
+			if ix.ProgramID == solana.Ed25519ProgramID {
+				precompile = &ix
+			}
+		}
+		if precompile == nil {
+			t.Fatalf("%s: no Ed25519 instruction", tx.Name)
+		}
+		var r ticket.UsageReceipt
+		if err := json.Unmarshal(tx.Receipt, &r); err != nil {
+			t.Fatal(err)
+		}
+		sig, err := base64.StdEncoding.DecodeString(r.Sig)
+		if err != nil || len(sig) != 64 {
+			t.Fatalf("%s: the receipt's signature: %d bytes, %v", tx.Name, len(sig), err)
+		}
+		digest := ticket.ReceiptSigDigest(&r)
+		_, node := ed25519Message(t, precompile.Data)
+		if !solana.VerifyStrict(node, digest[:], solana.Signature(sig)) {
+			t.Fatalf("%s: the receipt's signature is not the node's over its digest", tx.Name)
+		}
+		got := solana.Ed25519Verify(node, solana.Signature(sig), digest[:])
+		if got.ProgramID != precompile.ProgramID || len(got.Accounts) != 0 || !bytes.Equal(got.Data, precompile.Data) {
+			t.Errorf("%s: built %x, the program accepted %x", tx.Name, got.Data, precompile.Data)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("%d protest transactions, want 2", seen)
+	}
+}
+
 // claimFieldsOf reads ClaimFields from the head of an instruction's
 // arguments, in the program's Borsh order.
 func claimFieldsOf(t *testing.T, b []byte) zsescrow.ClaimFields {

@@ -24,6 +24,25 @@ var idl struct {
 	Instructions []idlEntry       `json:"instructions"`
 	Accounts     []idlEntry       `json:"accounts"`
 	Events       []idlEntry       `json:"events"`
+	Errors       []struct {
+		Code uint32 `json:"code"`
+		Name string `json:"name"`
+	} `json:"errors"`
+}
+
+// A code a payer branches on is the program's own: one moved by a reordered
+// ErrorCode would leave the branch reading another error.
+func TestIDLErrorCodes(t *testing.T) {
+	readIDL(t)
+	codes := map[string]uint32{}
+	for _, e := range idl.Errors {
+		codes[e.Name] = e.Code
+	}
+	for name, want := range map[string]uint32{"PastDeadline": zsescrow.ErrPastDeadline} {
+		if got, ok := codes[name]; !ok || got != want {
+			t.Errorf("error %s: the IDL has %d (listed %v), the constant %d", name, got, ok, want)
+		}
+	}
 }
 
 func readIDL(t *testing.T) {

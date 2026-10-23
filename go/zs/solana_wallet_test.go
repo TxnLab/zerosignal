@@ -37,8 +37,13 @@ type walletCluster struct {
 	// address with no account.
 	accounts     map[solana.PublicKey]*rpc.Account
 	accountReads []solana.PublicKey
-	acks         []*solana.Transaction
-	ackLand      *rpc.SignatureStatus
+	// acks holds each settle transaction sent: an ack, an ending or a
+	// protest, anything but a rent deposit.
+	acks    []*solana.Transaction
+	ackLand *rpc.SignatureStatus
+	// sendErr fails the next settle transaction at sendTransaction, as a
+	// failed preflight does, sending nothing.
+	sendErr error
 }
 
 func (c *walletCluster) GetAccountInfo(ctx context.Context, k solana.PublicKey, cm rpc.Commitment) (*rpc.Account, error) {
@@ -75,15 +80,21 @@ func (c *walletCluster) SendTransaction(ctx context.Context, raw []byte, o rpc.S
 	if err != nil {
 		return solana.Signature{}, err
 	}
-	ackTag := c.d.Ack(zsescrow.Ending{}, zsescrow.ClaimFields{}).Data[:8]
-	if ix := tx.Message.Instructions[0]; !bytes.HasPrefix(ix.Data, ackTag) {
-		return c.rentChain.SendTransaction(ctx, raw, o)
+	depositTag := c.d.DepositRent(solana.PublicKey{}, 0).Data[:8]
+	for _, ix := range tx.Message.Instructions {
+		if bytes.HasPrefix(ix.Data, depositTag) {
+			return c.rentChain.SendTransaction(ctx, raw, o)
+		}
 	}
 	if err := tx.VerifySignatures(); err != nil {
 		return solana.Signature{}, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := c.sendErr; err != nil {
+		c.sendErr = nil
+		return solana.Signature{}, err
+	}
 	c.acks, c.sendOpts = append(c.acks, tx), append(c.sendOpts, o)
 	st := &rpc.SignatureStatus{Slot: 5, ConfirmationStatus: rpc.Confirmed}
 	if c.ackLand != nil {
@@ -442,29 +453,6 @@ var (
 	_ NodeOpener       = (*SolanaWallet)(nil)
 	_ DepositRechecker = (*SolanaWallet)(nil)
 )
-
-// A Solana handle acks but has no other settle path yet, and says so.
-func TestSolanaHandle_HasNoOtherSettlePath(t *testing.T) {
-	f := newSolanaOpenFixture(t, 1_000_000_000, 3)
-	h, err := f.open(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const want = "on Solana is not supported yet"
-	r := &ticket.UsageReceipt{}
-	if _, err := h.RefundInactive(t.Context()); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("RefundInactive: err = %v", err)
-	}
-	if _, _, err := h.Protest(t.Context(), r, nil, 1); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("Protest: err = %v", err)
-	}
-	if _, err := h.SettleLapsed(t.Context()); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("SettleLapsed: err = %v", err)
-	}
-	if _, _, claim, err := h.freezeOverclaim(t.Context(), r); claim != ClaimUnreadable || err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("freezeOverclaim: %v, err = %v", claim, err)
-	}
-}
 
 // A ticket already signed for is refused before the pool is read, so a
 // second offer for it costs no top-up even once the latch is cleared.

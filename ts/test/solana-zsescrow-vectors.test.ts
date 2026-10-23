@@ -17,7 +17,17 @@ import { base64, hex } from '@scure/base'
 import { describe, expect, it } from 'vitest'
 
 import type { Instruction } from '../src/solana/index.js'
-import { ED25519_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, decodeBase58, encodeBase58, publicKeyBytes, transferChecked } from '../src/solana/index.js'
+import {
+    ED25519_PROGRAM_ID,
+    SYSTEM_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
+    decodeBase58,
+    ed25519Verify,
+    encodeBase58,
+    publicKeyBytes,
+    transferChecked,
+    verifyStrict,
+} from '../src/solana/index.js'
 import { findProgramAddress } from '../src/solana/pda.js'
 import {
     type AckSpec,
@@ -29,6 +39,7 @@ import {
     OfferRejectedError,
     CONFIG_SIZE,
     Deployment,
+    ERR_PAST_DEADLINE,
     EVENT_IX_TAG,
     NODE_SIZE,
     OPERATOR_SIZE,
@@ -455,6 +466,41 @@ describe('the protest of a pending ticket in solana_tx_vectors.json', () => {
     })
 })
 
+// The Ed25519 instruction of each protest the program accepted is the one
+// ed25519Verify builds from the receipt: its signature by the node's key over
+// its digest, as Go's TestProtestPrecompileFixtures reads it. The program
+// reads that layout and no other.
+describe('the protest precompile in solana_tx_vectors.json', () => {
+    const txs = load('testdata/solana_tx_vectors.json')
+    const protests = (txs.transactions as Json[]).filter((t) => t.name === 'protest' || t.name === 'protest_pending')
+    it('has both protests', () => expect(protests.map((t) => t.name).sort()).toEqual(['protest', 'protest_pending']))
+    for (const tx of protests) {
+        it(tx.name, () => {
+            expect(tx.program).toBe('ok')
+            const precompile = (tx.built_instructions as Json[]).find((b) => b.program_id === ED25519_PROGRAM_ID)
+            if (!precompile) throw new Error('no Ed25519 instruction')
+            const data = base64.decode(precompile.data_base64)
+            const r = parseReceiptJSON(new TextEncoder().encode(JSON.stringify(tx.receipt_value)))
+            const sig = base64.decode(r.sig ?? '')
+            const digest = receiptSigDigest(r)
+            const { signer } = ed25519Message(data)
+            expect(verifyStrict(signer, digest, sig)).toBe(true)
+            const got = ed25519Verify(signer, sig, digest)
+            expect([got.programId, got.accounts.length, hex.encode(got.data)]).toEqual([ED25519_PROGRAM_ID, 0, hex.encode(data)])
+        })
+    }
+    // Go's types rule these out.
+    it('refuses a signature of any length but 64', () => {
+        for (const n of [63, 65]) expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(n), new Uint8Array(32))).toThrow(RangeError)
+    })
+    // The offsets record carries the message size as a u16, as Go's
+    // TestEd25519Verify_MessageSizeBound has it.
+    it('takes a message of 65535 bytes and refuses one past it', () => {
+        expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(64), new Uint8Array(0xffff))).not.toThrow()
+        expect(() => ed25519Verify(PROGRAM_ID, new Uint8Array(64), new Uint8Array(0x10000))).toThrow(RangeError)
+    })
+})
+
 // ClaimFields as the program's fixtures write them.
 function claim(f: Json): ClaimFields {
     return {
@@ -782,5 +828,11 @@ describe('the IDL', () => {
         }
         expect(idl.accounts.length).toBe(5)
         expect(idl.events.length).toBe(6)
+    })
+    // A code a payer branches on is the program's own: one moved by a
+    // reordered ErrorCode would leave the branch reading another error.
+    it('lists the error codes a payer branches on', () => {
+        const codes = new Map((idl.errors as Json[]).map((e) => [e.name as string, e.code as number]))
+        expect(codes.get('PastDeadline')).toBe(ERR_PAST_DEADLINE)
     })
 })

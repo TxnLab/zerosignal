@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { NoResolveFrozenError } from '../src/ack.js'
+import { NoResolveFrozenError, ProtestAfterDeadlineError, SentSettleError } from '../src/ack.js'
 import type { SpendGuard } from '../src/config.js'
 import { APPROVAL_ASSERT, ApprovalError } from '../src/escrow/revert.js'
 import type { OpenHandle } from '../src/parts.js'
@@ -172,10 +172,13 @@ describe('a refused protest', () => {
     })
 
     // Go's TestCheckReceipt_LateProtestTriesNoFreeze: the deadline that
-    // refused the protest bars settle too, so the protest's error stands.
-    it('tries no freeze after a protest refused for its deadline', async () => {
+    // refused the protest bars settle too, so the protest's error stands. On
+    // Algorand the revert names it; on Solana the wallet does.
+    it.each([
+        ['Algorand', new Error('protest', { cause: new ApprovalError('protest', 1, APPROVAL_ASSERT.protestAfterDeadline, new Error('algod')) })],
+        ['Solana', new Error('protest', { cause: new ProtestAfterDeadlineError(new Error('custom 6011')) })],
+    ])('tries no freeze after a protest refused for its deadline: %s', async (_rail, late) => {
         const f = await fixture()
-        const late = new Error('protest', { cause: new ApprovalError('protest', 1, APPROVAL_ASSERT.protestAfterDeadline, new Error('algod')) })
         let freezes = 0
         const handle = handleOf({ err: late })
         Object.assign(handle, {
@@ -189,6 +192,28 @@ describe('a refused protest', () => {
         expect(await submit!()).toEqual({ settlement: { ...empty, kind: 'protest' }, err: late })
         expect(freezes).toBe(0)
         expect(resolved).toEqual([])
+    })
+
+    // Go's TestCheckReceipt_ReportsWhatAFailedProtestPaid: a protest that was
+    // sent and failed paid its fee, and so did a freeze after it, sent and
+    // failed or not: the turn's settlement reports the fee of every
+    // transaction the payer paid for, under the last one's id.
+    const sent = (txid: string, fee: bigint) => new SentSettleError({ txid, payerFeeMicroalgos: fee }, 'landed and failed')
+    const late = new ProtestAfterDeadlineError(sent('PROTESTTX', 10000n))
+    const landed = new Error('protest', { cause: sent('PROTESTTX', 10000n) })
+    const failedFreeze = new Error('wallet: freeze', { cause: sent('FAILEDFREEZE', 5000n) })
+    const paid = (txId: string, fee: number, frozen = false) => ({ ...empty, kind: 'protest', txId, feesMicroAlgos: fee, networkFees: fee, ...(frozen ? { frozen } : {}) })
+    it.each([
+        ['past the deadline', late, { claim: 'overclaims', call: { txid: 'FREEZETX', payerFeeMicroalgos: 4000n } }, { settlement: paid('PROTESTTX', 10000), err: late }],
+        ['refused, nothing to freeze', landed, { claim: 'open' }, { settlement: paid('PROTESTTX', 10000), err: landed }],
+        ['refused, then frozen', landed, { claim: 'overclaims', call: { txid: 'FREEZETX', payerFeeMicroalgos: 4000n } }, { settlement: paid('FREEZETX', 14000, true) }],
+        ['refused, then a freeze sent and failed', landed, { claim: 'overclaims', err: failedFreeze }, { settlement: paid('FAILEDFREEZE', 15000), err: failedFreeze }],
+        ['refused, then a freeze never sent', landed, { claim: 'overclaims', err: freezeFailed }, { settlement: paid('PROTESTTX', 10000), err: freezeFailed }],
+    ] as [string, Error, NonNullable<Scripted['freeze']>, object][])('reports what a failed protest paid: %s', async (_name, err, freeze, want) => {
+        const f = await fixture()
+        const { deps } = depsOf()
+        const { submit } = await run(deps, f, handleOf({ err, freeze }), { matching: false })
+        expect(await submit!()).toEqual(want)
     })
 
     // A box that could not be read leaves the protest's failure standing, and

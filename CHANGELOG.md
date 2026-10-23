@@ -31,6 +31,35 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — the Solana handle's protest, refund, lapse and freeze (0.11.0)
+
+A Solana ticket's handle now has every settle path an Algorand one has, each the payer's own
+transaction, where each returned "not supported yet":
+
+- **`Protest` ↔ `protest`** sends the receipt with the node's signature over its digest, by the
+  key the ticket took at open, in an Ed25519 precompile instruction before the `protest`
+  instruction (`solana.Ed25519Verify` ↔ `ed25519Verify`). It pays for two signatures, 10,000
+  lamports. The program has no dispute excerpt, so the handle drops it. A reason above 255 is
+  refused before signing.
+- **A protest past the settle window** wraps `escrow.ErrProtestAfterDeadline`, as Algorand's
+  revert does. TS throws `ProtestAfterDeadlineError`, which the receipt check reads beside the
+  Algorand revert, so neither rail tries the freeze no settle could make either. The program's
+  error code is read from a failed preflight or a landed failure (`rpc.TxCustomError` ↔
+  `txCustomError`, `(*rpc.Error).TxErr` ↔ `SolanaRpcError.txErr`, `zsescrow.ErrPastDeadline` ↔
+  `ERR_PAST_DEADLINE`).
+- **`RefundInactive` / `SettleLapsed` ↔ `refundInactive` / `settleLapsed`** send
+  `refund_inactive` / `settle_lapsed` over the ticket account, forfeiting the refund to the
+  treasury when the payer's token account can't take it, as the ack does.
+- **`freezeOverclaim`** sends the payer's ack at the receipt over a claim above it, and nothing
+  over any other.
+- **A protest that was sent and failed** reports its transaction id and fee in the turn's
+  `Settlement`, as a failed ack does, since a Solana protest that lands and fails pays its fee.
+  A freeze after it adds its own fee, under its id. An Algorand protest that fails has sent
+  nothing, so its report is unchanged.
+
+The refund watchdog still skips Solana tickets, so nothing yet calls the refund or the lapse.
+The program's protest fixtures in `solana_tx_vectors.json` now carry the node's signature.
+
 ### 2026-10-23 — dstack verifiers refuse debug TDs and pin the boot chain (0.10.0)
 
 Both SDK verifiers, and every caller of `attest`, now run two checks that a dstack quote could
