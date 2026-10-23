@@ -998,15 +998,17 @@ A matching group is exactly the settle the payer wants on chain, whoever submits
 
 | Status | `code` | Meaning |
 |---|---|---|
-| 202 | — | Submitted, or a failed submit of a group algod already holds. |
+| 202 | — | Submitted, or a failed submit of a group algod already holds. On Solana: the settle passed preflight and the RPC accepted it (below). |
 | 400 | `read_body` | Unreadable body, or over 64 KiB. |
 | 400 | `bad_settle_ack` | Not openable, or `settle_group` is malformed. |
 | 400 | `settle_ack_mismatch` | Not the group this node composed for the ticket. |
 | 404 | `settle_ack_unknown_ticket` | No ledger row for the ticket. |
 | 409 | `settle_ack_too_late` | The ticket is already finalized, failed, or lapsing. |
-| 409 | `settle_ack_rejected` | algod or the contract refused the group, and algod does not hold it. |
+| 409 | `settle_ack_rejected` | algod or the contract refused the group, and algod does not hold it. On Solana: the settle failed preflight. |
 | 415 | `bad_content_type` | Wrong `Content-Type`. |
 | 503 | `settle_ack_unavailable`, `node_ephemeral_unavailable` | Transient node-side failure: the ledger or algod unreachable, or no ephemeral key. |
+
+**When a Solana node answers 202.** At the same level as algod's acceptance: the node's `settle_cooperative` has been checked against current state and handed on, and nothing waits for it to land. The node sends it with preflight on and `preflightCommitment: "processed"`, the check it admits a Solana open on (the default, `finalized`, simulates against older state, where an open just landed is not yet there), and answers 202 once `sendTransaction` returns its signature. A preflight success means the RPC simulated it against its state: the signatures, the blockhash, the payer's ack signature in the Ed25519 precompile, and every program check. A preflight that reports `AlreadyProcessed` is the cluster already holding it, as with a group algod already holds, and is answered 202 too. Any other preflight failure is `409 settle_ack_rejected`. No pool keeps a Solana transaction, so the node resends it until it lands or its blockhash expires, as it does the open.
 
 **After a failed ack, the payer does not broadcast the group.** Two failures are final: a refusal, because the node's answer about its own group stands, and a transport failure, because the ack may have arrived. Either way the ticket settles on the driver's path (its standalone claim, then `settleLapsed` at the operator's claimed amount after the deadline), as it does when a payer never acks. There are two exceptions:
 - **No route.** When there is no route for the ack at all (no ≥ 9.12 relay), the payer broadcasts the group itself. On Solana it sends its own `ack` transaction (§ 3a "The open and the ack on Solana"). This is decided before anything is sent.
