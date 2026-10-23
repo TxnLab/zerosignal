@@ -28,9 +28,13 @@ import {
     quoteTEEType,
     reportData,
     splitReportData,
+    type BootChain,
+    trustedDstackBootChains,
     verifyAppCompose,
     verifyAux,
+    verifyBootChain,
     verifyEventLog,
+    verifyNotDebug,
     verifyStorageEncrypted,
 } from '@txnlab/zs-proto/attest'
 import {
@@ -69,6 +73,12 @@ export const PLAINTEXT_NAMED_UPSTREAM = 'named_upstream'
 export interface DstackVerifierOptions {
     /** The trusted guest-image list. EMPTY MEANS NOTHING VERIFIES. */
     trustedOSImages: readonly string[]
+    /**
+     * The boot measurements each trusted image must show. Absent means
+     * trustedDstackBootChains(), not "unchecked"; empty refuses everything.
+     * Mirrors Go's DstackVerifier.TrustedBootChains.
+     */
+    trustedBootChains?: readonly BootChain[]
     /**
      * Whole-document compose pins. They narrow the release match, and empty
      * means "no constraint" only while composePolicy.enforceComposeSkeleton is
@@ -109,6 +119,7 @@ export interface DstackOutcome {
  */
 export class DstackVerifier {
     private readonly trustedOSImages: readonly string[]
+    private readonly trustedBootChains: readonly BootChain[]
     private readonly trustedComposeHashes: readonly string[]
     private readonly composePolicy: ComposePolicy
     private readonly verifyChain: QuoteChainVerifier
@@ -117,6 +128,7 @@ export class DstackVerifier {
 
     constructor(opts: DstackVerifierOptions) {
         this.trustedOSImages = opts.trustedOSImages
+        this.trustedBootChains = opts.trustedBootChains ?? trustedDstackBootChains()
         this.trustedComposeHashes = opts.trustedComposeHashes ?? []
         this.composePolicy = opts.composePolicy
         const now = opts.now ?? Date.now
@@ -237,6 +249,15 @@ export class DstackVerifier {
             return fail(FailureTag.VendorChainInvalid)
         }
 
+        // Before the replay: in a debug TD the host can write the memory
+        // that extends RTMR3.
+        try {
+            verifyNotDebug(quote)
+        } catch (err) {
+            this.log.warn('attestation: the quote was taken in a debug TD', { ...opAttrs, err: String(err) })
+            return fail(FailureTag.MeasurementMismatch)
+        }
+
         // 3 + 4. Replay, then read the measurements off the replay.
         let recovered: Record<string, string>
         try {
@@ -267,6 +288,14 @@ export class DstackVerifier {
                 ...opAttrs,
                 os_image_hash: recovered[EVENT_OS_IMAGE_HASH] ?? '',
             })
+            return fail(FailureTag.MeasurementMismatch)
+        }
+        // The os-image-hash is an RTMR3 event, which guest software writes;
+        // the boot registers say whether that software was the image's own.
+        try {
+            verifyBootChain(quote, recovered[EVENT_OS_IMAGE_HASH] ?? '', this.trustedBootChains)
+        } catch (err) {
+            this.log.warn("attestation: the quote's boot chain is not the trusted image's", { ...opAttrs, err: String(err) })
             return fail(FailureTag.MeasurementMismatch)
         }
         try {

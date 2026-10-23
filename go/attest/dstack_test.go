@@ -6,6 +6,7 @@
 package attest
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -426,6 +427,7 @@ func TestQuoteFields_ShortQuote(t *testing.T) {
 	}{
 		{"QuoteTEEType", headerTEEType + 4 - 1, func(b []byte) bool { _, ok := QuoteTEEType(b); return ok }},
 		{"QuoteMRTD", quoteHeaderLen + bodyMRTD + rtmrLen - 1, func(b []byte) bool { _, ok := QuoteMRTD(b); return ok }},
+		{"QuoteTDAttributes", quoteHeaderLen + bodyTDAttributes + TDAttributesLen - 1, func(b []byte) bool { _, ok := QuoteTDAttributes(b); return ok }},
 		{"QuoteRTMR3", quoteHeaderLen + bodyRTMR0 + 3*rtmrLen + rtmrLen - 1, func(b []byte) bool { _, ok := QuoteRTMR(b, 3); return ok }},
 		{"QuoteReportData", quoteHeaderLen + bodyReportData + ReportDataLen - 1, func(b []byte) bool { _, ok := QuoteReportData(b); return ok }},
 		{"SplitReportData", quoteHeaderLen + bodyReportData + ReportDataLen - 1, func(b []byte) bool { _, err := SplitReportData(b); return err == nil }},
@@ -552,6 +554,38 @@ func TestVerifyStorageEncrypted(t *testing.T) {
 				t.Fatalf("err = %v, want ErrStorageUnencrypted", err)
 			}
 		})
+	}
+}
+
+// Every bit of the TUD byte refuses and no bit outside it does, so a check
+// narrowed to bit 0, or widened to the whole field, fails a row.
+func TestVerifyNotDebug(t *testing.T) {
+	_, quote := loadVectors(t)
+	if err := VerifyNotDebug(quote); err != nil {
+		t.Fatalf("the capture refused: %v", err)
+	}
+	for i := range TDAttributesLen {
+		for bit := range 8 {
+			q := bytes.Clone(quote)
+			attrs, _ := QuoteTDAttributes(q)
+			attrs[i] ^= 1 << bit
+			err := VerifyNotDebug(q)
+			if i == 0 && !errors.Is(err, ErrDebugTD) {
+				t.Errorf("byte %d bit %d: err = %v, want ErrDebugTD", i, bit, err)
+			}
+			if i != 0 && err != nil {
+				t.Errorf("byte %d bit %d: refused: %v", i, bit, err)
+			}
+		}
+	}
+	// One byte either side of the field's end, so the guard's arithmetic is
+	// pinned rather than only its existence.
+	end := quoteHeaderLen + bodyTDAttributes + TDAttributesLen
+	if err := VerifyNotDebug(quote[:end-1]); !errors.Is(err, ErrShortQuote) {
+		t.Errorf("one byte short: err = %v, want ErrShortQuote", err)
+	}
+	if err := VerifyNotDebug(quote[:end]); err != nil {
+		t.Errorf("exactly long enough: refused: %v", err)
 	}
 }
 

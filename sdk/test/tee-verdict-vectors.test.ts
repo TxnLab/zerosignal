@@ -66,6 +66,14 @@ interface VerdictCase {
         compose_policy: string
         trusted_compose_skeletons?: string[]
         trusted_node_images?: string[]
+        trusted_boot_chains?: {
+            os_image: string
+            name: string
+            mrtd: string
+            rtmr0: string[] | null
+            rtmr1: string
+            rtmr2: string
+        }[]
     }
     allow_stub: boolean
     chain: string
@@ -191,6 +199,17 @@ async function replay(c: VerdictCase): Promise<Expected> {
     const v = new BundleVerifier({
         allowStub: c.allow_stub,
         trustedOSImages: c.policy.trusted_os_images,
+        ...(c.policy.trusted_boot_chains !== undefined && {
+            trustedBootChains: c.policy.trusted_boot_chains.map((b) => ({
+                osImage: b.os_image,
+                name: b.name,
+                mrtd: b.mrtd,
+                // Go writes a nil slice as null.
+                rtmr0: b.rtmr0 ?? [],
+                rtmr1: b.rtmr1,
+                rtmr2: b.rtmr2,
+            })),
+        }),
         trustedComposeHashes: c.policy.trusted_compose_hashes,
         composePolicy: composePolicy(c.policy),
         verifyChain: chainVerifier(c.chain),

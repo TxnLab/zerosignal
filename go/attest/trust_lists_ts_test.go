@@ -78,6 +78,15 @@ func renderTrustListsTS() (string, error) {
 			}
 		}
 	}
+	chains := TrustedDstackBootChains()
+	for _, c := range chains {
+		// Empty is legal here: it is an unmeasured row's registers.
+		for _, v := range append([]string{c.OSImage, c.Name, c.MRTD, c.RTMR1, c.RTMR2}, c.RTMR0...) {
+			if v != "" && !tsLiteralSafe.MatchString(v) {
+				return "", fmt.Errorf("boot chain %s value %q has a character the generator does not emit", c.Name, v)
+			}
+		}
+	}
 
 	var b strings.Builder
 	b.WriteString(`/*
@@ -85,7 +94,7 @@ func renderTrustListsTS() (string, error) {
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// GENERATED from proto/go/attest/releases.go and osimages.go. Do not edit.
+// GENERATED from proto/go/attest/releases.go and bootchain.go. Do not edit.
 //
 // The Go lists are the single source. Regenerate with:
 //   cd proto/go && go test ./attest -run TestTrustListTwinVectors -update-trust-lists
@@ -97,7 +106,48 @@ func renderTrustListsTS() (string, error) {
 	for _, l := range lists {
 		writeTSList(&b, l.name, l.values)
 	}
+	writeTSBootChains(&b, chains)
 	return b.String(), nil
+}
+
+func writeTSBootChains(b *strings.Builder, chains []BootChain) {
+	b.WriteString(`
+/**
+ * One trusted dstack image's boot measurements. Mirrors Go's attest.BootChain;
+ * a row with empty registers is trusted but not yet measured, and refused.
+ */
+export interface BootChain {
+    osImage: string
+    name: string
+    mrtd: string
+    rtmr1: string
+    rtmr2: string
+    /** One value per measured instance shape. */
+    rtmr0: string[]
+}
+
+export function trustedDstackBootChains(): BootChain[] {
+    return [
+`)
+	for _, c := range chains {
+		b.WriteString("        {\n")
+		for _, f := range []struct{ k, v string }{
+			{"osImage", c.OSImage}, {"name", c.Name}, {"mrtd", c.MRTD}, {"rtmr1", c.RTMR1}, {"rtmr2", c.RTMR2},
+		} {
+			fmt.Fprintf(b, "            %s: '%s',\n", f.k, f.v)
+		}
+		if len(c.RTMR0) == 0 {
+			b.WriteString("            rtmr0: [],\n")
+		} else {
+			b.WriteString("            rtmr0: [\n")
+			for _, v := range c.RTMR0 {
+				fmt.Fprintf(b, "                '%s',\n", v)
+			}
+			b.WriteString("            ],\n")
+		}
+		b.WriteString("        },\n")
+	}
+	b.WriteString("    ]\n}\n")
 }
 
 func writeTSList(b *strings.Builder, name string, values []string) {

@@ -84,7 +84,8 @@ type carriedChainVerifier func(ctx context.Context, quote []byte, c *inject.TEEC
 //  2. Verify the quote against Intel's PCK chain.
 //  3. Replay the event log into RTMR3 and compare against the quote.
 //  4. Check the recovered compose and OS-image hashes against the
-//     allowlist, then the storage-encrypted record, then — for a node
+//     allowlist, then the boot chain (MRTD, RTMR0-2) against the OS
+//     image's measured row, then the storage-encrypted record, then — for a node
 //     that publishes the preimage — validate the compose document's
 //     CONTENT. Content runs last so a dev OS image is reported as a dev
 //     OS image; the verdict is the same either way.
@@ -103,6 +104,13 @@ type DstackVerifier struct {
 	// an unconfigured proxy accept a quote from any CVM running any image,
 	// while looking exactly like the feature working.
 	TrustedOSImages []string
+
+	// TrustedBootChains are the boot measurements (MRTD, RTMR0-2) each
+	// trusted image must show. NIL MEANS attest.TrustedDstackBootChains(),
+	// not "unchecked": the check always runs, and an image in
+	// TrustedOSImages with no measured row here is refused. A caller
+	// trusting an extra image supplies its row here too.
+	TrustedBootChains []attest.BootChain
 
 	// TrustedComposeHashes pins whole-document digests. It NARROWS; it does
 	// not substitute, and empty means "no constraint" ONLY because the
@@ -268,6 +276,14 @@ func (v *DstackVerifier) verify(ctx context.Context, bundle inject.TEEEvidenceBu
 		return FailureVendorChainInvalid
 	}
 
+	// Before the replay: in a debug TD the host can write the memory that
+	// extends RTMR3, so nothing the replay recovers would mean anything.
+	if err := attest.VerifyNotDebug(quote); err != nil {
+		v.log().Warn("attestation: the quote was taken in a debug TD",
+			slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
+		return FailureMeasurementMismatch
+	}
+
 	// 3 + 4. Replay, then read the measurements off the REPLAY.
 	// attest.VerifyEventLog fails closed on a zero-event replay, an
 	// all-zero RTMR3, and an undecodable payload — each of which
@@ -305,6 +321,19 @@ func (v *DstackVerifier) verify(ctx context.Context, bundle inject.TEEEvidenceBu
 		v.log().Warn("attestation: OS image hash is not in the trusted set",
 			slog.Uint64("operator_id", op.OperatorID),
 			slog.String("os_image_hash", measurements[attest.EventOSImageHash]))
+		return FailureMeasurementMismatch
+	}
+	// The os-image-hash above is an RTMR3 event, which guest software
+	// writes; the boot registers say whether that software was the image's
+	// own kernel. Right after the OS-image check because the row is keyed
+	// by it.
+	chains := v.TrustedBootChains
+	if chains == nil {
+		chains = attest.TrustedDstackBootChains()
+	}
+	if err := attest.VerifyBootChain(quote, measurements[attest.EventOSImageHash], chains); err != nil {
+		v.log().Warn("attestation: the quote's boot chain is not the trusted image's",
+			slog.Uint64("operator_id", op.OperatorID), slog.Any("err", err))
 		return FailureMeasurementMismatch
 	}
 	// After the OS image, which says whether the event means anything, and

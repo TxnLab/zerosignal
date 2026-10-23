@@ -64,6 +64,7 @@ type replayVector struct {
 type quoteVector struct {
 	Len           int    `json:"len"`
 	TEEType       uint32 `json:"tee_type"`
+	TDAttrsHex    string `json:"td_attributes_hex"`
 	MRTDHex       string `json:"mrtd_hex"`
 	RTMR0Hex      string `json:"rtmr0_hex"`
 	RTMR1Hex      string `json:"rtmr1_hex"`
@@ -1261,6 +1262,10 @@ func buildVectors(t *testing.T) *vectorsFile {
 	if !ok {
 		t.Fatal("QuoteMRTD not present")
 	}
+	tdAttrs, ok := QuoteTDAttributes(quote)
+	if !ok {
+		t.Fatal("QuoteTDAttributes not present")
+	}
 	rd, ok := QuoteReportData(quote)
 	if !ok {
 		t.Fatal("QuoteReportData not present")
@@ -1335,6 +1340,7 @@ func buildVectors(t *testing.T) *vectorsFile {
 		Quote: quoteVector{
 			Len:               len(quote),
 			TEEType:           teeType,
+			TDAttrsHex:        hex.EncodeToString(tdAttrs),
 			MRTDHex:           hex.EncodeToString(mrtd),
 			RTMR0Hex:          rtmr[0],
 			RTMR1Hex:          rtmr[1],

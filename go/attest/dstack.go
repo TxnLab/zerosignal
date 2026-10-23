@@ -95,8 +95,9 @@ var (
 	// an all-zero replay pass.
 	ErrZeroRTMR = errors.New("attest: quote's RTMR3 is all zero")
 
-	// ErrShortQuote means the quote is too short to hold the register
-	// the log would be compared against.
+	// ErrShortQuote means the quote is too short to hold the field a
+	// check reads: the register the log would be compared against, or
+	// TDATTRIBUTES.
 	//
 	// A sentinel rather than an inline error because this branch fails
 	// OPEN under one plausible edit: returning the measurements with a
@@ -104,7 +105,7 @@ var (
 	// that were compared against nothing at all. The bytes are
 	// operator-supplied and reach here after only an 8-byte length
 	// check, so the branch is reachable by anyone.
-	ErrShortQuote = errors.New("attest: quote is too short to hold RTMR3")
+	ErrShortQuote = errors.New("attest: quote is too short")
 )
 
 // Event is one entry of a dstack runtime event log.
@@ -215,7 +216,7 @@ func VerifyEventLog(rawLog string, quote []byte) (map[string]string, error) {
 	}
 	fromQuote, ok := QuoteRTMR(quote, 3)
 	if !ok {
-		return nil, fmt.Errorf("%w: got %d bytes", ErrShortQuote, len(quote))
+		return nil, fmt.Errorf("%w to hold RTMR3: got %d bytes", ErrShortQuote, len(quote))
 	}
 	if allZero(fromQuote) {
 		return nil, ErrZeroRTMR
@@ -292,9 +293,10 @@ func VerifyStorageEncrypted(measurements map[string]string) error {
 const (
 	quoteHeaderLen = 48
 
-	bodyMRTD       = 136
-	bodyRTMR0      = 328
-	bodyReportData = 520
+	bodyTDAttributes = 120
+	bodyMRTD         = 136
+	bodyRTMR0        = 328
+	bodyReportData   = 520
 
 	// headerTEEType is the offset of the 4-byte TEE type in the quote
 	// HEADER (not the body). 0x81 is TDX; 0x00 is SGX.
@@ -306,7 +308,46 @@ const (
 	// ReportDataLen is the width of the hardware REPORTDATA field. Each
 	// of the two bindings it carries is 32 bytes — see SplitReportData.
 	ReportDataLen = 64
+
+	// TDAttributesLen is the width of the TD report's TDATTRIBUTES field.
+	TDAttributesLen = 8
 )
+
+// ErrDebugTD means the quote's TD runs under debug.
+var ErrDebugTD = errors.New("attest: the quote was taken in a debug TD")
+
+// QuoteTDAttributes extracts TDATTRIBUTES, the TD's launch-time attribute
+// bits, as the 8 little-endian bytes the report carries.
+func QuoteTDAttributes(quote []byte) ([]byte, bool) {
+	off := quoteHeaderLen + bodyTDAttributes
+	if len(quote) < off+TDAttributesLen {
+		return nil, false
+	}
+	return quote[off : off+TDAttributesLen], true
+}
+
+// VerifyNotDebug refuses a quote from a TD under debug.
+//
+// A debug TD lets the host read and write guest memory, so every other
+// check passes on a TD whose contents the host controls. Intel's vendor
+// chain does not look at attributes, which is why this is a separate step.
+//
+// THE WHOLE TUD BYTE, not only bit 0. Intel defines bits 7:0 as the "TD
+// under debug" group and calls a TD with any of them set untrusted; bit 0
+// is the only one defined today, so testing it alone would accept the next
+// debug mode Intel adds. The other attribute bits (SEPT_VE_DISABLE, PKS,
+// KL, PERFMON, ...) are not judged here: which of them a trusted fleet
+// sets is a per-image fact, not a rule.
+func VerifyNotDebug(quote []byte) error {
+	attrs, ok := QuoteTDAttributes(quote)
+	if !ok {
+		return fmt.Errorf("%w to hold TDATTRIBUTES: got %d bytes", ErrShortQuote, len(quote))
+	}
+	if attrs[0] != 0 {
+		return fmt.Errorf("%w (TDATTRIBUTES %x)", ErrDebugTD, attrs)
+	}
+	return nil
+}
 
 // QuoteTEEType reads the TEE type from the quote header.
 //

@@ -120,6 +120,19 @@ type verdictPolicy struct {
 	ComposePolicy           string   `json:"compose_policy"`
 	TrustedComposeSkeletons []string `json:"trusted_compose_skeletons,omitempty"`
 	TrustedNodeImages       []string `json:"trusted_node_images,omitempty"`
+	// TrustedBootChains is absent for the built-in table, whose contents the
+	// trust-list generator test pins, and present (possibly empty) for a
+	// caller's own, so the vectors pin that absent and empty differ.
+	TrustedBootChains *[]verdictBootChain `json:"trusted_boot_chains,omitempty"`
+}
+
+type verdictBootChain struct {
+	OSImage string   `json:"os_image"`
+	Name    string   `json:"name"`
+	MRTD    string   `json:"mrtd"`
+	RTMR0   []string `json:"rtmr0"`
+	RTMR1   string   `json:"rtmr1"`
+	RTMR2   string   `json:"rtmr2"`
 }
 
 // AttestedModelIDs is null for no verified list and [] for a verified empty
@@ -299,12 +312,23 @@ func replayVerdictCase(f *verdictVectorsFile, c verdictCase) (verdictExpect, err
 		return verdictExpect{}, err
 	}
 
+	var chains []attest.BootChain
+	if p := c.Policy.TrustedBootChains; p != nil {
+		chains = []attest.BootChain{}
+		for _, b := range *p {
+			chains = append(chains, attest.BootChain{
+				OSImage: b.OSImage, Name: b.Name, MRTD: b.MRTD, RTMR0: b.RTMR0, RTMR1: b.RTMR1, RTMR2: b.RTMR2,
+			})
+		}
+	}
+
 	now := time.UnixMilli(c.NowUnixMs)
 	called := false
 	v := &BundleVerifier{
 		AllowStub:            c.AllowStub,
 		TrustedComposeHashes: c.Policy.TrustedComposeHashes,
 		TrustedOSImages:      c.Policy.TrustedOSImages,
+		TrustedBootChains:    chains,
 		ComposePolicy:        policy,
 		VerifyChain:          func(context.Context, []byte) error { return chainErr },
 		// The stub replaces VerifyTDXQuoteChainCarried whole, guard included,
@@ -1097,6 +1121,148 @@ func (fx *verdictFixture) cases() []verdictCase {
 	storage("storage_encrypted_empty_payload", false, "")
 	// The first record counts, so a later "1" cannot cover an unencrypted boot.
 	storage("storage_unencrypted_then_encrypted", false, "30", "31")
+
+	// TDATTRIBUTES. The capture sets only SEPT_VE_DISABLE (bit 28), so the
+	// base cases are a non-debug TD. Each case edits one attribute byte of
+	// an otherwise passing quote, and the chain step is stubbed, so the
+	// verdict can only come from the attribute check.
+	tdAttrs := func(name string, pass bool, byteIdx int, value byte) {
+		add(fx.base(name), func(c *verdictCase) {
+			q := fx.boundQuote(capturedKey, capturedNodeID, models, nil, nil)
+			attrs, ok := attest.QuoteTDAttributes(q)
+			if !ok {
+				fx.t.Fatal("the capture has no TDATTRIBUTES")
+			}
+			attrs[byteIdx] = value
+			c.CPUReportQuote = fx.quoteNamed(name, q)
+			if !pass {
+				c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+			}
+		})
+	}
+	tdAttrs("td_debug", false, 0, 0x01)
+	// Bits 7:1 are the rest of Intel's "TD under debug" group.
+	tdAttrs("td_debug_reserved_tud_bit", false, 0, 0x80)
+	// SEPT_VE_DISABLE cleared, and PERFMON (bit 63) set: neither is debug.
+	tdAttrs("td_attributes_all_zero", true, 3, 0x00)
+	tdAttrs("td_perfmon_set", true, 7, 0x80)
+	// The attribute check runs after the chain: a debug quote whose chain
+	// also fails reports the chain, as every quote-field check does.
+	add(fx.base("td_debug_chain_invalid"), func(c *verdictCase) {
+		c.CPUReportQuote = "td_debug"
+		c.Chain = "invalid"
+		c.refuse(FailureVendorChainInvalid, VerifierIDDstack)
+	})
+
+	// The boot chain. The capture is dstack-0.5.9 on tdx.small, which the
+	// built-in table lists, so the base cases pass it; each case below edits
+	// one register or the image the replay names, with the chain stubbed.
+	builtin := attest.TrustedDstackBootChains()
+	rowOf := func(osImage string) attest.BootChain {
+		for _, b := range builtin {
+			if b.OSImage == osImage {
+				return b
+			}
+		}
+		fx.t.Fatalf("no built-in boot chain for %s", osImage)
+		return attest.BootChain{}
+	}
+	captured059 := rowOf(capturedOSImage)
+	setReg := func(q []byte, reg int, hexValue string) {
+		var dst []byte
+		var ok bool
+		if reg < 0 {
+			dst, ok = attest.QuoteMRTD(q)
+		} else {
+			dst, ok = attest.QuoteRTMR(q, reg)
+		}
+		v, err := hex.DecodeString(hexValue)
+		if !ok || err != nil || len(v) != len(dst) {
+			fx.t.Fatalf("set register %d: ok=%v err=%v", reg, ok, err)
+		}
+		copy(dst, v)
+	}
+	bootReg := func(name string, pass bool, reg int, hexValue string) {
+		add(fx.base(name), func(c *verdictCase) {
+			q := fx.boundQuote(capturedKey, capturedNodeID, models, nil, nil)
+			setReg(q, reg, hexValue)
+			c.CPUReportQuote = fx.quoteNamed(name, q)
+			if !pass {
+				c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+			}
+		})
+	}
+	// One flipped register each, MRTD as -1.
+	flip := func(v string) string { return "00" + v[2:] }
+	bootReg("boot_mrtd_other", false, -1, flip(captured059.MRTD))
+	bootReg("boot_rtmr0_other", false, 0, flip(captured059.RTMR0[0]))
+	bootReg("boot_rtmr1_other", false, 1, flip(captured059.RTMR1))
+	bootReg("boot_rtmr2_other", false, 2, flip(captured059.RTMR2))
+	// RTMR0 is a set per image: the gateway's shape passes on 0.5.9, and
+	// tdx.large, measured on other images only, does not.
+	bootReg("boot_rtmr0_second_shape", true, 0, captured059.RTMR0[1])
+	bootReg("boot_rtmr0_shape_of_another_image", false, 0, rowOf("8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd").RTMR0[1])
+	// A 0.6.1 RTMR1 on a quote whose MRTD is 0.5.9's: each register is
+	// checked against the one row, not against any row.
+	bootReg("boot_rtmr1_of_another_image", false, 1, rowOf("ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6").RTMR1)
+
+	// The replay names a trusted image whose boot this is not: the forgery
+	// the boot chain exists to catch, a guest writing a friendlier
+	// os-image-hash into RTMR3.
+	claimImage := func(name, osImage string) {
+		q, log := fx.remeasured(func(events []map[string]json.RawMessage) []map[string]json.RawMessage {
+			for _, e := range events {
+				if string(e["event"]) == `"`+attest.EventOSImageHash+`"` {
+					e["event_payload"] = json.RawMessage(`"` + osImage + `"`)
+				}
+			}
+			return events
+		})
+		fx.quoteNamed(name, q)
+		fx.eventLogs[name] = log
+		add(fx.base(name), func(c *verdictCase) {
+			c.CPUReportQuote = name
+			c.EventLog = name
+			c.Policy.TrustedOSImages = []string{osImage}
+			c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+		})
+	}
+	claimImage("boot_claims_another_image", "ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6")
+	// Trusted but not yet measured: refused until the grid fills the row.
+	claimImage("boot_image_not_measured", "91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829")
+
+	// A caller's own table replaces the built-in one, and an empty one
+	// refuses everything rather than reading as "unchecked".
+	toVector := func(b attest.BootChain) verdictBootChain {
+		return verdictBootChain{OSImage: b.OSImage, Name: b.Name, MRTD: b.MRTD, RTMR0: b.RTMR0, RTMR1: b.RTMR1, RTMR2: b.RTMR2}
+	}
+	add(fx.base("boot_policy_empty"), func(c *verdictCase) {
+		c.Policy.TrustedBootChains = &[]verdictBootChain{}
+		c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+	})
+	add(fx.base("boot_policy_own_row"), func(c *verdictCase) {
+		c.Policy.TrustedBootChains = &[]verdictBootChain{toVector(captured059)}
+	})
+	add(fx.base("boot_policy_own_row_other_shape"), func(c *verdictCase) {
+		row := toVector(captured059)
+		row.RTMR0 = []string{captured059.RTMR0[1]}
+		c.Policy.TrustedBootChains = &[]verdictBootChain{row}
+		c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+	})
+	// Register values compare case-insensitively, as every measurement does.
+	add(fx.base("boot_policy_uppercase_row"), func(c *verdictCase) {
+		row := toVector(captured059)
+		row.OSImage, row.MRTD, row.RTMR1, row.RTMR2 = strings.ToUpper(row.OSImage), strings.ToUpper(row.MRTD), strings.ToUpper(row.RTMR1), strings.ToUpper(row.RTMR2)
+		row.RTMR0 = []string{strings.ToUpper(row.RTMR0[0])}
+		c.Policy.TrustedBootChains = &[]verdictBootChain{row}
+	})
+	// The boot chain runs after the OS-image check, so an untrusted image
+	// is still refused there even with a matching row.
+	add(fx.base("boot_row_for_untrusted_image"), func(c *verdictCase) {
+		c.Policy.TrustedOSImages = []string{"ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6"}
+		c.Policy.TrustedBootChains = &[]verdictBootChain{toVector(captured059)}
+		c.refuse(FailureMeasurementMismatch, VerifierIDDstack)
+	})
 
 	// The compose-hash guard: an empty pin is "no constraint" only under the
 	// release match.

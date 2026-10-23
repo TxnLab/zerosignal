@@ -248,6 +248,10 @@ type BundleVerifier struct {
 	TrustedComposeHashes []string
 	TrustedOSImages      []string
 
+	// TrustedBootChains is handed to the dstack branch; nil means the
+	// built-in table. See DstackVerifier.TrustedBootChains.
+	TrustedBootChains []attest.BootChain
+
 	// ComposePolicy is the content rule set for the published compose
 	// document — see DstackVerifier.ComposePolicy, which explains why it
 	// runs alongside TrustedComposeHashes rather than replacing it.
@@ -414,6 +418,7 @@ func (v *BundleVerifier) Verify(ctx context.Context, advertised inject.TEEAdvert
 		dv := &DstackVerifier{
 			TrustedComposeHashes: v.TrustedComposeHashes,
 			TrustedOSImages:      v.TrustedOSImages,
+			TrustedBootChains:    v.TrustedBootChains,
 			ComposePolicy:        v.ComposePolicy,
 			VerifyChain:          v.VerifyChain,
 			VerifyChainCarried:   v.VerifyChainCarried,

@@ -8,7 +8,7 @@
 // reasoning; the order below is Go's and is load-bearing. These run before any
 // platform verifier because no platform is trusted to do them for itself.
 
-import { type ComposePolicy, reportData } from '@txnlab/zs-proto/attest'
+import { type BootChain, type ComposePolicy, reportData } from '@txnlab/zs-proto/attest'
 import {
     type TEEAdvertisement,
     type TEEEvidenceBundle,
@@ -39,6 +39,8 @@ export interface BundleVerifierOptions {
     /** Handed to the dstack branch; see DstackVerifierOptions. */
     trustedComposeHashes?: readonly string[]
     trustedOSImages?: readonly string[]
+    /** Absent means the built-in table; see DstackVerifierOptions. */
+    trustedBootChains?: readonly BootChain[]
     composePolicy?: ComposePolicy
     verifyChain?: QuoteChainVerifier
     verifyChainCarried?: CarriedChainVerifier
@@ -63,6 +65,7 @@ export class BundleVerifier implements Verifier {
         this.now = opts.now ?? Date.now
         this.dstack = new DstackVerifier({
             trustedOSImages: opts.trustedOSImages ?? [],
+            ...(opts.trustedBootChains !== undefined && { trustedBootChains: opts.trustedBootChains }),
             trustedComposeHashes: opts.trustedComposeHashes ?? [],
             composePolicy: opts.composePolicy ?? {},
             ...(opts.verifyChain !== undefined && { verifyChain: opts.verifyChain }),

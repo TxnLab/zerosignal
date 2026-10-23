@@ -41,9 +41,11 @@ import {
     hPosture,
     parseEvidenceBundle,
     parseEventLog,
+    TD_ATTRIBUTES_LEN,
     quoteMRTD,
     quoteRTMR,
     quoteReportData,
+    quoteTDAttributes,
     quoteTEEType,
     replayRTMR3,
     reportData,
@@ -53,6 +55,9 @@ import {
     splitReportData,
     verifyAux,
     verifyEventLog,
+    verifyNotDebug,
+    verifyBootChain,
+    trustedDstackBootChains,
 } from '../src/attest/index.js'
 import type { DstackEvent, ModelEntry, WeightsStateValue } from '../src/attest/index.js'
 
@@ -112,6 +117,7 @@ interface Vectors {
     quote: {
         len: number
         tee_type: number
+        td_attributes_hex: string
         mrtd_hex: string
         rtmr0_hex: string
         rtmr1_hex: string
@@ -242,6 +248,7 @@ describe('attest vectors', () => {
     it('reads the TDX quote fields', () => {
         expect(quoteTEEType(quote)).toBe(vectors.quote.tee_type)
         expect(quoteTEEType(quote)).toBe(TEE_TYPE_TDX)
+        expect(attestBytesToHex(quoteTDAttributes(quote)!)).toBe(vectors.quote.td_attributes_hex)
         expect(attestBytesToHex(quoteMRTD(quote)!)).toBe(vectors.quote.mrtd_hex)
         expect(attestBytesToHex(quoteRTMR(quote, 0)!)).toBe(vectors.quote.rtmr0_hex)
         expect(attestBytesToHex(quoteRTMR(quote, 1)!)).toBe(vectors.quote.rtmr1_hex)
@@ -914,6 +921,63 @@ describe('attest failure modes', () => {
         }
     })
 
+    // Mirrors Go's TestVerifyNotDebug: every bit of the TUD byte refuses
+    // and no bit outside it does.
+    it('verifyNotDebug refuses exactly the TUD byte', () => {
+        expect(() => verifyNotDebug(quote)).not.toThrow()
+        for (let i = 0; i < TD_ATTRIBUTES_LEN; i++) {
+            for (let bit = 0; bit < 8; bit++) {
+                const q = quote.slice()
+                quoteTDAttributes(q)![i]! ^= 1 << bit
+                const run = () => verifyNotDebug(q)
+                if (i === 0) expect(run).toThrow(expect.objectContaining({ code: 'debug_td' }))
+                else expect(run).not.toThrow()
+            }
+        }
+        expect(() => verifyNotDebug(quote.subarray(0, 48 + 120 + 8 - 1))).toThrow(
+            expect.objectContaining({ code: 'short_quote' }),
+        )
+    })
+
+    // Mirrors Go's TestVerifyBootChain: which code each refusal carries.
+    it('verifyBootChain refuses each register and names why', () => {
+        const img059 = 'bd369a8c2f9edb2b52dad48ac8e0b32dde5f1337c423a506b48d07403a7d8033'
+        const chains = trustedDstackBootChains()
+        const code = (c: string) => expect.objectContaining({ code: c })
+        expect(() => verifyBootChain(quote, img059, chains)).not.toThrow()
+        expect(() => verifyBootChain(quote, img059.toUpperCase(), chains)).not.toThrow()
+
+        for (const img of ['ab'.repeat(32), '91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829', '']) {
+            expect(() => verifyBootChain(quote, img, chains)).toThrow(code('boot_chain_unknown'))
+        }
+        expect(() => verifyBootChain(quote, '', [{ ...chains[0]!, osImage: '' }])).toThrow(code('boot_chain_unknown'))
+        // ASCII folding only, as Go's: toLowerCase would fold the Kelvin sign to k.
+        expect(() => verifyBootChain(quote, 'K', [{ ...chains[0]!, osImage: 'k' }])).toThrow(code('boot_chain_unknown'))
+        for (const field of ['mrtd', 'rtmr1', 'rtmr2'] as const) {
+            expect(() => verifyBootChain(quote, img059, [{ ...chains[0]!, [field]: '' }])).toThrow(code('boot_chain_unknown'))
+        }
+        expect(() => verifyBootChain(quote, img059, [{ ...chains[0]!, rtmr0: [] }])).toThrow(code('boot_chain_unknown'))
+
+        const getters: [string, (q: Uint8Array) => Uint8Array | null][] = [
+            ['MRTD', quoteMRTD],
+            ['RTMR0', (q) => quoteRTMR(q, 0)],
+            ['RTMR1', (q) => quoteRTMR(q, 1)],
+            ['RTMR2', (q) => quoteRTMR(q, 2)],
+        ]
+        for (const [, get] of getters) {
+            const q = quote.slice()
+            get(q)![47]! ^= 1
+            expect(() => verifyBootChain(q, img059, chains)).toThrow(code('boot_chain_mismatch'))
+        }
+        const q3 = quote.slice()
+        quoteRTMR(q3, 3)![0]! ^= 1
+        expect(() => verifyBootChain(q3, img059, chains)).not.toThrow()
+
+        const end = 48 + 328 + 3 * 48
+        expect(() => verifyBootChain(quote.subarray(0, end - 1), img059, chains)).toThrow(code('short_quote'))
+        expect(() => verifyBootChain(quote.subarray(0, end), img059, chains)).not.toThrow()
+    })
+
     it('keeps the first occurrence of a duplicated event name', () => {
         // An appended event must not be able to displace a measured one.
         const dup: DstackEvent[] = [
@@ -958,6 +1022,7 @@ describe('attest failure modes', () => {
         { name: 'quoteRTMR(3)', end: 48 + 328 + 3 * 48 + 48, f: (q: Uint8Array) => quoteRTMR(q, 3) },
         { name: 'quoteRTMR(0)', end: 48 + 328 + 48, f: (q: Uint8Array) => quoteRTMR(q, 0) },
         { name: 'quoteMRTD', end: 48 + 136 + 48, f: quoteMRTD },
+        { name: 'quoteTDAttributes', end: 48 + 120 + 8, f: quoteTDAttributes },
         { name: 'quoteReportData', end: 48 + 520 + 64, f: quoteReportData },
         { name: 'quoteTEEType', end: 4 + 4, f: quoteTEEType },
     ])('$name reads exactly at its boundary and not one byte before', ({ end, f }) => {
