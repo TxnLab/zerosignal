@@ -30,6 +30,7 @@ import { MIN_SIGNER_SPENDABLE_LAMPORTS } from '@txnlab/zs-proto/selection'
 import { solanaRpc } from '../src/assemble.js'
 import { readOnlySolanaSigner } from '../src/doctor.js'
 import { type DoctorCheck, type Operator, ZsError, diagnose, resolveConfig, solanaDevnet, solanaDoctorChecks, solanaLocalnet } from '../src/index.js'
+import { main } from '../src/node/cli.js'
 import { NoOperatorsError } from '../src/registry/chain.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../src/registry/solana.js'
 import {
@@ -426,6 +427,25 @@ describe('diagnose on Solana', () => {
         expect(rep.checks).toEqual(solanaDoctorChecks({ ...want, ...readout }))
         // An empty fleet fails it.
         expect(rep).toMatchObject({ network: 'localnet', address: PAYER, failed: true })
+    })
+
+    // The command line reaches the same report through --rail solana.
+    it('runs from the zerosignal doctor command', async () => {
+        stubCluster(
+            CONFIG.genesisHash,
+            new Map<string, StubAccount>([
+                [D.config(), { owner: PROGRAM_ID, lamports: 1n, data: base64.decode(CONFIG_DATA) }],
+                [ATA, { owner: TOKEN_PROGRAM_ID, lamports: 1n, data: tokenAccount(TOKEN_INITIALIZED) }],
+                [POOL, { owner: PROGRAM_ID, lamports: POOL_LAMPORTS, data: rentPool(1n) }],
+            ]),
+        )
+        let text = ''
+        let errText = ''
+        const argv = ['doctor', '--rail', 'solana', '--network', 'localnet', '--rpc-url', ENDPOINT, '--address', PAYER, '--json']
+        expect(await main(argv, { write: (s: string) => (text += s) }, { write: (s: string) => (errText += s) })).toBe(1)
+        expect(JSON.parse(text)).toMatchObject({ network: 'localnet', address: PAYER, checks: solanaDoctorChecks(want) })
+        // The endpoint overrides the localnet preset's.
+        expect(errText).toContain('zerosignal: warning: Network.rpcEndpoint overrides the localnet preset')
     })
 
     it('reads an unreadable balance', async () => {

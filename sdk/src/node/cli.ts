@@ -7,25 +7,38 @@
 
 import { parseArgs } from 'node:util'
 
+import { isValidAddress } from 'algosdk'
+
 import { diagnose, type DoctorReport, type DoctorStatus } from '../doctor.js'
 import { ZsError } from '../errors.js'
-import type { Network, NetworkName } from '../network.js'
+import type { Network, NetworkName, Rail, SolanaClusterName } from '../network.js'
 
 export const USAGE = `usage: zerosignal doctor --address <address> [options]
 
 Checks, without signing anything, what a payer address needs before a request
-can succeed: algod, the escrow app, ALGO and USDC, the prepaid ticket pool, and
-the nodes that would serve it.
+can succeed: the chain, the escrow, the account's fee coin and USDC, the
+prepaid ticket pool, and the nodes that would serve it.
 
 options:
-  --network <name>       mainnet (default), testnet or localnet
-  --algod-url <url>      an algod other than the network's preset
-  --algod-token <token>  that algod's API token
-  --escrow-app-id <id>   the escrow app, for localnet or a private chain
+  --rail <rail>          algorand (default) or solana
+  --network <name>       on Algorand mainnet (default), testnet or localnet;
+                         on Solana devnet or localnet, with no default
   --direct               probe nodes directly instead of through relays
   --allow-staging        count staging nodes as able to serve
   --allow-private-hosts  probe nodes on private addresses (a local fleet)
   --json                 print the report as JSON
+
+Algorand options:
+  --algod-url <url>      an algod other than the network's preset
+  --algod-token <token>  that algod's API token
+  --escrow-app-id <id>   the escrow app, for localnet or a private chain
+
+Solana options (each needs --rail solana):
+  --rpc-url <url>        a JSON-RPC endpoint other than the cluster's preset;
+                         without --network it needs --program
+  --program <id>         the zs_escrow program id, base58
+
+Each rail refuses the other's options.
 
 Exits 0 when no check fails, 1 when one does, 2 on a usage error, and 3 when
 the doctor itself fails.
@@ -37,7 +50,7 @@ interface Out {
     write(s: string): unknown
 }
 
-const STRING_FLAGS = ['address', 'network', 'algod-url', 'algod-token', 'escrow-app-id'] as const
+const STRING_FLAGS = ['address', 'rail', 'network', 'algod-url', 'algod-token', 'escrow-app-id', 'rpc-url', 'program'] as const
 
 /** main runs the command line and returns the exit code; see USAGE. run is diagnose, apart for a test. */
 export async function main(
@@ -54,10 +67,13 @@ export async function main(
             allowPositionals: true,
             options: {
                 address: { type: 'string' },
+                rail: { type: 'string' },
                 network: { type: 'string' },
                 'algod-url': { type: 'string' },
                 'algod-token': { type: 'string' },
                 'escrow-app-id': { type: 'string' },
+                'rpc-url': { type: 'string' },
+                program: { type: 'string' },
                 direct: { type: 'boolean' },
                 'allow-staging': { type: 'boolean' },
                 'allow-private-hosts': { type: 'boolean' },
@@ -76,6 +92,8 @@ export async function main(
             if (parsed.values[f] === '') throw new Error(`--${f} is empty`)
         }
         if (parsed.values.address === undefined) throw new Error('--address is required')
+        const rail = parsed.values.rail
+        if (rail !== undefined && rail !== 'algorand' && rail !== 'solana') throw new Error('--rail must be algorand or solana')
         const id = parsed.values['escrow-app-id']
         if (id !== undefined && !/^[1-9]\d*$/.test(id)) throw new Error('--escrow-app-id must be a positive number')
         values = parsed.values
@@ -85,11 +103,17 @@ export async function main(
         return 2
     }
 
+    // resolveNetwork refuses one rail's fields on the other, so the flags pass
+    // through as given and the cross-rail rules live in one place. --rail is
+    // checked above as well, so a misspelled rail prints the usage.
     const network: Network = {}
-    if (values.network !== undefined) network.network = values.network as NetworkName
+    if (values.rail !== undefined) network.rail = values.rail as Rail
+    if (values.network !== undefined) network.network = values.network as NetworkName | SolanaClusterName
     if (values['algod-url'] !== undefined) network.algodEndpoint = values['algod-url']
     if (values['algod-token'] !== undefined) network.algodToken = values['algod-token']
     if (values['escrow-app-id'] !== undefined) network.escrowAppId = BigInt(values['escrow-app-id'])
+    if (values['rpc-url'] !== undefined) network.rpcEndpoint = values['rpc-url']
+    if (values.program !== undefined) network.program = values.program
 
     let report: DoctorReport
     try {
@@ -104,7 +128,13 @@ export async function main(
         )
     } catch (e) {
         if (e instanceof ZsError) {
-            err.write(`zerosignal: ${e.message}\n`)
+            // Leaving --rail off is the likeliest mistake with a Solana address
+            // or cluster, and the Algorand refusal it gets doesn't say so.
+            const solanaHint =
+                values.rail === undefined && (values.network?.toLowerCase() === 'devnet' || !isValidAddress(address))
+                    ? ' (pass --rail solana for the Solana rail)'
+                    : ''
+            err.write(`zerosignal: ${e.message}${solanaHint}\n`)
             return 2
         }
         err.write(`zerosignal: the doctor failed: ${e instanceof Error && e.stack ? e.stack : message(e)}\n`)
