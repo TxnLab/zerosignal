@@ -21,7 +21,7 @@ PNPM ?= pnpm
 
 .PHONY: test test-go test-ts test-sdk test-examples build-ts build-sdk check-lockstep verify-vectors update-vectors update-sealed-vectors \
 	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck \
-	release-pr release-tag release-status check-release-script
+	release-pr release-tag release-status check-release-script solana-e2e
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
@@ -77,6 +77,16 @@ build-sdk: build-ts
 test-examples: build-sdk
 	$(PNPM) -r --filter './examples/*' typecheck
 	$(PNPM) --filter ./examples/browser-openai-shim build
+
+# The Solana rail end to end, Go's Client and then TS's, against a local
+# validator holding zs_escrow (contracts-solana's `make localnet`). Not part of
+# test: CI has no validator. The suites run one after the other because each
+# waits out deadlines on the validator's clock, which a busy machine slows.
+solana-e2e: build-ts
+	@[ -n "$$ZS_SOLANA_E2E_RPC" ] && [ -n "$$ZS_SOLANA_E2E_MINT_AUTHORITY" ] || \
+		{ echo "solana-e2e: set ZS_SOLANA_E2E_RPC and ZS_SOLANA_E2E_MINT_AUTHORITY (README \"Build & test\")"; exit 1; }
+	cd go && $(GO) test -race ./internal/solanastub -count 1
+	cd sdk && GO=$(GO) $(PNPM) exec vitest run test/solana-e2e.test.ts
 
 # Read-only check that every testdata fixture matches what the current Go code
 # emits, and that Go still opens the TS-sealed fixture. No -update — on drift it
