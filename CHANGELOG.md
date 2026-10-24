@@ -31,6 +31,19 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-24 — `payer_usdc_account_unusable` ends the reserve sweep (0.11.0)
+
+A Solana node refuses a reserve with `403 payer_usdc_account_unusable` when the payer's USDC
+token account can't take a refund (missing, frozen, or not the payer's account of the escrow's
+mint), since every ending refunds the payer through it (SPEC § 3a, the reserve's error table).
+Only `payer_not_opted_in` still has the wallet recheck its deposit. Both SDKs now read it as they read `payer_not_opted_in`: a payer
+refusal that every node gives alike, so the sweep stops at the first one and reports a `funds`
+error with the node's message. Before this they read it as an ordinary 403 and asked every
+other node in turn. SPEC also gains the Solana node's fee component of the minimum charge,
+`zs.min_charge.lamports` at SOL/USD, which a payer bounds through the existing
+`min_charge_microusdc`, and the Solana reserve's other rules: the payer signature is always
+required and must be deployment-bound, and `409 ticket_id_taken` joins the transient vectors.
+
 ### 2026-10-24 — The Solana cluster presets move to `solana/zsescrow` (0.11.0)
 
 The devnet and localnet presets (RPC endpoint and program id) are now

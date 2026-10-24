@@ -1506,6 +1506,7 @@ describe('the sweep', () => {
         for (const [code, want] of [
             ['payer_not_opted_in', 1],
             ['free_quota_exhausted', 0],
+            ['payer_usdc_account_unusable', 0],
         ] as const) {
             let rechecks = 0
             const h = harness([op(1)], {

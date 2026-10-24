@@ -43,13 +43,16 @@ var errorKinds = map[string]Kind{
 	// The caller's context ended during the reserve sweep, before any open.
 	"canceled": KindInterrupted,
 
-	"free_quota_exhausted":  KindFunds,
-	"payer_not_opted_in":    KindFunds,
-	"wallet_unfunded":       KindFunds,
-	"mbr_pool_underfunded":  KindFunds,
-	"spend_cap_exceeded":    KindSpendCap,
-	"ticket_price_rejected": KindOperatorFault,
-	"operator_ticket_reuse": KindOperatorFault,
+	"free_quota_exhausted": KindFunds,
+	"payer_not_opted_in":   KindFunds,
+	// Funds, not a node fault: the payer's own USDC token account can't take
+	// an ending's refund, and every Solana node reads the same account.
+	"payer_usdc_account_unusable": KindFunds,
+	"wallet_unfunded":             KindFunds,
+	"mbr_pool_underfunded":        KindFunds,
+	"spend_cap_exceeded":          KindSpendCap,
+	"ticket_price_rejected":       KindOperatorFault,
+	"operator_ticket_reuse":       KindOperatorFault,
 
 	"registry":     KindInternal,
 	"tokenize":     KindInternal,

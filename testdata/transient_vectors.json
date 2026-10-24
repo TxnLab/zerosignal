@@ -1444,6 +1444,15 @@
       "retryable_after_payment": false
     },
     {
+      "code": "ticket_id_taken",
+      "classify": {
+        "retryable": false,
+        "attribution": ""
+      },
+      "retryable_busy": false,
+      "retryable_after_payment": false
+    },
+    {
       "code": "ticket_invalid",
       "classify": {
         "retryable": false,
@@ -1490,6 +1499,15 @@
     },
     {
       "code": "payer_optin_unavailable",
+      "classify": {
+        "retryable": false,
+        "attribution": ""
+      },
+      "retryable_busy": false,
+      "retryable_after_payment": false
+    },
+    {
+      "code": "payer_usdc_account_unusable",
       "classify": {
         "retryable": false,
         "attribution": ""

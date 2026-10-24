@@ -43,6 +43,9 @@ export const errorKinds: ReadonlyMap<string, Kind> = new Map<string, Kind>([
 
     ['free_quota_exhausted', 'funds'],
     ['payer_not_opted_in', 'funds'],
+    // Funds, not a node fault: the payer's own USDC token account can't take
+    // an ending's refund, and every Solana node reads the same account.
+    ['payer_usdc_account_unusable', 'funds'],
     ['wallet_unfunded', 'funds'],
     ['mbr_pool_underfunded', 'funds'],
     ['spend_cap_exceeded', 'spend_cap'],

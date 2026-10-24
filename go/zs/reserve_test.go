@@ -30,7 +30,7 @@ import (
 
 // The payer-scoped codes end failover to every node; any other code doesn't.
 func TestParsePayerRefusal(t *testing.T) {
-	for code, want := range map[string]bool{"free_quota_exhausted": true, "payer_not_opted_in": true, "forbidden": false} {
+	for code, want := range map[string]bool{"free_quota_exhausted": true, "payer_not_opted_in": true, "payer_usdc_account_unusable": true, "forbidden": false} {
 		body := fmt.Appendf(nil, `{"error":{"code":%q,"message":"m"}}`, code)
 		if got := parsePayerRefusal(body, time.Minute); (got != nil) != want {
 			t.Errorf("%s: refusal %v, want %v", code, got, want)

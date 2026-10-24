@@ -88,8 +88,9 @@ type OperatorDetails struct {
 	// recommended enabled value is 7.
 	MinChargeAlgoTxns uint64 `json:"min_charge_algo_txns,omitempty"`
 
-	// MinChargeMicroUSDC is the current USD value of the µALGO component at this
-	// operator's most-recent oracle reading. ONE component of the floor, not the
+	// MinChargeMicroUSDC is the current USD value of the µALGO component (on a
+	// Solana node, the lamport component) at this operator's most-recent
+	// oracle reading. ONE component of the floor, not the
 	// whole floor — the token component is per-model. 0 when the component is
 	// disabled or the oracle is stale.
 	MinChargeMicroUSDC uint64 `json:"min_charge_microusdc,omitempty"`

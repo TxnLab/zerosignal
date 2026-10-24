@@ -363,6 +363,13 @@ describe('reserve', () => {
             expect(err).toMatchObject({ code: 'payer_not_opted_in', nodeMessage: 'opt in to USDC' })
         })
 
+        it('reads a 403 payer_usdc_account_unusable as a PayerRefusalError', async () => {
+            const { node, fetch } = await fakeNode(() => refuse(403, 'payer_usdc_account_unusable', 'frozen'))
+            const err = await reserve(call(node, fetch)).catch((e) => e)
+            expect(err).toBeInstanceOf(PayerRefusalError)
+            expect(err).toMatchObject({ code: 'payer_usdc_account_unusable', nodeMessage: 'frozen' })
+        })
+
         it('reads another 403 as a ReserveHTTPError', async () => {
             const { node, fetch } = await fakeNode(() => refuse(403, 'forbidden'))
             await expect(reserve(call(node, fetch))).rejects.toMatchObject({ name: 'ReserveHTTPError', status: 403 })
