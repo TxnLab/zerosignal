@@ -34,32 +34,21 @@ type Deployment struct {
 	Solana      SolanaNetwork // resolved: the cluster lowered, the preset applied
 }
 
-// The Solana cluster presets.
+// The Solana cluster presets. The table is zsescrow's, which a node reads
+// without the SDK; these names keep the SDK's API unchanged.
 const (
-	SolanaClusterDevnet   = "devnet"
-	SolanaClusterLocalnet = "localnet"
+	SolanaClusterDevnet   = zsescrow.ClusterDevnet
+	SolanaClusterLocalnet = zsescrow.ClusterLocalnet
 )
 
-type solanaPreset struct {
-	rpcEndpoint string
-	program     solana.PublicKey
-}
-
-// solanaPresets have one program id: devnet's deployment, which a localnet
-// started by contracts-solana's `make localnet` loads at the same address.
-var solanaPresets = map[string]solanaPreset{
-	SolanaClusterDevnet:   {rpcEndpoint: "https://api.devnet.solana.com", program: zsescrow.ProgramID},
-	SolanaClusterLocalnet: {rpcEndpoint: "http://127.0.0.1:8899", program: zsescrow.ProgramID},
-}
-
 // SolanaClusters are the preset names.
-func SolanaClusters() []string { return []string{SolanaClusterDevnet, SolanaClusterLocalnet} }
+func SolanaClusters() []string { return zsescrow.Clusters() }
 
 // SolanaClusterPreset is a preset's RPC endpoint and program id, and false
 // for a name that is none.
 func SolanaClusterPreset(name string) (rpcEndpoint string, program solana.PublicKey, ok bool) {
-	p, ok := solanaPresets[name]
-	return p.rpcEndpoint, p.program, ok
+	c, ok := zsescrow.ClusterPreset(name)
+	return c.RPCEndpoint, c.Program, ok
 }
 
 // RailName is a rail as Key and the TS SDK spell it.
@@ -243,18 +232,18 @@ func resolveSolana(n Network) (Deployment, []string, error) {
 	if s.Cluster == "" && s.RPCEndpoint == "" {
 		return Deployment{}, nil, configError("Network.Solana.Cluster or RPCEndpoint is required on the Solana rail")
 	}
-	var p solanaPreset
+	var p zsescrow.Cluster
 	if s.Cluster != "" {
 		var ok bool
-		if p, ok = solanaPresets[s.Cluster]; !ok {
+		if p, ok = zsescrow.ClusterPreset(s.Cluster); !ok {
 			return Deployment{}, nil, configError(fmt.Sprintf("Network.Solana.Cluster must be one of %s (case-insensitive), got %q",
 				strings.Join(SolanaClusters(), "|"), n.Solana.Cluster))
 		}
 	}
 	var warnings []string
 	if s.Program.IsZero() {
-		s.Program = p.program
-		if s.Cluster != "" && s.RPCEndpoint != "" && s.RPCEndpoint != p.rpcEndpoint {
+		s.Program = p.Program
+		if s.Cluster != "" && s.RPCEndpoint != "" && s.RPCEndpoint != p.RPCEndpoint {
 			warnings = append(warnings, fmt.Sprintf(
 				"Network.Solana.RPCEndpoint overrides the %s preset but the program is still that preset's (%s); set Network.Solana.Program if the endpoint is another cluster",
 				s.Cluster, s.Program))
@@ -264,7 +253,7 @@ func resolveSolana(n Network) (Deployment, []string, error) {
 		return Deployment{}, nil, configError("Network.Solana.Program is required for this network")
 	}
 	if s.RPCEndpoint == "" {
-		s.RPCEndpoint = p.rpcEndpoint
+		s.RPCEndpoint = p.RPCEndpoint
 	}
 	label := s.Cluster
 	if label == "" {
