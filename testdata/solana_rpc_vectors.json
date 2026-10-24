@@ -1302,8 +1302,7 @@
         "data_len": 233
       },
       "params": [
-        233,
-        {}
+        233
       ]
     },
     {
@@ -1393,7 +1392,9 @@
         [
           "LnrbZDPq59Ywk2Ddy9zVxg7KVaDBPRpikn7V7A3ZWgEb2JK6JYLkQKJCbqyeji46k7svBPp5UsFu4v4mh1DGzTJ"
         ],
-        {}
+        {
+          "searchTransactionHistory": false
+        }
       ]
     }
   ],

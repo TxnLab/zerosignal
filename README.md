@@ -183,6 +183,20 @@ cd go && go test -race ./...   # before crypto/streaming changes
 cd ts && pnpm build
 ```
 
+The Solana rail also runs end to end on a local validator: the Go SDK against a stub node
+(`go/internal/solanastub`) and the real `zs_escrow` program, through a settle on the payer's ack,
+a protest, an over-claim freeze, a refund of an unserved ticket and a lapse. Start the validator
+with contracts-solana's `make localnet`, then:
+
+```bash
+cd go && ZS_SOLANA_E2E_RPC=http://127.0.0.1:8899 \
+  ZS_SOLANA_E2E_MINT_AUTHORITY=$HOME/.config/zs-solana/deployer.json \
+  go test ./internal/solanastub -count=1    # about 90 s: two scenarios wait out a deadline
+```
+
+Without both variables the scenarios skip, so `make test` and CI never need a validator. The run
+shortens the localnet Config's default grace to its minimum.
+
 ## Releasing
 
 Go, `@txnlab/zs-proto` and the `@txnlab/zerosignal` SDK release in lockstep: one version

@@ -31,6 +31,18 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — Solana confirmations work against Agave (0.11.0)
+
+`getSignatureStatuses` sent an empty config object when the caller didn't ask for history, and
+Agave refuses that object without its `searchTransactionHistory` field. The confirmation wait
+(`rpc.Confirm` ↔ `confirmSignature`) polls that method, so against a real cluster a poll failed
+instead of reporting the transaction's status. Both RPC clients now always send the field
+(`solana_rpc_vectors.json` pins the params). `getMinimumBalanceForRentExemption` had the same
+shape: Agave refuses its config object without `commitment`, so a call that names none now sends
+no object. Every caller names one today, so nothing hit it. The fake
+clusters every test ran against accepted the empty object; the local-validator suite
+(`go/internal/solanastub`, README "Build & test") found it.
+
 ### 2026-10-23 — `zerosignal doctor` takes the Solana rail (0.11.0)
 
 The TS command line took Algorand networks only. `--rail solana` with `--network devnet|localnet`,

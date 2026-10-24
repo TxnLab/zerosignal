@@ -420,7 +420,10 @@ export class SolanaRpcClient implements SolanaRpc {
 
     async getMinimumBalanceForRentExemption(dataLen: number, o: CallOptions = {}): Promise<bigint> {
         const m = 'getMinimumBalanceForRentExemption'
-        return u64(m, await this.#call(m, [dataLen, commitmentConfig(o.commitment)], o.signal), 'result')
+        // No config object without a commitment: Agave refuses this method's
+        // config without its commitment field.
+        const params = o.commitment === undefined ? [dataLen] : [dataLen, { commitment: o.commitment }]
+        return u64(m, await this.#call(m, params, o.signal), 'result')
     }
 
     async sendTransaction(tx: Uint8Array, o: SendOptions = {}): Promise<string> {
@@ -437,7 +440,9 @@ export class SolanaRpcClient implements SolanaRpc {
         o: { searchHistory?: boolean | undefined; signal?: AbortSignal | undefined } = {},
     ): Promise<(SignatureStatus | null)[]> {
         const m = 'getSignatureStatuses'
-        const r = obj(m, await this.#call(m, [signatures, o.searchHistory === true ? { searchTransactionHistory: true } : {}], o.signal), 'result')
+        // The field goes out even when false: Agave refuses this method's
+        // config object without it.
+        const r = obj(m, await this.#call(m, [signatures, { searchTransactionHistory: o.searchHistory === true }], o.signal), 'result')
         const v = r.value
         if (!Array.isArray(v) || v.length !== signatures.length) {
             throw new MalformedAnswer(m, `${Array.isArray(v) ? v.length : 'no'} statuses for ${signatures.length} signatures`)
