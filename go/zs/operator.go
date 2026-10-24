@@ -243,7 +243,8 @@ type Operator struct {
 	// (default 1000; 0 = the token component disabled). MinChargeAlgoTxns
 	// is the µALGO-recovery count (0 = that component disabled, today's
 	// default). MinChargeMicroUSDC is the current USD value of the µALGO
-	// component at the operator's most-recent oracle reading; 0 when it's
+	// component (on a Solana node, the lamport component) at the operator's
+	// most-recent oracle reading; 0 when it's
 	// disabled or the operator's oracle is unhealthy. All populated by
 	// FetchDetails from /v1/zs/details; surfaced on /v1/zs/operators.
 	// The authoritative per-request value for any given reserve is the

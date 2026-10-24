@@ -150,11 +150,11 @@ var emittedCodes = []string{
 	"missing_model_id", "missing_payer_addr", "nonce_unsupported",
 	"payment_verification_failed", "price_overflow", "read_body",
 	"reply_to_mismatch", "request_too_large", "reserve_body_too_large",
-	"reserve_replayed", "ticket_invalid", "ticket_required",
+	"reserve_replayed", "ticket_id_taken", "ticket_invalid", "ticket_required",
 
 	// node: payer account and free tier
 	"free_quota_exhausted", "free_quota_unavailable", "payer_not_opted_in",
-	"payer_optin_unavailable",
+	"payer_optin_unavailable", "payer_usdc_account_unusable",
 
 	// node: model, capability, and upstream provider
 	"context_length_exceeded", "image_generation_not_supported", "model_not_found",

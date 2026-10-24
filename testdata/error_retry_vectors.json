@@ -125,6 +125,11 @@
     "retryable": false
   },
   {
+    "kind": "funds",
+    "code": "payer_usdc_account_unusable",
+    "retryable": false
+  },
+  {
     "kind": "invalid_request",
     "code": "pin_conflicts_with_continuation",
     "retryable": false

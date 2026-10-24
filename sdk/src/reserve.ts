@@ -423,7 +423,9 @@ const MAX_RETRY_AFTER_SECONDS = 24 * 60 * 60
 // payer's. Allowlists: a code added here changes what the caller does next,
 // so each must match what a node emits.
 const sizingErrorCodes = new Set(['context_length_exceeded'])
-const payerRefusalCodes = new Set(['free_quota_exhausted', 'payer_not_opted_in'])
+// payer_usdc_account_unusable is a Solana node's: the payer's USDC token
+// account can't take a refund, and every node reads the same account.
+const payerRefusalCodes = new Set(['free_quota_exhausted', 'payer_not_opted_in', 'payer_usdc_account_unusable'])
 
 /**
  * reserve posts one reserve to call.target, through call.hop when given, and

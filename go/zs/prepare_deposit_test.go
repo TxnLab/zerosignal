@@ -55,7 +55,7 @@ func (r *recheckerWallet) RecheckDeposit() { r.rechecks++ }
 // checked may be gone, so dispatch has the wallet check it again; any other
 // payer refusal leaves it alone.
 func TestDispatch_NotOptedInRefusalRechecksTheDeposit(t *testing.T) {
-	for code, want := range map[string]int{"payer_not_opted_in": 1, "free_quota_exhausted": 0} {
+	for code, want := range map[string]int{"payer_not_opted_in": 1, "free_quota_exhausted": 0, "payer_usdc_account_unusable": 0} {
 		t.Run(code, func(t *testing.T) {
 			c, rc := admitClient(t, []Operator{retryOp(1, "OWNER_A")}, &admitGuard{limit: ^uint64(0)})
 			rc.script = []error{&PayerRefusalError{Code: code, Message: "refused"}}

@@ -252,6 +252,9 @@ func IsPayerRefusal(err error) bool {
 var payerRefusalCodes = map[string]struct{}{
 	"free_quota_exhausted": {},
 	"payer_not_opted_in":   {},
+	// A Solana node's: the payer's USDC token account can't take a refund,
+	// and every node reads the same account.
+	"payer_usdc_account_unusable": {},
 }
 
 // parsePayerRefusal decodes an OpenAI-shaped error body and returns a
