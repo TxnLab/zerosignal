@@ -31,6 +31,14 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — `zerosignal doctor` takes the Solana rail (0.11.0)
+
+The TS command line took Algorand networks only. `--rail solana` with `--network devnet|localnet`,
+`--rpc-url` and `--program` now runs the Solana doctor, setting the `Network` fields of those
+names. The flags pass through to `resolveNetwork`, so each rail refuses the other's as a
+`Network` does, and the command exits 2 on the mix. `--rail` defaults to `algorand`, so an
+existing command line is unchanged. Go has no doctor command line in this module.
+
 ### 2026-10-23 — the doctor fails a paused escrow, on both rails (0.11.0)
 
 Both contracts refuse every open while their admin has paused them (Algorand's `paus` global,
@@ -64,7 +72,6 @@ refused it, and return the same `DoctorReport`. The checks are `SolanaDoctorChec
   "with a signing account short of fee SOL".
 
 The `solanaCases` of `doctor_vectors.json` pin the checks' statuses and wording across the two.
-The `zerosignal doctor` command still takes Algorand flags only.
 
 ### 2026-10-23 — Go loaders for a Solana payer key (0.11.0)
 

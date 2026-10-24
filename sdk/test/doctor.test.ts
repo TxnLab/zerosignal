@@ -386,6 +386,10 @@ describe('zerosignal doctor', () => {
         [['doctor', '--address', ADDR, '--escrow-app-id', '0']],
         [['doctor', '--address', ADDR, '--network', '']],
         [['doctor', '--address', '']],
+        [['doctor', '--address', ADDR, '--rail', 'ethereum']],
+        [['doctor', '--address', ADDR, '--rail', '']],
+        [['doctor', '--address', ADDR, '--rail', 'solana', '--rpc-url', '']],
+        [['doctor', '--address', ADDR, '--rail', 'solana', '--program', '']],
         [['doctor', '--bogus']],
     ])(
         'refuses %j',
@@ -441,6 +445,45 @@ describe('zerosignal doctor', () => {
         expect(address).toBe(ADDR)
         expect(config.network).toEqual({ network: 'localnet', algodEndpoint: 'http://algod.test', algodToken: 'tok', escrowAppId: 42n })
         expect(config).toMatchObject({ allowStaging: true, allowPrivateHosts: true })
+    })
+
+    it('passes the Solana flags to the network', async () => {
+        const program = 'Vote111111111111111111111111111111111111111'
+        const [config] = await configFor(['--rail', 'solana', '--network', 'devnet', '--rpc-url', 'http://rpc.test', '--program', program])
+        expect(config.network).toEqual({ rail: 'solana', network: 'devnet', rpcEndpoint: 'http://rpc.test', program })
+        expect((await configFor(['--rail', 'algorand']))[0].network).toEqual({ rail: 'algorand' })
+    })
+
+    // resolveNetwork's refusals, through the real diagnose: a usage error, not
+    // a report.
+    it.each([
+        [['--rail', 'solana', '--network', 'devnet', '--escrow-app-id', '1'], "are the Algorand rail's"],
+        [['--rail', 'solana', '--network', 'devnet', '--algod-url', 'http://algod.test'], "are the Algorand rail's"],
+        [['--rail', 'solana', '--network', 'devnet', '--algod-token', 'tok'], "are the Algorand rail's"],
+        [['--rpc-url', 'http://rpc.test'], 'set Network.rail to solana'],
+        [['--network', 'testnet', '--program', 'Vote111111111111111111111111111111111111111'], 'set Network.rail to solana'],
+        [['--rail', 'solana'], 'Network.network or rpcEndpoint is required on the Solana rail'],
+        [['--rail', 'solana', '--network', 'mainnet'], 'on the Solana rail, got "mainnet"'],
+        [['--rail', 'solana', '--rpc-url', 'http://rpc.test'], 'Network.program is required'],
+    ])('refuses the mix %j', async (argv, want) => {
+        const err = sink()
+        const address = argv.includes('solana') ? 'Vote111111111111111111111111111111111111111' : ADDR
+        expect(await main(['doctor', '--address', address, ...argv], sink(), err)).toBe(2)
+        expect(err.text).toContain(want)
+        expect(err.text).not.toContain('--rail solana')
+    })
+
+    // A Solana address or cluster without --rail solana is refused as
+    // Algorand's; the refusal says which flag was missing.
+    it.each([
+        [['--address', 'Vote111111111111111111111111111111111111111'], 'not an Algorand address'],
+        [['--address', ADDR, '--network', 'devnet'], 'network must be one of'],
+        [['--address', ADDR, '--network', 'DevNet'], 'network must be one of'],
+    ])('points %j at --rail solana', async (argv, want) => {
+        const err = sink()
+        expect(await main(['doctor', ...argv], sink(), err)).toBe(2)
+        expect(err.text).toContain(want)
+        expect(err.text).toContain('(pass --rail solana for the Solana rail)')
     })
 
     it('exits 3 when the doctor itself fails', async () => {
