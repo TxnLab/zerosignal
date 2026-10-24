@@ -102,14 +102,13 @@ type SignatureStatus struct {
 }
 
 type config struct {
-	Encoding                 string     `json:"encoding,omitempty"`
-	Commitment               Commitment `json:"commitment,omitempty"`
-	Filters                  []Filter   `json:"filters,omitempty"`
-	SkipPreflight            bool       `json:"skipPreflight,omitempty"`
-	PreflightCommitment      Commitment `json:"preflightCommitment,omitempty"`
-	MaxRetries               *uint64    `json:"maxRetries,omitempty"`
-	SearchTransactionHistory bool       `json:"searchTransactionHistory,omitempty"`
-	MinContextSlot           uint64     `json:"minContextSlot,omitempty"`
+	Encoding            string     `json:"encoding,omitempty"`
+	Commitment          Commitment `json:"commitment,omitempty"`
+	Filters             []Filter   `json:"filters,omitempty"`
+	SkipPreflight       bool       `json:"skipPreflight,omitempty"`
+	PreflightCommitment Commitment `json:"preflightCommitment,omitempty"`
+	MaxRetries          *uint64    `json:"maxRetries,omitempty"`
+	MinContextSlot      uint64     `json:"minContextSlot,omitempty"`
 }
 
 // wireAccount holds each field so that a missing or null one is seen: read as
@@ -270,8 +269,14 @@ func (c *HTTPClient) GetGenesisHash(ctx context.Context) (solana.Hash, error) {
 }
 
 func (c *HTTPClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataLen uint64, cm Commitment) (uint64, error) {
+	// No config object without a commitment: Agave refuses this method's
+	// config without its commitment field.
+	params := []any{dataLen}
+	if cm != "" {
+		params = append(params, config{Commitment: cm})
+	}
 	var lamports uint64
-	if err := c.call(ctx, "getMinimumBalanceForRentExemption", []any{dataLen, config{Commitment: cm}}, &lamports); err != nil {
+	if err := c.call(ctx, "getMinimumBalanceForRentExemption", params, &lamports); err != nil {
 		return 0, err
 	}
 	return lamports, nil
@@ -310,7 +315,12 @@ func (c *HTTPClient) GetSignatureStatuses(ctx context.Context, sigs []solana.Sig
 			ConfirmationStatus Commitment      `json:"confirmationStatus"`
 		} `json:"value"`
 	}
-	if err := c.call(ctx, "getSignatureStatuses", []any{keys, config{SearchTransactionHistory: searchHistory}}, &r); err != nil {
+	// The field goes out even when false: Agave refuses this method's config
+	// object without it ("missing field `searchTransactionHistory`").
+	cfg := struct {
+		SearchTransactionHistory bool `json:"searchTransactionHistory"`
+	}{searchHistory}
+	if err := c.call(ctx, "getSignatureStatuses", []any{keys, cfg}, &r); err != nil {
 		return nil, err
 	}
 	if len(r.Value) != len(sigs) {
