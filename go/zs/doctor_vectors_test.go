@@ -67,6 +67,10 @@ func TestDoctorVectors(t *testing.T) {
 			r.TicketMbr, r.UsdcAssetID = 0, 0
 		}},
 		{"escrow without a ticket MBR", func(r *DoctorReadings) { r.TicketMbr = 0 }},
+		{"escrow paused", func(r *DoctorReadings) { r.EscrowPaused = true }},
+		{"paused without a ticket MBR", func(r *DoctorReadings) {
+			r.TicketMbr, r.EscrowPaused = 0, true
+		}},
 		{"account unreadable", func(r *DoctorReadings) {
 			r.AccountErr = "HTTP 500"
 			r.Amount, r.MinBalance, r.UsdcOptedIn, r.UsdcBalance, r.PoolOptedIn = 0, 0, false, 0, false
@@ -262,6 +266,14 @@ func solanaDoctorCases() []solanaDoctorCase {
 		}},
 		{"no ticket rent", func(r *SolanaDoctorReadings) { r.TicketRent = 0 }},
 		{"config for another cluster", func(r *SolanaDoctorReadings) { r.ConfigGenesis = mainnet }},
+		{"program paused", func(r *SolanaDoctorReadings) { r.ConfigPaused = true }},
+		{"paused without ticket rent", func(r *SolanaDoctorReadings) {
+			r.TicketRent, r.ConfigPaused = 0, true
+		}},
+		// The genesis check comes first: the pause read is another cluster's.
+		{"paused on another cluster", func(r *SolanaDoctorReadings) {
+			r.ConfigGenesis, r.ConfigPaused = mainnet, true
+		}},
 		{"account unreadable", func(r *SolanaDoctorReadings) {
 			r.AccountErr = "HTTP 500"
 			r.Lamports = 0

@@ -137,6 +137,12 @@ type Client struct {
 	// keeps its escrow locked for good, so the payer sends no settle that can
 	// freeze a ticket unless this is set.
 	ResolvesFrozen bool
+
+	// Paused is the contract's `paus` global as of the last RefreshConfig: while
+	// it is set every open reverts. setPaused toggles it at any time, so this is
+	// a snapshot, true only of the moment it was read; nothing on the open path
+	// gates on it. An absent slot is not paused.
+	Paused bool
 }
 
 // NewClient constructs a Client for the given app id against the
@@ -194,6 +200,7 @@ func (c *Client) RefreshConfig(ctx context.Context, senderAddr string) error {
 	c.StakingAppID = g.stakingAppId
 	c.SettlementGraceDefault = g.settlementGraceDefault
 	c.ResolvesFrozen = g.resolvesFrozen
+	c.Paused = g.paused
 	c.TicketMbr = mbr
 	// Free-quota box MBR. An app predating the free-ticket quota has no such
 	// method, which is not a config error — there is simply no quota box to
@@ -229,6 +236,7 @@ type escrowGlobals struct {
 	stakingAppId           uint64
 	settlementGraceDefault uint64
 	resolvesFrozen         bool
+	paused                 bool
 }
 
 // readGlobals fetches the application once and extracts every global-state
@@ -251,6 +259,7 @@ func (c *Client) readGlobals(ctx context.Context) (escrowGlobals, error) {
 		oracleKeyB64 = "aGF5T3JhY2xlQXBwSWQ=" // base64("hayOracleAppId")
 		stakeKeyB64  = "c3Rha2luZ0FwcElk"     // base64("stakingAppId")
 		graceKeyB64  = "Z3JhY2U="             // base64("grace")
+		pausKeyB64   = "cGF1cw=="             // base64("paus")
 	)
 	var g escrowGlobals
 	var foundUsdc, foundTreasury bool
@@ -287,6 +296,11 @@ func (c *Client) readGlobals(ctx context.Context) (escrowGlobals, error) {
 				return escrowGlobals{}, fmt.Errorf("escrow: settlementGraceDefault global has type %d, want 2 (uint)", kv.Value.Type)
 			}
 			g.settlementGraceDefault = kv.Value.Uint
+		case pausKeyB64:
+			if kv.Value.Type != 2 {
+				return escrowGlobals{}, fmt.Errorf("escrow: paused global has type %d, want 2 (uint)", kv.Value.Type)
+			}
+			g.paused = kv.Value.Uint != 0
 		case treaKeyB64:
 			if kv.Value.Type != 1 {
 				return escrowGlobals{}, fmt.Errorf("escrow: treasury global has type %d, want 1 (bytes)", kv.Value.Type)

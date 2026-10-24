@@ -81,6 +81,8 @@ export interface DoctorReadings {
     /** The free-quota box MBR the pool still has to cover. */
     quotaDue: bigint
     usdcAssetId: bigint
+    /** The admin's pause, under which every open reverts. */
+    escrowPaused: boolean
 
     accountErr?: string | undefined
     amount: bigint
@@ -116,6 +118,9 @@ export function doctorChecks(r: DoctorReadings): DoctorCheck[] {
     if (!algodOK) add('escrow', 'skip', needsAlgod)
     else if (r.escrowErr) add('escrow', 'fail', `can't read escrow app ${r.escrowAppId}: ${r.escrowErr}`)
     else if (r.ticketMbr === 0n) add('escrow', 'fail', `escrow app ${r.escrowAppId} reports no ticket MBR`)
+    // A pause leaves the account readings valid, so it fails only this check
+    // and the account checks still run.
+    else if (r.escrowPaused) add('escrow', 'fail', `escrow app ${r.escrowAppId} is paused; no ticket can open until its admin unpauses it`)
     else add('escrow', 'pass', `escrow app ${r.escrowAppId}: ${micros(r.ticketMbr)} ALGO per ticket, USDC asset ${r.usdcAssetId}`)
 
     const spendable = spendableOf(r.amount, r.minBalance)
@@ -269,6 +274,7 @@ export function doctorBase(cfg: ResolvedConfig, address: string): DoctorReadings
         ticketMbr: 0n,
         quotaDue: 0n,
         usdcAssetId: 0n,
+        escrowPaused: false,
         amount: 0n,
         minBalance: 0n,
         usdcOptedIn: false,
@@ -283,7 +289,7 @@ export function doctorBase(cfg: ResolvedConfig, address: string): DoctorReadings
 /** What diagnose reads, apart from the reading of it so a test can supply the answers. */
 export interface DoctorChain {
     status(signal?: AbortSignal): Promise<{ lastRound: bigint; minFee: bigint }>
-    escrowConfig(signal?: AbortSignal): Promise<{ ticketMbr: bigint; usdcAssetId: bigint; quotaDue: bigint }>
+    escrowConfig(signal?: AbortSignal): Promise<{ ticketMbr: bigint; usdcAssetId: bigint; quotaDue: bigint; paused: boolean }>
     account(signal?: AbortSignal): Promise<algosdk.modelsv2.Account>
     /** Read only after escrowConfig succeeded. */
     payerDeposit(signal?: AbortSignal): Promise<PayerDeposit>
@@ -313,6 +319,7 @@ export async function gatherDoctorReadings(c: DoctorChain, base: DoctorReadings,
         r.ticketMbr = e.ticketMbr
         r.usdcAssetId = e.usdcAssetId
         r.quotaDue = e.quotaDue
+        r.escrowPaused = e.paused
     } catch (err) {
         r.escrowErr = message(err)
     }
@@ -373,6 +380,7 @@ function algodDoctorChain(cfg: ResolvedConfig, address: string): DoctorChain {
                 ticketMbr: await chain.ticketMbr(),
                 usdcAssetId: (await chain.config(signal)).usdcAssetId,
                 quotaDue: await chain.freeQuotaMbrDue(address),
+                paused: await chain.paused(signal),
             }
         },
         account: (signal) => algod.accountInformation(address).do(undefined, opts(signal)),

@@ -81,6 +81,8 @@ type DoctorReadings struct {
 	// QuotaDue is the free-quota box MBR the pool still has to cover.
 	QuotaDue    uint64 `json:"quotaDue,string"`
 	UsdcAssetID uint64 `json:"usdcAssetId,string"`
+	// EscrowPaused is the admin's pause, under which every open reverts.
+	EscrowPaused bool `json:"escrowPaused"`
 
 	AccountErr  string `json:"accountErr,omitempty"`
 	Amount      uint64 `json:"amount,string"`
@@ -141,6 +143,10 @@ func DoctorChecks(r DoctorReadings) []DoctorCheck {
 		add("escrow", DoctorFail, "can't read escrow app %d: %s", r.EscrowAppID, r.EscrowErr)
 	case r.TicketMbr == 0:
 		add("escrow", DoctorFail, "escrow app %d reports no ticket MBR", r.EscrowAppID)
+	// A pause leaves the account readings valid, so it fails only this check
+	// and the account checks still run.
+	case r.EscrowPaused:
+		add("escrow", DoctorFail, "escrow app %d is paused; no ticket can open until its admin unpauses it", r.EscrowAppID)
 	default:
 		add("escrow", DoctorPass, "escrow app %d: %s ALGO per ticket, USDC asset %d", r.EscrowAppID, micros(r.TicketMbr), r.UsdcAssetID)
 	}
@@ -352,7 +358,7 @@ func doctorBase(cfg Config, ac algod.Config, appID uint64, address string) Docto
 // can supply the answers.
 type doctorChain interface {
 	status(ctx context.Context) (lastRound, minFee uint64, err error)
-	escrowConfig(ctx context.Context) (ticketMbr, usdcAssetID, quotaDue uint64, err error)
+	escrowConfig(ctx context.Context) (ticketMbr, usdcAssetID, quotaDue uint64, paused bool, err error)
 	account(ctx context.Context) (models.Account, error)
 	// payerDeposit is read only after escrowConfig succeeded.
 	payerDeposit(ctx context.Context) (escrow.PayerDeposit, error)
@@ -379,9 +385,9 @@ func gatherDoctorReadings(ctx context.Context, c doctorChain, r DoctorReadings) 
 		done <- fleet{ops, err}
 	}()
 
-	if r.TicketMbr, r.UsdcAssetID, r.QuotaDue, err = c.escrowConfig(ctx); err != nil {
+	if r.TicketMbr, r.UsdcAssetID, r.QuotaDue, r.EscrowPaused, err = c.escrowConfig(ctx); err != nil {
 		r.EscrowErr = err.Error()
-		r.TicketMbr, r.UsdcAssetID, r.QuotaDue = 0, 0, 0
+		r.TicketMbr, r.UsdcAssetID, r.QuotaDue, r.EscrowPaused = 0, 0, 0, false
 	}
 	if acct, err := c.account(ctx); err != nil {
 		r.AccountErr = err.Error()
@@ -452,18 +458,18 @@ func (a *algodDoctorChain) status(ctx context.Context) (uint64, uint64, error) {
 	return st.LastRound, sp.MinFee, nil
 }
 
-func (a *algodDoctorChain) escrowConfig(ctx context.Context) (uint64, uint64, uint64, error) {
+func (a *algodDoctorChain) escrowConfig(ctx context.Context) (uint64, uint64, uint64, bool, error) {
 	ec, err := escrow.NewClient(a.appID, a.chain)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, false, err
 	}
 	rctx, cancel := context.WithTimeout(ctx, escrowConfigTimeout)
 	defer cancel()
 	if err := ec.RefreshConfig(rctx, ec.AppAddr.String()); err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, false, err
 	}
 	a.ec = ec
-	return ec.TicketMbr, ec.UsdcAssetID, ec.FreeQuotaMbrDueFor(rctx, a.address), nil
+	return ec.TicketMbr, ec.UsdcAssetID, ec.FreeQuotaMbrDueFor(rctx, a.address), ec.Paused, nil
 }
 
 func (a *algodDoctorChain) account(ctx context.Context) (models.Account, error) {

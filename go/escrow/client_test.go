@@ -2205,3 +2205,77 @@ func TestReadFreeQuotaMbr_ClassifiesOnlyEvalRejectAsUnsupported(t *testing.T) {
 		})
 	}
 }
+
+// readGlobals reads the `paus` global: an absent slot is not paused, and a slot
+// of the wrong type is a config error rather than a guess.
+func TestReadGlobals_Paused(t *testing.T) {
+	treasury := crypto.GenerateAccount()
+	required := `{"key":"dXNkYw==","value":{"type":2,"bytes":"","uint":31566704}},
+		{"key":"dHJlYQ==","value":{"type":1,"bytes":"` + base64.StdEncoding.EncodeToString(treasury.Address[:]) + `","uint":0}}`
+	globals := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v2/applications/4242") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id": 4242, "params": {"approval-program": "", "clear-state-program": "",
+				"creator": "`+treasury.Address.String()+`", "global-state": [`+required+globals+`]}}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	algod, err := protoalgod.NewClient(srv.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewClient(4242, algod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		globals string
+		want    bool
+		wantErr string
+	}{
+		{``, false, ""},
+		{`,{"key":"cGF1cw==","value":{"type":2,"uint":1}}`, true, ""},
+		{`,{"key":"cGF1cw==","value":{"type":2,"uint":2}}`, true, ""},
+		{`,{"key":"cGF1cw==","value":{"type":2,"uint":0}}`, false, ""},
+		{`,{"key":"cGF1cw==","value":{"type":1,"bytes":"AQ==","uint":1}}`, false, "paused global has type 1"},
+	} {
+		globals = tc.globals
+		g, err := client.readGlobals(context.Background())
+		switch {
+		case tc.wantErr != "":
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("globals %s: err = %v, want %q", tc.globals, err, tc.wantErr)
+			}
+		case err != nil || g.paused != tc.want:
+			t.Errorf("globals %s: paused = %v, %v, want %v", tc.globals, g.paused, err, tc.want)
+		}
+	}
+}
+
+// The `paus` key readGlobals matches is the one the contract declares: a
+// renamed global would otherwise read as never paused.
+func TestPausedKeyMatchesARC56(t *testing.T) {
+	var spec struct {
+		State struct {
+			Keys struct {
+				Global map[string]struct {
+					Key       string `json:"key"`
+					ValueType string `json:"valueType"`
+				} `json:"global"`
+			} `json:"keys"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal(ZeroSignalEscrowARC56, &spec); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := spec.State.Keys.Global["paused"]
+	if !ok {
+		t.Fatal("ARC-56 declares no paused global")
+	}
+	if got.Key != "cGF1cw==" || got.ValueType != "AVMUint64" {
+		t.Errorf("paused global = %+v, want key cGF1cw== (paus), AVMUint64", got)
+	}
+}

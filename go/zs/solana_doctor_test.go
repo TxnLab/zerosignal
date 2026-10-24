@@ -109,6 +109,20 @@ func TestDiagnose_SolanaReadsTheCluster(t *testing.T) {
 			readout: func(r *SolanaDoctorReadings) { r.PoolExists, r.PoolLamports, r.OpenTickets = false, 0, 0 },
 		},
 		{
+			name: "a paused program",
+			edit: func(f *fakeSolanaRPC) {
+				data, err := base64.StdEncoding.DecodeString(configAcct.DataBase64)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data[13] = 1 // Config.paused, after the discriminator and five u8s
+				a := configAcct
+				a.DataBase64 = base64.StdEncoding.EncodeToString(data)
+				f.accounts[configAddr] = a
+			},
+			readout: func(r *SolanaDoctorReadings) { r.ConfigPaused = true },
+		},
+		{
 			name: "an RPC on another cluster",
 			edit: func(f *fakeSolanaRPC) { f.genesis = solana.Hash{9} },
 			readout: func(r *SolanaDoctorReadings) {
@@ -174,7 +188,7 @@ func (f *fakeSolanaDoctorChain) config(context.Context) (*zsescrow.Config, uint6
 	if f.configErr != nil {
 		return nil, 0, 0, f.configErr
 	}
-	return &zsescrow.Config{GenesisHash: solana.Hash{2}, USDCMint: solana.PublicKey{3}}, 2_000_000, 1_000_000, nil
+	return &zsescrow.Config{GenesisHash: solana.Hash{2}, USDCMint: solana.PublicKey{3}, Paused: true}, 2_000_000, 1_000_000, nil
 }
 
 func (f *fakeSolanaDoctorChain) balance(context.Context) (uint64, error) {
@@ -210,7 +224,7 @@ func TestGatherSolanaDoctorReadings_MapsEachRead(t *testing.T) {
 	r := gatherSolanaDoctorReadings(context.Background(), f, SolanaDoctorReadings{Program: "P"})
 	want := SolanaDoctorReadings{
 		Program: "P", BlockHeight: 42, Genesis: solana.Hash{1}.String(),
-		ConfigGenesis: solana.Hash{2}.String(), Mint: solana.PublicKey{3}.String(), TicketRent: 2_000_000, PoolRent: 1_000_000,
+		ConfigGenesis: solana.Hash{2}.String(), Mint: solana.PublicKey{3}.String(), ConfigPaused: true, TicketRent: 2_000_000, PoolRent: 1_000_000,
 		Lamports:    7_000_000,
 		UsdcAccount: true, UsdcFrozen: true, UsdcBalance: 2_500_000,
 		PoolExists: true, PoolLamports: 9_000_000, OpenTickets: 2,

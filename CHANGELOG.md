@@ -31,6 +31,18 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-23 — the doctor fails a paused escrow, on both rails (0.11.0)
+
+Both contracts refuse every open while their admin has paused them (Algorand's `paus` global,
+the Solana Config's `paused`), yet the doctor passed its `escrow` / `program` check on a paused
+deployment. It now fails that check, naming the pause. The account checks after it still run,
+since their readings still hold. `DoctorReadings.EscrowPaused` ↔ `escrowPaused` and
+`SolanaDoctorReadings.ConfigPaused` ↔ `configPaused` carry the reading, and `doctor_vectors.json`
+pins the verdict. On Algorand the flag comes from the same application fetch as the other
+globals: `escrow.Client.Paused` ↔ `AlgodEscrowChain.paused()`, a snapshot as of `RefreshConfig`,
+since `setPaused` toggles it at any time. A `paus` global of the wrong type now fails
+`RefreshConfig`, as the other globals' do.
+
 ### 2026-10-23 — the doctor reads Solana (0.11.0)
 
 `zs.Diagnose` ↔ `diagnose` on a Solana network read that rail for a base58 address, where they
