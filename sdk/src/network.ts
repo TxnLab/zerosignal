@@ -4,8 +4,8 @@
  */
 
 // The chain and escrow application, mirroring proto/go/zs Network and
-// proto/go/algod's presets, and zs's Solana cluster presets (pinned by
-// testdata/sdk_vocabulary_vectors.json).
+// proto/go/algod's presets, and proto/go/solana/zsescrow's cluster presets
+// (pinned by testdata/sdk_vocabulary_vectors.json).
 
 import { publicKeyBytes } from '@txnlab/zs-proto/solana'
 import { PROGRAM_ID } from '@txnlab/zs-proto/solana/zsescrow'

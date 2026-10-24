@@ -31,6 +31,15 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-24 — The Solana cluster presets move to `solana/zsescrow` (0.11.0)
+
+The devnet and localnet presets (RPC endpoint and program id) are now
+`zsescrow.ClusterPreset` / `Clusters` / `ClusterDevnet` / `ClusterLocalnet`, so a node reads them
+without importing the payer SDK, as Algorand's presets live in `algod`. The `zs` names
+(`SolanaClusterPreset`, `SolanaClusters`, `SolanaClusterDevnet`, `SolanaClusterLocalnet`) still
+work and forward to them. `ClusterPreset` matches the name case-insensitively, as
+`ResolveNetwork` always has, so `zs.SolanaClusterPreset("Devnet")` now finds devnet.
+
 ### 2026-10-23 — Solana confirmations work against Agave (0.11.0)
 
 `getSignatureStatuses` sent an empty config object when the caller didn't ask for history, and
