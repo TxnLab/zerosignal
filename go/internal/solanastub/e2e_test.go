@@ -10,7 +10,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -33,13 +32,7 @@ const (
 )
 
 // localnet is the chain and the one stub node every scenario shares.
-type localnet struct {
-	chain     *solanastub.Chain
-	authority ed25519.PrivateKey
-	node      *solanastub.Node
-	operator  uint64
-	nodeID    uint64
-}
+type localnet struct{ *solanastub.Localnet }
 
 var (
 	setupOnce sync.Once
@@ -67,48 +60,11 @@ func newLocalnet(endpoint, keyFile string) (*localnet, error) {
 	if err != nil {
 		return nil, err
 	}
-	chain, err := solanastub.Dial(ctx, endpoint, zsescrow.ProgramID)
+	l, err := solanastub.StartLocalnet(ctx, endpoint, authority, "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	// The shortest grace the program allows, so the endings that wait out a
-	// deadline wait about a minute.
-	if chain.Config.DefaultGrace != chain.Config.MinGrace {
-		grace := chain.Config.MinGrace
-		ix, err := chain.Deployment.SetConfig(solanastub.PublicKey(authority), zsescrow.SetConfigArgs{DefaultGrace: &grace})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := chain.Send(ctx, []solana.Instruction{ix}, authority); err != nil {
-			return nil, err
-		}
-		if err := chain.Refresh(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	owner, signing := newKey(), newKey()
-	if err := chain.Airdrop(ctx, solanastub.PublicKey(owner), 2_000_000_000); err != nil {
-		return nil, err
-	}
-	if err := chain.Airdrop(ctx, solanastub.PublicKey(signing), 2_000_000_000); err != nil {
-		return nil, err
-	}
-	if err := chain.MintUSDC(ctx, authority, solanastub.PublicKey(owner), chain.Config.OperatorStake+chain.Config.NodeStake); err != nil {
-		return nil, err
-	}
-	srv := httptest.NewUnstartedServer(nil)
-	opID, nodeID, err := chain.RegisterNode(ctx, owner, solanastub.PublicKey(signing), "http://"+srv.Listener.Addr().String())
-	if err != nil {
-		return nil, err
-	}
-	node, err := solanastub.NewNode(chain, signing, opID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	srv.Config.Handler = node.Handler()
-	srv.Start()
-	return &localnet{chain: chain, authority: authority, node: node, operator: opID, nodeID: nodeID}, nil
+	return &localnet{l}, nil
 }
 
 func newKey() ed25519.PrivateKey {
@@ -136,7 +92,7 @@ type payer struct {
 	client *zs.Client
 }
 
-const payerUSDC = 10_000_000
+const payerUSDC = solanastub.PayerUSDC
 
 func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 	t.Helper()
@@ -144,23 +100,20 @@ func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 	defer cancel()
 	key := newKey()
 	pub := solanastub.PublicKey(key)
-	if err := l.chain.Airdrop(ctx, pub, 1_000_000_000); err != nil {
+	if err := l.FundPayer(ctx, pub); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.chain.MintUSDC(ctx, l.authority, pub, payerUSDC); err != nil {
-		t.Fatal(err)
-	}
-	l.node.SetBehavior(pub, b)
+	l.Node.SetBehavior(pub, b)
 	client, err := zs.New(ctx, zs.Config{
 		SolanaSigner: payerSigner{key},
 		Network: zs.Network{Rail: ticket.RailSolana, Solana: zs.SolanaNetwork{
-			Cluster: zs.SolanaClusterLocalnet, RPCEndpoint: l.chain.Endpoint, Program: l.chain.Deployment.Program,
+			Cluster: zs.SolanaClusterLocalnet, RPCEndpoint: l.Chain.Endpoint, Program: l.Chain.Deployment.Program,
 		}},
 		// One node can't be its own relay.
 		Privacy:           zs.PrivacyDirect,
 		AllowPrivateHosts: true,
 		DisableTEE:        true,
-		Discovery:         zs.Discovery{OperatorIDs: []uint64{l.operator}},
+		Discovery:         zs.Discovery{OperatorIDs: []uint64{l.OperatorID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +146,7 @@ func (p *payer) ask(t *testing.T, stream bool) (string, zs.Settlement, error, er
 // onlyTicket is the one ticket p opened at the stub.
 func (l *localnet) onlyTicket(t *testing.T, p *payer) [16]byte {
 	t.Helper()
-	ids := l.node.Opened(p.key)
+	ids := l.Node.Opened(p.key)
 	if len(ids) != 1 {
 		t.Fatalf("payer opened %d tickets at the stub, want 1", len(ids))
 	}
@@ -207,7 +160,7 @@ func (l *localnet) waitTicket(t *testing.T, id [16]byte, within time.Duration, w
 	ctx := context.Background()
 	deadline := time.Now().Add(within)
 	for {
-		tk, err := l.chain.Ticket(ctx, l.operator, l.nodeID, id)
+		tk, err := l.Chain.Ticket(ctx, l.OperatorID, l.NodeID, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -225,22 +178,16 @@ func closed(tk *zsescrow.Ticket) bool { return tk == nil }
 
 func (l *localnet) usdc(t *testing.T, owner solana.PublicKey) uint64 {
 	t.Helper()
-	v, err := l.chain.USDC(context.Background(), owner)
+	v, err := l.Chain.USDC(context.Background(), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return v
 }
 
-// withFee is what a payer pays for a charge: the program adds the protocol
-// fee on top, rounded down.
-func (l *localnet) withFee(amount uint64) uint64 {
-	return amount + amount*uint64(l.chain.Config.FeeBps)/10_000
-}
-
 func (l *localnet) checkStub(t *testing.T, p *payer) {
 	t.Helper()
-	for _, err := range l.node.Errors(p.key) {
+	for _, err := range l.Node.Errors(p.key) {
 		t.Errorf("stub node: %v", err)
 	}
 }
@@ -266,11 +213,11 @@ func TestSolanaE2E_Settles(t *testing.T) {
 			}
 			id := l.onlyTicket(t, p)
 			l.waitTicket(t, id, 30*time.Second, "settled", closed)
-			receipts := l.node.Receipts(p.key)
+			receipts := l.Node.Receipts(p.key)
 			if len(receipts) != 1 {
 				t.Fatalf("%d receipts, want 1", len(receipts))
 			}
-			if got, want := payerUSDC-l.usdc(t, p.key), l.withFee(receipts[0].AmountCharged); got != want {
+			if got, want := payerUSDC-l.usdc(t, p.key), l.WithFee(receipts[0].AmountCharged); got != want {
 				t.Errorf("payer paid %d, want the receipt's %d and its fee", got, want)
 			}
 			l.checkStub(t, p)
@@ -288,7 +235,7 @@ func TestSolanaE2E_RefundsAnUnservedTicket(t *testing.T) {
 		t.Fatal("turn succeeded, want the node's failure")
 	}
 	id := l.onlyTicket(t, p)
-	grace := time.Duration(l.chain.Config.DefaultGrace) * time.Second
+	grace := time.Duration(l.Chain.Config.DefaultGrace) * time.Second
 	// Room for the watchdog's margin past the deadline and one retry of a
 	// refund the validator's clock refused as early.
 	l.waitTicket(t, id, 10*time.Second+grace+2*time.Minute, "refunded", closed)
@@ -344,7 +291,7 @@ func TestSolanaE2E_FreezesAnOverClaim(t *testing.T) {
 	if _, _, err, _ := p.ask(t, false); err == nil {
 		t.Error("a second turn succeeded, want the over-claiming node barred")
 	}
-	if n := len(l.node.Opened(p.key)); n != 1 {
+	if n := len(l.Node.Opened(p.key)); n != 1 {
 		t.Errorf("payer opened %d tickets at the barred node, want 1", n)
 	}
 	l.checkStub(t, p)
@@ -373,7 +320,7 @@ func TestSolanaE2E_LeavesAnUncontestedClaimToLapse(t *testing.T) {
 	// The validator's clock can trail the wall clock under load, which the
 	// program reads as before the deadline.
 	for start := time.Now(); ; time.Sleep(2 * time.Second) {
-		err := l.node.SettleLapsed(context.Background(), id, p.key)
+		err := l.Node.SettleLapsed(context.Background(), id, p.key)
 		if err == nil {
 			break
 		}
@@ -382,7 +329,7 @@ func TestSolanaE2E_LeavesAnUncontestedClaimToLapse(t *testing.T) {
 		}
 	}
 	l.waitTicket(t, id, 30*time.Second, "lapsed", closed)
-	if got, want := payerUSDC-l.usdc(t, p.key), l.withFee(tk.Pending.Amount); got != want {
+	if got, want := payerUSDC-l.usdc(t, p.key), l.WithFee(tk.Pending.Amount); got != want {
 		t.Errorf("payer paid %d, want the claim's %d and its fee", got, want)
 	}
 	l.checkStub(t, p)
