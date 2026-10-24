@@ -551,7 +551,7 @@ for one payer serializes them, or both may deposit.
 
 `npx @txnlab/zerosignal doctor --address <address> [--network testnet]` checks what an Algorand
 payer address needs before a request can succeed, without signing anything (the command takes
-Algorand networks only): algod, the escrow app,
+Algorand networks only): algod, the escrow app (and that its admin hasn't paused it),
 the account's ALGO, its USDC opt-in and balance, the prepaid MBR pool (and what the first
 request will deposit), and one discovery cycle over the fleet. It exits 1 when a check fails,
 2 on a usage error and 3 when the doctor itself fails. `--json` prints the report, `--direct`
@@ -560,9 +560,10 @@ settings of those names, and `--algod-url`, `--algod-token` and `--escrow-app-id
 another chain. `diagnose(config, address)`
 is the same as a function, taking a `Config` without a signer, and `doctorChecks(readings)` is
 the judgment alone. On a Solana network `diagnose` takes a base58 address and checks that rail
-instead: the RPC, the program's Config (and that its genesis hash is the cluster's the RPC
-serves), the account's SOL, its USDC token account and balance, the ticket rent pool, and the
-fleet against the lamports floor; `solanaDoctorChecks(readings)` is that judgment. Go's
+instead: the RPC, the program's Config (that its genesis hash is the cluster's the RPC
+serves, and that the program isn't paused), the account's SOL, its USDC token account and
+balance, the ticket rent pool, and the fleet against the lamports floor;
+`solanaDoctorChecks(readings)` is that judgment. Go's
 `zs.Diagnose`, `zs.DoctorChecks` and `zs.SolanaDoctorChecks` are the twins, and
 `testdata/doctor_vectors.json` pins the checks' statuses and wording across the two.
 

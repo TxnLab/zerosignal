@@ -11,9 +11,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { PROTO_VERSION } from '@txnlab/zs-proto/wire'
 
-import type algosdk from 'algosdk'
+import algosdk from 'algosdk'
 
 import { type DoctorChain, doctorBase, gatherDoctorReadings } from '../src/doctor.js'
+import { ESCROW_METHOD_SIGNATURES } from '../src/escrow/generated/abi.js'
 import {
     type Config,
     type DoctorCheck,
@@ -108,6 +109,7 @@ describe('gatherDoctorReadings', () => {
         ticketMbr: 0n,
         quotaDue: 0n,
         usdcAssetId: 0n,
+        escrowPaused: false,
         amount: 0n,
         minBalance: 0n,
         usdcOptedIn: false,
@@ -133,7 +135,7 @@ describe('gatherDoctorReadings', () => {
             v instanceof Error ? Promise.reject(v) : Promise.resolve(v === undefined ? ok : v)
         const chain: DoctorChain = {
             status: () => (calls.push('status'), fail(o.status, { lastRound: 42n, minFee: 1_000n })),
-            escrowConfig: () => (calls.push('escrow'), fail(o.escrow, { ticketMbr: 115_000n, usdcAssetId: 777n, quotaDue: 22_500n })),
+            escrowConfig: () => (calls.push('escrow'), fail(o.escrow, { ticketMbr: 115_000n, usdcAssetId: 777n, quotaDue: 22_500n, paused: true })),
             account: () => (calls.push('account'), fail(o.account, { amount: 1n } as unknown as algosdk.modelsv2.Account)),
             payerDeposit: () => (calls.push('deposit'), fail(o.pool, { algoBalance: 345_000n, openTickets: 1n })),
             nodes: () => fail(o.nodes, []),
@@ -154,6 +156,7 @@ describe('gatherDoctorReadings', () => {
             ticketMbr: 115_000n,
             usdcAssetId: 777n,
             quotaDue: 22_500n,
+            escrowPaused: true,
             amount: 5_000_000n,
             minBalance: 400_000n,
             usdcOptedIn: true,
@@ -185,7 +188,7 @@ describe('gatherDoctorReadings', () => {
         const { chain, calls } = fake({ escrow: new Error('no app'), account: optedIn })
         const r = await gatherDoctorReadings(chain, base)
         expect(calls).toEqual(['status', 'escrow', 'account'])
-        expect(r).toMatchObject({ escrowErr: 'no app', ticketMbr: 0n, usdcAssetId: 0n, usdcOptedIn: false, poolOptedIn: true })
+        expect(r).toMatchObject({ escrowErr: 'no app', ticketMbr: 0n, usdcAssetId: 0n, escrowPaused: false, usdcOptedIn: false, poolOptedIn: true })
     })
 
     it('keeps no balance from a failed pool read', async () => {
@@ -250,6 +253,116 @@ describe('diagnose', () => {
         const rep = await diagnose({ network: { network: 'testnet', algodEndpoint: algodUrl } }, ADDR)
         expect(rep.warnings).toHaveLength(1)
         expect(rep.warnings[0]).toContain('escrow app id')
+    })
+})
+
+// As Go's TestAlgodDoctorChain_ReadsThePause: the escrow check reads the
+// pause through the app fetch, and the account checks still run.
+describe('diagnose on a paused escrow', () => {
+    let escrowAlgod: Server
+    let url: string
+    let paus = 0
+    const mbrForTicket = algosdk.ABIMethod.fromSignature(ESCROW_METHOD_SIGNATURES.mbrForTicket!)
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64')
+    const global = (key: string, value: Record<string, unknown>) => ({ key: b64(new TextEncoder().encode(key)), value })
+
+    function simulate(body: Uint8Array): Uint8Array {
+        const stxn = algosdk.decodeMsgpack(body, algosdk.modelsv2.SimulateRequest).txnGroups[0]!.txns[0]!
+        const isMbr = b64(stxn.txn.applicationCall!.appArgs[0]!) === b64(mbrForTicket.getSelector())
+        const ret = new Uint8Array([0x15, 0x1f, 0x7c, 0x75, ...new algosdk.ABIUintType(64).encode(115_000n)])
+        const resp = new algosdk.modelsv2.SimulateResponse({
+            version: 2,
+            lastRound: 100,
+            txnGroups: [
+                new algosdk.modelsv2.SimulateTransactionGroupResult({
+                    ...(isMbr ? {} : { failureMessage: 'logic eval error: err opcode executed' }),
+                    txnResults: [
+                        new algosdk.modelsv2.SimulateTransactionResult({
+                            txnResult: new algosdk.modelsv2.PendingTransactionResponse({ poolError: '', txn: stxn, logs: isMbr ? [ret] : [] }),
+                        }),
+                    ],
+                }),
+            ],
+        })
+        return algosdk.encodeMsgpack(resp)
+    }
+
+    function answer(path: string, body: Uint8Array): { type: string; body: Uint8Array | string } | undefined {
+        const json = (v: unknown) => ({ type: 'application/json', body: JSON.stringify(v) })
+        switch (path) {
+            case '/v2/status':
+                return json({
+                    'catchup-time': 0,
+                    'last-round': 100,
+                    'last-version': 'future',
+                    'next-version': 'future',
+                    'next-version-round': 101,
+                    'next-version-supported': true,
+                    'stopped-at-unsupported-round': false,
+                    'time-since-last-round': 0,
+                })
+            case '/v2/transactions/params':
+                return json({
+                    'consensus-version': 'future',
+                    fee: 0,
+                    'genesis-hash': b64(new Uint8Array(32)),
+                    'genesis-id': 'dev-v1',
+                    'last-round': 100,
+                    'min-fee': 1000,
+                })
+            case '/v2/applications/1':
+                return json({
+                    id: 1,
+                    params: {
+                        'approval-program': '',
+                        'clear-state-program': '',
+                        creator: ADDR,
+                        'global-state': [
+                            global('usdc', { type: 2, bytes: '', uint: 31566704 }),
+                            global('trea', { type: 1, bytes: b64(new Uint8Array(32)), uint: 0 }),
+                            global('paus', { type: 2, bytes: '', uint: paus }),
+                        ],
+                    },
+                })
+            case '/v2/transactions/simulate':
+                return { type: 'application/msgpack', body: simulate(body) }
+        }
+        return undefined
+    }
+
+    beforeAll(async () => {
+        escrowAlgod = createServer((req, res) => {
+            const chunks: Buffer[] = []
+            req.on('data', (c: Buffer) => chunks.push(c))
+            req.on('end', () => {
+                const a = answer(new URL(req.url ?? '/', 'http://algod').pathname, new Uint8Array(Buffer.concat(chunks)))
+                if (a === undefined) {
+                    res.statusCode = 404
+                    res.end('{"message":"not found"}')
+                    return
+                }
+                res.setHeader('content-type', a.type)
+                res.end(a.body)
+            })
+        })
+        await new Promise<void>((resolve) => escrowAlgod.listen(0, '127.0.0.1', resolve))
+        url = `http://127.0.0.1:${(escrowAlgod.address() as AddressInfo).port}`
+    })
+    afterAll(() => new Promise<void>((resolve) => escrowAlgod.close(() => resolve())))
+
+    const check = (rep: DoctorReport, id: string) => rep.checks.find((c) => c.id === id)
+
+    it('fails the escrow check on a paused app', async () => {
+        paus = 1
+        const rep = await diagnose({ network: { algodEndpoint: url, escrowAppId: 1n } }, ADDR)
+        expect(check(rep, 'escrow')).toMatchObject({ status: 'fail', message: 'escrow app 1 is paused; no ticket can open until its admin unpauses it' })
+        expect(check(rep, 'algo')?.status).not.toBe('skip')
+    })
+
+    it('passes it on an unpaused one', async () => {
+        paus = 0
+        const rep = await diagnose({ network: { algodEndpoint: url, escrowAppId: 1n } }, ADDR)
+        expect(check(rep, 'escrow')?.status).toBe('pass')
     })
 })
 

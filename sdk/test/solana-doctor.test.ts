@@ -88,6 +88,7 @@ const BASE: SolanaDoctorReadings = {
     program: 'P',
     configGenesis: '',
     mint: '',
+    configPaused: false,
     ticketRent: 0n,
     poolRent: 0n,
     lamports: 0n,
@@ -132,7 +133,7 @@ function fakeChain(o: {
         async config() {
             calls.push('config')
             fail(o.configErr)
-            return { config: { genesisHash: key(2), usdcMint: key(3) } as SolanaConfig, ticketRent: 2_000_000n, poolRent: 1_000_000n }
+            return { config: { genesisHash: key(2), usdcMint: key(3), paused: true } as SolanaConfig, ticketRent: 2_000_000n, poolRent: 1_000_000n }
         },
         async balance() {
             calls.push('balance')
@@ -177,6 +178,7 @@ describe('gatherSolanaDoctorReadings', () => {
             genesis: key(1),
             configGenesis: key(2),
             mint: key(3),
+            configPaused: true,
             ticketRent: 2_000_000n,
             poolRent: 1_000_000n,
             lamports: 7_000_000n,
@@ -374,6 +376,7 @@ describe('diagnose on Solana', () => {
         program: PROGRAM_ID,
         configGenesis: CONFIG.genesisHash,
         mint: CONFIG.usdcMint,
+        configPaused: false,
         ticketRent: TICKET_RENT,
         poolRent: POOL_RENT,
         lamports: LAMPORTS,
@@ -398,6 +401,15 @@ describe('diagnose on Solana', () => {
             'lamports at the pool address before any deposit',
             (a) => void a.set(POOL, { owner: '11111111111111111111111111111111', lamports: 5_000n, data: new Uint8Array() }),
             { poolExists: false, poolLamports: 0n, openTickets: 0n },
+        ],
+        [
+            'a paused program',
+            (a) => {
+                const data = base64.decode(CONFIG_DATA)
+                data[13] = 1 // Config.paused, after the discriminator and five u8s
+                a.set(D.config(), { owner: PROGRAM_ID, lamports: 1n, data })
+            },
+            { configPaused: true },
         ],
         ['an RPC on another cluster', () => key(9), { genesis: key(9) }],
     ])('reads %s', async (_, edit, readout) => {

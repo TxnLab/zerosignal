@@ -27,6 +27,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { RESOLVE_FROZEN_SIGNATURE, programHasMethod, settleOutcomeOf } from '../src/escrow/algod.js'
 import { ESCROW_METHOD_SIGNATURES } from '../src/escrow/generated/abi.js'
+import { APP_SPEC } from '../src/escrow/generated/ZeroSignalEscrowClient.js'
 import {
     APPROVAL_ASSERT,
     AlgodEscrowChain,
@@ -509,6 +510,27 @@ describe('AlgodEscrowChain config', () => {
         expect(await chain.protocolFeeBps()).toBe(0)
         fake.globals.set('pfee', { type: 1, bytes: new Uint8Array(8) })
         await expect(chain.protocolFeeBps()).rejects.toThrow('protocolFeeBps global has type 1')
+    })
+
+    // As Go's TestReadGlobals_Paused: absent is not paused, and a slot of the
+    // wrong type is a config error rather than a guess.
+    it('reads the paused flag with the globals', async () => {
+        expect(await chain.paused()).toBe(false)
+        fake.globals.set('paus', { type: 2, uint: 1n })
+        expect(await newChain().paused()).toBe(true)
+        fake.globals.set('paus', { type: 2, uint: 2n })
+        expect(await newChain().paused()).toBe(true)
+        fake.globals.set('paus', { type: 2, uint: 0n })
+        expect(await newChain().paused()).toBe(false)
+        fake.globals.set('paus', { type: 1, bytes: new Uint8Array([1]) })
+        await expect(newChain().paused()).rejects.toThrow('paused global has type 1')
+        await expect(newChain().config()).rejects.toThrow('paused global has type 1')
+    })
+
+    // As Go's TestPausedKeyMatchesARC56: a renamed global would otherwise read
+    // as never paused.
+    it('reads the paused key the contract declares', () => {
+        expect(APP_SPEC.state.keys.global.paused).toMatchObject({ key: 'cGF1cw==', valueType: 'AVMUint64' })
     })
 })
 

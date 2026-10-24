@@ -16,6 +16,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -99,6 +100,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -182,6 +184,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -265,6 +268,7 @@
         "ticketMbr": "0",
         "quotaDue": "0",
         "usdcAssetId": "0",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -347,6 +351,173 @@
         "ticketMbr": "0",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
+        "amount": "5000000",
+        "minBalance": "471000",
+        "usdcOptedIn": true,
+        "usdcBalance": "2500000",
+        "poolOptedIn": true,
+        "algoBalance": "1150000",
+        "openTickets": "2",
+        "nodes": [
+          {
+            "owner": "OWNER-0",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendable": "5000000"
+          },
+          {
+            "owner": "OWNER-1",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendable": "5000000"
+          },
+          {
+            "owner": "OWNER-2",
+            "reachable": false,
+            "protoVersion": "9.13",
+            "staging": false
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "algod",
+          "status": "pass",
+          "message": "algod on testnet answers at round 51234567"
+        },
+        {
+          "id": "escrow",
+          "status": "fail",
+          "message": "escrow app 765860477 reports no ticket MBR"
+        },
+        {
+          "id": "algo",
+          "status": "pass",
+          "message": "AEBAGBAFAYDQQCIKBMGA2DQPCAIREEYUCULBOGAZDINRYHI6D4QDTYK3BA holds 5 ALGO, 4.529 spendable"
+        },
+        {
+          "id": "usdc_opt_in",
+          "status": "skip",
+          "message": "needs the account and escrow reads"
+        },
+        {
+          "id": "usdc_balance",
+          "status": "skip",
+          "message": "needs the USDC opt-in"
+        },
+        {
+          "id": "prepaid_pool",
+          "status": "skip",
+          "message": "needs the account and escrow reads"
+        },
+        {
+          "id": "operators",
+          "status": "pass",
+          "message": "2 of 3 nodes can serve a request; the rest: 1 unreachable"
+        }
+      ]
+    },
+    {
+      "name": "escrow paused",
+      "readings": {
+        "network": "testnet",
+        "address": "AEBAGBAFAYDQQCIKBMGA2DQPCAIREEYUCULBOGAZDINRYHI6D4QDTYK3BA",
+        "slots": "10",
+        "relayRequired": true,
+        "allowStaging": false,
+        "lastRound": "51234567",
+        "minFee": "1000",
+        "escrowAppId": "765860477",
+        "ticketMbr": "115000",
+        "quotaDue": "0",
+        "usdcAssetId": "10458941",
+        "escrowPaused": true,
+        "amount": "5000000",
+        "minBalance": "471000",
+        "usdcOptedIn": true,
+        "usdcBalance": "2500000",
+        "poolOptedIn": true,
+        "algoBalance": "1150000",
+        "openTickets": "2",
+        "nodes": [
+          {
+            "owner": "OWNER-0",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendable": "5000000"
+          },
+          {
+            "owner": "OWNER-1",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendable": "5000000"
+          },
+          {
+            "owner": "OWNER-2",
+            "reachable": false,
+            "protoVersion": "9.13",
+            "staging": false
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "algod",
+          "status": "pass",
+          "message": "algod on testnet answers at round 51234567"
+        },
+        {
+          "id": "escrow",
+          "status": "fail",
+          "message": "escrow app 765860477 is paused; no ticket can open until its admin unpauses it"
+        },
+        {
+          "id": "algo",
+          "status": "pass",
+          "message": "AEBAGBAFAYDQQCIKBMGA2DQPCAIREEYUCULBOGAZDINRYHI6D4QDTYK3BA holds 5 ALGO, 4.529 spendable"
+        },
+        {
+          "id": "usdc_opt_in",
+          "status": "pass",
+          "message": "opted in to USDC (asset 10458941)"
+        },
+        {
+          "id": "usdc_balance",
+          "status": "pass",
+          "message": "holds 2.5 USDC"
+        },
+        {
+          "id": "prepaid_pool",
+          "status": "pass",
+          "message": "1.15 ALGO deposited, backing 10 of 10 tickets, 2 in use"
+        },
+        {
+          "id": "operators",
+          "status": "pass",
+          "message": "2 of 3 nodes can serve a request; the rest: 1 unreachable"
+        }
+      ]
+    },
+    {
+      "name": "paused without a ticket MBR",
+      "readings": {
+        "network": "testnet",
+        "address": "AEBAGBAFAYDQQCIKBMGA2DQPCAIREEYUCULBOGAZDINRYHI6D4QDTYK3BA",
+        "slots": "10",
+        "relayRequired": true,
+        "allowStaging": false,
+        "lastRound": "51234567",
+        "minFee": "1000",
+        "escrowAppId": "765860477",
+        "ticketMbr": "0",
+        "quotaDue": "0",
+        "usdcAssetId": "10458941",
+        "escrowPaused": true,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -429,6 +600,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "accountErr": "HTTP 500",
         "amount": "0",
         "minBalance": "0",
@@ -512,6 +684,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "0",
         "minBalance": "100000",
         "usdcOptedIn": false,
@@ -594,6 +767,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": false,
@@ -676,6 +850,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -758,6 +933,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "471001",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -840,6 +1016,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -923,6 +1100,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "200000",
         "usdcOptedIn": true,
@@ -1005,6 +1183,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "300000",
         "minBalance": "200000",
         "usdcOptedIn": true,
@@ -1087,6 +1266,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "521000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1169,6 +1349,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "521000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1251,6 +1432,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1333,6 +1515,7 @@
         "ticketMbr": "115000",
         "quotaDue": "22500",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1415,6 +1598,7 @@
         "ticketMbr": "115000",
         "quotaDue": "22500",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "476000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1497,6 +1681,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1579,6 +1764,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1661,6 +1847,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1743,6 +1930,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1805,6 +1993,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1866,6 +2055,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -1965,6 +2155,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2033,6 +2224,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2101,6 +2293,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2175,6 +2368,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2249,6 +2443,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2324,6 +2519,7 @@
         "ticketMbr": "115000",
         "quotaDue": "0",
         "usdcAssetId": "10458941",
+        "escrowPaused": false,
         "amount": "5000000",
         "minBalance": "471000",
         "usdcOptedIn": true,
@@ -2415,6 +2611,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -2499,6 +2696,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -2583,6 +2781,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -2667,6 +2866,7 @@
         "configErr": "program 2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1 has no Config",
         "configGenesis": "",
         "mint": "",
+        "configPaused": false,
         "ticketRent": "0",
         "poolRent": "0",
         "lamports": "50000000",
@@ -2750,6 +2950,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "0",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -2833,6 +3034,259 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
+        "ticketRent": "2282880",
+        "poolRent": "1141440",
+        "lamports": "50000000",
+        "usdcAccount": true,
+        "usdcFrozen": false,
+        "usdcBalance": "2500000",
+        "poolExists": true,
+        "poolLamports": "19404480",
+        "openTickets": "2",
+        "nodes": [
+          {
+            "owner": "OWNER-0",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-1",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-2",
+            "reachable": false,
+            "protoVersion": "9.13",
+            "staging": false
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "rpc",
+          "status": "pass",
+          "message": "the Solana RPC for devnet answers at block height 312345678"
+        },
+        {
+          "id": "program",
+          "status": "fail",
+          "message": "program 2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1's Config is for the cluster with genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d, but the RPC serves genesis EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
+        },
+        {
+          "id": "sol",
+          "status": "pass",
+          "message": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw holds 0.05 SOL, 0.04910912 spendable"
+        },
+        {
+          "id": "usdc_account",
+          "status": "skip",
+          "message": "needs the program read"
+        },
+        {
+          "id": "usdc_balance",
+          "status": "skip",
+          "message": "needs the USDC token account"
+        },
+        {
+          "id": "rent_pool",
+          "status": "skip",
+          "message": "needs the account and program reads"
+        },
+        {
+          "id": "operators",
+          "status": "pass",
+          "message": "2 of 3 nodes can serve a request; the rest: 1 unreachable"
+        }
+      ]
+    },
+    {
+      "name": "program paused",
+      "readings": {
+        "network": "devnet",
+        "address": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw",
+        "slots": "10",
+        "relayRequired": true,
+        "allowStaging": false,
+        "blockHeight": "312345678",
+        "genesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": true,
+        "ticketRent": "2282880",
+        "poolRent": "1141440",
+        "lamports": "50000000",
+        "usdcAccount": true,
+        "usdcFrozen": false,
+        "usdcBalance": "2500000",
+        "poolExists": true,
+        "poolLamports": "19404480",
+        "openTickets": "2",
+        "nodes": [
+          {
+            "owner": "OWNER-0",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-1",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-2",
+            "reachable": false,
+            "protoVersion": "9.13",
+            "staging": false
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "rpc",
+          "status": "pass",
+          "message": "the Solana RPC for devnet answers at block height 312345678"
+        },
+        {
+          "id": "program",
+          "status": "fail",
+          "message": "program 2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1 is paused; no ticket can open until its admin unpauses it"
+        },
+        {
+          "id": "sol",
+          "status": "pass",
+          "message": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw holds 0.05 SOL, 0.04910912 spendable"
+        },
+        {
+          "id": "usdc_account",
+          "status": "pass",
+          "message": "has a USDC token account (mint 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU)"
+        },
+        {
+          "id": "usdc_balance",
+          "status": "pass",
+          "message": "holds 2.5 USDC"
+        },
+        {
+          "id": "rent_pool",
+          "status": "pass",
+          "message": "0.0228288 SOL deposited, backing 10 of 10 tickets, 2 in use"
+        },
+        {
+          "id": "operators",
+          "status": "pass",
+          "message": "2 of 3 nodes can serve a request; the rest: 1 unreachable"
+        }
+      ]
+    },
+    {
+      "name": "paused without ticket rent",
+      "readings": {
+        "network": "devnet",
+        "address": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw",
+        "slots": "10",
+        "relayRequired": true,
+        "allowStaging": false,
+        "blockHeight": "312345678",
+        "genesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": true,
+        "ticketRent": "0",
+        "poolRent": "1141440",
+        "lamports": "50000000",
+        "usdcAccount": true,
+        "usdcFrozen": false,
+        "usdcBalance": "2500000",
+        "poolExists": true,
+        "poolLamports": "19404480",
+        "openTickets": "2",
+        "nodes": [
+          {
+            "owner": "OWNER-0",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-1",
+            "reachable": true,
+            "protoVersion": "9.13",
+            "staging": false,
+            "signerSpendableLamports": "10120"
+          },
+          {
+            "owner": "OWNER-2",
+            "reachable": false,
+            "protoVersion": "9.13",
+            "staging": false
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "rpc",
+          "status": "pass",
+          "message": "the Solana RPC for devnet answers at block height 312345678"
+        },
+        {
+          "id": "program",
+          "status": "fail",
+          "message": "the cluster quotes no rent for program 2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1's tickets"
+        },
+        {
+          "id": "sol",
+          "status": "pass",
+          "message": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw holds 0.05 SOL, 0.04910912 spendable"
+        },
+        {
+          "id": "usdc_account",
+          "status": "skip",
+          "message": "needs the program read"
+        },
+        {
+          "id": "usdc_balance",
+          "status": "skip",
+          "message": "needs the USDC token account"
+        },
+        {
+          "id": "rent_pool",
+          "status": "skip",
+          "message": "needs the account and program reads"
+        },
+        {
+          "id": "operators",
+          "status": "pass",
+          "message": "2 of 3 nodes can serve a request; the rest: 1 unreachable"
+        }
+      ]
+    },
+    {
+      "name": "paused on another cluster",
+      "readings": {
+        "network": "devnet",
+        "address": "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw",
+        "slots": "10",
+        "relayRequired": true,
+        "allowStaging": false,
+        "blockHeight": "312345678",
+        "genesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+        "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+        "configGenesis": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+        "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": true,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -2916,6 +3370,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "accountErr": "HTTP 500",
@@ -3000,6 +3455,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "0",
@@ -3083,6 +3539,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "0",
@@ -3166,6 +3623,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "1",
@@ -3249,6 +3707,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3333,6 +3792,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3416,6 +3876,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3499,6 +3960,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3582,6 +4044,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "890881",
@@ -3665,6 +4128,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3749,6 +4213,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -3832,6 +4297,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "2890880",
@@ -3915,6 +4381,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "1890880",
@@ -3998,6 +4465,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "990880",
@@ -4081,6 +4549,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4164,6 +4633,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4247,6 +4717,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4330,6 +4801,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4393,6 +4865,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4455,6 +4928,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",
@@ -4543,6 +5017,7 @@
         "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
         "configGenesis": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
         "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "configPaused": false,
         "ticketRent": "2282880",
         "poolRent": "1141440",
         "lamports": "50000000",

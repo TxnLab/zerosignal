@@ -7,12 +7,17 @@ package zs
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
@@ -68,6 +73,69 @@ func TestDiagnose_UnreachableAlgod(t *testing.T) {
 	}
 }
 
+// The escrow check reads the pause through the app fetch, and the account
+// checks still run.
+func TestAlgodDoctorChain_ReadsThePause(t *testing.T) {
+	escrowURL, _, _ := fakeEscrowAlgod(t, 115_000)
+	target, err := url.Parse(escrowURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var paus atomic.Uint64
+	writeJSON := func(w http.ResponseWriter, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(v); err != nil {
+			t.Error(err)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/v2/status"):
+			writeJSON(w, models.NodeStatus{LastRound: 100})
+		case strings.Contains(r.URL.Path, "/v2/applications/"):
+			writeJSON(w, models.Application{Id: 1, Params: models.ApplicationParams{GlobalState: []models.TealKeyValue{
+				{Key: base64.StdEncoding.EncodeToString([]byte("usdc")), Value: models.TealValue{Type: 2, Uint: 31566704}},
+				{Key: base64.StdEncoding.EncodeToString([]byte("trea")), Value: models.TealValue{Type: 1, Bytes: base64.StdEncoding.EncodeToString(make([]byte, 32))}},
+				{Key: base64.StdEncoding.EncodeToString([]byte("paus")), Value: models.TealValue{Type: 2, Uint: paus.Load()}},
+			}}})
+		default:
+			proxy.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cfg := Config{Network: Network{Algod: algod.Config{Endpoint: srv.URL}, EscrowAppID: 1}}
+	check := func(rep DoctorReport, id string) DoctorCheck {
+		for _, c := range rep.Checks {
+			if c.ID == id {
+				return c
+			}
+		}
+		t.Fatalf("no %s check in %+v", id, rep.Checks)
+		return DoctorCheck{}
+	}
+
+	paus.Store(1)
+	rep, err := Diagnose(context.Background(), cfg, testPayerAddr)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if c := check(rep, "escrow"); c.Status != DoctorFail || c.Message != "escrow app 1 is paused; no ticket can open until its admin unpauses it" {
+		t.Errorf("escrow = %s (%s), want the pause failure", c.Status, c.Message)
+	}
+	if c := check(rep, "algo"); c.Status == DoctorSkip {
+		t.Errorf("algo = %s (%s), want the account checks run", c.Status, c.Message)
+	}
+
+	paus.Store(0)
+	if rep, err = Diagnose(context.Background(), cfg, testPayerAddr); err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	if c := check(rep, "escrow"); c.Status != DoctorPass {
+		t.Errorf("unpaused escrow = %s (%s), want pass", c.Status, c.Message)
+	}
+}
+
 // An endpoint override that keeps the preset's app id is a warning New logs,
 // which the report carries.
 func TestDiagnose_CarriesConfigWarnings(t *testing.T) {
@@ -96,9 +164,9 @@ func (f *fakeDoctorChain) status(context.Context) (uint64, uint64, error) {
 	return 42, 1_000, f.statusErr
 }
 
-func (f *fakeDoctorChain) escrowConfig(context.Context) (uint64, uint64, uint64, error) {
+func (f *fakeDoctorChain) escrowConfig(context.Context) (uint64, uint64, uint64, bool, error) {
 	f.calls = append(f.calls, "escrow")
-	return 115_000, 777, 22_500, f.escrowErr
+	return 115_000, 777, 22_500, true, f.escrowErr
 }
 
 func (f *fakeDoctorChain) account(context.Context) (models.Account, error) {
@@ -136,7 +204,7 @@ func TestGatherDoctorReadings_MapsEachRead(t *testing.T) {
 	r := gatherDoctorReadings(context.Background(), f, DoctorReadings{EscrowAppID: appID})
 	want := DoctorReadings{
 		EscrowAppID: appID, LastRound: 42, MinFee: 1_000,
-		TicketMbr: 115_000, UsdcAssetID: 777, QuotaDue: 22_500,
+		TicketMbr: 115_000, UsdcAssetID: 777, QuotaDue: 22_500, EscrowPaused: true,
 		Amount: 5_000_000, MinBalance: 400_000, UsdcOptedIn: true, UsdcBalance: 2_500_000, PoolOptedIn: true,
 		AlgoBalance: 345_000, OpenTickets: 1,
 		Nodes: []DoctorNode{
@@ -177,7 +245,7 @@ func TestGatherDoctorReadings_ReadsWhatItCan(t *testing.T) {
 			chain:     &fakeDoctorChain{escrowErr: errors.New("no app"), acct: optedInAccount(appID)},
 			wantCalls: "status,escrow,account",
 			check: func(t *testing.T, r DoctorReadings) {
-				if r.EscrowErr != "no app" || r.TicketMbr != 0 || r.UsdcAssetID != 0 || r.UsdcOptedIn || !r.PoolOptedIn {
+				if r.EscrowErr != "no app" || r.TicketMbr != 0 || r.UsdcAssetID != 0 || r.EscrowPaused || r.UsdcOptedIn || !r.PoolOptedIn {
 					t.Errorf("readings = %+v", r)
 				}
 			},

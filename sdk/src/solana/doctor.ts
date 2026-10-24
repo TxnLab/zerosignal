@@ -65,6 +65,8 @@ export interface SolanaDoctorReadings {
     /** The genesis hash the program's Config binds every ack digest to. */
     configGenesis: string
     mint: string
+    /** The admin's pause, under which every open fails. */
+    configPaused: boolean
     /** The cluster's rent-exempt minimums for a ticket and a rent pool account. */
     ticketRent: bigint
     poolRent: bigint
@@ -111,7 +113,11 @@ export function solanaDoctorChecks(r: SolanaDoctorReadings): DoctorCheck[] {
     // another cluster reads a program nothing here can pay through.
     else if (r.configGenesis !== r.genesis) {
         add('program', 'fail', `program ${r.program}'s Config is for the cluster with genesis ${r.configGenesis}, but the RPC serves genesis ${r.genesis}`)
-    } else add('program', 'pass', `program ${r.program}: ${lamportsSol(r.ticketRent)} SOL rent per ticket, USDC mint ${r.mint}`)
+    }
+    // A pause leaves the account readings valid, so it fails only this check
+    // and the account checks still run.
+    else if (r.configPaused) add('program', 'fail', `program ${r.program} is paused; no ticket can open until its admin unpauses it`)
+    else add('program', 'pass', `program ${r.program}: ${lamportsSol(r.ticketRent)} SOL rent per ticket, USDC mint ${r.mint}`)
 
     const spendable = r.lamports < SOLANA_SIGNER_RESERVE_LAMPORTS ? 0n : r.lamports - SOLANA_SIGNER_RESERVE_LAMPORTS
     if (!rpcOK) add('sol', 'skip', needsRpc)
@@ -219,6 +225,7 @@ export function solanaDoctorBase(cfg: ResolvedConfig, address: string): SolanaDo
         program: cfg.network.program,
         configGenesis: '',
         mint: '',
+        configPaused: false,
         ticketRent: 0n,
         poolRent: 0n,
         lamports: 0n,
@@ -268,6 +275,7 @@ export async function gatherSolanaDoctorReadings(c: SolanaDoctorChain, base: Sol
         config = got.config
         r.configGenesis = config.genesisHash
         r.mint = config.usdcMint
+        r.configPaused = config.paused
         r.ticketRent = got.ticketRent
         r.poolRent = got.poolRent
     } catch (err) {

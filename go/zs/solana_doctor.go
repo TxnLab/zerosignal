@@ -43,6 +43,8 @@ type SolanaDoctorReadings struct {
 	// digest to.
 	ConfigGenesis string `json:"configGenesis"`
 	Mint          string `json:"mint"`
+	// ConfigPaused is the admin's pause, under which every open fails.
+	ConfigPaused bool `json:"configPaused"`
 	// TicketRent and PoolRent are the cluster's rent-exempt minimums for a
 	// ticket and a rent pool account.
 	TicketRent uint64 `json:"ticketRent,string"`
@@ -100,6 +102,10 @@ func SolanaDoctorChecks(r SolanaDoctorReadings) []DoctorCheck {
 	// another cluster reads a program nothing here can pay through.
 	case r.ConfigGenesis != r.Genesis:
 		add("program", DoctorFail, "program %s's Config is for the cluster with genesis %s, but the RPC serves genesis %s", r.Program, r.ConfigGenesis, r.Genesis)
+	// A pause leaves the account readings valid, so it fails only this check
+	// and the account checks still run.
+	case r.ConfigPaused:
+		add("program", DoctorFail, "program %s is paused; no ticket can open until its admin unpauses it", r.Program)
 	default:
 		add("program", DoctorPass, "program %s: %s SOL rent per ticket, USDC mint %s", r.Program, lamportsSOL(r.TicketRent), r.Mint)
 	}
@@ -281,7 +287,7 @@ func gatherSolanaDoctorReadings(ctx context.Context, c solanaDoctorChain, r Sola
 	if cfg, ticketRent, poolRent, err := c.config(ctx); err != nil {
 		r.ConfigErr = err.Error()
 	} else {
-		r.ConfigGenesis, r.Mint = cfg.GenesisHash.String(), cfg.USDCMint.String()
+		r.ConfigGenesis, r.Mint, r.ConfigPaused = cfg.GenesisHash.String(), cfg.USDCMint.String(), cfg.Paused
 		r.TicketRent, r.PoolRent = ticketRent, poolRent
 		switch t, err := c.usdcAccount(ctx, cfg.USDCMint); {
 		case err != nil:

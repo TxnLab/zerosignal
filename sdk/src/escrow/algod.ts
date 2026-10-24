@@ -64,6 +64,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 /** The contract globals the chain composes with, read once (Go's RefreshConfig). */
 interface Globals extends EscrowChainConfig {
     treasury: string
+    paused: boolean
 }
 
 /** Thrown by freeQuotaMbrDue's read when the deployed app predates the free-ticket quota. */
@@ -207,6 +208,16 @@ export class AlgodEscrowChain implements EscrowChain {
         return Number(v.uint)
     }
 
+    /**
+     * The `paus` global as of the kept globals read (Go's Client.Paused):
+     * while it is set every open reverts. setPaused toggles it at any time,
+     * so this is a snapshot, true only of the moment it was read; nothing on
+     * the open path gates on it. Absent is not paused.
+     */
+    async paused(signal?: AbortSignal): Promise<boolean> {
+        return (await this.#readGlobalsOnce(signal)).paused
+    }
+
     // One read serves every caller, so it runs under the timeout alone and
     // each caller stops waiting on its own signal. A failed read is not kept.
     #readGlobalsOnce(signal?: AbortSignal): Promise<Globals> {
@@ -253,6 +264,10 @@ export class AlgodEscrowChain implements EscrowChain {
         if (grace !== undefined && grace.type !== 2) {
             throw new Error(`escrow: settlementGraceDefault global has type ${grace.type}, want 2 (uint)`)
         }
+        const paus = kv.get('paus')
+        if (paus !== undefined && paus.type !== 2) {
+            throw new Error(`escrow: paused global has type ${paus.type}, want 2 (uint)`)
+        }
         return {
             appId: this.#appId,
             appAddress: this.#appAddress,
@@ -260,6 +275,7 @@ export class AlgodEscrowChain implements EscrowChain {
             settlementGraceDefault: grace === undefined ? 0n : BigInt(grace.uint),
             resolvesFrozen: programHasMethod(app.params?.approvalProgram, RESOLVE_FROZEN_SIGNATURE),
             treasury: new Address(trea.bytes).toString(),
+            paused: paus !== undefined && paus.uint !== 0n,
         }
     }
 
