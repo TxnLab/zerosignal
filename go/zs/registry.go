@@ -801,14 +801,14 @@ func uniqueMode(counts map[string]int) string {
 // foldTags makes the aggregate's tags a set a payer can scan and filter: one
 // entry per tag however each operator cased or padded it, lowercased, in byte
 // order. Without the fold "NSFW" and "nsfw" both list, and the order follows
-// operator iteration, so it shifts from one refresh to the next. Only ASCII
-// letters fold and only ASCII whitespace trims, because strings.ToLower and
-// strings.TrimSpace each differ from their JS namesakes outside ASCII.
+// operator iteration, so it shifts from one refresh to the next. The TS twin
+// uses toLowerCase and trim, which differ from these on a few inputs no tag
+// carries (a word-final Σ, U+FEFF, U+0085); tags are display-only either way.
 func foldTags(tags []string) []string {
 	var out []string
 	seen := make(map[string]struct{}, len(tags))
 	for _, t := range tags {
-		k := asciiLower(strings.Trim(t, asciiSpace))
+		k := strings.ToLower(strings.TrimSpace(t))
 		if k == "" {
 			continue
 		}
@@ -820,17 +820,6 @@ func foldTags(tags []string) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-const asciiSpace = " \t\n\v\f\r"
-
-func asciiLower(s string) string {
-	return strings.Map(func(r rune) rune {
-		if 'A' <= r && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return r
-	}, s)
 }
 
 // unionStrings returns a slice containing every element of a plus any

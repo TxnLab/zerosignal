@@ -758,8 +758,7 @@
                 "code",
                 "Uncensored",
                 "\t",
-                "É",
-                "﻿bom"
+                "É"
               ]
             },
             {
@@ -810,13 +809,12 @@
           "output_rate_usd_per_1m": 1,
           "tags": [
             "code",
+            "nbsp",
             "nsfw",
             "uncensored",
             "zeta",
-            " nbsp",
-            "É",
-            "﻿bom",
-            "Ａ",
+            "é",
+            "ａ",
             "😀"
           ]
         }

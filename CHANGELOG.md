@@ -34,8 +34,9 @@ the answer.
 ### 2026-10-25 — the aggregate's tags are a sorted set (unreleased)
 
 Both SDKs' `AllModelDetails` ↔ `allModelDetails` (Go's `aggregateModelDetails` ↔ `aggregateModelDetails` in
-`sdk/src/registry/aggregate.ts`) now fold each model's tags: ASCII-trimmed, ASCII-lowercased,
-blanks dropped, one entry each, in code point order. Before, `NSFW` and `nsfw` from two
+`sdk/src/registry/aggregate.ts`) now fold each model's tags: trimmed, lowercased (Go's
+`strings.ToLower` / `TrimSpace`, JS `toLowerCase` / `trim`), blanks dropped, one entry each, in
+code point order. Before, `NSFW` and `nsfw` from two
 operators both listed, a repeat within one operator's list was kept, and the order followed
 operator iteration, so it moved between refreshes. Modalities and `allowed_efforts` still union
 as before. The per-operator `/v1/zs/operators` keeps each operator's tags verbatim. Pinned by

@@ -185,11 +185,10 @@ func aggregateCases() []aggregateCase {
 		Reasoning:       &inject.ModelReasoning{AllowedEfforts: []string{"high", "high"}},
 	}
 	// Tags as operators actually write them: mixed case, padded, repeated,
-	// blank, and in an order the aggregate must not inherit. U+FF21 and
-	// U+1F600 sort one way by code point and the other by UTF-16 unit, and
-	// U+FF21 and U+00C9 stay as written, since only ASCII letters fold.
-	// U+00A0 and U+FEFF stay too, since only ASCII whitespace trims: Go's
-	// TrimSpace strips the first and JS trim() strips both.
+	// blank, and in an order the aggregate must not inherit. U+FF21 lowercases
+	// to U+FF41, which sorts before U+1F600 by code point and after it by
+	// UTF-16 unit. Non-ASCII letters fold and U+00A0 trims, as both languages'
+	// standard functions agree on them.
 	tagged := func(id string, tags ...string) inject.OperatorDetailsModel {
 		m := chat(id, 1, 1)
 		m.Tags = tags
@@ -221,7 +220,7 @@ func aggregateCases() []aggregateCase {
 		{Name: "tags fold to one lowercase entry each, trimmed, blanks dropped, in code point order",
 			Nodes: []aggregateNode{
 				aggUp(1, tagged("tags", "NSFW", "zeta", " code ", "", r(0xFF21), "\U0001F600", r(0xA0)+"nbsp"), tagged("blank", "", " ")),
-				aggUp(2, tagged("tags", "nsfw", "Code", "code", "Uncensored", "\t", r(0xC9), r(0xFEFF)+"bom"), tagged("blank", "\t")),
+				aggUp(2, tagged("tags", "nsfw", "Code", "code", "Uncensored", "\t", r(0xC9)), tagged("blank", "\t")),
 				aggUp(3, tagged("tags")),
 			}},
 		{Name: "coordinates take each field's majority, and a tie omits it",

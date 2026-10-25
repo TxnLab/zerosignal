@@ -283,14 +283,12 @@ function aggregateReasoning(a: ModelReasoning | undefined, b: ModelReasoning | u
 }
 
 // Go's foldTags: one entry per tag however it was cased or padded, lowercased,
-// in Go's byte order (code point order, which UTF-16 `<` is not). ASCII only,
-// since toLowerCase and trim fold and strip more than Go's ToLower and TrimSpace.
-// One input still parts the two: Go's JSON decoder turns a lone surrogate into
-// U+FFFD and JSON.parse keeps it, so such a tag sorts differently. It never routes.
+// in Go's byte order (code point order, which UTF-16 `<` is not). Go's foldTags
+// says where toLowerCase and trim differ from its ToLower and TrimSpace.
 function foldTags(tags: readonly string[]): string[] {
     const out = new Set<string>()
     for (const t of tags) {
-        const k = t.replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '').replace(/[A-Z]/g, (c) => c.toLowerCase())
+        const k = t.trim().toLowerCase()
         if (k !== '') out.add(k)
     }
     return [...out].sort(compareCodePoints)
