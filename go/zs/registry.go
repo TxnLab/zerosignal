@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -343,7 +344,8 @@ func (p *StaticRegistryProvider) AllModelDetails(_ context.Context) []inject.Ope
 
 // aggregateModelDetails is the deduplicated union of model capability info
 // across every node keep admits, in no particular order. Modalities are
-// unioned; sizing fields take the minimum of declared (non-zero) values across
+// unioned, and tags unioned then folded into a sorted set (foldTags); sizing
+// fields take the minimum of declared (non-zero) values across
 // operators. Pricing fields take the lowest declared (non-zero) USD/1M rate
 // across operators — a "from $X" advertising number. The authoritative
 // per-request rate is whichever operator's ticket the proxy actually consumes.
@@ -492,6 +494,7 @@ func aggregateModelDetails(ops []Operator, keep func(Operator) bool) []inject.Op
 		return nil
 	}
 	for m, d := range seen {
+		d.Tags = foldTags(d.Tags)
 		d.Coordinates = aggregateCoordinates(coordsByModel[m])
 		d.WeightsDigest, d.WeightsMismatch = aggregateDigest(digestsByModel[m])
 		d.Source = aggregateSource(sourcesByModel[m])
@@ -793,6 +796,30 @@ func uniqueMode(counts map[string]int) string {
 		return ""
 	}
 	return best
+}
+
+// foldTags makes the aggregate's tags a set a payer can scan and filter: one
+// entry per tag however each operator cased or padded it, lowercased, in byte
+// order. Without the fold "NSFW" and "nsfw" both list, and the order follows
+// operator iteration, so it shifts from one refresh to the next. The TS twin
+// uses toLowerCase and trim, which differ from these on a few inputs no tag
+// carries (a word-final Σ, U+FEFF, U+0085); tags are display-only either way.
+func foldTags(tags []string) []string {
+	var out []string
+	seen := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		k := strings.ToLower(strings.TrimSpace(t))
+		if k == "" {
+			continue
+		}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // unionStrings returns a slice containing every element of a plus any

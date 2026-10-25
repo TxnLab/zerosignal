@@ -229,8 +229,8 @@
           "tool_use": false,
           "tags": [
             "chat",
-            "fast",
-            "code"
+            "code",
+            "fast"
           ],
           "image_tool_rate_micro_usdc": 40000,
           "image_edit_tool_rate_micro_usdc": 60000,
@@ -602,7 +602,7 @@
       ]
     },
     {
-      "name": "a value a node repeats in a list is kept as it repeats",
+      "name": "a value a node repeats in a modality or effort list is kept as it repeats",
       "now_ms": 1800000000000,
       "max_carry_age_ms": 5400000,
       "allow_staging": false,
@@ -631,10 +631,7 @@
                   "low",
                   "low"
                 ]
-              },
-              "tags": [
-                "a"
-              ]
+              }
             }
           ],
           "bare_models": []
@@ -665,11 +662,7 @@
                   "high",
                   "high"
                 ]
-              },
-              "tags": [
-                "b",
-                "b"
-              ]
+              }
             }
           ],
           "bare_models": []
@@ -697,11 +690,132 @@
               "high",
               "high"
             ]
-          },
+          }
+        }
+      ]
+    },
+    {
+      "name": "tags fold to one lowercase entry each, trimmed, blanks dropped, in code point order",
+      "now_ms": 1800000000000,
+      "max_carry_age_ms": 5400000,
+      "allow_staging": false,
+      "nodes": [
+        {
+          "id": 1,
+          "node_id": 1,
+          "reachable": true,
+          "probed": true,
+          "reachable_as_of_ms": 1800000000000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "proto_version": "9.13",
+          "builtin_tools": [],
+          "models": [
+            {
+              "id": "tags",
+              "input_rate_usd_per_1m": 1,
+              "output_rate_usd_per_1m": 1,
+              "tags": [
+                "NSFW",
+                "zeta",
+                " code ",
+                "",
+                "Ａ",
+                "😀",
+                " nbsp"
+              ]
+            },
+            {
+              "id": "blank",
+              "input_rate_usd_per_1m": 1,
+              "output_rate_usd_per_1m": 1,
+              "tags": [
+                "",
+                " "
+              ]
+            }
+          ],
+          "bare_models": []
+        },
+        {
+          "id": 2,
+          "node_id": 1,
+          "reachable": true,
+          "probed": true,
+          "reachable_as_of_ms": 1800000000000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "proto_version": "9.13",
+          "builtin_tools": [],
+          "models": [
+            {
+              "id": "tags",
+              "input_rate_usd_per_1m": 1,
+              "output_rate_usd_per_1m": 1,
+              "tags": [
+                "nsfw",
+                "Code",
+                "code",
+                "Uncensored",
+                "\t",
+                "É"
+              ]
+            },
+            {
+              "id": "blank",
+              "input_rate_usd_per_1m": 1,
+              "output_rate_usd_per_1m": 1,
+              "tags": [
+                "\t"
+              ]
+            }
+          ],
+          "bare_models": []
+        },
+        {
+          "id": 3,
+          "node_id": 1,
+          "reachable": true,
+          "probed": true,
+          "reachable_as_of_ms": 1800000000000,
+          "staging": false,
+          "signer_spendable_microalgos": null,
+          "proto_version": "9.13",
+          "builtin_tools": [],
+          "models": [
+            {
+              "id": "tags",
+              "input_rate_usd_per_1m": 1,
+              "output_rate_usd_per_1m": 1
+            }
+          ],
+          "bare_models": []
+        }
+      ],
+      "models": [
+        "tags",
+        "blank"
+      ],
+      "builtin_tools": [],
+      "model_details": [
+        {
+          "id": "blank",
+          "input_rate_usd_per_1m": 1,
+          "output_rate_usd_per_1m": 1
+        },
+        {
+          "id": "tags",
+          "input_rate_usd_per_1m": 1,
+          "output_rate_usd_per_1m": 1,
           "tags": [
-            "a",
-            "b",
-            "b"
+            "code",
+            "nbsp",
+            "nsfw",
+            "uncensored",
+            "zeta",
+            "é",
+            "ａ",
+            "😀"
           ]
         }
       ]

@@ -176,14 +176,26 @@ func aggregateCases() []aggregateCase {
 	// repeat it appends, as it keeps one already in the first node's list.
 	repeatsA := inject.OperatorDetailsModel{
 		ID: "dup", InputRateUSDPer1M: 1, OutputRateUSDPer1M: 1,
-		InputModalities: []string{"text"}, Tags: []string{"a"},
-		Reasoning: &inject.ModelReasoning{Supported: true, AllowedEfforts: []string{"low", "low"}},
+		InputModalities: []string{"text"},
+		Reasoning:       &inject.ModelReasoning{Supported: true, AllowedEfforts: []string{"low", "low"}},
 	}
 	repeatsB := inject.OperatorDetailsModel{
 		ID: "dup", InputRateUSDPer1M: 1, OutputRateUSDPer1M: 1,
-		InputModalities: []string{"text", "image", "image"}, Tags: []string{"b", "b"},
-		Reasoning: &inject.ModelReasoning{AllowedEfforts: []string{"high", "high"}},
+		InputModalities: []string{"text", "image", "image"},
+		Reasoning:       &inject.ModelReasoning{AllowedEfforts: []string{"high", "high"}},
 	}
+	// Tags as operators actually write them: mixed case, padded, repeated,
+	// blank, and in an order the aggregate must not inherit. U+FF21 lowercases
+	// to U+FF41, which sorts before U+1F600 by code point and after it by
+	// UTF-16 unit. Non-ASCII letters fold and U+00A0 trims, as both languages'
+	// standard functions agree on them.
+	tagged := func(id string, tags ...string) inject.OperatorDetailsModel {
+		m := chat(id, 1, 1)
+		m.Tags = tags
+		return m
+	}
+	// Spelled by code point so the source carries no invisible characters.
+	r := func(c rune) string { return string(c) }
 
 	unprobed := func(agoMs int64) aggregateNode {
 		return with(aggUp(9, chat("carried", 1, 1)), func(c *aggregateNode) {
@@ -203,8 +215,14 @@ func aggregateCases() []aggregateCase {
 			Nodes: []aggregateNode{aggUp(1, imgRated), aggUp(2, imgFree), aggUp(3, imgEdit)}},
 		{Name: "every rate and image factor takes the lower of two declared values, whichever node declared it",
 			Nodes: []aggregateNode{aggUp(1, everyRate(2)), aggUp(2, everyRate(1)), aggUp(3, everyRate(3))}},
-		{Name: "a value a node repeats in a list is kept as it repeats",
+		{Name: "a value a node repeats in a modality or effort list is kept as it repeats",
 			Nodes: []aggregateNode{aggUp(1, repeatsA), aggUp(2, repeatsB)}},
+		{Name: "tags fold to one lowercase entry each, trimmed, blanks dropped, in code point order",
+			Nodes: []aggregateNode{
+				aggUp(1, tagged("tags", "NSFW", "zeta", " code ", "", r(0xFF21), "\U0001F600", r(0xA0)+"nbsp"), tagged("blank", "", " ")),
+				aggUp(2, tagged("tags", "nsfw", "Code", "code", "Uncensored", "\t", r(0xC9)), tagged("blank", "\t")),
+				aggUp(3, tagged("tags")),
+			}},
 		{Name: "coordinates take each field's majority, and a tie omits it",
 			Nodes: []aggregateNode{
 				aggUp(1, coords("llama", "q4", "instruct", 8, 0)),
