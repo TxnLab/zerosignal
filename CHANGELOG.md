@@ -31,6 +31,13 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-25 — the payer's catalog endpoints carry model tags (0.11.0)
+
+The Go handler's `/v1/zs/details` gives each model the union of its operators' `tags`, and
+`/v1/zs/operators` gives each operator's own, as SPEC § 3c describes. The registry already
+merged them; neither endpoint emitted them. `zs-proxy models --tag` reads the aggregate, so
+it needs this release.
+
 ### 2026-10-24 — `payer_usdc_account_unusable` ends the reserve sweep (0.11.0)
 
 A Solana node refuses a reserve with `403 payer_usdc_account_unusable` when the payer's USDC
