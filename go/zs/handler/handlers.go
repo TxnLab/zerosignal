@@ -226,6 +226,10 @@ func (s *Server) handleDetails(w http.ResponseWriter, r *http.Request) {
 		// flags in the tools it configures. Advisory.
 		Reasoning *inject.ModelReasoning `json:"reasoning,omitempty"`
 		ToolUse   *bool                  `json:"tool_use,omitempty"`
+		// Tags is the union of every operator's labels for the model, so one
+		// operator's tag is enough to list it under that tag — `zs-proxy models
+		// --tag` filters on this. Advisory: never routes.
+		Tags []string `json:"tags,omitempty"`
 		// USD/1M rates aggregated from operators (lowest declared rate
 		// wins — see AllModelDetails). 0 means no operator declared a
 		// rate for this model. Authoritative per-request rate is the
@@ -331,6 +335,7 @@ func (s *Server) handleDetails(w http.ResponseWriter, r *http.Request) {
 			OutputModalities:             d.OutputModalities,
 			Reasoning:                    d.Reasoning,
 			ToolUse:                      d.ToolUse,
+			Tags:                         d.Tags,
 			InputUSDPer1M:                d.InputRateUSDPer1M,
 			OutputUSDPer1M:               d.OutputRateUSDPer1M,
 			CacheReadUSDPer1M:            d.CacheReadRateUSDPer1M,
@@ -406,6 +411,9 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 		MaxOutputTokens  uint64   `json:"max_output_tokens,omitempty"`
 		InputModalities  []string `json:"input_modalities,omitempty"`
 		OutputModalities []string `json:"output_modalities,omitempty"`
+		// Tags are THIS operator's labels for the model verbatim, so a tag the
+		// aggregate shows can be traced to the operator that declared it. Advisory.
+		Tags []string `json:"tags,omitempty"`
 		// USD/1M rates as advertised by this specific operator. 0 means
 		// the operator did not declare a rate for the model. The node's
 		// reserve handler resolves these (with default_pricing fallback)
@@ -578,6 +586,7 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 				MaxOutputTokens:            cap.MaxOutputTokens,
 				InputModalities:            cap.InputModalities,
 				OutputModalities:           cap.OutputModalities,
+				Tags:                       cap.Tags,
 				InputUSDPer1M:              cap.InputUSDPer1M,
 				OutputUSDPer1M:             cap.OutputUSDPer1M,
 				CacheReadUSDPer1M:          cap.CacheReadUSDPer1M,

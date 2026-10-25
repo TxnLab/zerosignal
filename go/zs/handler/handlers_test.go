@@ -1001,6 +1001,85 @@ func TestHandleCatalog_WeightsSurfaces(t *testing.T) {
 	}
 }
 
+// Tags reach both catalog surfaces: the aggregate carries the union, so a tag
+// one operator declares is enough to find the model by it, and the per-operator
+// view carries each operator's own list, so that tag can be traced back.
+func TestHandleCatalog_TagsSurfaces(t *testing.T) {
+	op1 := zs.Operator{
+		ID: 1, OwnerAddr: "A", SigningAddr: "SA", BaseURL: "http://a",
+		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m", "plain"},
+		ModelCapacities: map[string]zs.ModelCapacity{
+			"m":     {Tags: []string{"code"}},
+			"plain": {},
+		},
+	}
+	op2 := zs.Operator{
+		ID: 2, OwnerAddr: "B", SigningAddr: "SB", BaseURL: "http://b",
+		Reachable: true, ProtoVersion: wire.ProtoVersion, Models: []string{"m"},
+		ModelCapacities: map[string]zs.ModelCapacity{
+			"m": {Tags: []string{"code", "uncensored"}},
+		},
+	}
+	reg, err := zs.NewStaticRegistryProvider([]zs.Operator{op1, op2})
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	s := testServer(testConfig(), deps{RegistryProvider: reg})
+
+	w := httptest.NewRecorder()
+	s.handleDetails(w, httptest.NewRequest(http.MethodGet, "/v1/zs/details", nil))
+	var agg struct {
+		Models []struct {
+			ID   string          `json:"id"`
+			Tags json.RawMessage `json:"tags"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&agg); err != nil {
+		t.Fatalf("decode details: %v", err)
+	}
+	aggTags := map[string]string{}
+	for _, m := range agg.Models {
+		aggTags[m.ID] = string(m.Tags)
+	}
+	if got, want := aggTags["m"], `["code","uncensored"]`; got != want {
+		t.Errorf("aggregate m tags = %s, want %s", got, want)
+	}
+	// Untagged stays absent rather than an empty list.
+	if got, ok := aggTags["plain"]; !ok || got != "" {
+		t.Errorf("aggregate plain tags = %q (present=%v), want omitted", got, ok)
+	}
+
+	w = httptest.NewRecorder()
+	s.handleOperators(w, httptest.NewRequest(http.MethodGet, "/v1/zs/operators", nil))
+	var perOp struct {
+		Operators []struct {
+			OperatorID uint64 `json:"operator_id"`
+			Models     []struct {
+				ID   string          `json:"id"`
+				Tags json.RawMessage `json:"tags"`
+			} `json:"models"`
+		} `json:"operators"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&perOp); err != nil {
+		t.Fatalf("decode operators: %v", err)
+	}
+	opTags := map[string]string{}
+	for _, o := range perOp.Operators {
+		for _, m := range o.Models {
+			opTags[fmt.Sprintf("%d/%s", o.OperatorID, m.ID)] = string(m.Tags)
+		}
+	}
+	for key, want := range map[string]string{
+		"1/m":     `["code"]`,
+		"2/m":     `["code","uncensored"]`,
+		"1/plain": "",
+	} {
+		if got, ok := opTags[key]; !ok || got != want {
+			t.Errorf("operator %s tags = %s (present=%v), want %s", key, got, ok, want)
+		}
+	}
+}
+
 // Retention reaches the wire. It is per-operator and deliberately NOT
 // aggregated — every other advisory field on this entry describes the MODEL and
 // is expected to agree across operators, while this describes each operator's
