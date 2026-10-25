@@ -31,6 +31,16 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-25 — the aggregate's tags are a sorted set (unreleased)
+
+Both SDKs' `AllModelDetails` ↔ `allModelDetails` (Go's `aggregateModelDetails` ↔ `aggregateModelDetails` in
+`sdk/src/registry/aggregate.ts`) now fold each model's tags: ASCII-trimmed, ASCII-lowercased,
+blanks dropped, one entry each, in code point order. Before, `NSFW` and `nsfw` from two
+operators both listed, a repeat within one operator's list was kept, and the order followed
+operator iteration, so it moved between refreshes. Modalities and `allowed_efforts` still union
+as before. The per-operator `/v1/zs/operators` keeps each operator's tags verbatim. Pinned by
+`catalog_aggregate_vectors.json` (SPEC § 3c).
+
 ### 2026-10-25 — the payer's catalog endpoints carry model tags (0.11.0)
 
 The Go handler's `/v1/zs/details` gives each model the union of its operators' `tags`, and

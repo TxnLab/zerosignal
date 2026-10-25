@@ -56,9 +56,9 @@ func TestAllModelDetails_TagsAndCapsUnion(t *testing.T) {
 		t.Fatalf("expected 1 model, got %d", len(out))
 	}
 	m := out[0]
-	// Tags OR-union: a tag appears if ANY operator declares it.
-	if !reflect.DeepEqual(m.Tags, []string{"nsfw", "code"}) {
-		t.Errorf("tags = %v, want [nsfw code]", m.Tags)
+	// Tags OR-union: a tag appears if ANY operator declares it, in sorted order.
+	if !reflect.DeepEqual(m.Tags, []string{"code", "nsfw"}) {
+		t.Errorf("tags = %v, want [code nsfw]", m.Tags)
 	}
 	// tool_use OR: op2 advertises true → aggregate true.
 	if m.ToolUse == nil || !*m.ToolUse {

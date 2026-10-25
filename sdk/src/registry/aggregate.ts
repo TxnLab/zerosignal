@@ -108,7 +108,8 @@ const NO_CAPACITY: ModelCapacity = {
 
 /**
  * The capability union of every model the nodes keep admits serve, the
- * figures behind /v1/models. Modalities and tags are unioned, sizing takes
+ * figures behind /v1/models. Modalities are unioned, tags unioned then folded
+ * into a sorted set (foldTags), sizing takes
  * the lowest declared (non-zero) value and each rate the lowest declared one
  * ("from $X"); the rate a request pays is the one its node signs into the
  * ticket. Coordinates take each field's majority, and the weights digest,
@@ -212,7 +213,8 @@ function detailsOf(f: Fold): OperatorDetailsModel {
     if (f.outputModalities.length > 0) d.output_modalities = f.outputModalities
     if (f.reasoning !== undefined) d.reasoning = f.reasoning
     if (f.toolUse !== undefined) d.tool_use = f.toolUse
-    if (f.tags.length > 0) d.tags = f.tags
+    const tags = foldTags(f.tags)
+    if (tags.length > 0) d.tags = tags
     const coordinates = aggregateCoordinates(f.coordinates)
     if (coordinates !== undefined) d.coordinates = coordinates
     const source = aggregateSource(f.sources)
@@ -278,6 +280,27 @@ function aggregateReasoning(a: ModelReasoning | undefined, b: ModelReasoning | u
     const out: ModelReasoning = { supported }
     if (efforts.length > 0) out.allowed_efforts = efforts
     return out
+}
+
+// Go's foldTags: one entry per tag however it was cased or padded, lowercased,
+// in Go's byte order (code point order, which UTF-16 `<` is not). ASCII only,
+// since toLowerCase and trim fold and strip more than Go's ToLower and TrimSpace.
+// One input still parts the two: Go's JSON decoder turns a lone surrogate into
+// U+FFFD and JSON.parse keeps it, so such a tag sorts differently. It never routes.
+function foldTags(tags: readonly string[]): string[] {
+    const out = new Set<string>()
+    for (const t of tags) {
+        const k = t.replace(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '').replace(/[A-Z]/g, (c) => c.toLowerCase())
+        if (k !== '') out.add(k)
+    }
+    return [...out].sort(compareCodePoints)
+}
+
+function compareCodePoints(a: string, b: string): number {
+    const x = Array.from(a, (c) => c.codePointAt(0) ?? 0)
+    const y = Array.from(b, (c) => c.codePointAt(0) ?? 0)
+    for (let i = 0; i < x.length && i < y.length; i++) if (x[i] !== y[i]) return x[i]! - y[i]!
+    return x.length - y.length
 }
 
 // a, then each of b not in a. A value b repeats is appended each time, as

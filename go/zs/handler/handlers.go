@@ -412,7 +412,8 @@ func (s *Server) handleOperators(w http.ResponseWriter, r *http.Request) {
 		InputModalities  []string `json:"input_modalities,omitempty"`
 		OutputModalities []string `json:"output_modalities,omitempty"`
 		// Tags are THIS operator's labels for the model verbatim, so a tag the
-		// aggregate shows can be traced to the operator that declared it. Advisory.
+		// aggregate shows (trimmed and lowercased there) can be traced to the
+		// operator that declared it. Advisory.
 		Tags []string `json:"tags,omitempty"`
 		// USD/1M rates as advertised by this specific operator. 0 means
 		// the operator did not declare a rate for the model. The node's
