@@ -43,7 +43,7 @@ const (
 	ConfigSize   = 349
 	OperatorSize = 171
 	NodeSize     = 880
-	TicketSize   = 275
+	TicketSize   = 291
 	RentPoolSize = 82
 )
 
@@ -304,9 +304,14 @@ type Ticket struct {
 	RentPayer   solana.PublicKey `json:"rent_payer"`
 	// FrozenAt and FreezeOrigin (FreezeOrigin*) are Algorand's frozenAt and
 	// freezeOrigin, for whoever resolves the ticket.
-	FrozenAt     int64   `json:"frozen_at"`
-	FreezeOrigin uint8   `json:"freeze_origin"`
-	Reserve      [7]byte `json:"_reserve"`
+	FrozenAt     int64 `json:"frozen_at"`
+	FreezeOrigin uint8 `json:"freeze_origin"`
+	// TicketID is the id the address derives from, which the address can't
+	// give back. Everything off chain names a ticket by it, so a walk of a
+	// node's tickets can match each to the ledger, receipts and journal that
+	// name it, as an Algorand box's name is its ticket id.
+	TicketID [16]byte `json:"ticket_id"`
+	Reserve  [7]byte  `json:"_reserve"`
 }
 
 // Deadline is the last moment either half, a cooperative settle or a protest
@@ -330,6 +335,7 @@ func DecodeTicket(data []byte) (*Ticket, error) {
 		Payer: r.key(), Node: r.key(), NodeSigning: r.key(), RentPayer: r.key(),
 	}
 	t.FrozenAt, t.FreezeOrigin = r.i64(), r.u8()
+	r.array(t.TicketID[:])
 	r.array(t.Reserve[:])
 	return t, r.err
 }

@@ -80,7 +80,7 @@ describe('rentPoolGross', () => {
     })
 })
 
-const TICKET_RENT = (128n + 275n) * 6_960n
+const TICKET_RENT = (128n + 291n) * 6_960n
 const POOL_RENT = (128n + 82n) * 6_960n
 
 const seed = new Uint8Array(32).fill(7)
@@ -188,8 +188,8 @@ describe('SolanaRentPool', () => {
         expect(err).toBeInstanceOf(RentDepositUnaffordableError)
         // The serving path's branch on Algorand's error takes it too.
         expect(err).toBeInstanceOf(MbrDepositUnaffordableError)
-        expect(err).toMatchObject({ backedSlots: 0n, slots: 1n, need: 4_271_480n, spendable: 4_271_479n })
-        expect((err as Error).message).toContain('one more slot needs 4271480 lamports (2804880 + 5000 fee + 1461600 pool rent)')
+        expect(err).toMatchObject({ backedSlots: 0n, slots: 1n, need: 4_382_840n, spendable: 4_382_839n })
+        expect((err as Error).message).toContain('one more slot needs 4382840 lamports (2916240 + 5000 fee + 1461600 pool rent)')
         expect((err as Error).stack).not.toMatch(/ALGO/)
         expect(c.sent).toHaveLength(0)
     })
