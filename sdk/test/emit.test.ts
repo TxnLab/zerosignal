@@ -167,6 +167,18 @@ describe('StreamEmitter', () => {
         expect(r.errors[0]!.ticket).toBe(own)
     })
 
+    // A free Solana turn commits with no open: nothing is locked, so a failure
+    // after it is unpaid and names no ticket, and its resend costs nothing.
+    it('leaves a failure after a free turn’s commit unpaid, with no ticket', () => {
+        const r = recording({ feeUnit: feeUnitOf('solana') })
+        r.em.reserved(reservedOf('tid', 0), op34)
+        r.em.committed('tid', '', 0)
+        r.em.interrupt()
+        expect(r.events).toContainEqual({ type: 'payment.committed', ticketId: 'tid', openTxId: '', feesMicroAlgos: 0, networkFees: 0 })
+        expect(r.errors[0]).toMatchObject({ paid: false, code: 'stream_interrupted', retryable: true })
+        expect(r.errors[0]!.ticket).toBeUndefined()
+    })
+
     it('leaves a failure before the open unpaid, with no ticket', () => {
         const r = recording()
         r.em.reserved(reservedOf('tid'), op34)

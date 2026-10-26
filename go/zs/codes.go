@@ -44,7 +44,11 @@ var errorKinds = map[string]Kind{
 	"canceled": KindInterrupted,
 
 	"free_quota_exhausted": KindFunds,
-	"payer_not_opted_in":   KindFunds,
+	// No Solana node that answered for the model has free tier left for the
+	// UTC day, and none was busy or unreachable; like free_quota_exhausted,
+	// the remedy is waiting or paying.
+	"free_budget_exhausted": KindFunds,
+	"payer_not_opted_in":    KindFunds,
 	// Funds, not a node fault: the payer's own USDC token account can't take
 	// an ending's refund, and every Solana node reads the same account.
 	"payer_usdc_account_unusable": KindFunds,

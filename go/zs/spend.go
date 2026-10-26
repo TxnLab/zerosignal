@@ -27,7 +27,9 @@ func recordSpend(log *slog.Logger, method, ticketID string, call func()) {
 // All amounts are microUSDC. Implementations must be safe for concurrent use.
 //
 // After a successful Reserve the request resolves the ticket with Settle or
-// Release at most once. When it cannot (no verified receipt arrived), the
+// Release at most once, except a free Solana turn (MaxPrice 0, nothing
+// opened): it is Released at once, and its receipt check may resolve it
+// again, Settle at 0 or Release. When it cannot (no verified receipt arrived), the
 // refund watchdog and the ticket reconciler may resolve it once the ticket
 // ends on chain. Both Release on a refund they submitted. The reconciler also
 // Settles a lapse it submitted, at the operator's claim, and Releases

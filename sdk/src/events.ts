@@ -76,11 +76,14 @@ export interface ReserveSucceeded {
 /**
  * Once, when algod accepts the escrow open group; it may still be pending.
  * Nothing is resent after it: a later failure ends in settle, protest or
- * refund.
+ * refund. A free Solana turn opens nothing, so it fires once the turn is
+ * sealed to its node, with an empty openTxId and no fees: the node admits it
+ * on the ticket alone.
  */
 export interface PaymentCommitted {
     type: 'payment.committed'
     ticketId: string
+    /** The open's transaction id; empty for a free Solana turn. */
     openTxId: string
     /** @deprecated networkFees on Algorand, 0 on any other rail. */
     feesMicroAlgos: number

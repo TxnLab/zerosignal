@@ -39,6 +39,7 @@ import type { Rail } from './network.js'
 import type { Operator } from './operator.js'
 import type { OpenHandle, Reserved, WalletOpener } from './parts.js'
 import type { Fetch, LogAttrs, Logger } from './ports.js'
+import { opensOnChain } from './rail.js'
 import { recordRelayHopAction, relayHopAction } from './routing/attribution.js'
 import { type RelayHop, applyRelay } from './routing/relay.js'
 import type { RelayReputationStore } from './routing/reputation.js'
@@ -57,8 +58,8 @@ export interface SealedCall {
     model: string
     op: Operator
     reserved: Reserved
-    /** The opened escrow, for the ack and a protest. */
-    handle: OpenHandle
+    /** The opened escrow, for the ack and a protest; null for a turn that opens nothing (opensOnChain). */
+    handle: OpenHandle | null
     /** The open() app call's txid, which the envelope carries. */
     txId: string
     hop: RelayHop | null
@@ -86,7 +87,10 @@ export interface SealedDeps {
     remedies: Remedies
     /** The network's name, as failure messages give it. Empty when named only by endpoint. */
     network: string
-    /** The payer's rail, which names the coin and pool in failure messages; absent is algorand. */
+    /**
+     * The payer's rail, which decides whether the turn opens (opensOnChain) and
+     * names the coin and pool in failure messages; absent is algorand.
+     */
     rail?: Rail | undefined
     fetch: Fetch
     relayReputation?: RelayReputationStore | undefined
@@ -150,47 +154,69 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
     // (submitsOpen). The app-call txid goes into the envelope either way: the
     // node finds a payer-submitted open by it, and checks that a handed-off
     // group carries it.
-    let handle: OpenHandle
-    try {
-        handle =
-            deps.wallet.openForNode && submitsOpen(op.protoVersion)
-                ? await deps.wallet.openForNode(ticket, op, rt.presignedOpenTxn, signal)
-                : await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
-    } catch (err) {
-        // The open didn't commit, so a failed attempt doesn't keep the cap.
-        const guard = deps.spendGuard
-        if (guard) guardRecords(log, 'release', ticket.ticket_id, () => guard.release(ticket.ticket_id))
-        log.error('wallet open failed', {
+    //
+    // A free Solana turn opens nothing (opensOnChain): it binds an empty txid,
+    // and its handle stays null, so the receipt check records the zero charge
+    // and sends no ack, protest or journal row.
+    let handle: OpenHandle | null = null
+    let txId = ''
+    if (opensOnChain(deps.rail, ticket.max_price)) {
+        let opened: OpenHandle
+        try {
+            opened =
+                deps.wallet.openForNode && submitsOpen(op.protoVersion)
+                    ? await deps.wallet.openForNode(ticket, op, rt.presignedOpenTxn, signal)
+                    : await deps.wallet.open(ticket, op, rt.presignedOpenTxn, signal)
+        } catch (err) {
+            // The open didn't commit, so a failed attempt doesn't keep the cap.
+            const guard = deps.spendGuard
+            if (guard) guardRecords(log, 'release', ticket.ticket_id, () => guard.release(ticket.ticket_id))
+            log.error('wallet open failed', {
+                endpoint,
+                ...opAttrs(op),
+                ...relayAttrs(hop),
+                ticket_id: ticket.ticket_id,
+                err: errText(err),
+            })
+            em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err, deps.rail))
+            return
+        }
+        handle = opened
+        // The ceiling stays on the spend tally: settlement charges less on chain,
+        // and the cap counts the ceiling on purpose. The hook can't stop the turn:
+        // escrow is open, or for a handed-off group may open whenever the node
+        // submits it, so the caller must still hear that it paid.
+        try {
+            await deps.opened?.(opened, ticket)
+        } catch (err) {
+            log.warn('open hook failed', { ticket_id: ticket.ticket_id, err: errText(err) })
+        }
+        const deliverAck = settleAckPoster(deps, op, rt.sealRecipient, hop !== null)
+        if (deliverAck) opened.deliverAck = deliverAck
+        txId = opened.appCallTxId
+        em.committed(ticket.ticket_id, txId, opened.openFeesMicroalgos)
+        log.debug('wallet open submitted', {
             endpoint,
             ...opAttrs(op),
             ...relayAttrs(hop),
             ticket_id: ticket.ticket_id,
-            err: errText(err),
+            app_call_txid: opened.appCallTxId,
+            group_id: opened.groupId,
         })
-        em.fail(openFailure(deps.wallet.payerAddr(), deps.network, deps.remedies, err, deps.rail))
-        return
+    } else {
+        // Nothing is locked, so the reservation holds no exposure; releasing it
+        // now resolves it whatever becomes of the turn, which no watchdog or
+        // reconciler will see. The receipt check may resolve it again, which
+        // the SpendGuard contract allows.
+        const guard = deps.spendGuard
+        if (guard) guardRecords(log, 'release', ticket.ticket_id, () => guard.release(ticket.ticket_id))
+        log.debug('free Solana turn: nothing to open', {
+            endpoint,
+            ...opAttrs(op),
+            ...relayAttrs(hop),
+            ticket_id: ticket.ticket_id,
+        })
     }
-    // The ceiling stays on the spend tally: settlement charges less on chain,
-    // and the cap counts the ceiling on purpose. The hook can't stop the turn:
-    // escrow is open, or for a handed-off group may open whenever the node
-    // submits it, so the caller must still hear that it paid.
-    try {
-        await deps.opened?.(handle, ticket)
-    } catch (err) {
-        log.warn('open hook failed', { ticket_id: ticket.ticket_id, err: errText(err) })
-    }
-    const deliverAck = settleAckPoster(deps, op, rt.sealRecipient, hop !== null)
-    if (deliverAck) handle.deliverAck = deliverAck
-    const txId = handle.appCallTxId
-    em.committed(ticket.ticket_id, txId, handle.openFeesMicroalgos)
-    log.debug('wallet open submitted', {
-        endpoint,
-        ...opAttrs(op),
-        ...relayAttrs(hop),
-        ticket_id: ticket.ticket_id,
-        app_call_txid: handle.appCallTxId,
-        group_id: handle.groupId,
-    })
 
     // Sealed to the recipient pinned at reserve, not the operator's current
     // one: a refresh since may have rotated it, and the node committed
@@ -205,7 +231,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
             responseKey: rt.responseKey,
             nodeRecipient: rt.sealRecipient,
             ephemeral: rt.identity,
-            ...(handle.openGroup ? { openGroup: handle.openGroup } : {}),
+            ...(handle?.openGroup ? { openGroup: handle.openGroup } : {}),
             neutralNames: usesRailNeutralNames(op.protoVersion),
         })
     } catch (err) {
@@ -213,10 +239,16 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
         em.fail(newError('wrap_request', 'request could not be wrapped'))
         return
     }
+    if (handle === null) {
+        // A free turn is committed once it is sealed for its node, so hosts
+        // get the same "the node has the turn" line as for a paid one, with
+        // no open to name. It leaves the turn unpaid: a resend costs nothing.
+        em.committed(ticket.ticket_id, '', 0)
+    }
 
     const call: SealedCall = { endpoint, model, op, reserved: rt, handle, txId, hop, signal }
     const buffered = deps.buffered(call)
-    const respond = handle.openGroup ? recheckDepositOnRefusedOpen(deps.wallet, buffered) : buffered
+    const respond = handle?.openGroup ? recheckDepositOnRefusedOpen(deps.wallet, buffered) : buffered
     // Relayed, the envelope goes to the relay's route with the inner request
     // in its headers; it stays sealed to the target, which the relay can't open.
     const fwd = applyRelay(hop, op.baseUrl + endpoint, 'POST', operatorHeaders(ENCRYPTED_CONTENT_TYPE), endpoint)

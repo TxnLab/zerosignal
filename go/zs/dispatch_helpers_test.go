@@ -8,6 +8,7 @@ package zs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -67,6 +68,8 @@ type recEmitter struct {
 	opened  int
 	broken  bool
 	cause   error
+	// commits are the committed calls, as "ticket open fees".
+	commits []string
 }
 
 func (e *recEmitter) note(ev Event) {
@@ -76,7 +79,11 @@ func (e *recEmitter) note(ev Event) {
 }
 func (e *recEmitter) clamped(uint64)                     {}
 func (e *recEmitter) reserved(*ReservedTicket, Operator) {}
-func (e *recEmitter) committed(string, string, uint64)   {}
+func (e *recEmitter) committed(ticketID, openTxID string, fees uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.commits = append(e.commits, fmt.Sprintf("%s %q %d", ticketID, openTxID, fees))
+}
 func (e *recEmitter) fail(err *Error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

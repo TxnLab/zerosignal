@@ -45,6 +45,7 @@ func TestErrorShapes(t *testing.T) {
 		"mbr_pool_exhausted":              {429, "rate_limit_exceeded"},
 		"canceled":                        {499, "proxy_error"},
 		"free_quota_exhausted":            {403, "invalid_request_error"},
+		"free_budget_exhausted":           {403, "invalid_request_error"},
 		"payer_not_opted_in":              {403, "invalid_request_error"},
 		"payer_usdc_account_unusable":     {403, "invalid_request_error"},
 		"wallet_unfunded":                 {402, "insufficient_quota"},

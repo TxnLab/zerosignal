@@ -723,7 +723,7 @@ export function frameFactory(
                             receipt,
                             ticket,
                             op,
-                            openFees: handle.openFeesMicroalgos,
+                            openFees: handle?.openFeesMicroalgos ?? 0,
                             settleFees: check.settled.networkFees,
                             algoUsdPrice: reserved.algoUsdPrice,
                             feeUnit: deps.feeUnit,

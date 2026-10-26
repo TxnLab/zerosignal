@@ -28,7 +28,9 @@ type emitter interface {
 	clamped(ceiling uint64)
 	// reserved reports the ticket a node signed.
 	reserved(rt *ReservedTicket, op Operator)
-	// committed reports the escrow open; nothing is resent after it.
+	// committed reports the escrow open; nothing is resent after it. A free
+	// Solana turn reports it with no open (openTxID empty) once it is sealed,
+	// and that does not make the turn paid: nothing was locked.
 	committed(ticketID, openTxID string, networkFees uint64)
 	// fail ends the request with e before any response has started.
 	fail(e *Error)
@@ -243,7 +245,9 @@ func (e *streamEmitter) reserved(rt *ReservedTicket, op Operator) {
 }
 
 func (e *streamEmitter) committed(ticketID, openTxID string, networkFees uint64) {
-	e.paid = true
+	// Paid says money is locked and a Ticket can still move it; a free
+	// Solana turn locked none, and a resend of it costs nothing.
+	e.paid = openTxID != ""
 	e.emit(PaymentCommitted{TicketID: ticketID, OpenTxID: openTxID, FeesMicroAlgos: algoOnly(e.unit, networkFees), NetworkFees: networkFees})
 }
 

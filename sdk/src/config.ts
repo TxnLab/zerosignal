@@ -87,7 +87,9 @@ export interface Remedies {
  * SpendGuard is the caller's spending policy, consulted at two checkpoints.
  * Amounts are microUSDC. See proto/go/zs SpendGuard for the full contract:
  * settle and release can arrive more than once for a ticket, so a guard
- * keyed by ticket id counts only the first.
+ * keyed by ticket id counts only the first. A free Solana turn (maxPrice 0,
+ * nothing opened) is released at once, and its receipt check may resolve it
+ * again, settle at 0 or release.
  *
  * Every method answers synchronously: an async one doesn't compile against
  * SpendGuardResult, and an async admit or reserve is refused at run time

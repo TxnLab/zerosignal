@@ -173,7 +173,7 @@ export interface TurnReceipt {
     model: string
     ticket: Ticket
     op: Operator
-    /** The opened escrow, or null when there is none to submit against. */
+    /** The opened escrow, or null for a free Solana turn, which opens nothing to submit against. */
     handle: OpenHandle | null
     receipt: UsageReceipt
     /** sha256 of the body, or of the concatenated stream frames. */

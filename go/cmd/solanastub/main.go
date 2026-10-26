@@ -60,7 +60,7 @@ func run(rpcURL, authorityPath, listen string, exitOnEOF bool) error {
 		"url": l.URL, "operator_id": l.OperatorID, "node_id": l.NodeID,
 		"program": zsescrow.ProgramID.String(), "fee_bps": l.Chain.Config.FeeBps,
 		"default_grace": l.Chain.Config.DefaultGrace, "payer_usdc": solanastub.PayerUSDC,
-		"model": solanastub.Model, "reply": solanastub.Reply,
+		"model": solanastub.Model, "free_model": solanastub.FreeModel, "reply": solanastub.Reply,
 	})
 	if err != nil {
 		return err

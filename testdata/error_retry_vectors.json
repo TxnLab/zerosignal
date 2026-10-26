@@ -26,6 +26,11 @@
   },
   {
     "kind": "funds",
+    "code": "free_budget_exhausted",
+    "retryable": false
+  },
+  {
+    "kind": "funds",
     "code": "free_quota_exhausted",
     "retryable": false
   },

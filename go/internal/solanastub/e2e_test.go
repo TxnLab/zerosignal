@@ -122,9 +122,9 @@ func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 	return &payer{key: pub, client: client}
 }
 
-func chatBody(stream bool) []byte {
+func chatBody(model string, stream bool) []byte {
 	b, _ := json.Marshal(map[string]any{
-		"model":      solanastub.Model,
+		"model":      model,
 		"messages":   []any{map[string]string{"role": "user", "content": "say hello"}},
 		"max_tokens": 64,
 		"stream":     stream,
@@ -132,12 +132,18 @@ func chatBody(stream bool) []byte {
 	return b
 }
 
-// ask runs one chat turn and waits for its settle submit.
+// ask runs one chat turn on the stub's priced model and waits for its
+// settle submit.
 func (p *payer) ask(t *testing.T, stream bool) (string, zs.Settlement, error, error) {
+	t.Helper()
+	return p.askModel(t, solanastub.Model, stream)
+}
+
+func (p *payer) askModel(t *testing.T, model string, stream bool) (string, zs.Settlement, error, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	s := p.client.Stream(ctx, zs.Request{Endpoint: zs.EndpointChatCompletions, Body: chatBody(stream)})
+	s := p.client.Stream(ctx, zs.Request{Endpoint: zs.EndpointChatCompletions, Body: chatBody(model, stream)})
 	text, err := s.Text()
 	set, werr := s.Wait(ctx)
 	return text, set, err, werr
@@ -219,6 +225,40 @@ func TestSolanaE2E_Settles(t *testing.T) {
 			}
 			if got, want := payerUSDC-l.usdc(t, p.key), l.WithFee(receipts[0].AmountCharged); got != want {
 				t.Errorf("payer paid %d, want the receipt's %d and its fee", got, want)
+			}
+			l.checkStub(t, p)
+		})
+	}
+}
+
+// A free turn opens nothing: the payer signs and pays nothing, the node's
+// receipt charges zero, and nothing settles.
+func TestSolanaE2E_FreeTurnOpensNothing(t *testing.T) {
+	l := setup(t)
+	for _, stream := range []bool{false, true} {
+		name := map[bool]string{false: "buffered", true: "streamed"}[stream]
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := l.newPayer(t, solanastub.Behavior{})
+			text, set, err, werr := p.askModel(t, solanastub.FreeModel, stream)
+			if err != nil || werr != nil {
+				t.Fatalf("turn: %v; settle: %v", err, werr)
+			}
+			if text != solanastub.Reply {
+				t.Errorf("text = %q, want %q", text, solanastub.Reply)
+			}
+			if set.Kind != zs.SettleNone {
+				t.Errorf("settlement = %+v, want none", set)
+			}
+			if ids := l.Node.Opened(p.key); len(ids) != 0 {
+				t.Errorf("payer opened %d tickets", len(ids))
+			}
+			receipts := l.Node.Receipts(p.key)
+			if len(receipts) != 1 || receipts[0].AmountCharged != 0 {
+				t.Errorf("receipts %+v, want one at zero", receipts)
+			}
+			if got := l.usdc(t, p.key); got != payerUSDC {
+				t.Errorf("payer holds %d, want %d", got, payerUSDC)
 			}
 			l.checkStub(t, p)
 		})

@@ -39,6 +39,26 @@ func railReserve(t *testing.T, rail ticket.Rail, edit func(h *reserveTestHarness
 	return seen, rt, err
 }
 
+// Only a free Solana turn opens nothing; an Algorand free ticket opens at
+// zero under the contract's quota. The TS SDK's 'opensOnChain'.
+func TestOpensOnChain(t *testing.T) {
+	for _, c := range []struct {
+		rail     ticket.Rail
+		maxPrice uint64
+		want     bool
+	}{
+		{0, 0, true},
+		{ticket.RailAlgorand, 0, true},
+		{ticket.RailAlgorand, 5, true},
+		{ticket.RailSolana, 1, true},
+		{ticket.RailSolana, 0, false},
+	} {
+		if got := opensOnChain(c.rail, &ticket.Ticket{MaxPrice: c.maxPrice}); got != c.want {
+			t.Errorf("opensOnChain(%v, %d) = %v, want %v", c.rail, c.maxPrice, got, c.want)
+		}
+	}
+}
+
 // staleTicketID is an id a caller left on the request, perhaps one already
 // opened at the node.
 const staleTicketID = "c3RhbGUtdGlja2V0LWlkLg=="

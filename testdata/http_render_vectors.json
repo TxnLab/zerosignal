@@ -76,14 +76,29 @@
     },
     {
       "kind": "internal",
-      "code": "free_quota_exhausted",
-      "message": "msg for free_quota_exhausted",
+      "code": "free_budget_exhausted",
+      "message": "msg for free_budget_exhausted",
       "retryable": false,
       "paid": false,
       "retry_after_ms": 0,
       "status": 403,
       "headers": {
         "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for free_budget_exhausted\",\"type\":\"invalid_request_error\",\"code\":\"free_budget_exhausted\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "free_quota_exhausted",
+      "message": "msg for free_quota_exhausted",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 7000,
+      "status": 403,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for free_quota_exhausted\",\"type\":\"invalid_request_error\",\"code\":\"free_quota_exhausted\"}}\n"
@@ -92,13 +107,13 @@
       "kind": "internal",
       "code": "max_output_required",
       "message": "msg for max_output_required",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 7000,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
       "status": 400,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "7",
+        "retry-after": "1",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for max_output_required\",\"type\":\"invalid_request_error\",\"code\":\"max_output_required\"}}\n"
@@ -107,14 +122,14 @@
       "kind": "internal",
       "code": "mbr_pool_exhausted",
       "message": "msg for mbr_pool_exhausted",
-      "retryable": false,
+      "retryable": true,
       "paid": false,
-      "retry_after_ms": 1500,
+      "retry_after_ms": 999,
       "status": 429,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
-        "x-should-retry": "false"
+        "retry-after": "0",
+        "x-should-retry": "true"
       },
       "body": "{\"error\":{\"message\":\"msg for mbr_pool_exhausted\",\"type\":\"rate_limit_exceeded\",\"code\":\"mbr_pool_exhausted\"}}\n"
     },
@@ -122,14 +137,14 @@
       "kind": "internal",
       "code": "mbr_pool_underfunded",
       "message": "msg for mbr_pool_underfunded",
-      "retryable": true,
-      "paid": false,
-      "retry_after_ms": 999,
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 86400000,
       "status": 402,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "0",
-        "x-should-retry": "true"
+        "retry-after": "86400",
+        "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for mbr_pool_underfunded\",\"type\":\"insufficient_quota\",\"code\":\"mbr_pool_underfunded\"}}\n"
     },
@@ -137,21 +152,6 @@
       "kind": "internal",
       "code": "missing_model",
       "message": "msg for missing_model",
-      "retryable": false,
-      "paid": true,
-      "retry_after_ms": 86400000,
-      "status": 400,
-      "headers": {
-        "content-type": "application/json",
-        "retry-after": "86400",
-        "x-should-retry": "false"
-      },
-      "body": "{\"error\":{\"message\":\"msg for missing_model\",\"type\":\"invalid_request_error\",\"code\":\"missing_model\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "no_compatible_operator",
-      "message": "msg for no_compatible_operator",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 0,
@@ -160,19 +160,34 @@
         "content-type": "application/json",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for missing_model\",\"type\":\"invalid_request_error\",\"code\":\"missing_model\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_compatible_operator",
+      "message": "msg for no_compatible_operator",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for no_compatible_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_compatible_operator\"}}\n"
     },
     {
       "kind": "internal",
       "code": "no_ephemeral_capacity",
       "message": "msg for no_ephemeral_capacity",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 7000,
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 1500,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "7",
+        "retry-after": "1",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for no_ephemeral_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_ephemeral_capacity\"}}\n"
@@ -181,13 +196,13 @@
       "kind": "internal",
       "code": "no_flusher",
       "message": "msg for no_flusher",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 1500,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
       "status": 500,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
+        "retry-after": "0",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for no_flusher\",\"type\":\"proxy_error\",\"code\":\"no_flusher\"}}\n"
@@ -196,14 +211,14 @@
       "kind": "internal",
       "code": "no_funded_operator",
       "message": "msg for no_funded_operator",
-      "retryable": false,
+      "retryable": true,
       "paid": false,
-      "retry_after_ms": 999,
+      "retry_after_ms": 86400000,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "0",
-        "x-should-retry": "false"
+        "retry-after": "86400",
+        "x-should-retry": "true"
       },
       "body": "{\"error\":{\"message\":\"msg for no_funded_operator\",\"type\":\"service_unavailable\",\"code\":\"no_funded_operator\"}}\n"
     },
@@ -211,14 +226,13 @@
       "kind": "internal",
       "code": "no_operator",
       "message": "msg for no_operator",
-      "retryable": true,
-      "paid": false,
-      "retry_after_ms": 86400000,
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 0,
       "status": 404,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "86400",
-        "x-should-retry": "true"
+        "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for no_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_operator\"}}\n"
     },
@@ -226,20 +240,6 @@
       "kind": "internal",
       "code": "no_pinned_operator",
       "message": "msg for no_pinned_operator",
-      "retryable": false,
-      "paid": true,
-      "retry_after_ms": 0,
-      "status": 400,
-      "headers": {
-        "content-type": "application/json",
-        "x-should-retry": "false"
-      },
-      "body": "{\"error\":{\"message\":\"msg for no_pinned_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_pinned_operator\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "no_production_operator",
-      "message": "msg for no_production_operator",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 7000,
@@ -249,19 +249,34 @@
         "retry-after": "7",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for no_pinned_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_pinned_operator\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "no_production_operator",
+      "message": "msg for no_production_operator",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for no_production_operator\",\"type\":\"invalid_request_error\",\"code\":\"no_production_operator\"}}\n"
     },
     {
       "kind": "internal",
       "code": "no_relay_available",
       "message": "msg for no_relay_available",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 1500,
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 999,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
+        "retry-after": "0",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for no_relay_available\",\"type\":\"service_unavailable\",\"code\":\"no_relay_available\"}}\n"
@@ -270,13 +285,13 @@
       "kind": "internal",
       "code": "no_tee_capacity",
       "message": "msg for no_tee_capacity",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 999,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 86400000,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "0",
+        "retry-after": "86400",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for no_tee_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_tee_capacity\"}}\n"
@@ -285,14 +300,13 @@
       "kind": "internal",
       "code": "no_tool_capacity",
       "message": "msg for no_tool_capacity",
-      "retryable": false,
+      "retryable": true,
       "paid": false,
-      "retry_after_ms": 86400000,
+      "retry_after_ms": 0,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "86400",
-        "x-should-retry": "false"
+        "x-should-retry": "true"
       },
       "body": "{\"error\":{\"message\":\"msg for no_tool_capacity\",\"type\":\"service_unavailable\",\"code\":\"no_tool_capacity\"}}\n"
     },
@@ -300,20 +314,6 @@
       "kind": "internal",
       "code": "operator_inconsistent_response",
       "message": "msg for operator_inconsistent_response",
-      "retryable": true,
-      "paid": false,
-      "retry_after_ms": 0,
-      "status": 502,
-      "headers": {
-        "content-type": "application/json",
-        "x-should-retry": "true"
-      },
-      "body": "{\"error\":{\"message\":\"msg for operator_inconsistent_response\",\"type\":\"proxy_error\",\"code\":\"operator_inconsistent_response\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "operator_ticket_reuse",
-      "message": "msg for operator_ticket_reuse",
       "retryable": false,
       "paid": true,
       "retry_after_ms": 7000,
@@ -323,12 +323,12 @@
         "retry-after": "7",
         "x-should-retry": "false"
       },
-      "body": "{\"error\":{\"message\":\"msg for operator_ticket_reuse\",\"type\":\"bad_gateway\",\"code\":\"operator_ticket_reuse\"}}\n"
+      "body": "{\"error\":{\"message\":\"msg for operator_inconsistent_response\",\"type\":\"proxy_error\",\"code\":\"operator_inconsistent_response\"}}\n"
     },
     {
       "kind": "internal",
-      "code": "operator_unsealed_response",
-      "message": "msg for operator_unsealed_response",
+      "code": "operator_ticket_reuse",
+      "message": "msg for operator_ticket_reuse",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 1500,
@@ -338,19 +338,34 @@
         "retry-after": "1",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for operator_ticket_reuse\",\"type\":\"bad_gateway\",\"code\":\"operator_ticket_reuse\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "operator_unsealed_response",
+      "message": "msg for operator_unsealed_response",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for operator_unsealed_response\",\"type\":\"proxy_error\",\"code\":\"operator_unsealed_response\"}}\n"
     },
     {
       "kind": "internal",
       "code": "operators_busy",
       "message": "msg for operators_busy",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 999,
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 86400000,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "0",
+        "retry-after": "86400",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for operators_busy\",\"type\":\"service_unavailable\",\"code\":\"operators_busy\"}}\n"
@@ -359,13 +374,12 @@
       "kind": "internal",
       "code": "operators_unreachable",
       "message": "msg for operators_unreachable",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 86400000,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 0,
       "status": 503,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "86400",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for operators_unreachable\",\"type\":\"service_unavailable\",\"code\":\"operators_unreachable\"}}\n"
@@ -374,20 +388,6 @@
       "kind": "internal",
       "code": "payer_not_opted_in",
       "message": "msg for payer_not_opted_in",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 0,
-      "status": 403,
-      "headers": {
-        "content-type": "application/json",
-        "x-should-retry": "false"
-      },
-      "body": "{\"error\":{\"message\":\"msg for payer_not_opted_in\",\"type\":\"invalid_request_error\",\"code\":\"payer_not_opted_in\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "payer_usdc_account_unusable",
-      "message": "msg for payer_usdc_account_unusable",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 7000,
@@ -397,27 +397,27 @@
         "retry-after": "7",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for payer_not_opted_in\",\"type\":\"invalid_request_error\",\"code\":\"payer_not_opted_in\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "payer_usdc_account_unusable",
+      "message": "msg for payer_usdc_account_unusable",
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 1500,
+      "status": 403,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "1",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for payer_usdc_account_unusable\",\"type\":\"invalid_request_error\",\"code\":\"payer_usdc_account_unusable\"}}\n"
     },
     {
       "kind": "internal",
       "code": "pin_conflicts_with_continuation",
       "message": "msg for pin_conflicts_with_continuation",
-      "retryable": false,
-      "paid": true,
-      "retry_after_ms": 1500,
-      "status": 400,
-      "headers": {
-        "content-type": "application/json",
-        "retry-after": "1",
-        "x-should-retry": "false"
-      },
-      "body": "{\"error\":{\"message\":\"msg for pin_conflicts_with_continuation\",\"type\":\"invalid_request_error\",\"code\":\"pin_conflicts_with_continuation\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "price_ceiling_exceeded",
-      "message": "msg for price_ceiling_exceeded",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 999,
@@ -427,19 +427,33 @@
         "retry-after": "0",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for pin_conflicts_with_continuation\",\"type\":\"invalid_request_error\",\"code\":\"pin_conflicts_with_continuation\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "price_ceiling_exceeded",
+      "message": "msg for price_ceiling_exceeded",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 86400000,
+      "status": 400,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "86400",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for price_ceiling_exceeded\",\"type\":\"invalid_request_error\",\"code\":\"price_ceiling_exceeded\"}}\n"
     },
     {
       "kind": "internal",
       "code": "read_upstream",
       "message": "msg for read_upstream",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 86400000,
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 0,
       "status": 502,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "86400",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for read_upstream\",\"type\":\"proxy_error\",\"code\":\"read_upstream\"}}\n"
@@ -448,12 +462,13 @@
       "kind": "internal",
       "code": "registry",
       "message": "msg for registry",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 0,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
       "status": 502,
       "headers": {
         "content-type": "application/json",
+        "retry-after": "7",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for registry\",\"type\":\"proxy_error\",\"code\":\"registry\"}}\n"
@@ -462,14 +477,14 @@
       "kind": "internal",
       "code": "response_handler",
       "message": "msg for response_handler",
-      "retryable": false,
+      "retryable": true,
       "paid": false,
-      "retry_after_ms": 7000,
+      "retry_after_ms": 1500,
       "status": 502,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "7",
-        "x-should-retry": "false"
+        "retry-after": "1",
+        "x-should-retry": "true"
       },
       "body": "{\"error\":{\"message\":\"msg for response_handler\",\"type\":\"proxy_error\",\"code\":\"response_handler\"}}\n"
     },
@@ -477,14 +492,14 @@
       "kind": "internal",
       "code": "spend_cap_exceeded",
       "message": "msg for spend_cap_exceeded",
-      "retryable": true,
-      "paid": false,
-      "retry_after_ms": 1500,
+      "retryable": false,
+      "paid": true,
+      "retry_after_ms": 999,
       "status": 402,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
-        "x-should-retry": "true"
+        "retry-after": "0",
+        "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for spend_cap_exceeded\",\"type\":\"insufficient_quota\",\"code\":\"spend_cap_exceeded\"}}\n"
     },
@@ -492,21 +507,6 @@
       "kind": "internal",
       "code": "stream_interrupted",
       "message": "msg for stream_interrupted",
-      "retryable": false,
-      "paid": true,
-      "retry_after_ms": 999,
-      "status": 502,
-      "headers": {
-        "content-type": "application/json",
-        "retry-after": "0",
-        "x-should-retry": "false"
-      },
-      "body": "{\"error\":{\"message\":\"msg for stream_interrupted\",\"type\":\"proxy_error\",\"code\":\"stream_interrupted\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "stream_setup",
-      "message": "msg for stream_setup",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 86400000,
@@ -516,18 +516,33 @@
         "retry-after": "86400",
         "x-should-retry": "true"
       },
-      "body": "{\"error\":{\"message\":\"msg for stream_setup\",\"type\":\"proxy_error\",\"code\":\"stream_setup\"}}\n"
+      "body": "{\"error\":{\"message\":\"msg for stream_interrupted\",\"type\":\"proxy_error\",\"code\":\"stream_interrupted\"}}\n"
     },
     {
       "kind": "internal",
-      "code": "ticket_price_rejected",
-      "message": "msg for ticket_price_rejected",
+      "code": "stream_setup",
+      "message": "msg for stream_setup",
       "retryable": false,
       "paid": false,
       "retry_after_ms": 0,
       "status": 502,
       "headers": {
         "content-type": "application/json",
+        "x-should-retry": "false"
+      },
+      "body": "{\"error\":{\"message\":\"msg for stream_setup\",\"type\":\"proxy_error\",\"code\":\"stream_setup\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "ticket_price_rejected",
+      "message": "msg for ticket_price_rejected",
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 7000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for ticket_price_rejected\",\"type\":\"bad_gateway\",\"code\":\"ticket_price_rejected\"}}\n"
@@ -536,13 +551,13 @@
       "kind": "internal",
       "code": "tokenize",
       "message": "msg for tokenize",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 7000,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 1500,
       "status": 502,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "7",
+        "retry-after": "1",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for tokenize\",\"type\":\"proxy_error\",\"code\":\"tokenize\"}}\n"
@@ -551,14 +566,14 @@
       "kind": "internal",
       "code": "unsupported_tool",
       "message": "msg for unsupported_tool",
-      "retryable": false,
+      "retryable": true,
       "paid": false,
-      "retry_after_ms": 1500,
+      "retry_after_ms": 999,
       "status": 400,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
-        "x-should-retry": "false"
+        "retry-after": "0",
+        "x-should-retry": "true"
       },
       "body": "{\"error\":{\"message\":\"msg for unsupported_tool\",\"type\":\"invalid_request_error\",\"code\":\"unsupported_tool\"}}\n"
     },
@@ -566,21 +581,6 @@
       "kind": "internal",
       "code": "upstream_error",
       "message": "msg for upstream_error",
-      "retryable": true,
-      "paid": false,
-      "retry_after_ms": 999,
-      "status": 502,
-      "headers": {
-        "content-type": "application/json",
-        "retry-after": "0",
-        "x-should-retry": "true"
-      },
-      "body": "{\"error\":{\"message\":\"msg for upstream_error\",\"type\":\"bad_gateway\",\"code\":\"upstream_error\"}}\n"
-    },
-    {
-      "kind": "internal",
-      "code": "upstream_unreachable",
-      "message": "msg for upstream_unreachable",
       "retryable": false,
       "paid": true,
       "retry_after_ms": 86400000,
@@ -590,12 +590,12 @@
         "retry-after": "86400",
         "x-should-retry": "false"
       },
-      "body": "{\"error\":{\"message\":\"msg for upstream_unreachable\",\"type\":\"proxy_error\",\"code\":\"upstream_unreachable\"}}\n"
+      "body": "{\"error\":{\"message\":\"msg for upstream_error\",\"type\":\"bad_gateway\",\"code\":\"upstream_error\"}}\n"
     },
     {
       "kind": "internal",
-      "code": "wallet_open",
-      "message": "msg for wallet_open",
+      "code": "upstream_unreachable",
+      "message": "msg for upstream_unreachable",
       "retryable": true,
       "paid": false,
       "retry_after_ms": 0,
@@ -604,19 +604,34 @@
         "content-type": "application/json",
         "x-should-retry": "true"
       },
+      "body": "{\"error\":{\"message\":\"msg for upstream_unreachable\",\"type\":\"proxy_error\",\"code\":\"upstream_unreachable\"}}\n"
+    },
+    {
+      "kind": "internal",
+      "code": "wallet_open",
+      "message": "msg for wallet_open",
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 7000,
+      "status": 502,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-should-retry": "false"
+      },
       "body": "{\"error\":{\"message\":\"msg for wallet_open\",\"type\":\"proxy_error\",\"code\":\"wallet_open\"}}\n"
     },
     {
       "kind": "internal",
       "code": "wallet_unfunded",
       "message": "msg for wallet_unfunded",
-      "retryable": false,
-      "paid": false,
-      "retry_after_ms": 7000,
+      "retryable": true,
+      "paid": true,
+      "retry_after_ms": 1500,
       "status": 402,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "7",
+        "retry-after": "1",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for wallet_unfunded\",\"type\":\"insufficient_quota\",\"code\":\"wallet_unfunded\"}}\n"
@@ -625,13 +640,13 @@
       "kind": "internal",
       "code": "wrap_request",
       "message": "msg for wrap_request",
-      "retryable": true,
-      "paid": true,
-      "retry_after_ms": 1500,
+      "retryable": false,
+      "paid": false,
+      "retry_after_ms": 999,
       "status": 502,
       "headers": {
         "content-type": "application/json",
-        "retry-after": "1",
+        "retry-after": "0",
         "x-should-retry": "false"
       },
       "body": "{\"error\":{\"message\":\"msg for wrap_request\",\"type\":\"proxy_error\",\"code\":\"wrap_request\"}}\n"

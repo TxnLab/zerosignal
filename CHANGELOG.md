@@ -31,6 +31,31 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-26 — a free Solana turn opens nothing (unreleased)
+
+A Solana ticket at `max_price` 0 has no on-chain open: the program refuses a zero-price
+open, and the free tier there is off chain (SPEC § 3a "Free turns on Solana"). Both SDKs
+skip the wallet's open for one (`opensOnChain` ↔ `opensOnChain` in `rail.go` ↔ `rail.ts`):
+they sign and hand over nothing, bind an empty `tx_id` in the admission tag and the response
+AAD, release the spend reservation at once (nothing is locked), and pass the receipt check
+no handle, so it sends no ack, protest or journal row, and the refund watchdog tracks
+nothing. `payment.committed` still fires for the turn once it is sealed, with an empty
+`OpenTxID` / `openTxId` and no fees, so a host's "the node admitted us" line holds on both
+rails, but it leaves the turn unpaid: an error after it has `Paid` false and no `Ticket`,
+since nothing is locked. A host should not open a settlement window for an empty
+`openTxId`. An Algorand free ticket still opens at zero under the contract's quota.
+
+A node rations free Solana turns itself with a daily token budget, refusing with the new
+`429 free_budget_exhausted` (`transient.BusyCodeFreeBudgetExhausted` ↔
+`BusyCode.FreeBudgetExhausted`). The SDKs fail over from it, still re-sweep a sibling that
+was only unreachable, and, when no node was busy or left unreachable, end the turn with the new error code
+`free_budget_exhausted` (`KindFunds`, not retryable, rendered 403 like
+`free_quota_exhausted`), with a `Retry-After` to the next 00:00 UTC, instead of
+`operators_busy`. `dispatch_verdict_vectors.json` gains a `free_budget_spent` field. A payer
+from before this change fails a free Solana turn at its open, since the wallet refuses a
+ticket with no offer, and reads `free_budget_exhausted` as a busy code it may not re-ask,
+so it reports `operators_busy`.
+
 ### 2026-10-25 — a Solana ticket stores its ticket id (unreleased)
 
 The `zs_escrow` program's `Ticket` account stores the id its address derives from

@@ -5,7 +5,21 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { signerFloorText } from '../src/rail.js'
+import { opensOnChain, signerFloorText } from '../src/rail.js'
+
+describe('opensOnChain', () => {
+    // Only a free Solana turn opens nothing; an Algorand free ticket opens at
+    // zero under the contract's quota. Go's TestOpensOnChain.
+    it.each([
+        [undefined, 0, true],
+        ['algorand', 0, true],
+        ['algorand', 5, true],
+        ['solana', 1, true],
+        ['solana', 0, false],
+    ] as const)('on %s at max_price %d is %s', (rail, maxPrice, want) => {
+        expect(opensOnChain(rail, maxPrice)).toBe(want)
+    })
+})
 
 describe('signerFloorText', () => {
     // A Client always passes its resolved rail, never undefined, so Algorand's

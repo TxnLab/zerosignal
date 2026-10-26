@@ -91,9 +91,12 @@ type ReserveSucceeded struct {
 
 // PaymentCommitted fires once, when algod accepts the escrow open group; it
 // may still be pending. Nothing is resent after it: a later failure ends in
-// settle, protest or refund.
+// settle, protest or refund. A free Solana turn opens nothing, so it fires
+// once the turn is sealed to its node, with an empty OpenTxID and no fees:
+// the node admits it on the ticket alone.
 type PaymentCommitted struct {
 	TicketID string
+	// OpenTxID is the open's transaction id; empty for a free Solana turn.
 	OpenTxID string
 	// Deprecated: FeesMicroAlgos is NetworkFees on Algorand and 0 on any
 	// other rail; read NetworkFees.

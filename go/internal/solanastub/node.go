@@ -31,9 +31,11 @@ import (
 	"github.com/TxnLab/zerosignal/go/wire"
 )
 
-// Model is the one model the stub serves, at InputUSDPer1M and OutputUSDPer1M.
+// Model is the stub's priced model, at InputUSDPer1M and OutputUSDPer1M, and
+// FreeModel its free one, whose turns open nothing.
 const (
 	Model          = "stub-model"
+	FreeModel      = "stub-free-model"
 	InputUSDPer1M  = 1.0
 	OutputUSDPer1M = 2.0
 	// OutputTokens is what every reply reports generating.
@@ -211,10 +213,10 @@ func (n *Node) details(w http.ResponseWriter, r *http.Request) {
 		EphemeralSig:        adv.Sig,
 		EphemeralDeployment: n.deployment.String(),
 		EphemeralSigV2:      adv.SigV2,
-		Models: []inject.OperatorDetailsModel{{
-			ID: Model, InputRateUSDPer1M: InputUSDPer1M, OutputRateUSDPer1M: OutputUSDPer1M,
-			ContextWindow: 32_768, MaxOutputTokens: 1024,
-		}},
+		Models: []inject.OperatorDetailsModel{
+			{ID: Model, InputRateUSDPer1M: InputUSDPer1M, OutputRateUSDPer1M: OutputUSDPer1M, ContextWindow: 32_768, MaxOutputTokens: 1024},
+			{ID: FreeModel, ContextWindow: 32_768, MaxOutputTokens: 1024},
+		},
 		ProtoVersion: wire.ProtoVersion,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -225,6 +227,18 @@ func rates() (in, out uint64) {
 	in, _ = pricing.USDRateToMicroUSDCPer1M(InputUSDPer1M)
 	out, _ = pricing.USDRateToMicroUSDCPer1M(OutputUSDPer1M)
 	return in, out
+}
+
+// ratesFor is model's rates, and false for a model the stub doesn't serve.
+func ratesFor(model string) (in, out uint64, ok bool) {
+	switch model {
+	case Model:
+		in, out = rates()
+		return in, out, true
+	case FreeModel:
+		return 0, 0, true
+	}
+	return 0, 0, false
 }
 
 func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
@@ -244,8 +258,9 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_reserve", err.Error())
 		return
 	}
-	if req.Model != Model {
-		writeError(w, http.StatusNotFound, "model_not_found", "the stub serves "+Model)
+	inRate, outRate, ok := ratesFor(req.Model)
+	if !ok {
+		writeError(w, http.StatusNotFound, "model_not_found", "the stub serves "+Model+" and "+FreeModel)
 		return
 	}
 	if !req.Deployment.IsZero() && req.Deployment != n.deployment {
@@ -288,7 +303,6 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 	n.tickets[req.TicketID] = e
 	n.mu.Unlock()
 
-	inRate, outRate := rates()
 	maxPrice, err := pricing.ExpectedMaxPrice(req.InputCount, req.MaxOutputCount, inRate, outRate, 0, 0, uint64(n.chain.Config.FeeBps))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_size", err.Error())
@@ -313,12 +327,15 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	offer, err := n.openOffer(ctx, e)
-	if err != nil {
-		// Code-less, as a gateway's would be, so the payer's transient retry
-		// re-asks rather than taking it as the node's answer.
-		http.Error(w, "the stub could not read a blockhash", http.StatusServiceUnavailable)
-		return
+	// A free ticket opens nothing, so it has no offer.
+	var offer string
+	if maxPrice > 0 {
+		if offer, err = n.openOffer(ctx, e); err != nil {
+			// Code-less, as a gateway's would be, so the payer's transient retry
+			// re-asks rather than taking it as the node's answer.
+			http.Error(w, "the stub could not read a blockhash", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	var wrapped bytes.Buffer
 	aw, err := age.Encrypt(&wrapped, recipient)
@@ -411,9 +428,16 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusPaymentRequired, "admission_tag_mismatch", "admission tag does not bind this request")
 		return
 	}
-	if err := n.landOpen(ctx, e, paymentOpen, paymentRef); err != nil {
-		writeError(w, http.StatusPaymentRequired, "payment_verification_failed", err.Error())
+	free := e.ticket.MaxPrice == 0
+	switch {
+	case free && (paymentOpen != "" || paymentRef != ""):
+		writeError(w, http.StatusPaymentRequired, "payment_verification_failed", "a free ticket opens nothing")
 		return
+	case !free:
+		if err := n.landOpen(ctx, e, paymentOpen, paymentRef); err != nil {
+			writeError(w, http.StatusPaymentRequired, "payment_verification_failed", err.Error())
+			return
+		}
 	}
 
 	b := n.behaviorFor(e.payer)
@@ -444,10 +468,13 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	slot, err := sealer.SealHeader(wire.SealedHeaderSettleGroup, []byte(zsescrow.FormatOpenSeq(e.openSeq)))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
+	// A free ticket has no open_seq to ack, so no settle slot.
+	var slot string
+	if !free {
+		if slot, err = sealer.SealHeader(wire.SealedHeaderSettleGroup, []byte(zsescrow.FormatOpenSeq(e.openSeq))); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
 	}
 	if req.Stream {
 		n.stream(ctx, w, e, sealer, slot, b)
@@ -474,7 +501,9 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set(wire.ResponseKeyHeader, sealer.WrappedKeyHeader())
 	w.Header().Set(wire.ReceiptHeader, rh)
-	w.Header().Set(wire.SettleGroupHeader, slot)
+	if slot != "" {
+		w.Header().Set(wire.SettleGroupHeader, slot)
+	}
 	w.Header().Set("Content-Type", wire.EncryptedContentType)
 	_, _ = w.Write(sealedBody)
 }
@@ -520,7 +549,9 @@ func (n *Node) stream(ctx context.Context, w http.ResponseWriter, e *entry, seal
 		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wire.StreamEventMarker, data)
 		flush()
 	}
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wire.StreamEventSettleGroup, slot)
+	if slot != "" {
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", wire.StreamEventSettleGroup, slot)
+	}
 	rb, _ := json.Marshal(rcpt)
 	data, err := sealer.SealStreamFrame(rb)
 	if err != nil {
@@ -536,8 +567,7 @@ func (n *Node) stream(ctx context.Context, w http.ResponseWriter, e *entry, seal
 // the over-claim Behavior asks for before the reply goes out.
 func (n *Node) receipt(ctx context.Context, e *entry, sum [32]byte, b Behavior) (*ticket.UsageReceipt, error) {
 	// The charge is net of the protocol fee, which the program adds on top.
-	inRate, outRate := rates()
-	amount, err := pricing.ExpectedBaseMax(e.ticket.InputCount, OutputTokens, inRate, outRate, 0, 0)
+	amount, err := pricing.ExpectedBaseMax(e.ticket.InputCount, OutputTokens, e.ticket.InputRate, e.ticket.OutputRate, 0, 0)
 	if err != nil {
 		return nil, err
 	}

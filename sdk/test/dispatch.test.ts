@@ -1501,6 +1501,72 @@ describe('the sweep', () => {
         }
     })
 
+    it('ends free_budget_exhausted, not retryable, until 00:00 UTC, when every node’s free tier is spent', async () => {
+        const h = harness([op(1), op(2)], { answer: async () => Promise.reject(busy(60_000, 'free_budget_exhausted')) })
+        const em = await h.run(chat())
+        // The fake clock sits at 1,000,000 ms past the epoch: 00:16:40 UTC.
+        expect(em.failed).toMatchObject({ code: 'free_budget_exhausted', kind: 'funds', retryAfter: 86_400_000 - 1_000_000 })
+        expect(em.failed!.message).toContain('resets at 00:00 UTC')
+        // Each node asked once: the refusal holds for the day, so nothing re-sweeps.
+        expect(ids(h.rc.calls)).toEqual([1, 2])
+        expect(h.logged.some((l) => l.level === 'info' && l.msg.includes('free tier is spent'))).toBe(true)
+    })
+
+    it('ends operators_busy when one node’s free tier is spent and another is merely busy', async () => {
+        const h = harness([op(1), op(2)], {
+            answer: perNode({ 1: () => busy(0, 'free_budget_exhausted'), 2: () => busy(2000) }),
+            deps: { sweepDelay: () => 0 },
+        })
+        const em = await h.run(chat())
+        expect(em.failed).toMatchObject({ code: 'operators_busy', kind: 'busy' })
+    })
+
+    // TestDispatch_EveryFreeBudgetSpent: node 1's free tier is spent, and
+    // node 2 answers in turn. Only when no node was busy, and none was left
+    // unreachable on the last sweep, is the day's refusal the answer.
+    it.each([
+        { name: 'every node spent', second: () => busy(0, 'free_budget_exhausted'), want: 'free_budget_exhausted', secondAsked: 1 },
+        { name: 'one spent, one busy', second: () => busy(0), want: 'operators_busy' },
+        {
+            name: 'one spent, one unreachable, then spent',
+            second: (n: number) => (n === 0 ? new ReserveHTTPError({ status: 502 }) : busy(0, 'free_budget_exhausted')),
+            want: 'free_budget_exhausted',
+        },
+        { name: 'one spent, one unreachable throughout', second: () => new ReserveHTTPError({ status: 502 }), want: 'operators_busy' },
+        {
+            // Only the last sweep decides: an earlier sweep left node 2
+            // unreachable, and the re-sweep found it spent.
+            name: 'one spent, one unreachable for a sweep, then spent',
+            second: (n: number) => (n < 3 ? new ReserveHTTPError({ status: 502 }) : busy(0, 'free_budget_exhausted')),
+            want: 'free_budget_exhausted',
+        },
+        {
+            // A later candidate's other refusal doesn't clear the spent one.
+            name: 'one spent, one refusing otherwise',
+            second: () => new ReserveHTTPError({ status: 400, code: 'invalid_reserve' }),
+            want: 'free_budget_exhausted',
+        },
+    ])('ends $want when $name', async ({ second, want, secondAsked }) => {
+        const h = harness([op(1), op(2)], {
+            answer: perNode({ 1: () => busy(0, 'free_budget_exhausted'), 2: second }),
+            deps: { sweepDelay: () => 0, retryBudget: 1500 },
+        })
+        const em = await h.run(chat())
+        expect(em.failed!.code).toBe(want)
+        if (secondAsked !== undefined) {
+            // A spent pool earns no re-sweep.
+            expect(h.rc.calls.filter((c) => c.op.id === 2)).toHaveLength(secondAsked)
+        }
+        if (want === 'free_budget_exhausted') {
+            expect(em.failed).toMatchObject({ kind: 'funds', retryable: false })
+            // To the next 00:00 UTC from the fake clock, which a re-sweep's
+            // backoff has moved on from its 1,000,000 ms start.
+            const untilMidnight = 86_400_000 - 1_000_000
+            expect(em.failed!.retryAfter).toBeLessThanOrEqual(untilMidnight)
+            expect(em.failed!.retryAfter).toBeGreaterThan(untilMidnight - 60_000)
+        }
+    })
+
     // TestDispatch_NotOptedInRefusalRechecksTheDeposit
     it('has the wallet recheck its deposit when a node refuses the payer as unopted, and only then', async () => {
         for (const [code, want] of [
