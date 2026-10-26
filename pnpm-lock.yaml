@@ -189,6 +189,9 @@ importers:
 
   ts:
     dependencies:
+      '@cloudflare/blindrsa-ts':
+        specifier: 0.4.6
+        version: 0.4.6
       '@noble/ciphers':
         specifier: 2.2.0
         version: 2.2.0
@@ -233,6 +236,10 @@ packages:
 
   '@algorandfoundation/xhd-wallet-api@2.0.0-canary.1':
     resolution: {integrity: sha512-U6rSWMO6FKDLvMxWtfKyW5ctqSy2NrONWTU/jOA+BX0SGru0GPXsxwzFdcPa5w+X055V/xVVsr8eA3xA+m/5jA==}
+
+  '@cloudflare/blindrsa-ts@0.4.6':
+    resolution: {integrity: sha512-n+CAo1hM78qkiouXB0Io1pPVBFKIaJqU7FqdCDNtBAB7q2bBpQOifv7Om3Jln/nx+IhjQAjlDjp8la3e9Yg9Bw==}
+    engines: {node: '>=24'}
 
   '@esbuild/aix-ppc64@0.28.2':
     resolution: {integrity: sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ==}
@@ -885,6 +892,9 @@ packages:
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
+  sjcl@1.0.9:
+    resolution: {integrity: sha512-dWM71tkSHxe7zEZj0/COjtJdmErIxp7UMp8a6D4xx8dTTtJLc4lFL+HAX8s6lvASyQQ2iYMHwa7rhhQq7MT5MA==}
+
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -1058,6 +1068,10 @@ snapshots:
       ajv: 8.20.0
       algo-msgpack-with-bigint: 2.1.1
       bn.js: 5.2.5
+
+  '@cloudflare/blindrsa-ts@0.4.6':
+    dependencies:
+      sjcl: 1.0.9
 
   '@esbuild/aix-ppc64@0.28.2':
     optional: true
@@ -1574,6 +1588,8 @@ snapshots:
   safer-buffer@2.1.2: {}
 
   siginfo@2.0.0: {}
+
+  sjcl@1.0.9: {}
 
   source-map-js@1.2.2: {}
 

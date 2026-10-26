@@ -6,6 +6,9 @@
 package zsescrow
 
 import (
+	"net"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -22,17 +25,69 @@ const (
 	ClusterLocalnet = "localnet"
 )
 
-// Cluster is a preset's RPC endpoint and program id.
+// Cluster is a preset's RPC endpoint, program id and default free-credit
+// issuers.
 type Cluster struct {
 	RPCEndpoint string
 	Program     solana.PublicKey
+	// FreeCreditIssuers are the issuers a node on this cluster trusts unless
+	// its operator names others, and the ones a payer knows how to reach.
+	FreeCreditIssuers []FreeCreditIssuer
 }
 
+// FreeCreditIssuer is one free-credit issuer: its Ed25519 public key as
+// standard base64 (freecredit.ParseIssuerKey reads it), and the base URL it
+// serves the issue wire on, empty when the payer's host supplies the
+// transport. LoopbackOnly marks an issuer whose private key is public, which
+// TrustedFreeCreditIssuers keeps only for a node on a loopback RPC.
+type FreeCreditIssuer struct {
+	Key          string
+	URL          string
+	LoopbackOnly bool
+}
+
+// localnetFreeCreditIssuer is the localnet issuer, whose private half is
+// committed beside the stub node
+// (internal/solanastub/freecredit_localnet_issuer.pem, and again in
+// testdata/free_credit_vectors.json) so the end-to-end tests can make
+// credits. It guards nothing, so it is LoopbackOnly.
+const localnetFreeCreditIssuer = "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw="
+
 // clusters have one program id: devnet's deployment, which a localnet started
-// by contracts-solana's `make localnet` loads at the same address.
+// by contracts-solana's `make localnet` loads at the same address. Devnet has
+// no issuer until ZeroSignal's key is made.
 var clusters = map[string]Cluster{
-	ClusterDevnet:   {RPCEndpoint: "https://api.devnet.solana.com", Program: ProgramID},
-	ClusterLocalnet: {RPCEndpoint: "http://127.0.0.1:8899", Program: ProgramID},
+	ClusterDevnet: {RPCEndpoint: "https://api.devnet.solana.com", Program: ProgramID},
+	ClusterLocalnet: {RPCEndpoint: "http://127.0.0.1:8899", Program: ProgramID,
+		FreeCreditIssuers: []FreeCreditIssuer{{Key: localnetFreeCreditIssuer, LoopbackOnly: true}}},
+}
+
+// TrustedFreeCreditIssuers is issuers less the LoopbackOnly ones, unless
+// rpcEndpoint is on this machine. A node named localnet but pointed at a
+// remote cluster would otherwise trust a key anyone can sign with, and pay
+// out free turns to every holder of the committed PEM.
+func TrustedFreeCreditIssuers(issuers []FreeCreditIssuer, rpcEndpoint string) []FreeCreditIssuer {
+	local := isLoopbackEndpoint(rpcEndpoint)
+	var out []FreeCreditIssuer
+	for _, iss := range issuers {
+		if !iss.LoopbackOnly || local {
+			out = append(out, iss)
+		}
+	}
+	return out
+}
+
+func isLoopbackEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Clusters are the preset names.
@@ -43,5 +98,6 @@ func Clusters() []string { return []string{ClusterDevnet, ClusterLocalnet} }
 // config and the payer SDK accepting the same spellings.
 func ClusterPreset(name string) (Cluster, bool) {
 	c, ok := clusters[strings.ToLower(name)]
+	c.FreeCreditIssuers = slices.Clone(c.FreeCreditIssuers)
 	return c, ok
 }

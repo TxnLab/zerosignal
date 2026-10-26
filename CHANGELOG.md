@@ -31,6 +31,29 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-26 — free credits: the token, the details field, the presets (unreleased)
+
+A new protocol package, `go/freecredit` ↔ `@txnlab/zs-proto/freecredit` (subpath only), holds
+the free credit (SPEC § 3a "Free credits"): an RFC 9474 blind signature
+(`RSABSSA-SHA384-PSS-Deterministic`, via `cloudflare/circl` and `@cloudflare/blindrsa-ts`)
+by an issuer's RSA day key over a message naming the deployment, the node's routing pair,
+the UTC day and a nonce. The issuer's Ed25519 key certifies each day key for its deployment
+and day, and issuers and nodes take only the current day and, within 10 minutes of
+midnight, the neighbouring one. It has the payer's blind and finalize, the node's verify
+with a typed refusal, the spent-set key and the issuer's day signer (both Go only), and the
+issue wire's types. `testdata/free_credit_vectors.json` pins the message and certificate bytes,
+the accepted epochs, the day-key rules, the credit's JSON and each refusal, and
+`testdata/rfc9474_pss_deterministic.json`, copied from circl, pins the variant in both
+languages. `/v1/zs/details` gains `free_credit_issuers`, the issuer keys a node trusts (Go
+`inject.OperatorDetails.FreeCreditIssuers`, parsed by the TS details parser). The Solana
+presets gain default issuers (`zsescrow.Cluster.FreeCreditIssuers`, read through
+`zs.SolanaClusterFreeCreditIssuers` ↔ `solanaClusterFreeCreditIssuers`): localnet a test
+key whose private half is committed beside the stub node, marked loopback-only, which
+`zsescrow.TrustedFreeCreditIssuers` drops for a node whose RPC is off the machine; devnet
+none yet.
+`go run ./cmd/freecreditkey -out <file>` makes an issuer key. Nothing sends or checks a
+credit yet.
+
 ### 2026-10-26 — a free Solana turn opens nothing (unreleased)
 
 A Solana ticket at `max_price` 0 has no on-chain open: the program refuses a zero-price

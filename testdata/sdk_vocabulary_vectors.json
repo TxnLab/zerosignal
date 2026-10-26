@@ -287,11 +287,19 @@
   "solana_networks": {
     "devnet": {
       "rpc_endpoint": "https://api.devnet.solana.com",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "free_credit_issuers": []
     },
     "localnet": {
       "rpc_endpoint": "http://127.0.0.1:8899",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "free_credit_issuers": [
+        {
+          "key": "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=",
+          "url": "",
+          "loopback_only": true
+        }
+      ]
     }
   },
   "defaults": {

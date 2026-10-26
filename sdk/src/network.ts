@@ -129,11 +129,42 @@ export const networkNames: readonly NetworkName[] = ['localnet', 'testnet', 'mai
 
 const MAX_UINT64 = (1n << 64n) - 1n
 
+/**
+ * A free-credit issuer: its Ed25519 public key as standard base64 (`parseIssuerKey` in
+ * `@txnlab/zs-proto/freecredit` reads it), and the base URL it serves the issue wire on,
+ * empty when the host supplies the transport. `loopbackOnly` marks an issuer whose private
+ * key is public, which a node trusts only on a loopback RPC (Go's
+ * `zsescrow.TrustedFreeCreditIssuers`).
+ */
+export interface FreeCreditIssuer {
+    key: string
+    url: string
+    loopbackOnly: boolean
+}
+
+// The localnet issuer, whose private half is committed beside Go's stub node
+// (go/internal/solanastub/freecredit_localnet_issuer.pem, and again in
+// testdata/free_credit_vectors.json) so the end-to-end tests can make credits.
+// It guards nothing.
+const LOCALNET_FREE_CREDIT_ISSUER = 'n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw='
+
 // One program id: devnet's deployment, which a localnet started by
-// contracts-solana's `make localnet` loads at the same address.
-const solanaPresets: Record<SolanaClusterName, { rpcEndpoint: string; program: string }> = {
-    devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: PROGRAM_ID },
-    localnet: { rpcEndpoint: 'http://127.0.0.1:8899', program: PROGRAM_ID },
+// contracts-solana's `make localnet` loads at the same address. Devnet has no
+// issuer until ZeroSignal's key is made.
+const solanaPresets: Record<SolanaClusterName, { rpcEndpoint: string; program: string; freeCreditIssuers: readonly FreeCreditIssuer[] }> = {
+    devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: PROGRAM_ID, freeCreditIssuers: [] },
+    localnet: {
+        rpcEndpoint: 'http://127.0.0.1:8899',
+        program: PROGRAM_ID,
+        freeCreditIssuers: [{ key: LOCALNET_FREE_CREDIT_ISSUER, url: '', loopbackOnly: true }],
+    },
+}
+
+/** A cluster preset's default free-credit issuers, a fresh copy; undefined for a name that is no preset. */
+export function solanaClusterFreeCreditIssuers(name: string): FreeCreditIssuer[] | undefined {
+    const key = name.toLowerCase()
+    if (!Object.hasOwn(solanaPresets, key)) return undefined
+    return solanaPresets[key as SolanaClusterName].freeCreditIssuers.map((i) => ({ ...i }))
 }
 
 /** The Solana presets, in the order Go lists them. */

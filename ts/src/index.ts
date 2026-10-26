@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// escrow, pricing, relay, settle, solana, steering, and transient are subpath-only (`@txnlab/zs-proto/transient`, …).
+// escrow, freecredit, pricing, relay, settle, solana, steering, and transient are subpath-only (`@txnlab/zs-proto/transient`, …).
 // Their names are package-qualified in Go — escrow.Classify, settle.Classify, transient.Classify,
-// relay.BuildRequest, steering.Decay — so at the root they would read as a bare `classify`,
-// `wait`, `buildRequest`, `decay`, or `Request`, and pricing's Violation collides with attest's.
+// relay.BuildRequest, steering.Decay, freecredit.Verify — so at the root they would read as a bare `classify`,
+// `wait`, `buildRequest`, `decay`, `verify`, or `Request`, and pricing's Violation collides with attest's.
 export * from './attest/index.js'
 export * from './wire/index.js'
 export * from './ticket/index.js'

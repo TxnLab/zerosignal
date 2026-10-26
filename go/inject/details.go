@@ -48,6 +48,12 @@ type OperatorDetails struct {
 	// another network or escrow before reserving, while the signed checks (the
 	// bound ephemeral, ticket and receipt) are what a lying node cannot pass.
 	Deployment string `json:"deployment,omitempty"`
+	// FreeCreditIssuers are the standard-base64 Ed25519 keys of the
+	// free-credit issuers this node trusts, so a payer attaches a credit only
+	// where it can count. Unsigned: a node that lies here only turns away
+	// credits, and its own check at reserve is what holds. Absent when it
+	// trusts none.
+	FreeCreditIssuers []string `json:"free_credit_issuers,omitempty"`
 
 	// The signed short-lived age recipient (forward secrecy by key-erasure).
 	// Mirrors ticket.EphemeralAdvertisement's JSON fields verbatim so the block

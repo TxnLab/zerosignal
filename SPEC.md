@@ -606,9 +606,58 @@ Clients should treat `free_quota_exhausted` as final for the current window: sho
 
 #### On Solana
 
-A free Solana turn has no open ("Free turns on Solana"), so there is no on-chain counter, and a payer key costs nothing to make, so a count per payer would limit nothing. Each node rations its own free turns instead: a budget of free tokens per UTC day, counted from each free receipt's input and output tokens, and a cap on free turns in flight. Once the day's budget is spent the node refuses free reserves with `429 free_budget_exhausted` until 00:00 UTC; a free turn already admitted finishes, so the budget can be overrun by what the turns in flight produce. This bounds what a node gives away. It doesn't stop one payer from spending the budget other payers would have had, which is what issuer-signed credits are meant for (not built yet).
+A free Solana turn has no open ("Free turns on Solana"), so there is no on-chain counter, and a payer key costs nothing to make, so a count per payer would limit nothing. Each node rations its own free turns instead: a budget of free tokens per UTC day, counted from each free receipt's input and output tokens, and a cap on free turns in flight. Once the day's budget is spent the node refuses free reserves with `429 free_budget_exhausted` until 00:00 UTC; a free turn already admitted finishes, so the budget can be overrun by what the turns in flight produce. This bounds what a node gives away. It doesn't stop one payer from spending the budget other payers would have had, which is what free credits are for ("Free credits").
 
 A payer fails over from `free_budget_exhausted` without waiting on that node. When a node gave it, no node was merely at capacity, and none was still unreachable (a node that may have budget), the turn ends with `free_budget_exhausted` (not `operators_busy`, whose advice is to retry in seconds), with a `Retry-After` to the next 00:00 UTC that the payer computes itself rather than taking a node's. Clients should treat it as they do `free_quota_exhausted`: show the reset time and offer a paid model.
+
+#### Free credits
+
+A free credit is an RSA blind signature (RFC 9474, `RSABSSA-SHA384-PSS-Deterministic`, the construction Privacy Pass type 2 uses) by an issuer's day key, which a payer spends on one free Solana turn at one node on one UTC day. The issuer signs without seeing what it signs, so it can't tell where a credit is spent. Each node keeps its own spent set. Built so far: the token itself (`proto/go/freecredit` ↔ `@txnlab/zs-proto/freecredit`, pinned by `testdata/free_credit_vectors.json`), the details field and the presets. The payer attaching a credit and the node checking it are not built yet.
+
+**Issuers are optional.** An operator chooses which issuers its node trusts. A cluster preset names default issuers (`zsescrow.Cluster.FreeCreditIssuers`); the operator can replace that list or empty it. Anyone can run an issuer, and the gate that decides who gets credits is the issuer's own. A node still serves a free turn that carries no credit, on its daily budget. The localnet preset's issuer is a test key whose private half is committed in this repo, so the preset marks it `loopback_only` and a node trusts it only when its RPC endpoint is on the same machine (`zsescrow.TrustedFreeCreditIssuers`).
+
+**Keys.** An issuer is named by a long-lived Ed25519 key, standard base64 of its 32 bytes, which is what presets and node configs list. It makes a fresh RSA day key for each deployment and epoch (2048 to 4096 bits, exponent 65537, in the canonical SPKI DER encoding) and certifies it by signing:
+
+```
+"zs-free-credit-day-key-v1\x00" ‖ deployment_id[32] ‖ u32be(epoch) ‖ sha256(day_key_spki)
+```
+
+The day key, not the payer, fixes the day a credit is good for, so a payer can't have today's key sign a credit for a later day. The issuer's key certifies day keys and signs nothing else. An issuer has **one day key per deployment and epoch** and serves the same one to every payer: a key per payer would let the issuer and a node link each credit back to the payer the issuer gated (see the residuals below).
+
+**The message** the day key blindly signs:
+
+```
+"zs-free-credit-v1\x00" ‖ deployment_id[32] ‖ u64be(operator_id) ‖ u64be(node_id) ‖ u32be(epoch) ‖ nonce[32]
+```
+
+The epoch is the UTC day, `floor(unix_seconds / 86400)`. The node is the routing pair, so a credit for one node is worthless at another node of the same operator. The nonce is 32 random bytes the payer draws, which makes each credit distinct.
+
+**Accepted epochs.** At a time `now`, the accepted epochs are the current day, and within 10 minutes of midnight the day on the other side of it as well. An issuer certifies and signs only for an accepted epoch at its clock, and a node accepts only a credit for one at its own. A payer mints for the current day. The grace absorbs clock skew between the three, and lets a credit minted just before midnight be spent just after. An issuer's cap counts credits per epoch, so a payer that mints tomorrow's credits in the grace before midnight takes them from tomorrow's allowance: no payer holds more than one day's cap for any day.
+
+**A credit on the wire** is `{"issuer", "epoch", "day_key", "day_key_sig", "nonce", "signature"}`: the day key's certificate, then the payer's nonce and the day key's signature. Byte fields are standard base64 with padding, decoded strictly (no line breaks, no set unused bits), so each value has one spelling. The object is read as `JSON.parse` reads it: names match exactly, the last of a repeated name wins, an absent field is empty (or epoch 0), and the epoch is any JSON number whose value is an integer from 0 to 2³²−1, so `20752.0` is epoch 20752. The node fills in the deployment and its own routing pair when it rebuilds both messages, and that is what binds the credit to it. A node checks, in order, and refuses with the first that fails:
+
+1. `malformed`: the issuer key is 32 bytes, the certificate signature 64, the day key and signature non-empty, the nonce 32, and every field decodes.
+2. `unknown_issuer`: the node trusts the issuer.
+3. `wrong_epoch`: the epoch is accepted.
+4. `bad_day_key`: the certificate verifies under the issuer's key for this deployment, and the day key meets the key rules above.
+5. `bad_signature`: the signature is exactly the modulus size, below the modulus, and verifies over the rebuilt message.
+
+A credit meant for another node or operator refuses as `bad_signature`, one for another deployment as `bad_day_key`. A node records a spent credit under `sha256(day_key) ‖ u32be(epoch) ‖ nonce`, never the wire bytes or the signature: PSS signatures are salted, so one message has many, and respelling a credit must not spend it twice. It names the day key rather than the issuer, so two trusted issuers certifying one day key don't make a credit spendable once under each.
+
+**The issue wire** is the same for every issuer, two POSTs of JSON to its base URL:
+- `/v1/zs/credits/key` with `{"deployment", "epoch"}` returns the day key's certificate, `{"issuer", "epoch", "day_key", "day_key_sig"}`. A payer checks it against the issuer key it expected before blinding to it.
+- `/v1/zs/credits` with `{"deployment", "epoch", "blinded": [b64…]}` (at most 20) returns `{"signatures": [b64…]}` in the same order. An issuer whose cap for the caller is nearly spent signs only the first few. Once the cap is spent it answers `429` with code `credits_exhausted` and a `Retry-After`.
+
+Either answers `400 epoch_not_issuable` for an epoch that isn't accepted at the issuer's clock. The caller proves whatever the issuer's gate wants in headers its host adds.
+
+**Discovery.** A node lists the issuer keys it trusts in `/v1/zs/details` as `free_credit_issuers` (absent when it trusts none). A payer fetches and attaches only a credit from one of those issuers, so a node that trusts no issuer is sent none. The field is unsigned; a node that lies in it only turns credits away.
+
+**What blinding protects, and what it doesn't.**
+- The node already learns the payer's address from `payer_addr` in the sealed reserve. Blinding keeps the issuer, which knows whatever its gate saw (a credential, an IP), from learning which nodes the user talks to. It doesn't hide the payer from the node.
+- A payer fetches credits for a node when it first needs one there. An issuer and a node that collude can match a fetch to the turn that follows it. Fetching a few at a time blunts this but doesn't close it.
+- An issuer that breaks the one-key rule and gives each payer its own day key can link every credit to its payer, together with any node, since each credit carries its day key. That is stronger than the timing link, and fetching a few at a time does nothing against it. A node sees every day key its credits carry, so it can catch the issuer: two distinct day keys for one issuer and epoch are proof. The payer and node checks for it are not built yet.
+- A credit for a node that goes down that day is wasted.
+- An issuer is only as strong as its gate, and an operator who trusts a weak issuer has chosen to.
 
 ### Ticket lifecycle
 

@@ -47,8 +47,15 @@ type vocabularyNetwork struct {
 }
 
 type vocabularySolanaNetwork struct {
-	RPCEndpoint string `json:"rpc_endpoint"`
-	Program     string `json:"program"`
+	RPCEndpoint       string                   `json:"rpc_endpoint"`
+	Program           string                   `json:"program"`
+	FreeCreditIssuers []vocabularyCreditIssuer `json:"free_credit_issuers"`
+}
+
+type vocabularyCreditIssuer struct {
+	Key          string `json:"key"`
+	URL          string `json:"url"`
+	LoopbackOnly bool   `json:"loopback_only"`
 }
 
 type vocabulary struct {
@@ -241,7 +248,12 @@ func buildVocabulary(t *testing.T) vocabulary {
 		if !ok {
 			t.Fatalf("SolanaClusters lists %q, which has no preset", n)
 		}
-		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String()}
+		issuers, _ := SolanaClusterFreeCreditIssuers(n)
+		credit := []vocabularyCreditIssuer{}
+		for _, iss := range issuers {
+			credit = append(credit, vocabularyCreditIssuer{Key: iss.Key, URL: iss.URL, LoopbackOnly: iss.LoopbackOnly})
+		}
+		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String(), FreeCreditIssuers: credit}
 	}
 	return v
 }
