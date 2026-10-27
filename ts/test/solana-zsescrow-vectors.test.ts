@@ -47,6 +47,7 @@ import {
     RENT_POOL_SEED,
     RENT_POOL_SIZE,
     STAKE_VAULT_SEED,
+    TICKET_PAYER_OFFSET,
     TICKET_SIZE,
     TOKEN_ACCOUNT_SIZE,
     VAULT_SEED,
@@ -155,6 +156,9 @@ describe('solana_account_vectors.json', () => {
                     // must be the one its address derives from.
                     want = d.ticket(v.node, v.ticketId)
                     expect(hex.encode(v.ticketId)).toBe(a.seeds_hex[2])
+                    // The offset a payer's ticket listing filters on, against
+                    // the program's own bytes.
+                    expect(hex.encode(data.subarray(TICKET_PAYER_OFFSET, TICKET_PAYER_OFFSET + 32))).toBe(hex.encode(publicKeyBytes(v.payer)))
                     break
                 case 'RentPool':
                     want = d.rentPool(v.payer)

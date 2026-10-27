@@ -16,6 +16,7 @@ import {
     type Transaction,
     TOKEN_PROGRAM_ID,
     compileMessage,
+    createAssociatedTokenAccountIdempotent,
     encodeBase58,
     encodeMessage,
     encodeTransaction,
@@ -32,6 +33,7 @@ import {
     TICKET_FROZEN,
     TICKET_OPEN,
     TICKET_PENDING_BY_OPERATOR,
+    TICKET_PAYER_OFFSET,
     TICKET_PENDING_BY_PAYER,
     TOKEN_FROZEN,
     TOKEN_INITIALIZED,
@@ -42,6 +44,7 @@ import {
     receiptAckDigest,
     ticketDeadline,
 } from '@txnlab/zs-proto/solana/zsescrow'
+import type { Verdict } from '@txnlab/zs-proto/settle'
 import type { UsageReceipt } from '@txnlab/zs-proto/ticket'
 import { type SettleAck, bodyHashOfBody } from '@txnlab/zs-proto/wire'
 import { describe, expect, it, vi } from 'vitest'
@@ -67,7 +70,7 @@ import { solanaClaimFields } from '../src/solana/claim.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import { SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
 import { type Account, CODE_PREFLIGHT_FAILURE, type SignatureStatus, type SolanaRpc, SolanaRpcError } from '../src/solana/rpc.js'
-import { SOLANA_ENDING_TIMEOUT_MS, SolanaAckSendError, SolanaWallet, solanaSettleBaselineTiming } from '../src/solana/wallet.js'
+import { SOLANA_ENDING_TIMEOUT_MS, SolanaAckSendError, SolanaTicketGoneError, SolanaWallet, solanaSettleBaselineTiming } from '../src/solana/wallet.js'
 
 type Json = Record<string, any>
 
@@ -1321,3 +1324,125 @@ function scriptTicket(f: Awaited<ReturnType<typeof fixture>>, script: string, sl
     }
     return { reads: () => reads, sent, commitments }
 }
+
+// The Config's fee_bps: after the discriminator and seven one-byte fields.
+const CONFIG_FEE_BPS_OFFSET = 8 + 7
+
+describe('SolanaWallet host calls', () => {
+    // The fee rate is the Config's, read each time, so a set_config reaches
+    // the next read.
+    it("reads the Config's fee rate", async () => {
+        const f = await fixture()
+        const fee = decodeConfig(CONFIG).feeBps
+        expect(fee).not.toBe(0)
+        await expect(f.wallet.protocolFeeBps()).resolves.toBe(fee)
+        const data = CONFIG.slice()
+        new DataView(data.buffer).setUint16(CONFIG_FEE_BPS_OFFSET, 1234, true)
+        expect(decodeConfig(data).feeBps).toBe(1234)
+        f.state.accounts.set(d.config(), { lamports: 1n, owner: PROGRAM_ID, data, executable: false })
+        await expect(f.wallet.protocolFeeBps()).resolves.toBe(1234)
+        f.state.accounts.set(d.config(), null)
+        await expect(f.wallet.protocolFeeBps()).rejects.toThrow(/has no Config/)
+    })
+
+    it('creates the USDC account only when it is missing', async () => {
+        const f = await fixture()
+        expect(f.wallet.usdcAccount()).toBe(d.tokenAccount(PAYER))
+        await expect(f.wallet.ensureUsdcAccount()).resolves.toBe('')
+        expect(f.state.sent).toHaveLength(0)
+        for (const absent of [
+            null,
+            { lamports: 1n, owner: '11111111111111111111111111111111', data: new Uint8Array(), executable: false },
+        ]) {
+            f.state.accounts.set(d.tokenAccount(PAYER), absent)
+            const n = f.state.sent.length
+            const sig = await f.wallet.ensureUsdcAccount()
+            expect(f.state.sent).toHaveLength(n + 1)
+            expect(sig).toBe(encodeBase58(f.state.sent[n]!.signatures[0]!))
+            const want = compileMessage(
+                PAYER,
+                txVectors.context.recent_blockhash,
+                [createAssociatedTokenAccountIdempotent(PAYER, PAYER, MINT)],
+                'legacy',
+            )
+            expect(encodeMessage(f.state.sent[n]!.message)).toEqual(encodeMessage(want))
+        }
+    })
+
+    // recoverTicket sends the ending the verdict on a fresh read names, and
+    // nothing for any other verdict. The deadline counts as passed only past
+    // the reconciler's 15 s skew, since the program reads the cluster's clock.
+    const past = 16n
+    const inSkew = 14n
+    const recoveries: [string, number, bigint, bigint, Verdict, ((e: Ending) => Instruction) | null][] = [
+        ['open past the deadline', TICKET_OPEN, 0n, past, 'refundInactive', (e) => d.refundInactive(e)],
+        ['open inside the skew', TICKET_OPEN, 0n, inSkew, 'wait', null],
+        [
+            "payer's half past the deadline",
+            TICKET_PENDING_BY_PAYER,
+            7n,
+            past,
+            'refundInactive',
+            (e) => d.refundInactive(e),
+        ],
+        [
+            "node's claim past the deadline",
+            TICKET_PENDING_BY_OPERATOR,
+            7n,
+            past,
+            'settleLapsed',
+            (e) => d.settleLapsed(e),
+        ],
+        ["node's claim inside the skew", TICKET_PENDING_BY_OPERATOR, 7n, inSkew, 'wait', null],
+        ["node's claim in the window", TICKET_PENDING_BY_OPERATOR, 7n, -3600n, 'wait', null],
+        ['frozen', TICKET_FROZEN, 7n, past, 'arbitrate', null],
+    ]
+    it.each(recoveries)('recovers a ticket: %s', async (_name, status, pending, ago, verdict, ix) => {
+        const f = await fixture()
+        setTicket(f, status, pending)
+        setTicketDeadline(f, nowSeconds() - ago)
+        const t = await f.ticket()
+        const r = await f.wallet.recoverTicket(OPERATOR_ID, NODE_ID, TICKET_ID)
+        expect(r.verdict).toBe(verdict)
+        if (ix === null) {
+            expect(r.signature).toBe('')
+            expect(f.state.sent).toHaveLength(0)
+            expect(f.signer.asked).toBe(0)
+            return
+        }
+        expect(f.state.sent).toHaveLength(1)
+        expect(r.signature).toBe(encodeBase58(f.state.sent[0]!.signatures[0]!))
+        const e: Ending = {
+            submitter: PAYER,
+            operatorId: OPERATOR_ID,
+            nodeId: NODE_ID,
+            ticketId: TICKET_ID,
+            rentPayer: t.rentPayer,
+            payer: PAYER,
+        }
+        const want = compileMessage(PAYER, txVectors.context.recent_blockhash, [ix(e)], 'legacy')
+        expect(encodeMessage(f.state.sent[0]!.message)).toEqual(encodeMessage(want))
+    })
+
+    // A ticket that is gone, or another payer's, sends nothing and asks the
+    // signer nothing.
+    it('refuses to recover a gone or foreign ticket', async () => {
+        const f = await fixture()
+        f.state.accounts.set(TICKET_ADDR, null)
+        await expect(f.wallet.recoverTicket(OPERATOR_ID, NODE_ID, TICKET_ID)).rejects.toBeInstanceOf(
+            SolanaTicketGoneError,
+        )
+        await expect(f.wallet.recoverTicket(OPERATOR_ID, NODE_ID, TICKET_ID.slice(1))).rejects.toThrow(/15 bytes, want 16/)
+
+        const g = await fixture()
+        setTicketDeadline(g, nowSeconds() - 60n)
+        const data = g.state.accounts.get(TICKET_ADDR)!.data.slice()
+        expect(data.slice(TICKET_PAYER_OFFSET, TICKET_PAYER_OFFSET + 32)).toEqual(
+            publicKeyBytes(decodeTicket(data).payer),
+        )
+        data.set(publicKeyBytes(OTHER), TICKET_PAYER_OFFSET)
+        g.state.accounts.set(TICKET_ADDR, { lamports: 1n, owner: PROGRAM_ID, data, executable: false })
+        await expect(g.wallet.recoverTicket(OPERATOR_ID, NODE_ID, TICKET_ID)).rejects.toThrow(/not this wallet's/)
+        expect([f.state.sent.length, g.state.sent.length, f.signer.asked, g.signer.asked]).toEqual([0, 0, 0, 0])
+    })
+})

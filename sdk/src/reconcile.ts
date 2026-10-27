@@ -195,7 +195,8 @@ export const DEFAULT_LAPSE_FALLBACK_MS = 10 * 60_000
 // Pads every deadline comparison against the gap between the local clock and
 // the chain's latest timestamp, so a call is not sent just before (or after)
 // the window the contract checks.
-const RECONCILE_SKEW_MS = 15_000
+/** @internal */
+export const RECONCILE_SKEW_MS = 15_000
 
 /**
  * decideTicket is what a sweep does about one journaled ticket, given its box

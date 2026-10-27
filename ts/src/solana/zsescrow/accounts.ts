@@ -289,6 +289,13 @@ export interface Ticket {
     reserve: Uint8Array
 }
 
+/**
+ * Where a Ticket account's payer key sits, discriminator included: what a
+ * getProgramAccounts memcmp matches to list one payer's tickets. Go's
+ * TicketPayerOffset.
+ */
+export const TICKET_PAYER_OFFSET = 131
+
 const I64_MAX = (1n << 63n) - 1n
 
 /** The last moment either half, a cooperative settle or a protest is accepted; settle_lapsed and refund_inactive open after it. */

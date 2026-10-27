@@ -8,7 +8,7 @@
 // from at open, as Algorand's prepaid MBR pool backs each ticket's box
 // (mbr.ts). Sized by the same rule, through planPoolDeposit.
 
-import { type PublicKey, compileMessage, encodeTransaction, newTransaction, signTransactionWith } from '@txnlab/zs-proto/solana'
+import { type Instruction, type PublicKey, compileMessage, encodeTransaction, newTransaction, signTransactionWith } from '@txnlab/zs-proto/solana'
 import { type Deployment, RENT_POOL_SIZE, TICKET_SIZE, decodeRentPool } from '@txnlab/zs-proto/solana/zsescrow'
 
 import { defaults } from '../config.js'
@@ -103,19 +103,128 @@ export class RentDepositBelowTargetError extends BelowTargetError {
 }
 
 /**
- * A deposit sent but not confirmed (Go returns its signature beside the
- * error). Unless the cause is a TransactionExpiredError it may still land: the
- * signature lets the caller look before it sends another.
+ * A pool transaction sent but not confirmed (Go returns its signature beside
+ * the error). Unless the cause is a TransactionExpiredError it may still land:
+ * the signature lets the caller look before it sends another.
  */
-export class RentDepositUnconfirmedError extends Error {
-    override readonly name = 'RentDepositUnconfirmedError'
+export class RentPoolUnconfirmedError extends Error {
+    override readonly name: string = 'RentPoolUnconfirmedError'
 
     constructor(
+        what: string,
         readonly signature: string,
         cause: unknown,
     ) {
-        super(`solana rent pool: deposit ${signature}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+        super(`solana rent pool: ${what} ${signature}: ${message(cause)}`, { cause })
     }
+}
+
+/** A deposit sent but not confirmed, as RentPoolUnconfirmedError. */
+export class RentDepositUnconfirmedError extends RentPoolUnconfirmedError {
+    override readonly name: string = 'RentDepositUnconfirmedError'
+
+    constructor(signature: string, cause: unknown) {
+        super('deposit', signature, cause)
+    }
+}
+
+/** A withdraw or close on a payer with no rent pool. Go's ErrNoRentPool. */
+export class NoRentPoolError extends Error {
+    override readonly name = 'NoRentPoolError'
+
+    constructor() {
+        super('solana rent pool: this payer has no rent pool')
+    }
+}
+
+/**
+ * A close while tickets the pool funded are live: their rent returns to the
+ * pool when each ends, and the program refuses the close until then. Go's
+ * ErrRentPoolTicketsOpen.
+ */
+export class RentPoolTicketsOpenError extends Error {
+    override readonly name = 'RentPoolTicketsOpenError'
+
+    constructor(readonly openTickets: bigint) {
+        super(`solana rent pool: tickets the pool funded are still open: ${openTickets}`)
+    }
+}
+
+/**
+ * A payer's rent pool as the chain shows it, with the cluster's rent figures
+ * it is read against. Go's SolanaRentPoolStatus.
+ */
+export interface SolanaRentPoolStatus extends RentPoolReading {
+    /** A ticket's rent exemption, what each open draws; never 0. */
+    ticketRent: bigint
+    /** The pool account's own rent exemption. */
+    poolRent: bigint
+}
+
+/**
+ * What an open can draw and a withdraw can take: the pool's lamports above
+ * its own rent exemption. A live ticket's rent sits in the ticket, not here.
+ * Go's SolanaRentPoolStatus.Available.
+ */
+export function rentPoolAvailable(s: SolanaRentPoolStatus): bigint {
+    if (!s.exists) return 0n
+    return s.lamports > s.poolRent ? s.lamports - s.poolRent : 0n
+}
+
+/** How many more tickets the pool can fund right now. Go's SolanaRentPoolStatus.FreeSlots. */
+export function rentPoolFreeSlots(s: SolanaRentPoolStatus): bigint {
+    // A zero status (a read that never happened) must not throw RangeError.
+    if (s.ticketRent === 0n) return 0n
+    return rentPoolAvailable(s) / s.ticketRent
+}
+
+/**
+ * How many concurrent tickets the pool backs counting the live ones, the
+ * figure a working set is compared against. Go's
+ * SolanaRentPoolStatus.BackedSlots.
+ */
+export function rentPoolBackedSlots(s: SolanaRentPoolStatus): bigint {
+    if (s.ticketRent === 0n) return 0n
+    return rentPoolGross(s.ticketRent, s.poolRent, s) / s.ticketRent
+}
+
+/**
+ * readSolanaRentPool reads payer's rent pool without a signer, so a host can
+ * show it for a wallet it has not unlocked. Go's ReadSolanaRentPool.
+ */
+export async function readSolanaRentPool(
+    rpc: SolanaRpc,
+    deployment: Deployment,
+    payer: PublicKey,
+    signal?: AbortSignal,
+): Promise<SolanaRentPoolStatus> {
+    const opts = { commitment: COMMITMENT, signal } as const
+    let ticketRent, poolRent, acct
+    try {
+        ticketRent = await rpc.getMinimumBalanceForRentExemption(TICKET_SIZE, opts)
+    } catch (err) {
+        throw new Error(`solana rent pool: ticket rent: ${message(err)}`, { cause: err })
+    }
+    if (ticketRent === 0n) throw new Error('solana rent pool: the cluster quotes no ticket rent')
+    try {
+        poolRent = await rpc.getMinimumBalanceForRentExemption(RENT_POOL_SIZE, opts)
+    } catch (err) {
+        throw new Error(`solana rent pool: pool rent: ${message(err)}`, { cause: err })
+    }
+    try {
+        acct = await rpc.getAccountInfo(deployment.rentPool(payer), opts)
+    } catch (err) {
+        throw new Error(`solana rent pool: read pool: ${message(err)}`, { cause: err })
+    }
+    if (acct === null || acct.owner !== deployment.program)
+        return { exists: false, lamports: 0n, openTickets: 0n, ticketRent, poolRent }
+    let openTickets
+    try {
+        openTickets = decodeRentPool(acct.data).openTickets
+    } catch (err) {
+        throw new Error(`solana rent pool: ${message(err)}`, { cause: err })
+    }
+    return { exists: true, lamports: acct.lamports, openTickets, ticketRent, poolRent }
 }
 
 /** What ensureDeposit did. */
@@ -155,18 +264,15 @@ export class SolanaRentPool {
     }
 
     async #read(signal: AbortSignal | undefined): Promise<PoolState> {
+        const payer = this.#o.signer.address
+        const { exists, lamports, openTickets, ticketRent, poolRent } = await this.status(signal)
+        return { payer, pool: { exists, lamports, openTickets }, ticketRent, poolRent }
+    }
+
+    /** The signer's pool, as readSolanaRentPool reads it. Go's Status. */
+    status(signal?: AbortSignal): Promise<SolanaRentPoolStatus> {
         const { rpc, deployment, signer } = this.#o
-        const payer = signer.address
-        const opts = { commitment: COMMITMENT, signal } as const
-        const ticketRent = await rpc.getMinimumBalanceForRentExemption(TICKET_SIZE, opts)
-        if (ticketRent === 0n) throw new Error('solana rent pool: the cluster quotes no ticket rent')
-        const poolRent = await rpc.getMinimumBalanceForRentExemption(RENT_POOL_SIZE, opts)
-        const acct = await rpc.getAccountInfo(deployment.rentPool(payer), opts)
-        let pool: RentPoolReading = { exists: false, lamports: 0n, openTickets: 0n }
-        if (acct !== null && acct.owner === deployment.program) {
-            pool = { exists: true, lamports: acct.lamports, openTickets: decodeRentPool(acct.data).openTickets }
-        }
-        return { payer, pool, ticketRent, poolRent }
+        return readSolanaRentPool(rpc, deployment, signer.address, signal)
     }
 
     /**
@@ -175,10 +281,77 @@ export class SolanaRentPool {
      * is at least 1.
      */
     async freeSlots(signal?: AbortSignal): Promise<bigint> {
-        const s = await this.#read(signal)
-        if (!s.pool.exists) return 0n
-        const available = s.pool.lamports > s.poolRent ? s.pool.lamports - s.poolRent : 0n
-        return available / s.ticketRent
+        return rentPoolFreeSlots(await this.status(signal))
+    }
+
+    /**
+     * Takes lamports back from the pool, at most its available, as Algorand's
+     * withdrawMbr, and resolves to the signature once the withdraw is
+     * confirmed; one sent but not confirmed throws RentPoolUnconfirmedError.
+     * Go's Withdraw.
+     */
+    async withdraw(lamports: bigint, signal?: AbortSignal): Promise<string> {
+        const s = await this.status(signal)
+        if (!s.exists) throw new NoRentPoolError()
+        const available = rentPoolAvailable(s)
+        if (lamports <= 0n || lamports > available) {
+            throw new Error(
+                `solana rent pool: withdraw ${lamports} lamports: the pool holds ${available} above its own rent`,
+            )
+        }
+        const payer = this.#o.signer.address
+        return this.#send(payer, 'withdraw', this.#o.deployment.withdrawRent(payer, lamports), signal)
+    }
+
+    /**
+     * Closes the pool and returns all of it, its own rent included, as
+     * Algorand's closeDeposit, resolving to the signature and the lamports it
+     * held. It refuses before signing while a ticket the pool funded is open.
+     * Go's Close.
+     */
+    async close(signal?: AbortSignal): Promise<{ signature: string; returned: bigint }> {
+        const s = await this.status(signal)
+        if (!s.exists) throw new NoRentPoolError()
+        if (s.openTickets > 0n) throw new RentPoolTicketsOpenError(s.openTickets)
+        const payer = this.#o.signer.address
+        const signature = await this.#send(payer, 'close', this.#o.deployment.closeRentPool(payer), signal)
+        return { signature, returned: s.lamports }
+    }
+
+    // Signs ix as the payer's own transaction, sends it and waits for it to
+    // confirm. Go's send.
+    async #send(payer: PublicKey, what: string, ix: Instruction, signal: AbortSignal | undefined): Promise<string> {
+        const { rpc, signer } = this.#o
+        let bh
+        try {
+            bh = await rpc.getLatestBlockhash({ commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana rent pool: blockhash: ${message(err)}`, { cause: err })
+        }
+        const tx = newTransaction(compileMessage(payer, bh.blockhash, [ix], 'legacy'))
+        await signTransactionWith(tx, payer, signer)
+        let signature
+        try {
+            // Preflight at the commitment the plan read, not the RPC's
+            // finalized default, which may not see the lamports the plan
+            // counted.
+            signature = await rpc.sendTransaction(encodeTransaction(tx), { preflightCommitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana rent pool: send ${what}: ${message(err)}`, { cause: err })
+        }
+        let r
+        try {
+            r = await confirmSignature(rpc, signature, bh.lastValidBlockHeight, COMMITMENT, {
+                ...this.#o.confirm,
+                signal,
+            })
+        } catch (e) {
+            throw what === 'deposit'
+                ? new RentDepositUnconfirmedError(signature, e)
+                : new RentPoolUnconfirmedError(what, signature, e)
+        }
+        if (r.err !== null) throw new Error(`solana rent pool: ${what} ${signature} failed: ${txErrorName(r.err)}`)
+        return signature
     }
 
     /**
@@ -194,7 +367,7 @@ export class SolanaRentPool {
      * both deposit.
      */
     async ensureDeposit(slots = 0n, signal?: AbortSignal): Promise<RentDeposit> {
-        const { rpc, deployment, signer } = this.#o
+        const { rpc } = this.#o
         const workingSet = slots > 0n ? slots : BigInt(defaults.concurrentSlots)
         const s = await this.#read(signal)
         const gross = rentPoolGross(s.ticketRent, s.poolRent, s.pool)
@@ -209,19 +382,11 @@ export class SolanaRentPool {
             throw new RentDepositUnaffordableError(gross / s.ticketRent, workingSet, plan.need, spendable, breakdown)
         }
 
-        const bh = await rpc.getLatestBlockhash({ commitment: COMMITMENT, signal })
-        const tx = newTransaction(compileMessage(s.payer, bh.blockhash, [deployment.depositRent(s.payer, plan.amount)], 'legacy'))
-        await signTransactionWith(tx, s.payer, signer)
-        // Preflight at the commitment the plan read, not the RPC's finalized
-        // default, which may not see the lamports the plan counted.
-        const signature = await rpc.sendTransaction(encodeTransaction(tx), { preflightCommitment: COMMITMENT, signal })
-        let r
-        try {
-            r = await confirmSignature(rpc, signature, bh.lastValidBlockHeight, COMMITMENT, { ...this.#o.confirm, signal })
-        } catch (e) {
-            throw new RentDepositUnconfirmedError(signature, e)
-        }
-        if (r.err !== null) throw new Error(`solana rent pool: deposit ${signature} failed: ${txErrorName(r.err)}`)
+        const signature = await this.#send(s.payer, 'deposit', this.#o.deployment.depositRent(s.payer, plan.amount), signal)
         return { signature, deposited: plan.amount, belowTarget: plan.belowTarget }
     }
+}
+
+function message(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
 }

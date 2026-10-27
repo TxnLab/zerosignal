@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -176,7 +177,10 @@ func (c *rentChain) SendTransaction(_ context.Context, raw []byte, o rpc.SendOpt
 		return solana.Signature{}, err
 	}
 	data := tx.Message.Instructions[0].Data
-	amount := binary.LittleEndian.Uint64(data[len(data)-8:])
+	var amount uint64
+	if len(data) >= 16 {
+		amount = binary.LittleEndian.Uint64(data[len(data)-8:])
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sent, c.sendOpts = append(c.sent, tx), append(c.sendOpts, o)
@@ -185,12 +189,22 @@ func (c *rentChain) SendTransaction(_ context.Context, raw []byte, o rpc.SendOpt
 		st = c.land(amount)
 	}
 	if st != nil && st.Err == nil {
-		if c.pool == nil || c.pool.Owner != c.d.Program {
-			c.withPool(testPoolRent, 0)
-			c.balance -= testPoolRent
+		c.balance -= solanaSignatureFee
+		switch {
+		case bytes.Equal(data, c.d.CloseRentPool(c.payer).Data):
+			c.balance += c.pool.Lamports
+			c.pool = nil
+		case bytes.HasPrefix(data, c.d.WithdrawRent(c.payer, 0).Data[:8]):
+			c.pool.Lamports -= amount
+			c.balance += amount
+		default:
+			if c.pool == nil || c.pool.Owner != c.d.Program {
+				c.withPool(testPoolRent, 0)
+				c.balance -= testPoolRent
+			}
+			c.pool.Lamports += amount
+			c.balance -= amount
 		}
-		c.pool.Lamports += amount
-		c.balance -= amount + solanaSignatureFee
 	}
 	c.statusFor[tx.Signatures[0]] = st
 	return tx.Signatures[0], nil
@@ -352,6 +366,164 @@ func TestSolanaRentPoolReportsAnExpiredDeposit(t *testing.T) {
 	// What was sent is named, and nothing counts as deposited.
 	if sig != c.sent[0].Signatures[0].String() || n != 0 {
 		t.Fatalf("EnsureDeposit = %q, %d", sig, n)
+	}
+}
+
+// sentAlone checks c sent one transaction more, ix alone with the payer as
+// fee payer, preflighted at confirmed.
+func sentAlone(t *testing.T, c *rentChain, ix solana.Instruction) {
+	t.Helper()
+	tx := c.sent[len(c.sent)-1]
+	want, err := solana.Compile(c.payer, solana.Hash{9}, []solana.Instruction{ix}, solana.Legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMsg, _ := want.MarshalBinary()
+	gotMsg, _ := tx.Message.MarshalBinary()
+	if !bytes.Equal(wantMsg, gotMsg) {
+		t.Fatal("the message is not the builder's instruction alone with the payer as fee payer")
+	}
+	if o := c.sendOpts[len(c.sendOpts)-1]; o.PreflightCommitment != rpc.Confirmed {
+		t.Fatalf("preflight at %q", o.PreflightCommitment)
+	}
+}
+
+func TestSolanaRentPoolStatus(t *testing.T) {
+	s := newTestSolanaSigner()
+	// Three slots' rent in the pool, two more in live tickets, and a few
+	// lamports short of a fourth.
+	c := newRentChain(t, s, 0).withPool(testPoolRent+4*testTicketRent-1, 2)
+	want := SolanaRentPoolStatus{Exists: true, Lamports: testPoolRent + 4*testTicketRent - 1, OpenTickets: 2, TicketRent: testTicketRent, PoolRent: testPoolRent}
+	got, err := ReadSolanaRentPool(t.Context(), c, c.d, c.payer)
+	if err != nil || got != want {
+		t.Fatalf("ReadSolanaRentPool = %+v, %v; want %+v", got, err, want)
+	}
+	if got.Available() != 4*testTicketRent-1 || got.FreeSlots() != 3 || got.BackedSlots() != 5 {
+		t.Errorf("available %d, free %d, backed %d; want %d, 3, 5", got.Available(), got.FreeSlots(), got.BackedSlots(), 4*testTicketRent-1)
+	}
+	if st, err := rentPool(c, s).Status(t.Context()); err != nil || st != want {
+		t.Errorf("Status = %+v, %v", st, err)
+	}
+	// The live tickets count toward the working set, so six slots is short
+	// by the one lamport the fourth free slot lacks, and two is all of
+	// Available over.
+	if got.Shortfall(6) != 1 || got.Shortfall(5) != 0 || got.Excess(6) != 0 {
+		t.Errorf("shortfall(6) %d, shortfall(5) %d, excess(6) %d; want 1, 0, 0", got.Shortfall(6), got.Shortfall(5), got.Excess(6))
+	}
+	if got.Excess(2) != 4*testTicketRent-1 || got.Excess(5) != testTicketRent-1 || got.Shortfall(2) != 0 {
+		t.Errorf("excess(2) %d, excess(5) %d, shortfall(2) %d; want %d, %d, 0", got.Excess(2), got.Excess(5), got.Shortfall(2), 4*testTicketRent-1, testTicketRent-1)
+	}
+	// The excess counts the live tickets' rent, which a withdraw can't take,
+	// so a shrink below them is over by more than the pool holds.
+	if got.Excess(1) != 5*testTicketRent-1 || got.Excess(1) <= got.Available() {
+		t.Errorf("excess(1) %d, available %d; want %d, above available", got.Excess(1), got.Available(), 5*testTicketRent-1)
+	}
+	// A working set whose rent overflows saturates rather than wrapping, so
+	// it reads as short, never as an excess. This count's product wraps to
+	// less than one ticket's rent.
+	huge := uint64(math.MaxUint64)/testTicketRent + 1
+	gross := uint64(6*testTicketRent - 1)
+	if got.Shortfall(huge) != math.MaxUint64-gross || got.Excess(huge) != 0 {
+		t.Errorf("saturated: shortfall %d, excess %d; want %d, 0", got.Shortfall(huge), got.Excess(huge), uint64(math.MaxUint64)-gross)
+	}
+
+	// The zero status a failed read returns has no slots rather than a
+	// division by zero, and sizes nothing.
+	if (SolanaRentPoolStatus{}).FreeSlots() != 0 || (SolanaRentPoolStatus{}).BackedSlots() != 0 {
+		t.Error("the zero status has slots")
+	}
+	if (SolanaRentPoolStatus{}).Shortfall(3) != 0 || (SolanaRentPoolStatus{}).Excess(0) != 0 {
+		t.Error("the zero status sizes a deposit")
+	}
+	// Without a ticket's rent there is no target to be over, whatever the
+	// pool holds.
+	if ex := (SolanaRentPoolStatus{Exists: true, Lamports: 5 * testTicketRent}).Excess(1); ex != 0 {
+		t.Errorf("no ticket rent: excess %d", ex)
+	}
+	// No pool yet is short the whole working set.
+	if none := (SolanaRentPoolStatus{TicketRent: testTicketRent, PoolRent: testPoolRent}); none.Shortfall(3) != 3*testTicketRent {
+		t.Errorf("no pool: shortfall(3) %d; want %d", none.Shortfall(3), 3*testTicketRent)
+	}
+
+	// A pool holding less than its own rent has nothing to draw.
+	c.withPool(testPoolRent-1, 0)
+	if got, _ := ReadSolanaRentPool(t.Context(), c, c.d, c.payer); got.Available() != 0 || got.FreeSlots() != 0 || got.BackedSlots() != 0 {
+		t.Errorf("under its rent: available %d, free %d, backed %d", got.Available(), got.FreeSlots(), got.BackedSlots())
+	}
+	// Lamports at the address are no pool.
+	c.pool = &rpc.Account{Lamports: 5 * testTicketRent, Owner: solana.SystemProgramID}
+	if got, _ := ReadSolanaRentPool(t.Context(), c, c.d, c.payer); got.Exists || got.Available() != 0 || got.BackedSlots() != 0 {
+		t.Errorf("stray lamports read as a pool: %+v", got)
+	}
+}
+
+func TestSolanaRentPoolWithdraw(t *testing.T) {
+	s := newTestSolanaSigner()
+	c := newRentChain(t, s, 0).withPool(testPoolRent+3*testTicketRent, 1)
+	p := rentPool(c, s)
+	// More than the pool holds above its rent, or nothing, is refused unsent.
+	for _, n := range []uint64{0, 3*testTicketRent + 1} {
+		if _, err := p.Withdraw(t.Context(), n); err == nil || len(c.sent) != 0 {
+			t.Fatalf("Withdraw(%d) = %v; %d sent", n, err, len(c.sent))
+		}
+	}
+	// All of it, to the lamport.
+	sig, err := p.Withdraw(t.Context(), 3*testTicketRent)
+	if err != nil || sig != c.sent[0].Signatures[0].String() {
+		t.Fatalf("Withdraw = %q, %v", sig, err)
+	}
+	sentAlone(t, c, c.d.WithdrawRent(c.payer, 3*testTicketRent))
+	if st, _ := p.Status(t.Context()); st.Available() != 0 || st.OpenTickets != 1 {
+		t.Errorf("after the withdraw: %+v", st)
+	}
+}
+
+func TestSolanaRentPoolClose(t *testing.T) {
+	s := newTestSolanaSigner()
+	c := newRentChain(t, s, 0).withPool(testPoolRent+2*testTicketRent, 1)
+	p := rentPool(c, s)
+	if _, _, err := p.Close(t.Context()); !errors.Is(err, ErrRentPoolTicketsOpen) || len(c.sent) != 0 {
+		t.Fatalf("Close with a ticket open = %v; %d sent", err, len(c.sent))
+	}
+	c.withPool(testPoolRent+2*testTicketRent, 0)
+	sig, returned, err := p.Close(t.Context())
+	if err != nil || sig != c.sent[0].Signatures[0].String() || returned != testPoolRent+2*testTicketRent {
+		t.Fatalf("Close = %q, %d, %v", sig, returned, err)
+	}
+	sentAlone(t, c, c.d.CloseRentPool(c.payer))
+	if c.balance != testPoolRent+2*testTicketRent-solanaSignatureFee {
+		t.Errorf("balance %d after the close", c.balance)
+	}
+}
+
+func TestSolanaRentPoolWithoutAPoolRefuses(t *testing.T) {
+	s := newTestSolanaSigner()
+	c := newRentChain(t, s, 1_000_000_000)
+	p := rentPool(c, s)
+	if _, err := p.Withdraw(t.Context(), 1); !errors.Is(err, ErrNoRentPool) {
+		t.Errorf("Withdraw = %v", err)
+	}
+	if _, _, err := p.Close(t.Context()); !errors.Is(err, ErrNoRentPool) {
+		t.Errorf("Close = %v", err)
+	}
+	if len(c.sent) != 0 {
+		t.Errorf("%d sent", len(c.sent))
+	}
+}
+
+func TestSolanaRentPoolReportsAFailedWithdraw(t *testing.T) {
+	s := newTestSolanaSigner()
+	c := newRentChain(t, s, 0).withPool(testPoolRent+testTicketRent, 0)
+	c.land = func(uint64) *rpc.SignatureStatus {
+		return &rpc.SignatureStatus{Slot: 5, ConfirmationStatus: rpc.Confirmed, Err: json.RawMessage(`{"InstructionError":[0,{"Custom":6000}]}`)}
+	}
+	if sig, err := rentPool(c, s).Withdraw(t.Context(), testTicketRent); err == nil || sig != "" || !strings.Contains(err.Error(), "withdraw") {
+		t.Fatalf("Withdraw = %q, %v", sig, err)
+	}
+	c.land = func(uint64) *rpc.SignatureStatus { return nil }
+	sig, _, err := rentPool(c, s).Close(t.Context())
+	if !errors.Is(err, rpc.ErrExpired) || sig != c.sent[1].Signatures[0].String() {
+		t.Fatalf("Close = %q, %v; want the expired close's signature", sig, err)
 	}
 }
 

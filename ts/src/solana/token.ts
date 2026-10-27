@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SPL Token's TransferChecked, and the associated token program's
+// SPL Token's TransferChecked and MintTo, and the associated token program's
 // CreateIdempotent. Mirrors proto/go/solana/token.go.
 
 import { ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from './key.js'
@@ -31,6 +31,30 @@ export function transferChecked(source: PublicKey, mint: PublicKey, destination:
         accounts: [
             { publicKey: source, isSigner: false, isWritable: true },
             { publicKey: mint, isSigner: false, isWritable: false },
+            { publicKey: destination, isSigner: false, isWritable: true },
+            { publicKey: authority, isSigner: true, isWritable: false },
+        ],
+        data,
+    }
+}
+
+/** SPL Token's MintTo tag, the first data byte. */
+export const TOKEN_MINT_TO = 7
+
+/**
+ * Mints amount of mint to destination, a token account of mint, signed by
+ * authority, the mint's authority. Only a test mint's authority is ever at
+ * hand: a localnet's, or devnet's test USDC.
+ */
+export function mintTo(mint: PublicKey, destination: PublicKey, authority: PublicKey, amount: bigint): Instruction {
+    if (amount < 0n || amount >= 1n << 64n) throw new RangeError(`solana: mint amount ${amount} is not a u64`)
+    const data = new Uint8Array(9)
+    data[0] = TOKEN_MINT_TO
+    new DataView(data.buffer).setBigUint64(1, amount, true)
+    return {
+        programId: TOKEN_PROGRAM_ID,
+        accounts: [
+            { publicKey: mint, isSigner: false, isWritable: true },
             { publicKey: destination, isSigner: false, isWritable: true },
             { publicKey: authority, isSigner: true, isWritable: false },
         ],

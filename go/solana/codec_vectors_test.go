@@ -173,6 +173,10 @@ func buildBuilderCases() []builderCase {
 	a, b, c, d := pubOf(seedKey(31)), pubOf(seedKey(32)), pubOf(seedKey(33)), pubOf(seedKey(34))
 	add("transfer_checked", solana.TransferChecked(a, b, c, d, math.MaxUint64, 6),
 		"source", a.String(), "mint", b.String(), "destination", c.String(), "authority", d.String(), "amount", strconv.FormatUint(math.MaxUint64, 10), "decimals", "6")
+	for _, amt := range []uint64{0, 1_000_000_000, math.MaxUint64} {
+		add("mint_to", solana.MintTo(b, c, d, amt),
+			"mint", b.String(), "destination", c.String(), "authority", d.String(), "amount", strconv.FormatUint(amt, 10))
+	}
 	for _, k := range [][3]solana.PublicKey{{a, b, c}, {a, a, c}} {
 		add("create_associated_token_account_idempotent", solana.CreateAssociatedTokenAccountIdempotent(k[0], k[1], k[2]),
 			"payer", k[0].String(), "owner", k[1].String(), "mint", k[2].String())
@@ -819,6 +823,23 @@ func TestCodecVectorsMeanWhatTheySay(t *testing.T) {
 		if m.FeePayer().String() != c.FeePayer {
 			t.Errorf("%s: fee payer %s", c.Name, m.FeePayer())
 		}
+	}
+}
+
+// MintTo has no crate-built fixture, so its layout is pinned here as SPL
+// Token's interface defines it: the tag, the amount little-endian, and the
+// mint, the destination and the signing authority. The stub mints test USDC
+// with it against the real token program in the end-to-end suites.
+func TestMintToLayout(t *testing.T) {
+	m, d, a := pubOf(seedKey(1)), pubOf(seedKey(2)), pubOf(seedKey(3))
+	ix := solana.MintTo(m, d, a, 0x0102030405060708)
+	want := solana.Instruction{
+		ProgramID: solana.TokenProgramID,
+		Accounts:  []solana.AccountMeta{{PublicKey: m, IsWritable: true}, {PublicKey: d, IsWritable: true}, {PublicKey: a, IsSigner: true}},
+		Data:      []byte{7, 8, 7, 6, 5, 4, 3, 2, 1},
+	}
+	if ix.ProgramID != want.ProgramID || !slices.Equal(ix.Accounts, want.Accounts) || !bytes.Equal(ix.Data, want.Data) {
+		t.Fatalf("MintTo = %+v, want %+v", ix, want)
 	}
 }
 

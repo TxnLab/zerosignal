@@ -16,6 +16,17 @@ import (
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
 
+func TestLoopbackEndpoint(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:8899": true, "http://localhost:8899": true, "http://[::1]:8899": true,
+		"https://api.devnet.solana.com": false, "http://10.0.0.5:8899": false, "::bad": false,
+	} {
+		if got := zsescrow.LoopbackEndpoint(raw); got != want {
+			t.Errorf("LoopbackEndpoint(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
 // Every preset issuer key must parse: a node trusting the preset would
 // otherwise refuse its own default config at startup.
 func TestClusterPreset_FreeCreditIssuersParse(t *testing.T) {

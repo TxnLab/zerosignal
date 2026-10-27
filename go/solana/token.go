@@ -32,6 +32,24 @@ func TransferChecked(source, mint, destination, authority PublicKey, amount uint
 	}
 }
 
+// TokenMintTo is SPL Token's MintTo tag, the first data byte.
+const TokenMintTo = 7
+
+// MintTo mints amount of mint to destination, a token account of mint,
+// signed by authority, the mint's authority. Only a test mint's authority is
+// ever at hand: a localnet's, or devnet's test USDC.
+func MintTo(mint, destination, authority PublicKey, amount uint64) Instruction {
+	return Instruction{
+		ProgramID: TokenProgramID,
+		Accounts: []AccountMeta{
+			{PublicKey: mint, IsWritable: true},
+			{PublicKey: destination, IsWritable: true},
+			{PublicKey: authority, IsSigner: true},
+		},
+		Data: binary.LittleEndian.AppendUint64([]byte{TokenMintTo}, amount),
+	}
+}
+
 // AssociatedTokenCreateIdempotent is the associated token program's
 // CreateIdempotent tag, its only data byte.
 const AssociatedTokenCreateIdempotent = 1

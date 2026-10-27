@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/internal/solanastub"
+	"github.com/TxnLab/zerosignal/go/keystore"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
 
@@ -44,7 +45,7 @@ func run(rpcURL, authorityPath, listen string, exitOnEOF bool) error {
 	if authorityPath == "" {
 		return fmt.Errorf("-mint-authority is required")
 	}
-	key, err := solanastub.ReadKeypair(authorityPath)
+	key, err := keystore.ReadSolanaKeypairFile(authorityPath)
 	if err != nil {
 		return err
 	}

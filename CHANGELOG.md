@@ -31,6 +31,34 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-27 — what a Solana payer's host needs (unreleased)
+
+The SDKs add the reads and calls a host's wallet commands make on the Solana rail, as
+Algorand's hosts make them through the escrow client. `SolanaWallet` now has a protocol fee
+rate, the Config's `fee_bps` read each time (`ProtocolFeeBps` ↔ `protocolFeeBps`), so a
+Solana payer's `/v1/models` carries a price and its reserve check bounds the fee by the
+Config's rather than `pricing.ProtocolFeeBpsMax`. It also gains `USDCAccount` ↔ `usdcAccount`,
+`EnsureUSDCAccount` ↔ `ensureUsdcAccount` (the idempotent associated token account create),
+and `RecoverTicket` ↔ `recoverTicket`, which classifies a fresh read of one of the payer's
+tickets, its deadline padded by the reconciler's 15 s skew, and sends the `refund_inactive`
+or `settle_lapsed` it allows, built from that same read. The rent pool gains
+`ReadSolanaRentPool` ↔ `readSolanaRentPool`, which needs no signer, with the available, free
+and backed slots, and `Withdraw` / `Close` ↔ `withdraw` / `close`, which refuse before
+signing on no pool, an amount above what the pool holds over its own rent, or a close with
+tickets open. The wallet reaches its pool through `RentPool` ↔ `rentPool`, and
+`CloseRentPool` ↔ `closeRentPool` closes it and clears the ready latch, so the next open tops
+the pool up again. The TS package root now exports `SolanaWallet`, `SolanaRentPool`,
+`SolanaTicketGoneError` and `readSolanaConfig`. `FetchSolanaPayerTickets` ↔ `fetchSolanaPayerTickets` lists a payer's live
+tickets with `getProgramAccounts` filtered on the payer at `TicketPayerOffset` ↔
+`TICKET_PAYER_OFFSET` (131, pinned against the account fixtures), each placed at its node.
+Go only: `go/wallet` records a 24-word wallet's Solana address in `wallet.json`
+(`solana_address`, backfilled on the next read of an older wallet), `go/solana/rpc`
+gains `RequestAirdrop` and `FaucetCluster`, `SolanaRentPoolStatus` gains `Shortfall` and
+`Excess`, Solana's `DepositShortfall` and `DepositExcess`, and `go/keystore` gains
+`ReadSolanaKeypairFile`, which reads a `solana-keygen` keypair file and refuses one whose
+public half doesn't match its seed. Both languages gain the SPL `MintTo` builder
+(`solana.MintTo` ↔ `mintTo`), pinned in `solana_codec_vectors.json`. No wire shape changes.
+
 ### 2026-10-27 — free credits: what the node does with them (unreleased)
 
 SPEC § 3a "Free credits" describes the node's check, built in zs-node: a free reserve's

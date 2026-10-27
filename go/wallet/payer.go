@@ -40,9 +40,9 @@ type Payer struct {
 }
 
 // SolanaPayer is the key LoadSolanaPayer chose. Signer satisfies
-// zs.SolanaSigner. It carries no network: the wallet's descriptor names its
-// Algorand address, so it never says which key is the wallet's here; a host
-// that wants the recorded network reads ReadMetadata.
+// zs.SolanaSigner. It carries no network; a host that wants the recorded
+// network, or the wallet's Solana address without unlocking it, reads
+// ReadMetadata.
 type SolanaPayer struct {
 	Signer keystore.SolanaAccountSigner
 }
