@@ -31,6 +31,21 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-27 — free credits: what the node does with them (unreleased)
+
+SPEC § 3a "Free credits" describes the node's check, built in zs-node: a free reserve's
+credit is checked at reserve and spent when its turn is consumed, so a second turn on one
+credit is refused `409 free_credit_spent` at its sealed request with its ticket gone; a
+credit on a priced reserve is ignored; and an issuer seen with two day keys for one epoch
+has its credits refused as `free_credit_invalid` for the rest of it, so an issuer must keep
+each day key across restarts. "Free-ticket quota", "On Solana", says what a credit buys:
+while a node trusts an issuer, free turns without one may spend only a share of its budget
+and of its places in flight. Admission step 4 checks the free cap again, so a free turn can
+now be refused `429 no_capacity` at its sealed request. The reserve and error tables name
+the new refusals. Two residuals: the node's spent set, day keys and bars are in memory, so a
+restart forgets them, and the payer's own check for a second day key is still unbuilt. No
+wire shape changes.
+
 ### 2026-10-27 — free credits: the payer fetches and attaches them (unreleased)
 
 The SDKs carry a free credit on a free Solana reserve (SPEC § 3a "Free credits"). A host
