@@ -612,7 +612,7 @@ A payer fails over from `free_budget_exhausted` without waiting on that node. Wh
 
 #### Free credits
 
-A free credit is an RSA blind signature (RFC 9474, `RSABSSA-SHA384-PSS-Deterministic`, the construction Privacy Pass type 2 uses) by an issuer's day key, which a payer spends on one free Solana turn at one node on one UTC day. The issuer signs without seeing what it signs, so it can't tell where a credit is spent. Each node keeps its own spent set. Built so far: the token itself (`proto/go/freecredit` ↔ `@txnlab/zs-proto/freecredit`, pinned by `testdata/free_credit_vectors.json`), the details field and the presets. The payer attaching a credit and the node checking it are not built yet.
+A free credit is an RSA blind signature (RFC 9474, `RSABSSA-SHA384-PSS-Deterministic`, the construction Privacy Pass type 2 uses) by an issuer's day key, which a payer spends on one free Solana turn at one node on one UTC day. The issuer signs without seeing what it signs, so it can't tell where a credit is spent. Each node keeps its own spent set. Built so far: the token itself (`proto/go/freecredit` ↔ `@txnlab/zs-proto/freecredit`, pinned by `testdata/free_credit_vectors.json`), the details field, the presets, and the payer's half. The node checking a credit is not built yet.
 
 **Issuers are optional.** An operator chooses which issuers its node trusts. A cluster preset names default issuers (`zsescrow.Cluster.FreeCreditIssuers`); the operator can replace that list or empty it. Anyone can run an issuer, and the gate that decides who gets credits is the issuer's own. A node still serves a free turn that carries no credit, on its daily budget. The localnet preset's issuer is a test key whose private half is committed in this repo, so the preset marks it `loopback_only` and a node trusts it only when its RPC endpoint is on the same machine (`zsescrow.TrustedFreeCreditIssuers`).
 
@@ -651,6 +651,22 @@ A credit meant for another node or operator refuses as `bad_signature`, one for 
 Either answers `400 epoch_not_issuable` for an epoch that isn't accepted at the issuer's clock. The caller proves whatever the issuer's gate wants in headers its host adds.
 
 **Discovery.** A node lists the issuer keys it trusts in `/v1/zs/details` as `free_credit_issuers` (absent when it trusts none). A payer fetches and attaches only a credit from one of those issuers, so a node that trusts no issuer is sent none. The field is unsigned; a node that lies in it only turns credits away.
+
+**The payer.** A host names the issuers it can reach (`zs.Config.FreeCredits` ↔ `Config.freeCredits`: an issuer key to a transport; the SDK's HTTP transport speaks the issue wire and takes a hook that adds the gate's headers). With none, the default and what `zs-proxy` runs, a payer fetches and sends no credit. A reserve carries one, as `free_credit` in the sealed reserve request, only when all of these hold:
+- the network is Solana;
+- the node advertises one of the payer's issuers;
+- the node prices the model at nothing, which is the node's own rule for a free reserve: the model serves no dedicated image route, and every token, cache, long-context, image-tool and tool-call rate is zero.
+- the node hasn't refused one of this payer's credits today (below).
+
+`free_credit` stays out of the digest `payer_sig` covers: the credit is already bound to the node, and a relay can't read the sealed body. The payer keeps credits per issuer, node and epoch. When a reserve needs one and none is kept, the payer fetches the issuer's day key, once per day, and checks the certificate against the issuer key it expected and the epoch it asked for. It then blinds a batch of 3 to that key and asks for signatures, one fetch at a time per node. Every signature must unblind to a valid credit: one that doesn't discards the batch. A fetch gets 5 seconds. An issuer that fails, or sends anything that doesn't verify, is skipped for a minute. One that answers `credits_exhausted` is skipped until its `Retry-After`, between a minute and a day, or without one until the next UTC day. A reserve with no credit to carry goes out without one.
+
+A node spends a credit when it consumes the turn it reserved, not at the reserve: a ticket the payer never uses leaves its credit spendable. A credit leaves the payer's store once its reserve returns a free ticket and the turn is sealed to the node. It goes back for the node's next turn when the ticket came back priced, when the reserve failed, or when the payer turned the ticket down (a mis-priced ticket, its spend cap).
+
+**The node's refusals** of a credit, each answered by asking that node once more, since it serves a free turn without a credit:
+- `400 free_credit_invalid`: the credit failed the checks above. The payer drops it, asks again with no credit, and sends that node no credit for the rest of the UTC day. A node that won't take the payer's credits, with a clock past the grace or an issuer it no longer trusts, then costs it one credit a day.
+- `409 free_credit_spent`: the node's spent set holds it, as when a payer's store kept a credit it had already sent. The payer drops it and asks again with another credit, or none. A second refusal is dropped too, and the node sent no credit for the rest of the day, so a node or relay that answers every credit this way burns two a day, not a batch a turn.
+
+A refusal on the second ask is that node's answer: a refusal, with no strike.
 
 **What blinding protects, and what it doesn't.**
 - The node already learns the payer's address from `payer_addr` in the sealed reserve. Blinding keeps the issuer, which knows whatever its gate saw (a credential, an IP), from learning which nodes the user talks to. It doesn't hide the payer from the node.

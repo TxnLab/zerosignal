@@ -812,6 +812,7 @@ func applyDetailsFields(op *Operator, resp inject.OperatorDetails) {
 	op.MinChargeOutputTokens = resp.MinChargeOutputTokens
 	op.MinChargeAlgoTxns = resp.MinChargeAlgoTxns
 	op.MinChargeMicroUSDC = resp.MinChargeMicroUSDC
+	op.FreeCreditIssuers = resp.FreeCreditIssuers
 }
 
 // modelCapacityOf is one advertised model as the registry keeps it.

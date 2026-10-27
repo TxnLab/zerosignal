@@ -38,6 +38,18 @@ export {
     doctorChecks,
 } from './doctor.js'
 export { type SolanaDoctorReadings, solanaDoctorChecks } from './solana/doctor.js'
+export {
+    type CreditIssuer,
+    type CreditKey,
+    type CreditStore,
+    CreditsExhaustedError,
+    FREE_CREDIT_DEFAULTS,
+    type FreeCredits,
+    type HttpCreditIssuerOptions,
+    creditIssuersFor,
+    httpCreditIssuer,
+    memoryCreditStore,
+} from './solana/credits.js'
 export * from './errors.js'
 export * from './escrow/index.js'
 export * from './estimate.js'

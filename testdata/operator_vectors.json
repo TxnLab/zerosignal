@@ -93,6 +93,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -250,6 +253,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -346,6 +352,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -441,6 +450,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -541,6 +553,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -636,6 +651,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -734,6 +752,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -832,6 +853,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -930,6 +954,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1034,6 +1061,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1130,6 +1160,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1228,6 +1261,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1324,6 +1360,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1420,6 +1459,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1516,6 +1558,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1702,6 +1747,11 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "__proto__": null,
+        "constructor": null,
+        "m": null
       }
     },
     {
@@ -1827,6 +1877,9 @@
           "zs_web_search",
           "zs_web_read"
         ]
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1924,6 +1977,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -1965,7 +2021,8 @@
         "models": [],
         "model_capacities": {},
         "builtin_tools": []
-      }
+      },
+      "creditIssuers": {}
     },
     {
       "name": "a model listed twice keeps both ids and the last capacity",
@@ -2066,6 +2123,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2162,6 +2222,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2257,6 +2320,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2355,6 +2421,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2453,6 +2522,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2551,6 +2623,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2649,6 +2724,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2747,6 +2825,9 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
       }
     },
     {
@@ -2841,6 +2922,965 @@
           }
         },
         "builtin_tools": []
+      },
+      "creditIssuers": {
+        "m": null
+      }
+    },
+    {
+      "name": "a free model on a node that trusts issuers carries their credits",
+      "node": {
+        "id": 7,
+        "node_id": 2,
+        "owner_addr": "OWNER",
+        "base_url": "https://node.example.com",
+        "reachable": true,
+        "staging": false,
+        "signer_spendable_microalgos": null,
+        "tee": null
+      },
+      "details": {
+        "free_credit_issuers": [
+          "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=",
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ],
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "context_window": 128000
+          },
+          {
+            "id": "free",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768
+          },
+          {
+            "id": "free-cache-0",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "cache_read_rate_usd_per_1m": 0,
+            "context_window": 32768
+          },
+          {
+            "id": "cache-read",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "cache_read_rate_usd_per_1m": 0.5,
+            "context_window": 32768
+          },
+          {
+            "id": "output-only",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 1,
+            "context_window": 32768
+          },
+          {
+            "id": "long-context",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "long_context_threshold_tokens": 100000,
+            "long_context_input_rate_usd_per_1m": 1,
+            "context_window": 32768
+          },
+          {
+            "id": "long-context-output",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "long_context_output_rate_usd_per_1m": 1,
+            "context_window": 32768
+          },
+          {
+            "id": "long-context-cache",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "long_context_cache_read_rate_usd_per_1m": 1,
+            "context_window": 32768
+          },
+          {
+            "id": "free-image-route",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "serves_image_gen": true
+          },
+          {
+            "id": "free-image-edit",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "serves_image_edit": true
+          },
+          {
+            "id": "image-tool",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "image_tool_rate_micro_usdc": 30000
+          },
+          {
+            "id": "image-edit-tool",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "image_edit_tool_rate_micro_usdc": 35000
+          },
+          {
+            "id": "zs-tool",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "tool_call_rates_micro_usdc": {
+              "zs_web_read": 500
+            }
+          },
+          {
+            "id": "vendor-tool",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "tool_call_rates_micro_usdc": {
+              "web_search": 6000
+            }
+          },
+          {
+            "id": "vendor-catch-all",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768,
+            "vendor_tool_catchall_micro_usdc": 3000
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "proto_version": "9.10"
+      },
+      "fields": {
+        "models": [
+          "m",
+          "free",
+          "free-cache-0",
+          "cache-read",
+          "output-only",
+          "long-context",
+          "long-context-output",
+          "long-context-cache",
+          "free-image-route",
+          "free-image-edit",
+          "image-tool",
+          "image-edit-tool",
+          "zs-tool",
+          "vendor-tool",
+          "vendor-catch-all"
+        ],
+        "modelCapacities": {
+          "cache-read": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "cacheReadUsdPer1m": 0.5,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "free": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "free-cache-0": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "cacheReadUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "free-image-edit": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": true,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "free-image-route": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": true,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "image-edit-tool": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 35000,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "image-tool": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 30000,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "long-context": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 100000,
+            "longContextInputUsdPer1m": 1,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "long-context-cache": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "longContextCacheReadUsdPer1m": 1,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "long-context-output": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "longContextOutputUsdPer1m": 1,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "m": {
+            "contextWindow": 128000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 2,
+            "outputUsdPer1m": 4,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "output-only": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 1,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "vendor-catch-all": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 3000,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "vendor-tool": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "toolCallRatesMicroUsdc": {
+              "web_search": 6000
+            },
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "zs-tool": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "toolCallRatesMicroUsdc": {
+              "zs_web_read": 500
+            },
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          }
+        },
+        "builtinTools": [],
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "protoVersion": "9.10",
+        "minChargeOutputTokens": 0,
+        "minChargeAlgoTxns": 0,
+        "minChargeMicroUsdc": 0,
+        "freeCreditIssuers": [
+          "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=",
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ]
+      },
+      "selection": {
+        "id": 7,
+        "node_id": 2,
+        "owner_addr": "OWNER",
+        "base_url": "https://node.example.com",
+        "proto_version": "9.10",
+        "reachable": true,
+        "tee_attested": false,
+        "models": [
+          "m",
+          "free",
+          "free-cache-0",
+          "cache-read",
+          "output-only",
+          "long-context",
+          "long-context-output",
+          "long-context-cache",
+          "free-image-route",
+          "free-image-edit",
+          "image-tool",
+          "image-edit-tool",
+          "zs-tool",
+          "vendor-tool",
+          "vendor-catch-all"
+        ],
+        "model_capacities": {
+          "cache-read": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "free": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "free-cache-0": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "free-image-edit": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": true,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "free-image-route": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": true,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "image-edit-tool": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": true,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "image-tool": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": true,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "long-context": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "long-context-cache": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "long-context-output": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "m": {
+            "context_window": 128000,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 2,
+            "output_usd_per_1m": 4,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "output-only": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 1,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "vendor-catch-all": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "vendor-tool": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "zs-tool": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          }
+        },
+        "builtin_tools": []
+      },
+      "creditIssuers": {
+        "cache-read": null,
+        "free": [
+          "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=",
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ],
+        "free-cache-0": [
+          "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=",
+          "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+        ],
+        "free-image-edit": null,
+        "free-image-route": null,
+        "image-edit-tool": null,
+        "image-tool": null,
+        "long-context": null,
+        "long-context-cache": null,
+        "long-context-output": null,
+        "m": null,
+        "output-only": null,
+        "vendor-catch-all": null,
+        "vendor-tool": null,
+        "zs-tool": null
+      }
+    },
+    {
+      "name": "a free model on a node that trusts no issuer carries none",
+      "node": {
+        "id": 7,
+        "node_id": 2,
+        "owner_addr": "OWNER",
+        "base_url": "https://node.example.com",
+        "reachable": true,
+        "staging": false,
+        "signer_spendable_microalgos": null,
+        "tee": null
+      },
+      "details": {
+        "models": [
+          {
+            "id": "m",
+            "input_rate_usd_per_1m": 2,
+            "output_rate_usd_per_1m": 4,
+            "context_window": 128000
+          },
+          {
+            "id": "free",
+            "input_rate_usd_per_1m": 0,
+            "output_rate_usd_per_1m": 0,
+            "context_window": 32768
+          }
+        ],
+        "oracle_healthy": false,
+        "algo_usd_at": "0001-01-01T00:00:00Z",
+        "proto_version": "9.10"
+      },
+      "fields": {
+        "models": [
+          "m",
+          "free"
+        ],
+        "modelCapacities": {
+          "free": {
+            "contextWindow": 32768,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 0,
+            "outputUsdPer1m": 0,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          },
+          "m": {
+            "contextWindow": 128000,
+            "maxOutputTokens": 0,
+            "inputUsdPer1m": 2,
+            "outputUsdPer1m": 4,
+            "longContextThresholdTokens": 0,
+            "weightsDigest": "",
+            "weightsUnverifiable": false,
+            "source": "",
+            "canonicalId": "",
+            "retention": "",
+            "imageToolRateMicroUsdc": 0,
+            "imageEditToolRateMicroUsdc": 0,
+            "imageToolBaseMicroUsdc": 0,
+            "imageEditToolBaseMicroUsdc": 0,
+            "imageRateMicroUsdc": 0,
+            "imageEditRateMicroUsdc": 0,
+            "imageDefaultMicroUsdc": 0,
+            "imageEditDefaultMicroUsdc": 0,
+            "imageCapMicroUsdc": 0,
+            "imageEditCapMicroUsdc": 0,
+            "advertisesImageGen": false,
+            "advertisesImageEdit": false,
+            "vendorToolCatchAllMicroUsdc": 0,
+            "vendorToolCallCap": 0,
+            "vendorToolTokensPerCall": 0
+          }
+        },
+        "builtinTools": [],
+        "maxToolIters": 0,
+        "toolHeadroomPerIteration": 0,
+        "protoVersion": "9.10",
+        "minChargeOutputTokens": 0,
+        "minChargeAlgoTxns": 0,
+        "minChargeMicroUsdc": 0
+      },
+      "selection": {
+        "id": 7,
+        "node_id": 2,
+        "owner_addr": "OWNER",
+        "base_url": "https://node.example.com",
+        "proto_version": "9.10",
+        "reachable": true,
+        "tee_attested": false,
+        "models": [
+          "m",
+          "free"
+        ],
+        "model_capacities": {
+          "free": {
+            "context_window": 32768,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 0,
+            "output_usd_per_1m": 0,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          },
+          "m": {
+            "context_window": 128000,
+            "max_output_tokens": 0,
+            "serves_image_gen": false,
+            "serves_image_edit": false,
+            "offers_image_gen_tool": false,
+            "offers_image_edit_tool": false,
+            "input_usd_per_1m": 2,
+            "output_usd_per_1m": 4,
+            "image_rate_micro_usdc": 0,
+            "image_edit_rate_micro_usdc": 0
+          }
+        },
+        "builtin_tools": []
+      },
+      "creditIssuers": {
+        "free": null,
+        "m": null
       }
     }
   ],

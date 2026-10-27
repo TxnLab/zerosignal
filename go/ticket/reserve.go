@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -132,6 +133,12 @@ type ReserveRequest struct {
 	// the ack on Solana"). An Algorand payer sends none and the node chooses.
 	// Unsigned: the payer's own check of the ticket is the guard.
 	TicketID string `json:"ticket_id,omitempty"`
+	// FreeCredit is a free credit for this node, on a free Solana reserve
+	// only (SPEC.md § 3a "Free credits"), as freecredit.ParseCredit reads it.
+	// Raw rather than a freecredit.Credit, which imports this package.
+	// Unsigned: the credit is a bearer token already bound to the node and the
+	// day, and a node that trusts no issuer ignores it.
+	FreeCredit json.RawMessage `json:"free_credit,omitempty"`
 }
 
 // reserveSigningTag domain-separates the reserve-request payer signature from

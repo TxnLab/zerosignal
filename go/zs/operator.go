@@ -252,6 +252,12 @@ type Operator struct {
 	MinChargeOutputTokens uint64
 	MinChargeAlgoTxns     uint64
 	MinChargeMicroUSDC    uint64
+
+	// FreeCreditIssuers are the free-credit issuer keys the node advertises
+	// trusting (SPEC.md § 3a "Free credits"), as it spells them. Unsigned:
+	// a node that lies here only turns credits away. Not saved with the
+	// catalog, so a node read from it is sent no credit until it is probed.
+	FreeCreditIssuers []string
 }
 
 // OperatorMetrics mirrors the per-NODE reliability tail of the on-chain

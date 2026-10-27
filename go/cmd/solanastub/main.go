@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -61,6 +62,7 @@ func run(rpcURL, authorityPath, listen string, exitOnEOF bool) error {
 		"program": zsescrow.ProgramID.String(), "fee_bps": l.Chain.Config.FeeBps,
 		"default_grace": l.Chain.Config.DefaultGrace, "payer_usdc": solanastub.PayerUSDC,
 		"model": solanastub.Model, "free_model": solanastub.FreeModel, "reply": solanastub.Reply,
+		"credit_issuer": base64.StdEncoding.EncodeToString(l.Node.Issuer().Key()), "issuer_payer_header": solanastub.IssuerPayerHeader,
 	})
 	if err != nil {
 		return err

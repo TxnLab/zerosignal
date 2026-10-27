@@ -198,6 +198,13 @@ export interface Operator {
     minChargeOutputTokens: number
     minChargeAlgoTxns: number
     minChargeMicroUsdc: number
+    /**
+     * The free-credit issuer keys the node advertises trusting (SPEC.md § 3a
+     * "Free credits"), as it spells them. Unsigned: a node that lies here only
+     * turns credits away. Not saved with the catalog, so a node read from it
+     * is sent no credit until it is probed.
+     */
+    freeCreditIssuers?: readonly string[] | undefined
 }
 
 export function refOf(o: Pick<Operator, 'id' | 'nodeId'>): NodeRef {
@@ -300,6 +307,7 @@ export type DetailsFields = Pick<
     | 'minChargeOutputTokens'
     | 'minChargeAlgoTxns'
     | 'minChargeMicroUsdc'
+    | 'freeCreditIssuers'
 >
 
 // A record keyed by node-chosen model ids. No prototype, so an id such as
@@ -321,6 +329,9 @@ export function detailsFieldsOf(d: OperatorDetails): DetailsFields {
         minChargeOutputTokens: d.min_charge_output_tokens ?? 0,
         minChargeAlgoTxns: d.min_charge_algo_txns ?? 0,
         minChargeMicroUsdc: d.min_charge_microusdc ?? 0,
+        // Set even when absent, so a node that stops advertising one is sent
+        // no more credits.
+        freeCreditIssuers: d.free_credit_issuers,
     }
 }
 

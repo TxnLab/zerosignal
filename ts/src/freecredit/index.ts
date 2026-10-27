@@ -390,6 +390,15 @@ export const MAX_ISSUE_BATCH = 20
 export const CODE_CREDITS_EXHAUSTED = 'credits_exhausted'
 export const CODE_EPOCH_NOT_ISSUABLE = 'epoch_not_issuable'
 
+// A node's refusals of the credit a free reserve carries. A node serves a free
+// reserve that carries none on its own budget, so these answer only a credit
+// that was sent. free_credit_invalid (400) is a credit verifyCredit refuses,
+// which the payer drops; free_credit_spent (409) is one the node already
+// consumed, which a payer's store holds only when it went stale, so the payer
+// drops it and asks that node once more with another.
+export const CODE_FREE_CREDIT_INVALID = 'free_credit_invalid'
+export const CODE_FREE_CREDIT_SPENT = 'free_credit_spent'
+
 export interface DayKeyRequest {
     deployment: string
     epoch: number

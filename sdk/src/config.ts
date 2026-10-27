@@ -16,6 +16,7 @@ import { DEFAULT_STREAM_IDLE, type StreamIdle } from './idle.js'
 import type { Network, ResolvedNetwork } from './network.js'
 import { resolveNetwork } from './network.js'
 import type { RegistryProvider, ReserveClient, Stores, WalletOpener } from './parts.js'
+import { type FreeCredits, checkFreeCredits } from './solana/credits.js'
 import {
     type CacheAdapter,
     type Clock,
@@ -215,6 +216,13 @@ export interface Config {
     allowPrivateHosts?: boolean
 
     spendGuard?: SpendGuard
+    /**
+     * The issuers a free Solana turn fetches a credit from, which a node that
+     * trusts one may require of a payer before spending its free budget on it
+     * (SPEC.md § 3a "Free credits"). None by default. Only on Solana: an
+     * Algorand free ticket is rationed by the contract.
+     */
+    freeCredits?: FreeCredits
     remedies?: Partial<Remedies>
     stores?: Stores
 
@@ -278,6 +286,8 @@ export interface ResolvedConfig {
     allowStaging: boolean
     allowPrivateHosts: boolean
     spendGuard: SpendGuard | undefined
+    /** As given; the batch default is applied where it is read. */
+    freeCredits: FreeCredits | undefined
     remedies: Remedies
     /**
      * As given: the defaults depend on which parts the Client builds. A
@@ -368,7 +378,8 @@ function checkSigner(c: Config): PayerSigner {
         }
         return c.solanaSigner
     }
-    if (c.solanaSigner) throw configError("solanaSigner is the Solana rail's; set Network.rail to solana, or pass signer")
+    if (c.solanaSigner)
+        throw configError("solanaSigner is the Solana rail's; set Network.rail to solana, or pass signer")
     if (!c.signer) throw configError('signer is required')
     if (!c.signer.address) throw configError('signer has no address')
     return c.signer
@@ -386,8 +397,12 @@ export function resolveConfig(c: Config): ResolvedConfig {
     if (policy !== 'prefer' && policy !== 'strict' && policy !== 'none') {
         throw configError(`unknown affinity.policy ${JSON.stringify(policy)}`)
     }
+    checkFreeCredits(c.freeCredits)
     const network = resolveNetwork(c.network)
     const warnings = [...network.warnings]
+    if (Object.keys(c.freeCredits?.issuers ?? {}).length > 0 && network.rail !== 'solana') {
+        warnings.push("freeCredits are used on the Solana rail only; this network's free tickets are rationed on chain")
+    }
     const railRemedies = network.rail === 'solana' ? solanaRemedies : defaultRemedies
 
     const requireMaxOutput = c.requireMaxOutput ?? false
@@ -427,7 +442,8 @@ export function resolveConfig(c: Config): ResolvedConfig {
         // Go's are uint64; checked here so a bad one fails as config, not
         // as a RangeError from the chain read.
         for (const id of d.operatorIds) {
-            if (!Number.isSafeInteger(id) || id < 0) throw configError(`discovery.operatorIds: ${id} is not an operator id`)
+            if (!Number.isSafeInteger(id) || id < 0)
+                throw configError(`discovery.operatorIds: ${id} is not an operator id`)
         }
         discovery.operatorIds = d.operatorIds
     }
@@ -474,6 +490,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         allowStaging: c.allowStaging ?? false,
         allowPrivateHosts,
         spendGuard: c.spendGuard,
+        freeCredits: c.freeCredits,
         stores: { ...c.stores },
         registry: c.registry,
         reserveClient: c.reserveClient,

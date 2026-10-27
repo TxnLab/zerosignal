@@ -35,6 +35,19 @@ const (
 	CodeEpochNotIssuable = "epoch_not_issuable"
 )
 
+// A node's refusals of the credit a free reserve carries. A node serves a free
+// reserve that carries none on its own budget, so these answer only a credit
+// that was sent.
+const (
+	// CodeFreeCreditInvalid (400) is a credit Verify refused. The payer drops
+	// it: asking again with it gets the same answer.
+	CodeFreeCreditInvalid = "free_credit_invalid"
+	// CodeFreeCreditSpent (409) is a credit the node already consumed, which a
+	// payer's store holds only when it went stale, so the payer drops it and
+	// asks that node once more with another.
+	CodeFreeCreditSpent = "free_credit_spent"
+)
+
 // DayKeyRequest asks for the issuer's day key for a deployment and epoch.
 type DayKeyRequest struct {
 	Deployment Bytes `json:"deployment"`

@@ -843,5 +843,14 @@
       },
       "reason": ""
     }
-  ]
+  ],
+  "wire": {
+    "day_key_path": "/v1/zs/credits/key",
+    "issue_path": "/v1/zs/credits",
+    "max_issue_batch": 20,
+    "credits_exhausted": "credits_exhausted",
+    "epoch_not_issuable": "epoch_not_issuable",
+    "free_credit_invalid": "free_credit_invalid",
+    "free_credit_spent": "free_credit_spent"
+  }
 }

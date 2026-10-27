@@ -27,6 +27,7 @@ type behaviorJSON struct {
 	BadBodyHash      bool   `json:"bad_body_hash"`
 	OverClaim        uint64 `json:"over_claim"`
 	TicketLifetimeMs int64  `json:"ticket_lifetime_ms"`
+	IssuerDown       bool   `json:"issuer_down"`
 }
 
 type ticketJSON struct {
@@ -43,6 +44,10 @@ type payerJSON struct {
 	Tickets  []ticketJSON `json:"tickets"`
 	Receipts []uint64     `json:"receipt_amounts"`
 	Errors   []string     `json:"errors"`
+	// Credits is how many verified credits the payer's free reserves
+	// carried, and IssuerCalls how many issue-wire requests it made.
+	Credits     int `json:"credits"`
+	IssuerCalls int `json:"issuer_calls"`
 }
 
 func (l *Localnet) handler() http.Handler {
@@ -84,6 +89,7 @@ func (l *Localnet) addPayer(w http.ResponseWriter, r *http.Request) {
 	l.Node.SetBehavior(payer, Behavior{
 		NoReceipt: b.NoReceipt, ClaimNoReceipt: b.ClaimNoReceipt, BadBodyHash: b.BadBodyHash,
 		OverClaim: b.OverClaim, TicketLifetime: time.Duration(b.TicketLifetimeMs) * time.Millisecond,
+		IssuerDown: b.IssuerDown,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -118,6 +124,7 @@ func (l *Localnet) payerState(w http.ResponseWriter, r *http.Request) {
 	for _, e := range l.Node.Errors(payer) {
 		out.Errors = append(out.Errors, e.Error())
 	}
+	out.Credits, out.IssuerCalls = l.Node.Credits(payer), l.Node.Issuer().Calls(payer)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }

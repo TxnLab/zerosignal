@@ -180,6 +180,9 @@ func verdictFailureInputs() []verdictFailureCase {
 		{Name: "a refusal's Retry-After is no hint", Error: verdictError{Kind: "http", Status: 503, Code: "provider_unavailable", RetryAfterMs: 20_000}, Route: direct},
 		{Name: "invalid_payer_sig is a refusal, no strike", Error: http(401, "invalid_payer_sig"), Route: direct},
 		{Name: "invalid_reserve is a refusal, no strike", Error: http(400, "invalid_reserve"), Route: direct},
+		// The loop drops the credit and asks again once before it gets here.
+		{Name: "a refused free credit is a refusal, no strike", Error: http(400, "free_credit_invalid"), Route: direct},
+		{Name: "a spent free credit asked again is a refusal, no strike", Error: http(409, "free_credit_spent"), Route: direct},
 		{Name: "commit_k_mismatch is a refusal, no strike", Error: http(502, "commit_k_mismatch"), Route: relay91, UsePrivacy: true},
 	}
 }

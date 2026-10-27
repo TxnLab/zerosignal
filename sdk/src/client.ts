@@ -37,13 +37,22 @@ import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
 import { guardRecords } from './spend-guard.js'
 import type { SettleSlot } from './receipt-check.js'
-import { type JournalDeps, Reconciler, boxSweep, journalOpen, journalReceipt, journalSigned, walletChain } from './reconciler.js'
+import {
+    type JournalDeps,
+    Reconciler,
+    boxSweep,
+    journalOpen,
+    journalReceipt,
+    journalSigned,
+    walletChain,
+} from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
 import { type ChainReader, deploymentOrFail, readDeploymentId } from './registry/chain.js'
 import { SolanaChainReader } from './registry/solana.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
 import { Settles } from './settles.js'
+import { CreditWallet } from './solana/credits.js'
 import { untilAborted } from './sleep.js'
 import { IdleWatchdog } from './idle.js'
 import { type GenComplete, forwardStream, frameFactory } from './stream.js'
@@ -111,7 +120,9 @@ export class Client {
         const builtWallet = cfg.wallet === undefined
         const wallet = cfg.wallet ?? (await chain!.wallet(signal))
         const deployment =
-            chain === undefined ? undefined : await deploymentOrFail(() => chain.deployment(signal), builtWallet, cfg.logger, signal)
+            chain === undefined
+                ? undefined
+                : await deploymentOrFail(() => chain.deployment(signal), builtWallet, cfg.logger, signal)
         const reserveClient =
             cfg.reserveClient ??
             httpReserveClient({
@@ -142,7 +153,7 @@ export class Client {
             st = { ...st, ...built.stores }
         }
         try {
-            return Client.#assemble(cfg, registry, st, reserveClient, wallet, built)
+            return Client.#assemble(cfg, registry, st, reserveClient, wallet, built, deployment)
         } catch (err) {
             // A started registry left behind would read the chain and probe
             // the fleet for the life of the process.
@@ -159,9 +170,20 @@ export class Client {
         reserveClient: ReserveClient,
         wallet: WalletOpener,
         built: BuiltDiscovery | undefined,
+        deployment: Uint8Array | undefined,
     ): Client {
         const toolAffinity = st.toolAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
         const responseAffinity = st.responseAffinity ?? new IDAffinity(cfg.affinity.max, cfg.affinity.ttl, cfg.clock)
+        const freeCredits = CreditWallet.for(cfg.freeCredits, cfg.network.rail, deployment, cfg.clock, cfg.logger)
+        if (
+            freeCredits === undefined &&
+            Object.keys(cfg.freeCredits?.issuers ?? {}).length > 0 &&
+            cfg.network.rail === 'solana'
+        ) {
+            // A credit is minted for one deployment, and none was read, as with
+            // a host's own registry and wallet.
+            cfg.logger.warn('freeCredits are off: the deployment id is unknown, so free reserves carry no credit')
+        }
 
         // Only the SDK's own wallets run the sweep that deletes rows; with a
         // caller's wallet a default journal would only grow.
@@ -229,7 +251,9 @@ export class Client {
             remedy: cfg.remedies.recoverTicket,
             // A ticket whose request failed after its escrow opened keeps its
             // reservation in dispatch; its refund is what frees it.
-            refunded: guard ? (ticketId) => guardRecords(cfg.logger, 'release', ticketId, () => guard.release(ticketId)) : undefined,
+            refunded: guard
+                ? (ticketId) => guardRecords(cfg.logger, 'release', ticketId, () => guard.release(ticketId))
+                : undefined,
             overclaimed: barOverclaimer,
         })
         const life = new AbortController()
@@ -275,6 +299,7 @@ export class Client {
             life,
             source: built?.source,
             stopRegistry: built === undefined ? undefined : () => built.registry.stop(),
+            freeCredits,
         })
         reconciler?.start()
         c.#warmFeeRate()
@@ -346,7 +371,8 @@ export class Client {
             ])
             const failed = results.flatMap((res) => (res.status === 'rejected' ? [res.reason as unknown] : []))
             if (failed.length === 1) throw failed[0]
-            if (failed.length > 1) throw new AggregateError(failed, 'closing the registry and the ticket sweep both failed')
+            if (failed.length > 1)
+                throw new AggregateError(failed, 'closing the registry and the ticket sweep both failed')
         })()
         return this.#closing
     }
@@ -525,7 +551,11 @@ async function buildWallet(cfg: ResolvedConfig, algod: algosdk.Algodv2, signal?:
  * buildSolanaWallet reads the program's Config for its mint, then builds the
  * wallet, which checks every offer's transfer against that mint.
  */
-async function buildSolanaWallet(cfg: ResolvedConfig, rpc: SolanaRpcClient, signal?: AbortSignal): Promise<SolanaWallet> {
+async function buildSolanaWallet(
+    cfg: ResolvedConfig,
+    rpc: SolanaRpcClient,
+    signal?: AbortSignal,
+): Promise<SolanaWallet> {
     const s = withTimeout(signal, ESCROW_CONFIG_TIMEOUT_MS)
     let config
     try {

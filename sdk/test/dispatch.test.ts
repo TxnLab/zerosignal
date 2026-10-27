@@ -12,6 +12,12 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+    CODE_FREE_CREDIT_INVALID,
+    CODE_FREE_CREDIT_SPENT,
+    acceptedEpochs,
+    verifyCredit,
+} from '@txnlab/zs-proto/freecredit'
 import { MIN_SIGNER_SPENDABLE_MICROALGOS } from '@txnlab/zs-proto/selection'
 import type { ReserveRequest } from '@txnlab/zs-proto/ticket'
 import { PROTO_VERSION } from '@txnlab/zs-proto/wire'
@@ -44,6 +50,8 @@ import { RelayReputationStore } from '../src/routing/reputation.js'
 import { type Request, turnOf } from '../src/turn.js'
 import type { Endpoint } from '../src/types.js'
 import { BelowTargetError } from '../src/wallet.js'
+import { CreditWallet, type CreditStore, FREE_CREDIT_DEFAULTS, memoryCreditStore } from '../src/solana/credits.js'
+import { FakeIssuer, creditDep, noon } from './credit-issuer.js'
 import { testOperator } from './fixtures.js'
 
 const MODEL = 'gpt-test'
@@ -266,7 +274,12 @@ function harness(ops: Operator[], o: HarnessOptions = {}): Harness {
         privacy: 'direct',
         allowPrivacyOverride: false,
         requireTeeModels: [],
-        remedies: { fund: 'fund it', raiseSlots: 'add slots', raiseSpendCap: 'raise the cap remedy', recoverTicket: 'recover it' },
+        remedies: {
+            fund: 'fund it',
+            raiseSlots: 'add slots',
+            raiseSpendCap: 'raise the cap remedy',
+            recoverTicket: 'recover it',
+        },
         network: 'testnet',
         retryBudget: 60_000,
         feeRate: () => null,
@@ -344,19 +357,27 @@ describe('the body', () => {
             `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="a.png"\r\nContent-Type: image/png\r\n\r\nPNG\r\n` +
             `--${boundary}--\r\n`
         const h = harness([edit])
-        const em = await h.run(body, { endpoint: '/v1/images/edits', contentType: `multipart/form-data; boundary=${boundary}` })
+        const em = await h.run(body, {
+            endpoint: '/v1/images/edits',
+            contentType: `multipart/form-data; boundary=${boundary}`,
+        })
         expect(h.rc.calls[0]!.req).toMatchObject({ image_n: 3, image_edit: true, input_count: 0, max_output_count: 0 })
         expect(em.runs[0]!.body).toBe(body)
 
         const bad = harness([edit])
         const failed = (await bad.run(body, { endpoint: '/v1/images/edits' })).failed
-        expect(failed).toMatchObject({ code: 'bad_image_edit_request', message: 'multipart Content-Type header is required' })
+        expect(failed).toMatchObject({
+            code: 'bad_image_edit_request',
+            message: 'multipart Content-Type header is required',
+        })
     })
 
     it('is shaped before the seal: provider and prompt_cache_key out, store defaulted, empty tools gone', async () => {
         for (const body of [
             chat(',"provider":{"sort":"price"},"prompt_cache_key":"k","tools":[],"tool_choice":"auto"'),
-            new TextEncoder().encode(chat(',"provider":{"sort":"price"},"prompt_cache_key":"k","tools":[],"tool_choice":"auto"')),
+            new TextEncoder().encode(
+                chat(',"provider":{"sort":"price"},"prompt_cache_key":"k","tools":[],"tool_choice":"auto"'),
+            ),
         ]) {
             const h = harness([op(1)])
             const em = await h.run(body)
@@ -387,7 +408,9 @@ describe('the estimate', () => {
     })
 
     it('sizes any model that names its own max_output', async () => {
-        const h = harness([op(1, { models: ['unknown'] })], { deps: { estimatePolicy: { maxOutputByModel: {}, fallbackMaxOutput: 0 } } })
+        const h = harness([op(1, { models: ['unknown'] })], {
+            deps: { estimatePolicy: { maxOutputByModel: {}, fallbackMaxOutput: 0 } },
+        })
         const em = await h.run('{"model":"unknown","max_tokens":64}')
         expect(em.failed).toBeUndefined()
         expect(h.rc.calls[0]!.req.max_output_count).toBe(64)
@@ -397,7 +420,10 @@ describe('the estimate', () => {
         const h = harness([op(1)])
         const em = await h.run(`{"model":"${MODEL}","max_tokens":"lots"}`)
         expect(em.failed).toMatchObject({ code: 'tokenize', kind: 'internal', message: 'input tokenization failed' })
-        expect(h.logged.find((l) => l.msg === 'tokenize failed')!.attrs).toMatchObject({ endpoint: '/v1/chat/completions', model: MODEL })
+        expect(h.logged.find((l) => l.msg === 'tokenize failed')!.attrs).toMatchObject({
+            endpoint: '/v1/chat/completions',
+            model: MODEL,
+        })
     })
 })
 
@@ -405,7 +431,8 @@ describe('the max_output clamp', () => {
     const CLAMP = 'big-out'
     const big = (id: number, maxOut: number, over: Partial<ModelCapacity> = {}) =>
         withCap(op(id, { models: [CLAMP] }), { maxOutputTokens: maxOut, ...over }, CLAMP)
-    const ask = (n: number, extra = '') => `{"model":"${CLAMP}","max_tokens":${n}${extra},"messages":[{"role":"user","content":"hi"}]}`
+    const ask = (n: number, extra = '') =>
+        `{"model":"${CLAMP}","max_tokens":${n}${extra},"messages":[{"role":"user","content":"hi"}]}`
     const sealedMax = (em: Recorder) => JSON.parse(em.runs[0]!.body as string).max_tokens as number
 
     it('lowers the caller’s max_output to the pool ceiling, in the reserve and the sealed body', async () => {
@@ -501,10 +528,12 @@ describe('an empty pick', () => {
             message: `every node serving the model "${MODEL}" has less than ${MIN_SIGNER_SPENDABLE_MICROALGOS / 1_000_000} ALGO spendable in its signing account to pay network fees; retry later or pick another model`,
         })
         // A Solana node's signer pays its fees in lamports.
-        expect(await fail([op(1, { signerSpendableLamports: 0 })], chat(), { deps: { rail: 'solana' } })).toMatchObject({
-            code: 'no_funded_operator',
-            message: `every node serving the model "${MODEL}" has less than 10120 lamports spendable in its signing account to pay network fees; retry later or pick another model`,
-        })
+        expect(await fail([op(1, { signerSpendableLamports: 0 })], chat(), { deps: { rail: 'solana' } })).toMatchObject(
+            {
+                code: 'no_funded_operator',
+                message: `every node serving the model "${MODEL}" has less than 10120 lamports spendable in its signing account to pay network fees; retry later or pick another model`,
+            },
+        )
         // A chat model pricing the image tool doesn't serve the dedicated route.
         const chatTool = withCap(op(1), { imageToolRateMicroUsdc: 80_000, outputUsdPer1m: 10 })
         expect(await fail([chatTool], chat(), {}, { endpoint: '/v1/images/generations' })).toMatchObject({
@@ -520,12 +549,19 @@ describe('an empty pick', () => {
             kind: 'no_route',
             message: `no operator matching your provider preferences is currently available to serve ${MODEL}; adjust provider.only / provider.order or remove the pin`,
         })
-        expect(await fail([withCap(op(1), { inputUsdPer1m: 9, outputUsdPer1m: 9 })], chat(',"provider":{"max_price":{"input":1}}'))).toMatchObject({
+        expect(
+            await fail(
+                [withCap(op(1), { inputUsdPer1m: 9, outputUsdPer1m: 9 })],
+                chat(',"provider":{"max_price":{"input":1}}'),
+            ),
+        ).toMatchObject({
             code: 'price_ceiling_exceeded',
             kind: 'price_rejected',
             message: `no operator serves ${MODEL} within your provider.max_price ceiling; raise or remove the ceiling`,
         })
-        expect(await fail([op(1)], chat(',"tools":[{"type":"zs_web_search"}],"provider":{"require_tools":true}'))).toMatchObject({
+        expect(
+            await fail([op(1)], chat(',"tools":[{"type":"zs_web_search"}],"provider":{"require_tools":true}')),
+        ).toMatchObject({
             code: 'no_tool_capacity',
             message: `no operator advertises every requested built-in tool for ${MODEL} (provider.require_tools is set)`,
         })
@@ -564,7 +600,9 @@ describe('an empty pick', () => {
         const em = await h.run(chat())
         expect(ids(h.rc.calls)).toEqual([2, 2, 2])
         expect(em.failed!.code).toBe('context_length_exceeded')
-        expect(em.failed!.message).toMatch(/\n {2}operators advertising this model:\n {2}- op 1: max_output_tokens=64 \(over by 64\)$/)
+        expect(em.failed!.message).toMatch(
+            /\n {2}operators advertising this model:\n {2}- op 1: max_output_tokens=64 \(over by 64\)$/,
+        )
     })
 
     it('routes around a node the sizing filter refused', async () => {
@@ -586,9 +624,12 @@ describe('an empty pick', () => {
         }
         const h = harness([op(1), op(2, { tee: attested })], { pick: { affinityPolicy: 'strict' } })
         h.deps.pick.toolAffinity.record({ op: 1, node: 0 }, ['call-strict-1'])
-        const em = await h.run(`{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call-strict-1","content":"x"}]}`, {
-            requireTee: true,
-        })
+        const em = await h.run(
+            `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call-strict-1","content":"x"}]}`,
+            {
+                requireTee: true,
+            },
+        )
         expect(em.failed!.code).toBe('no_tee_capacity')
         expect(em.failed!.message).toContain('pinned (strict affinity) to operator 1 node 0')
         expect(h.rc.calls).toEqual([])
@@ -597,7 +638,9 @@ describe('an empty pick', () => {
     it('names a strict pin that cannot fit, rather than blaming the pool', async () => {
         const h = harness([withCap(op(1), { contextWindow: 4 }), op(2)], { pick: { affinityPolicy: 'strict' } })
         h.deps.pick.toolAffinity.record({ op: 1, node: 0 }, ['call-strict-1'])
-        const em = await h.run(`{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call-strict-1","content":"x"}]}`)
+        const em = await h.run(
+            `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call-strict-1","content":"x"}]}`,
+        )
         expect(em.failed!.code).toBe('context_length_exceeded')
         expect(em.failed!.message).toMatch(
             /^strict affinity target cannot serve gpt-test with input_tokens=\d+ max_output_tokens=128; reduce prompt size or switch affinity_policy to "prefer"$/,
@@ -607,13 +650,17 @@ describe('an empty pick', () => {
 
     it('blocks a previous_response_id it cannot route, or whose node is gone', async () => {
         let h = harness([op(1)])
-        let em = await h.run(`{"model":"${MODEL}","previous_response_id":"resp_unknown","input":[]}`, { endpoint: '/v1/responses' })
+        let em = await h.run(`{"model":"${MODEL}","previous_response_id":"resp_unknown","input":[]}`, {
+            endpoint: '/v1/responses',
+        })
         expect(em.failed!.code).toBe('context_length_exceeded')
         expect(em.failed!.message).toContain('previous_response_id "resp_unknown" not found in routing cache')
 
         h = harness([op(2)])
         h.deps.pick.responseAffinity.record({ op: 1, node: 0 }, ['resp_X'])
-        em = await h.run(`{"model":"${MODEL}","previous_response_id":"resp_X","input":[]}`, { endpoint: '/v1/responses' })
+        em = await h.run(`{"model":"${MODEL}","previous_response_id":"resp_X","input":[]}`, {
+            endpoint: '/v1/responses',
+        })
         expect(em.failed!.message).toBe(
             'previous_response_id "resp_X" is pinned to operator 1 node 0 which is no longer registered; retry without previous_response_id',
         )
@@ -623,16 +670,20 @@ describe('an empty pick', () => {
     it('refuses a continuation the caller’s own pin excludes', async () => {
         const h = harness([op(1), op(2)])
         h.deps.pick.responseAffinity.record({ op: 1, node: 0 }, ['resp_X'])
-        const em = await h.run(`{"model":"${MODEL}","previous_response_id":"resp_X","input":[],"provider":{"only":["2"]}}`, {
-            endpoint: '/v1/responses',
-        })
+        const em = await h.run(
+            `{"model":"${MODEL}","previous_response_id":"resp_X","input":[],"provider":{"only":["2"]}}`,
+            {
+                endpoint: '/v1/responses',
+            },
+        )
         expect(em.failed).toMatchObject({ code: 'pin_conflicts_with_continuation', kind: 'invalid_request' })
         expect(em.failed!.message).toContain('which your provider preferences (only/ignore/order) exclude')
     })
 })
 
 describe('admission', () => {
-    const priced = (id: number, inUsd: number, outUsd: number) => withCap(op(id), { inputUsdPer1m: inUsd, outputUsdPer1m: outUsd })
+    const priced = (id: number, inUsd: number, outUsd: number) =>
+        withCap(op(id), { inputUsdPer1m: inUsd, outputUsdPer1m: outUsd })
 
     function guard(limit: number): SpendGuard & { estimates: number[]; reserved: string[] } {
         const estimates: number[] = []
@@ -673,7 +724,10 @@ describe('admission', () => {
                 return r
             }
             const g = guard(Math.floor((low + high) / 2))
-            const h = harness([priced(1, 1, 2), priced(2, 10, 20)], { deps: { feeRate: () => 0, spendGuard: g }, answer: misPriced })
+            const h = harness([priced(1, 1, 2), priced(2, 10, 20)], {
+                deps: { feeRate: () => 0, spendGuard: g },
+                answer: misPriced,
+            })
             await h.run(body)
             expect(g.estimates).toEqual([low])
             const cheap = h.rc.calls.find((c) => c.op.id === 1)!.req
@@ -702,12 +756,22 @@ describe('admission', () => {
             `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${MODEL}\r\n` +
             `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="a.png"\r\nContent-Type: image/png\r\n\r\nPNG\r\n` +
             `--${boundary}--\r\n`
-        const imaging = withCap(op(1), { inputUsdPer1m: 1, outputUsdPer1m: 2, imageRateMicroUsdc: 40_000, imageEditRateMicroUsdc: 40_000 })
+        const imaging = withCap(op(1), {
+            inputUsdPer1m: 1,
+            outputUsdPer1m: 2,
+            imageRateMicroUsdc: 40_000,
+            imageEditRateMicroUsdc: 40_000,
+        })
         for (const [ops, fee, body, req] of [
             [[op(1)], 0, json, {}],
             [[priced(1, 1, 2)], null, json, {}],
             [[imaging], 0, json, { endpoint: '/v1/images/generations' as Endpoint }],
-            [[imaging], 0, edit, { endpoint: '/v1/images/edits' as Endpoint, contentType: `multipart/form-data; boundary=${boundary}` }],
+            [
+                [imaging],
+                0,
+                edit,
+                { endpoint: '/v1/images/edits' as Endpoint, contentType: `multipart/form-data; boundary=${boundary}` },
+            ],
         ] as const) {
             const g = guard(0)
             const h = harness([...ops], { deps: { feeRate: () => fee, spendGuard: g } })
@@ -759,20 +823,24 @@ describe('the relay', () => {
         const em = await h.run(chat())
         expect(em.failed).toMatchObject({
             code: 'no_relay_available',
-            message: 'transport-privacy mode is enabled but no eligible relay operator is available for the selected target(s)',
+            message:
+                'transport-privacy mode is enabled but no eligible relay operator is available for the selected target(s)',
         })
         expect(h.rc.calls).toEqual([])
 
         // Under strict, an unpinned turn routes like any other. Op 1's only
         // other-owner relay shares its subnet; ops 2 and 3 relay each other.
         const at = (o: Operator, host: string) => ({ ...o, baseUrl: `http://${host}` })
-        h = harness([at(op(1), '203.0.113.1'), at(op(2), '203.0.113.2'), at(op(3, { ownerAddr: 'OWNER1' }), '198.51.100.1')], {
-            deps: { privacy: 'relay_required' },
-            pick: { affinityPolicy: 'strict' },
-            answer: async () => {
-                throw new ReserveHTTPError({ status: 400, code: 'invalid_request' })
+        h = harness(
+            [at(op(1), '203.0.113.1'), at(op(2), '203.0.113.2'), at(op(3, { ownerAddr: 'OWNER1' }), '198.51.100.1')],
+            {
+                deps: { privacy: 'relay_required' },
+                pick: { affinityPolicy: 'strict' },
+                answer: async () => {
+                    throw new ReserveHTTPError({ status: 400, code: 'invalid_request' })
+                },
             },
-        })
+        )
         await h.run(chat())
         expect(ids(h.rc.calls)).toEqual([2, 3])
         for (const c of h.rc.calls) expect(c.hop).not.toBeNull()
@@ -802,7 +870,10 @@ describe('the relay', () => {
         const h = harness(fleet(), {
             deps: { privacy: 'relay_required' },
             pick: { relayReputation },
-            answer: perNode({ 1: (n) => (n === 0 ? new ReserveHTTPError({ status: 503, code: 'relay_busy' }) : reservedFor(op(1), {} as Req)) }),
+            answer: perNode({
+                1: (n) =>
+                    n === 0 ? new ReserveHTTPError({ status: 503, code: 'relay_busy' }) : reservedFor(op(1), {} as Req),
+            }),
         })
         await h.run(chat())
         const first = h.rc.calls[0]!.hop!
@@ -815,7 +886,13 @@ describe('the reserve request', () => {
         const h = harness([op(1)])
         await h.run(chat(',"stream":true'))
         const req = h.rc.calls[0]!.req
-        expect(req).toMatchObject({ model: MODEL, max_output_count: 128, stream: true, payer_addr: 'PAYER', input_bound_version: 2 })
+        expect(req).toMatchObject({
+            model: MODEL,
+            max_output_count: 128,
+            stream: true,
+            payer_addr: 'PAYER',
+            input_bound_version: 2,
+        })
         expect(req.input_count).toBeGreaterThan(0)
 
         const old = harness([op(1, { protoVersion: '9.1' })])
@@ -830,7 +907,11 @@ describe('the reserve request', () => {
     })
 
     it('carries an image-tool budget only when one is asked for, clamped to 64', async () => {
-        const gen = withCap(op(1), { imageToolRateMicroUsdc: 100_000, imageEditToolRateMicroUsdc: 120_000, outputUsdPer1m: 10 })
+        const gen = withCap(op(1), {
+            imageToolRateMicroUsdc: 100_000,
+            imageEditToolRateMicroUsdc: 120_000,
+            outputUsdPer1m: 10,
+        })
         const responses = (extra = '') =>
             `{"model":"${MODEL}","input":[{"role":"user","content":"hi"}],"max_output_tokens":50${extra}}`
         for (const [extra, want] of [
@@ -844,7 +925,9 @@ describe('the reserve request', () => {
             await h.run(responses(extra), { endpoint: '/v1/responses' })
             const req = h.rc.calls[0]!.req
             expect(req.image_tool_budget).toBe((want as { image_tool_budget?: number }).image_tool_budget)
-            expect(req.image_edit_tool_budget).toBe((want as { image_edit_tool_budget?: number }).image_edit_tool_budget)
+            expect(req.image_edit_tool_budget).toBe(
+                (want as { image_edit_tool_budget?: number }).image_edit_tool_budget,
+            )
         }
     })
 
@@ -854,9 +937,15 @@ describe('the reserve request', () => {
             [0, 80_000],
             [80_000, 0],
         ] as const) {
-            const h = harness([withCap(op(1), { imageToolRateMicroUsdc: gen, imageEditToolRateMicroUsdc: edit }), withCap(op(2), { imageToolRateMicroUsdc: 80_000, imageEditToolRateMicroUsdc: 80_000 })], {
-                pick: { affinityPolicy: 'strict' },
-            })
+            const h = harness(
+                [
+                    withCap(op(1), { imageToolRateMicroUsdc: gen, imageEditToolRateMicroUsdc: edit }),
+                    withCap(op(2), { imageToolRateMicroUsdc: 80_000, imageEditToolRateMicroUsdc: 80_000 }),
+                ],
+                {
+                    pick: { affinityPolicy: 'strict' },
+                },
+            )
             await h.run(responses, { endpoint: '/v1/responses' })
             expect(ids(h.rc.calls)).toEqual([2])
         }
@@ -872,10 +961,10 @@ describe('the reserve request', () => {
     })
 
     it('lets a busy node outrank a missing tool price', async () => {
-        const h = harness(
-            [withCap(op(1), { imageToolRateMicroUsdc: 100_000 }), withCap(op(2), {})],
-            { answer: perNode({ 1: () => busy(7000) }), deps: { sweepDelay: () => 0 } },
-        )
+        const h = harness([withCap(op(1), { imageToolRateMicroUsdc: 100_000 }), withCap(op(2), {})], {
+            answer: perNode({ 1: () => busy(7000) }),
+            deps: { sweepDelay: () => 0 },
+        })
         const em = await h.run(
             `{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`,
             { endpoint: '/v1/responses' },
@@ -902,7 +991,11 @@ describe('the reserve request', () => {
                 endpoint: '/v1/responses',
             })
             expect(
-                h.rc.calls.map((c) => [c.req.input_bound_version, c.req.image_tool_budget, c.req.image_edit_tool_budget]),
+                h.rc.calls.map((c) => [
+                    c.req.input_bound_version,
+                    c.req.image_tool_budget,
+                    c.req.image_edit_tool_budget,
+                ]),
                 budgets,
             ).toEqual([
                 [2, gen, edit],
@@ -1187,7 +1280,10 @@ describe('the caller’s admitNode check', () => {
 describe('the prepaid pool before reserve', () => {
     const body = chat(',"max_tokens":100')
     const preparing = (fail?: unknown, deps: Partial<DispatchDeps> = {}, onPrepare?: () => void, ops = [op(1)]) => {
-        const h: { calls: number; reservesBefore: number; signal?: AbortSignal | undefined } = { calls: 0, reservesBefore: -1 }
+        const h: { calls: number; reservesBefore: number; signal?: AbortSignal | undefined } = {
+            calls: 0,
+            reservesBefore: -1,
+        }
         let rc: ReserveClient & { calls: Call[] }
         const wallet = {
             payerAddr: () => 'PAYER',
@@ -1258,7 +1354,11 @@ describe('the prepaid pool before reserve', () => {
     it.each([
         ['unaffordable', new MbrDepositUnaffordableError(0n, 10n, 50_000n, 1_000n), 'mbr_pool_underfunded'],
         ['below target', new BelowTargetError(115_000n), 'mbr_pool_underfunded'],
-        ['a deposit that overspends', new Error('wallet: deposit: TransactionPool.Remember: overspend'), 'wallet_unfunded'],
+        [
+            'a deposit that overspends',
+            new Error('wallet: deposit: TransactionPool.Remember: overspend'),
+            'wallet_unfunded',
+        ],
     ])('a pool the payer can’t fund (%s) ends the turn before any reserve', async (_name, err, code) => {
         const h = preparing(err)
         const em = await h.run(body)
@@ -1281,7 +1381,11 @@ describe('the prepaid pool before reserve', () => {
         const em = await h.run(body)
         expect(em.failed).toBeUndefined()
         expect(h.rc.calls).toHaveLength(1)
-        expect(h.logged.some((l) => l.level === 'warn' && l.msg === 'prepaid pool check failed before reserve; continuing')).toBe(true)
+        expect(
+            h.logged.some(
+                (l) => l.level === 'warn' && l.msg === 'prepaid pool check failed before reserve; continuing',
+            ),
+        ).toBe(true)
     })
 
     it('is not funded for a request no node can serve', async () => {
@@ -1353,23 +1457,40 @@ describe('the sweep', () => {
     })
 
     it('keeps the largest busy hint, not the last', async () => {
-        const h = harness([op(1), op(2)], { answer: perNode({ 1: () => busy(9000), 2: () => busy(2000) }), deps: { sweepDelay: () => 0 } })
+        const h = harness([op(1), op(2)], {
+            answer: perNode({ 1: () => busy(9000), 2: () => busy(2000) }),
+            deps: { sweepDelay: () => 0 },
+        })
         const em = await h.run(chat())
         expect(em.failed).toMatchObject({ code: 'operators_busy', retryAfter: 9000 })
     })
 
     it('serves the request once a busy node’s queue drains', async () => {
-        const h = harness([op(1)], { answer: perNode({ 1: (n) => (n === 0 ? busy(1000) : reservedFor(op(1), {} as Req)) }), deps: { sweepDelay: () => 0 } })
+        const h = harness([op(1)], {
+            answer: perNode({ 1: (n) => (n === 0 ? busy(1000) : reservedFor(op(1), {} as Req)) }),
+            deps: { sweepDelay: () => 0 },
+        })
         const em = await h.run(chat())
         expect(em.failed).toBeUndefined()
         expect(em.runs).toHaveLength(1)
         expect(em.notes.filter((e) => e.type === 'route.candidates')).toHaveLength(2)
-        expect(h.logged.map((l) => l.msg)).toContain('every operator was at capacity; re-sweeping after the hinted wait')
+        expect(h.logged.map((l) => l.msg)).toContain(
+            'every operator was at capacity; re-sweeping after the hinted wait',
+        )
     })
 
     it('does not re-ask a busy node whose code says waiting won’t help', async () => {
-        for (const code of ['payer_slot_cap', 'reserve_temporarily_banned', 'rate_limited', 'some_unknown_future_code', '']) {
-            const h = harness([op(1)], { answer: perNode({ 1: () => busy(1000, code) }), deps: { sweepDelay: () => 0 } })
+        for (const code of [
+            'payer_slot_cap',
+            'reserve_temporarily_banned',
+            'rate_limited',
+            'some_unknown_future_code',
+            '',
+        ]) {
+            const h = harness([op(1)], {
+                answer: perNode({ 1: () => busy(1000, code) }),
+                deps: { sweepDelay: () => 0 },
+            })
             const em = await h.run(chat())
             expect(em.failed!.code).toBe('operators_busy')
             expect(h.rc.calls, code).toHaveLength(1)
@@ -1377,7 +1498,10 @@ describe('the sweep', () => {
     })
 
     it('reads a hint-less 429 as capacity, over a missing ephemeral, and invents no hint', async () => {
-        const h = harness([op(1), op(2)], { answer: perNode({ 1: () => busy(), 2: () => new NoEphemeralError() }), deps: { sweepDelay: () => 0 } })
+        const h = harness([op(1), op(2)], {
+            answer: perNode({ 1: () => busy(), 2: () => new NoEphemeralError() }),
+            deps: { sweepDelay: () => 0 },
+        })
         const em = await h.run(chat())
         expect(em.failed!.code).toBe('operators_busy')
         expect(em.failed!.retryAfter).toBeUndefined()
@@ -1385,7 +1509,10 @@ describe('the sweep', () => {
     })
 
     it('lets a size refusal outrank busy, without a busy re-sweep', async () => {
-        const h = harness([op(1), op(2)], { answer: perNode({ 1: () => busy(1000), 2: () => sizeRefusal() }), deps: { sweepDelay: () => 0 } })
+        const h = harness([op(1), op(2)], {
+            answer: perNode({ 1: () => busy(1000), 2: () => sizeRefusal() }),
+            deps: { sweepDelay: () => 0 },
+        })
         const em = await h.run(chat())
         expect(em.failed).toMatchObject({ code: 'context_length_exceeded', kind: 'context_exceeded' })
         expect(em.failed!.message).toContain('op 2: max_output_tokens exceeds this operator (context_length_exceeded)')
@@ -1403,7 +1530,10 @@ describe('the sweep', () => {
     })
 
     it('rides out a gateway outage, then says the pool is unreachable rather than busy', async () => {
-        const h = harness([op(1), op(2)], { answer: async () => Promise.reject(gateway()), deps: { retryBudget: 1500 } })
+        const h = harness([op(1), op(2)], {
+            answer: async () => Promise.reject(gateway()),
+            deps: { retryBudget: 1500 },
+        })
         const em = await h.run(chat())
         expect(em.failed).toMatchObject({ code: 'operators_unreachable', kind: 'unreachable', retryAfter: 30_000 })
         expect(em.failed!.message).toBe(
@@ -1418,13 +1548,17 @@ describe('the sweep', () => {
 
     it('re-sweeps a pure outage, and a refusal in a later sweep keeps it from reading unreachable', async () => {
         const h = harness([op(1)], {
-            answer: perNode({ 1: (n) => (n === 0 ? gateway() : new ReserveHTTPError({ status: 503, code: 'provider_unavailable' })) }),
+            answer: perNode({
+                1: (n) => (n === 0 ? gateway() : new ReserveHTTPError({ status: 503, code: 'provider_unavailable' })),
+            }),
             deps: { sweepDelay: () => 0, retryBudget: 300 },
         })
         const em = await h.run(chat())
         expect(em.failed!.code).toBe('operators_busy')
         expect(h.rc.calls).toHaveLength(2)
-        expect(h.logged.map((l) => l.msg)).toContain('every operator failed transiently; re-sweeping the candidate list')
+        expect(h.logged.map((l) => l.msg)).toContain(
+            'every operator failed transiently; re-sweeping the candidate list',
+        )
     })
 
     it('waits out the largest gateway Retry-After before re-sweeping, over the 4s schedule', async () => {
@@ -1496,7 +1630,12 @@ describe('the sweep', () => {
                 answer: async () => Promise.reject(new PayerRefusalError(code, 'daily free tickets used', 3_600_000)),
             })
             const em = await h.run(chat())
-            expect(em.failed).toMatchObject({ code, kind: 'funds', message: 'daily free tickets used', retryAfter: 3_600_000 })
+            expect(em.failed).toMatchObject({
+                code,
+                kind: 'funds',
+                message: 'daily free tickets used',
+                retryAfter: 3_600_000,
+            })
             expect(h.rc.calls).toHaveLength(1)
         }
     })
@@ -1505,7 +1644,11 @@ describe('the sweep', () => {
         const h = harness([op(1), op(2)], { answer: async () => Promise.reject(busy(60_000, 'free_budget_exhausted')) })
         const em = await h.run(chat())
         // The fake clock sits at 1,000,000 ms past the epoch: 00:16:40 UTC.
-        expect(em.failed).toMatchObject({ code: 'free_budget_exhausted', kind: 'funds', retryAfter: 86_400_000 - 1_000_000 })
+        expect(em.failed).toMatchObject({
+            code: 'free_budget_exhausted',
+            kind: 'funds',
+            retryAfter: 86_400_000 - 1_000_000,
+        })
         expect(em.failed!.message).toContain('resets at 00:00 UTC')
         // Each node asked once: the refusal holds for the day, so nothing re-sweeps.
         expect(ids(h.rc.calls)).toEqual([1, 2])
@@ -1525,14 +1668,23 @@ describe('the sweep', () => {
     // node 2 answers in turn. Only when no node was busy, and none was left
     // unreachable on the last sweep, is the day's refusal the answer.
     it.each([
-        { name: 'every node spent', second: () => busy(0, 'free_budget_exhausted'), want: 'free_budget_exhausted', secondAsked: 1 },
+        {
+            name: 'every node spent',
+            second: () => busy(0, 'free_budget_exhausted'),
+            want: 'free_budget_exhausted',
+            secondAsked: 1,
+        },
         { name: 'one spent, one busy', second: () => busy(0), want: 'operators_busy' },
         {
             name: 'one spent, one unreachable, then spent',
             second: (n: number) => (n === 0 ? new ReserveHTTPError({ status: 502 }) : busy(0, 'free_budget_exhausted')),
             want: 'free_budget_exhausted',
         },
-        { name: 'one spent, one unreachable throughout', second: () => new ReserveHTTPError({ status: 502 }), want: 'operators_busy' },
+        {
+            name: 'one spent, one unreachable throughout',
+            second: () => new ReserveHTTPError({ status: 502 }),
+            want: 'operators_busy',
+        },
         {
             // Only the last sweep decides: an earlier sweep left node 2
             // unreachable, and the re-sweep found it spent.
@@ -1608,7 +1760,14 @@ describe('the sweep', () => {
         const h = harness([op(1), op(2)], { answer: perNode({ 1: () => busy() }) })
         const em = await h.run(chat())
         expect(em.notes.filter((e) => e.type !== 'reserve.started')).toEqual([
-            { type: 'route.candidates', model: MODEL, candidates: [{ op: 1, node: 0 }, { op: 2, node: 0 }] },
+            {
+                type: 'route.candidates',
+                model: MODEL,
+                candidates: [
+                    { op: 1, node: 0 },
+                    { op: 2, node: 0 },
+                ],
+            },
             { type: 'relay.hop', relay: null, target: { op: 1, node: 0 }, reason: 'chosen' },
             { type: 'relay.hop', relay: null, target: { op: 2, node: 0 }, reason: 'chosen' },
         ])
@@ -1717,7 +1876,10 @@ describe('the ticket', () => {
         })
         let em = await h.run(chat())
         expect(em.runs[0]!.op.id).toBe(2)
-        expect(h.logged.find((l) => l.msg === 'reserve refused: ticket price failed verification; trying next operator')!.attrs).toMatchObject({
+        expect(
+            h.logged.find((l) => l.msg === 'reserve refused: ticket price failed verification; trying next operator')!
+                .attrs,
+        ).toMatchObject({
             operator_id: 1,
             node_id: 0,
         })
@@ -1736,7 +1898,8 @@ describe('the ticket', () => {
         expect(em.failed).toMatchObject({
             code: 'ticket_price_rejected',
             kind: 'operator_fault',
-            message: 'every eligible operator returned a ticket whose price failed verification (mis-priced or internally inconsistent)',
+            message:
+                'every eligible operator returned a ticket whose price failed verification (mis-priced or internally inconsistent)',
         })
     })
 
@@ -1759,7 +1922,12 @@ describe('the ticket', () => {
             expect(em.runs, `no fee, ${answer.name}`).toHaveLength(runs)
 
             for (const budget of ['"zs_image_generation":{"max_n":1}', '"zs_image_edit":{"max_n":1}']) {
-                const tooled = withCap(pricedOp(1), { inputUsdPer1m: 1, outputUsdPer1m: 2, imageToolRateMicroUsdc: 80_000, imageEditToolRateMicroUsdc: 80_000 })
+                const tooled = withCap(pricedOp(1), {
+                    inputUsdPer1m: 1,
+                    outputUsdPer1m: 2,
+                    imageToolRateMicroUsdc: 80_000,
+                    imageEditToolRateMicroUsdc: 80_000,
+                })
                 h = harness([tooled], { deps: { feeRate: () => 0 }, answer: async (o, req) => answer(o, req) })
                 em = await h.run(`{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{${budget}}}`, {
                     endpoint: '/v1/responses',
@@ -1816,14 +1984,18 @@ describe('the ticket', () => {
         expect(em.failed).toMatchObject({
             code: 'spend_cap_exceeded',
             kind: 'spend_cap',
-            message: 'spend cap reached: this request would exceed the configured USDC limit — to fix it, raise the cap remedy.',
+            message:
+                'spend cap reached: this request would exceed the configured USDC limit — to fix it, raise the cap remedy.',
         })
         expect(em.runs).toEqual([])
     })
 
     it('lets a busy node outrank the cap, without a busy re-sweep', async () => {
         const g = spend({ reserveErr: () => new Error('daily spend cap exceeded') })
-        const h = harness([op(1), op(2)], { deps: { spendGuard: g, sweepDelay: () => 0 }, answer: perNode({ 1: () => busy(7000) }) })
+        const h = harness([op(1), op(2)], {
+            deps: { spendGuard: g, sweepDelay: () => 0 },
+            answer: perNode({ 1: () => busy(7000) }),
+        })
         const em = await h.run(chat())
         expect(em.failed!.code).toBe('operators_busy')
         expect(g.asks).toHaveLength(1)
@@ -1831,17 +2003,28 @@ describe('the ticket', () => {
 
     it('lets the cap outrank a missing tool price, a mis-priced ticket and a missing ephemeral', async () => {
         const capped = () => spend({ reserveErr: () => new Error('daily spend cap exceeded') })
-        let h = harness([withCap(op(1), { imageToolRateMicroUsdc: 100_000 }), withCap(op(2), {})], { deps: { spendGuard: capped() } })
-        let em = await h.run(`{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`, {
-            endpoint: '/v1/responses',
+        let h = harness([withCap(op(1), { imageToolRateMicroUsdc: 100_000 }), withCap(op(2), {})], {
+            deps: { spendGuard: capped() },
         })
+        let em = await h.run(
+            `{"model":"${MODEL}","input":[],"max_output_tokens":50,"tool_budgets":{"zs_image_generation":{"max_n":2}}}`,
+            {
+                endpoint: '/v1/responses',
+            },
+        )
         expect(em.failed!.code).toBe('spend_cap_exceeded')
 
-        h = harness([op(1), pricedOp(2)], { deps: { spendGuard: capped(), feeRate: () => 0 }, answer: async (o, req) => overpriced(o, req) })
+        h = harness([op(1), pricedOp(2)], {
+            deps: { spendGuard: capped(), feeRate: () => 0 },
+            answer: async (o, req) => overpriced(o, req),
+        })
         em = await h.run(chat())
         expect(em.failed!.code).toBe('spend_cap_exceeded')
 
-        h = harness([op(1), op(2)], { deps: { spendGuard: capped() }, answer: perNode({ 2: () => new NoEphemeralError() }) })
+        h = harness([op(1), op(2)], {
+            deps: { spendGuard: capped() },
+            answer: perNode({ 2: () => new NoEphemeralError() }),
+        })
         em = await h.run(chat())
         expect(em.failed!.code).toBe('spend_cap_exceeded')
     })
@@ -1861,7 +2044,11 @@ describe('the ticket', () => {
 })
 
 describe('the Client’s parts', () => {
-    const signer: Signer = { address: 'PAYER', signBytes: async () => new Uint8Array(), signTransactions: async () => [] }
+    const signer: Signer = {
+        address: 'PAYER',
+        signBytes: async () => new Uint8Array(),
+        signTransactions: async () => [],
+    }
 
     it('stay out of the package exports', async () => {
         const sdk = await import('../src/index.js')
@@ -1943,7 +2130,14 @@ describe('the Client’s parts', () => {
         // A strict pin to the staging node: only allowStaging lets it route,
         // and only strict keeps it to that node.
         deps.pick.toolAffinity.record({ op: 1, node: 0 }, ['call_1'])
-        await dispatch(deps, em, turnOf({ endpoint: '/v1/chat/completions', body: `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call_1"}]}` }))
+        await dispatch(
+            deps,
+            em,
+            turnOf({
+                endpoint: '/v1/chat/completions',
+                body: `{"model":"${MODEL}","messages":[{"role":"tool","tool_call_id":"call_1"}]}`,
+            }),
+        )
         expect(em.failed!.code).toBe('operators_busy')
         expect(ids(rc.calls)).toEqual([1, 1, 1])
         expect(rc.calls[0]!.req.max_output_count).toBe(77)
@@ -1960,7 +2154,11 @@ describe('the Client’s parts', () => {
             privacy: 'direct',
         })
         const em2 = new Recorder()
-        await dispatch(dispatchDepsOf(strict, async () => {}), em2, turnOf({ endpoint: '/v1/chat/completions', body: chat() }))
+        await dispatch(
+            dispatchDepsOf(strict, async () => {}),
+            em2,
+            turnOf({ endpoint: '/v1/chat/completions', body: chat() }),
+        )
         expect(em2.failed!.code).toBe('max_output_required')
         strict.close()
     })
@@ -1982,7 +2180,11 @@ describe('the Client’s parts', () => {
             network: { algodEndpoint: 'http://127.0.0.1:1', algodToken: '', escrowAppId: 1n } as never,
             registry: registryOf([withCap(op(1), { inputUsdPer1m: 1, outputUsdPer1m: 2 })]),
             reserveClient: rc,
-            wallet: { open: () => Promise.reject(new Error('unused')), payerAddr: () => 'PAYER', protocolFeeBps: async () => 250 },
+            wallet: {
+                open: () => Promise.reject(new Error('unused')),
+                payerAddr: () => 'PAYER',
+                protocolFeeBps: async () => 250,
+            },
             spendGuard,
             privacy: 'direct',
             allowPrivacyOverride: true,
@@ -2011,5 +2213,196 @@ describe('the Client’s parts', () => {
         expect(estimates).toHaveLength(1)
         expect(rc.calls).toEqual([])
         c.close()
+    })
+})
+
+describe('a free credit', () => {
+    const quiet = { debug() {}, info() {}, warn() {}, error() {} }
+    const creditNode = { op: 1, node: 2 }
+
+    /** A store that counts what it holds. */
+    function countingStore(): CreditStore & { held(): number } {
+        const inner = memoryCreditStore()
+        let n = 0
+        return {
+            held: () => n,
+            async take(key) {
+                const c = await inner.take(key)
+                if (c !== undefined) n--
+                return c
+            },
+            async put(key, cs) {
+                n += cs.length
+                await inner.put(key, cs)
+            },
+        }
+    }
+
+    // A Solana payer with a credit wallet over is, before one free node that trusts it.
+    function freeHarness(answer: Answer, edit: (o: Operator, is: FakeIssuer) => Operator = (o) => o) {
+        const is = new FakeIssuer()
+        const store = countingStore()
+        const freeCredits = CreditWallet.for(
+            { issuers: { [is.key]: is }, store },
+            'solana',
+            creditDep,
+            () => noon,
+            quiet,
+        )
+        const node = edit(withCap(op(1, { nodeId: 2, freeCreditIssuers: [is.key] }), {}), is)
+        const h = harness([node], { answer, deps: { rail: 'solana', freeCredits } })
+        return { h, is, store }
+    }
+
+    const sent = (c: Call) => c.req.free_credit
+    const refuse = () => new ReserveHTTPError({ status: 400, code: 'invalid_reserve' })
+    const free = (o: Operator, req: Req): Reserved => {
+        const r = reservedFor(o, req)
+        Object.assign(r.ticket, { max_price: 0, min_price: 0 })
+        return r
+    }
+
+    it('rides a free reserve and verifies at the node; a refused reserve gives it back', async () => {
+        const { h, is, store } = freeHarness(async () => {
+            throw refuse()
+        })
+        await h.run(chat())
+        expect(h.rc.calls).toHaveLength(1)
+        const c = sent(h.rc.calls[0]!)
+        expect(c).toBeDefined()
+        await verifyCredit([is.publicKey], creditDep, creditNode, acceptedEpochs(noon), c!)
+        expect(store.held()).toBe(FREE_CREDIT_DEFAULTS.batch)
+    })
+
+    it('is spent by a free ticket and given back by a priced one', async () => {
+        const spent = freeHarness(async (o, req) => free(o, req))
+        await spent.h.run(chat())
+        expect(spent.h.em.runs).toHaveLength(1)
+        expect(spent.store.held()).toBe(FREE_CREDIT_DEFAULTS.batch - 1)
+
+        const priced = freeHarness(async (o, req) => reservedFor(o, req))
+        await priced.h.run(chat())
+        expect(priced.h.em.runs).toHaveLength(1)
+        expect(priced.store.held()).toBe(FREE_CREDIT_DEFAULTS.batch)
+    })
+
+    it.each<[string, (o: Operator, is: FakeIssuer) => Operator, Partial<DispatchDeps>]>([
+        ['a priced model', (o) => withCap(o, { inputUsdPer1m: 1, outputUsdPer1m: 2 }), {}],
+        ['the Algorand rail', (o) => o, { rail: 'algorand' }],
+        ['a node trusting another issuer', (o) => ({ ...o, freeCreditIssuers: [new FakeIssuer().key] }), {}],
+        ['no credit wallet', (o) => o, { freeCredits: undefined }],
+    ])('stays off %s', async (_name, edit, deps) => {
+        const { h, is } = freeHarness(async () => {
+            throw refuse()
+        }, edit)
+        Object.assign(h.deps, deps)
+        await h.run(chat())
+        expect(h.rc.calls).toHaveLength(1)
+        expect(sent(h.rc.calls[0]!)).toBeUndefined()
+        expect(is.dayKeys).toBe(0)
+    })
+
+    it('the node already spent is dropped, and the node asked once more with another', async () => {
+        const spent = () => new ReserveHTTPError({ status: 409, code: CODE_FREE_CREDIT_SPENT })
+        const { h, store } = freeHarness(async () => {
+            throw spent()
+        })
+        await h.run(chat())
+        expect(h.em.failed).toBeDefined()
+        expect(h.rc.calls).toHaveLength(2)
+        const [first, second] = h.rc.calls.map(sent)
+        expect(first?.nonce).toBeDefined()
+        expect(second?.nonce).toBeDefined()
+        expect(first!.nonce).not.toBe(second!.nonce)
+        expect(store.held()).toBe(FREE_CREDIT_DEFAULTS.batch - 2)
+    })
+
+    it('the node refuses is dropped, the node asked again without one, and sent none for the day', async () => {
+        const { h, store } = freeHarness(async (_o, _req, _hop, n) => {
+            throw n === 0 ? new ReserveHTTPError({ status: 400, code: CODE_FREE_CREDIT_INVALID }) : refuse()
+        })
+        await h.run(chat())
+        expect(h.rc.calls.map(sent).map((c) => c !== undefined)).toEqual([true, false])
+        expect(store.held()).toBe(FREE_CREDIT_DEFAULTS.batch - 1)
+        delete h.em.failed
+        await h.run(chat())
+        expect(h.rc.calls).toHaveLength(3)
+        expect(sent(h.rc.calls[2]!)).toBeUndefined()
+        expect(store.held()).toBe(FREE_CREDIT_DEFAULTS.batch - 1)
+    })
+
+    it('a node answering every credit as spent costs two, then is sent none', async () => {
+        const { h, store } = freeHarness(async () => {
+            throw new ReserveHTTPError({ status: 409, code: CODE_FREE_CREDIT_SPENT })
+        })
+        for (let i = 0; i < 3; i++) {
+            delete h.em.failed
+            await h.run(chat())
+        }
+        expect(h.rc.calls.filter((c) => sent(c) !== undefined)).toHaveLength(2)
+        expect(store.held()).toBe(FREE_CREDIT_DEFAULTS.batch - 2)
+    })
+
+    it('a spent answer to a reserve that carried none is not retried', async () => {
+        const { h } = freeHarness(async () => {
+            throw new ReserveHTTPError({ status: 409, code: CODE_FREE_CREDIT_SPENT })
+        })
+        h.deps.freeCredits = undefined
+        await h.run(chat())
+        expect(h.rc.calls).toHaveLength(1)
+    })
+
+    it.each<[string, Answer, Partial<DispatchDeps>, number]>([
+        [
+            'over the spend cap',
+            async (o, req) => free(o, req),
+            {
+                spendGuard: {
+                    reserve: () => {
+                        throw new Error('daily spend cap exceeded')
+                    },
+                    release: () => {},
+                } as unknown as SpendGuard,
+            },
+            FREE_CREDIT_DEFAULTS.batch,
+        ],
+        [
+            'whose id is already in flight',
+            async (o, req) => free(o, req),
+            {
+                spendGuard: {
+                    reserve: () => {
+                        throw new DuplicateTicketError()
+                    },
+                    release: () => {},
+                } as unknown as SpendGuard,
+            },
+            FREE_CREDIT_DEFAULTS.batch,
+        ],
+        [
+            'mis-priced',
+            async (o, req) => {
+                const r = free(o, req)
+                Object.assign(r.ticket, { input_rate: 1_000_000_000 })
+                return r
+            },
+            {},
+            FREE_CREDIT_DEFAULTS.batch,
+        ],
+        [
+            'free after a spent credit',
+            async (o, req, _hop, n) => {
+                if (n === 0) throw new ReserveHTTPError({ status: 409, code: CODE_FREE_CREDIT_SPENT })
+                return free(o, req)
+            },
+            {},
+            FREE_CREDIT_DEFAULTS.batch - 2,
+        ],
+    ])('a ticket %s leaves the store as the turn left it', async (_name, answer, deps, want) => {
+        const { h, store } = freeHarness(answer)
+        Object.assign(h.deps, deps)
+        await h.run(chat())
+        expect(sent(h.rc.calls.at(-1)!)).toBeDefined()
+        expect(store.held()).toBe(want)
     })
 })

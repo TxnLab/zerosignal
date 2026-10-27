@@ -185,7 +185,8 @@ cd ts && pnpm build
 
 The Solana rail also runs end to end on a local validator: each SDK against a stub node
 (`go/internal/solanastub`) and the real `zs_escrow` program, through a settle on the payer's ack,
-a protest, an over-claim freeze, a refund of an unserved ticket and a lapse. The Go scenarios
+a protest, an over-claim freeze, a refund of an unserved ticket and a lapse, and free turns with
+and without a free credit from the stub's issuer. The Go scenarios
 run the stub in-process; the TS ones build and spawn it (`go/cmd/solanastub`) and check the chain
 through its `/stub/` routes. Start the validator with contracts-solana's `make localnet`, then:
 

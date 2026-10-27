@@ -31,6 +31,27 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-27 — free credits: the payer fetches and attaches them (unreleased)
+
+The SDKs carry a free credit on a free Solana reserve (SPEC § 3a "Free credits"). A host
+names the issuers it can reach in `zs.Config.FreeCredits` ↔ `Config.freeCredits`, with
+`zs.HTTPCreditIssuer` ↔ `httpCreditIssuer` for the issue wire and a `CreditStore` port
+(in memory by default); with none, which is the default, nothing changes. The payer fetches
+a batch of 3 credits for a node when a reserve there first needs one, under the one day key
+it verified for that day, and attaches one when the node trusts the issuer and prices the
+model at nothing (`creditIssuersFor` ↔ `creditIssuersFor`, pinned per model by
+`operator_vectors.json`). `ticket.ReserveRequest` gains `free_credit`, outside the payer
+signature's digest. A node's `400 free_credit_invalid` and `409 free_credit_spent`
+(`freecredit.CodeFreeCreditInvalid` / `CodeFreeCreditSpent`, pinned in
+`free_credit_vectors.json`) are refusals with no strike (`dispatch_verdict_vectors.json`).
+On either the payer drops the credit and asks the node once more, with another credit after
+a spent one and with none after an invalid one, and a node that refuses a credit it was sent
+is sent none for the rest of the day. `zs.Operator` gains
+`FreeCreditIssuers`, and `sdk_vocabulary_vectors.json` the batch, fetch timeout and failure
+backoff. The stub node serves an issuer, checks the credits it is sent, and spends one when
+its turn is consumed, and both e2e
+suites cover a free turn with a credit, with the issuer down, and a paid turn.
+
 ### 2026-10-26 — free credits: the token, the details field, the presets (unreleased)
 
 A new protocol package, `go/freecredit` ↔ `@txnlab/zs-proto/freecredit` (subpath only), holds

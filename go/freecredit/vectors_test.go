@@ -127,6 +127,19 @@ type vectorsFile struct {
 	CertMessage certCase               `json:"day_key_cert_message"`
 	Policy      []policyCase           `json:"day_key_policy"`
 	Verify      []verifyCase           `json:"verify"`
+	Wire        wireConstants          `json:"wire"`
+}
+
+// wireConstants are the issue wire's paths, batch cap and codes, and the
+// node's refusal codes for a credit, which each language spells on its own.
+type wireConstants struct {
+	DayKeyPath        string `json:"day_key_path"`
+	IssuePath         string `json:"issue_path"`
+	MaxIssueBatch     int    `json:"max_issue_batch"`
+	CreditsExhausted  string `json:"credits_exhausted"`
+	EpochNotIssuable  string `json:"epoch_not_issuable"`
+	FreeCreditInvalid string `json:"free_credit_invalid"`
+	FreeCreditSpent   string `json:"free_credit_spent"`
 }
 
 func u64(v uint64) string { return strconv.FormatUint(v, 10) }
@@ -550,6 +563,11 @@ func derive(t *testing.T, r randomBlock, issuer, other ed25519.PrivateKey) vecto
 			Message: hex.EncodeToString(freecredit.DayKeyCertMessage(vecDep, vecEpoch, spki))},
 		Policy: policyCases(t, r, s),
 		Verify: verifyCases(t, r, s, issuer, other),
+		Wire: wireConstants{
+			DayKeyPath: freecredit.DayKeyPath, IssuePath: freecredit.IssuePath, MaxIssueBatch: freecredit.MaxIssueBatch,
+			CreditsExhausted: freecredit.CodeCreditsExhausted, EpochNotIssuable: freecredit.CodeEpochNotIssuable,
+			FreeCreditInvalid: freecredit.CodeFreeCreditInvalid, FreeCreditSpent: freecredit.CodeFreeCreditSpent,
+		},
 	}
 	keys := map[string]ed25519.PublicKey{"issuer": issuer.Public().(ed25519.PublicKey), "other": other.Public().(ed25519.PublicKey)}
 	for i := range f.Verify {

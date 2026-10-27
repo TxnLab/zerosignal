@@ -17,9 +17,16 @@ import { base64, hex } from '@scure/base'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
+    CODE_CREDITS_EXHAUSTED,
+    CODE_EPOCH_NOT_ISSUABLE,
+    CODE_FREE_CREDIT_INVALID,
+    CODE_FREE_CREDIT_SPENT,
     type Credit,
+    DAY_KEY_PATH,
     type DayKey,
     GRACE_MS,
+    ISSUE_PATH,
+    MAX_ISSUE_BATCH,
     acceptedEpochs,
     blindCredit,
     creditMessage,
@@ -90,6 +97,18 @@ describe('free_credit_vectors.json', () => {
         expect(() => parseIssuerKey(base64.encode(new Uint8Array(31)))).toThrow(/32 bytes/)
         expect(() => parseIssuerKey(base64.encode(new Uint8Array(33)))).toThrow(/32 bytes/)
         expect(() => parseIssuerKey(v.issuers.issuer.key.slice(0, 20) + '\n' + v.issuers.issuer.key.slice(20))).toThrow()
+    })
+
+    it('spells the issue wire and the node refusal codes as Go does', () => {
+        expect({
+            day_key_path: DAY_KEY_PATH,
+            issue_path: ISSUE_PATH,
+            max_issue_batch: MAX_ISSUE_BATCH,
+            credits_exhausted: CODE_CREDITS_EXHAUSTED,
+            epoch_not_issuable: CODE_EPOCH_NOT_ISSUABLE,
+            free_credit_invalid: CODE_FREE_CREDIT_INVALID,
+            free_credit_spent: CODE_FREE_CREDIT_SPENT,
+        }).toEqual(v.wire)
     })
 
     it('builds the message bytes Go does', () => {

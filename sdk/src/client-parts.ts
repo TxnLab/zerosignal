@@ -16,6 +16,7 @@ import type { Reconciler } from './reconciler.js'
 import type { ChainOperatorSource } from './registry/chain.js'
 import type { Watchdog } from './refund-watchdog.js'
 import type { Settles } from './settles.js'
+import type { CreditWallet } from './solana/credits.js'
 
 /**
  * The parts a Client runs on. Routing stores, the spend guard and the logger
@@ -47,6 +48,8 @@ export interface Parts {
     source: ChainOperatorSource | undefined
     /** Stops the registry create built, which close calls; undefined with a supplied one. */
     stopRegistry: (() => Promise<void>) | undefined
+    /** Fetches and holds the credits a free Solana reserve carries; undefined carries none. */
+    freeCredits: CreditWallet | undefined
 }
 
 /** Each Client's parts, set by its constructor. */
@@ -73,5 +76,6 @@ export function dispatchDepsOf(c: Client, runSealed: RunSealed): DispatchDeps {
         feeRate: () => c.feeRate(),
         runSealed,
         clock: cfg.clock,
+        freeCredits: p.freeCredits,
     }
 }

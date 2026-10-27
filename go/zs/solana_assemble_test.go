@@ -64,11 +64,13 @@ func TestNew_BuildsTheSolanaParts(t *testing.T) {
 	signer := &s
 	network := SolanaLocalnet()
 	network.Solana.RPCEndpoint, network.Solana.Program = srv.URL, program
+	is := newFakeIssuer(t)
 	c, err := New(t.Context(), Config{
 		SolanaSigner: signer,
 		Network:      network,
 		DisableTEE:   true,
 		Discovery:    Discovery{OperatorIDs: []uint64{4}},
+		FreeCredits:  FreeCredits{Issuers: map[string]CreditIssuer{is.key(): is}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +114,9 @@ func TestNew_BuildsTheSolanaParts(t *testing.T) {
 	}
 	if src.Algod != nil || src.EscrowAppID != 0 {
 		t.Errorf("source reads Algorand too: algod %v app %d", src.Algod, src.EscrowAppID)
+	}
+	if c.freeCredits == nil || c.freeCredits.dep != want || c.freeCredits.issuers[is.key()] == nil {
+		t.Errorf("credit wallet %+v, want one minting for %x from the configured issuer", c.freeCredits, want)
 	}
 
 	if got := cfg.Network.Solana; got.Cluster != "localnet" || got.RPCEndpoint != srv.URL || got.Program != program {

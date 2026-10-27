@@ -266,6 +266,11 @@ type Config struct {
 
 	Stores     Stores
 	SpendGuard SpendGuard // none: no cap
+	// FreeCredits are the issuers a free Solana turn fetches a credit from,
+	// which a node that trusts one may require of a payer before spending its
+	// free budget on it (SPEC.md § 3a "Free credits"). None by default. Only
+	// on Solana: an Algorand free ticket is rationed by the contract.
+	FreeCredits FreeCredits
 	// Remedies is what errors and logs tell the payer to do about what only
 	// they can fix, in the caller's own terms; see Remedies.
 	Remedies Remedies
@@ -415,6 +420,7 @@ func (c Config) withDefaults() Config {
 	c.ConcurrentSlots = orDefault(c.ConcurrentSlots, DefaultDepositSlots)
 	c.ReserveTimeout = orDefault(c.ReserveTimeout, DefaultReserveTimeout)
 	c.StreamIdle = c.StreamIdle.withDefaults()
+	c.FreeCredits.Batch = orDefault(c.FreeCredits.Batch, DefaultFreeCreditBatch)
 
 	d := &c.Discovery
 	d.RefreshInterval = orDefault(d.RefreshInterval, DefaultRefreshInterval)
@@ -473,8 +479,14 @@ func (c Config) validate() (d Deployment, warnings []string, err error) {
 	if c.Stores.Journal != nil && c.Stores.JournalPath != "" {
 		return d, nil, configError("set Stores.Journal or Stores.JournalPath, not both")
 	}
+	if err := c.FreeCredits.validate(); err != nil {
+		return d, nil, err
+	}
 	if d, warnings, err = ResolveNetwork(c.Network); err != nil {
 		return Deployment{}, nil, err
+	}
+	if len(c.FreeCredits.Issuers) > 0 && d.Rail != ticket.RailSolana {
+		warnings = append(warnings, "FreeCredits are used on the Solana rail only; this network's free tickets are rationed on chain")
 	}
 	if !c.RequireMaxOutput && c.MaxOutputCeiling != selection.DefaultMaxOutputCeiling {
 		warnings = append(warnings, fmt.Sprintf(
