@@ -65,6 +65,9 @@ type Behavior struct {
 	TicketLifetime time.Duration
 	// IssuerDown fails the stub issuer's every answer to this payer.
 	IssuerDown bool
+	// HoldOpen sends the payer's open only once its blockhash has expired, as
+	// a congested cluster or a stalled node would: the open can never land.
+	HoldOpen bool
 }
 
 // Node is the stub. Its identity is fixed when it is built; each payer's
@@ -174,6 +177,27 @@ func (n *Node) Opened(payer solana.PublicKey) [][16]byte {
 	for _, e := range n.tickets {
 		if e.opened && e.payer == payer {
 			out = append(out, e.id)
+		}
+	}
+	return out
+}
+
+// Issued is a ticket the stub issued: its max price, and whether its open
+// landed.
+type Issued struct {
+	ID       [16]byte
+	MaxPrice uint64
+	Opened   bool
+}
+
+// Issued is every ticket the stub issued payer, opened or not, in no order.
+func (n *Node) Issued(payer solana.PublicKey) []Issued {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out []Issued
+	for _, e := range n.tickets {
+		if e.payer == payer {
+			out = append(out, Issued{ID: e.id, MaxPrice: e.ticket.MaxPrice, Opened: e.opened})
 		}
 	}
 	return out
@@ -454,11 +478,18 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	free := e.ticket.MaxPrice == 0
+	b := n.behaviorFor(e.payer)
 	switch {
 	case free && (paymentOpen != "" || paymentRef != ""):
 		writeError(w, http.StatusPaymentRequired, "payment_verification_failed", "a free ticket opens nothing")
 		return
 	case !free:
+		if b.HoldOpen {
+			if err := n.waitPast(ctx, e.lastValid); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", err.Error())
+				return
+			}
+		}
 		if err := n.landOpen(ctx, e, paymentOpen, paymentRef); err != nil {
 			writeError(w, http.StatusPaymentRequired, "payment_verification_failed", err.Error())
 			return
@@ -468,7 +499,6 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b := n.behaviorFor(e.payer)
 	if b.ClaimNoReceipt {
 		inRate, outRate := rates()
 		ceiling, err := pricing.ExpectedBaseMax(e.ticket.InputCount, e.ticket.MaxOutputCount, inRate, outRate, 0, 0)
@@ -623,6 +653,26 @@ func (n *Node) receipt(ctx context.Context, e *entry, sum [32]byte, b Behavior) 
 		}
 	}
 	return r, nil
+}
+
+// waitPast waits until the cluster's confirmed block height passes height,
+// when a transaction carrying a blockhash valid through it can no longer
+// land.
+func (n *Node) waitPast(ctx context.Context, height uint64) error {
+	for {
+		h, err := n.chain.RPC.GetBlockHeight(ctx, rpc.Confirmed)
+		if err != nil {
+			return err
+		}
+		if h > height {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // landOpen checks that the payer's completed open is the offer the stub

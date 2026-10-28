@@ -28,13 +28,14 @@ func TestIssuer_IsTheLocalnetPresets(t *testing.T) {
 	}
 }
 
-// The localnet's keypair is also devnet's admin, so StartLocalnet must refuse
-// before it writes the Config anywhere but this machine.
+// The localnet's keypair is also devnet's admin, so a run holding it must
+// refuse before it writes the Config anywhere but this machine.
 func TestCheckLoopback(t *testing.T) {
 	for endpoint, ok := range map[string]bool{
 		"http://127.0.0.1:8899":         true,
 		"http://localhost:8899":         true,
 		"http://[::1]:8899":             true,
+		"http://[::1]":                  true,
 		"http://127.0.0.2:8899":         true,
 		"https://api.devnet.solana.com": false,
 		"http://10.0.0.5:8899":          false,
@@ -44,6 +45,24 @@ func TestCheckLoopback(t *testing.T) {
 	} {
 		if err := checkLoopback(endpoint); (err == nil) != ok {
 			t.Errorf("checkLoopback(%q) = %v, want ok %v", endpoint, err, ok)
+		}
+	}
+}
+
+// The /stub/ routes fund whoever asks, so the stub listens on loopback alone,
+// and a bare port, which listens everywhere, is refused.
+func TestCheckLoopbackHost(t *testing.T) {
+	for listen, ok := range map[string]bool{
+		"127.0.0.1:0":    true,
+		"localhost:9000": true,
+		"[::1]:9000":     true,
+		":0":             false,
+		"0.0.0.0:9000":   false,
+		"[::]:9000":      false,
+		"10.0.0.5:9000":  false,
+	} {
+		if err := checkLoopbackHost(listen); (err == nil) != ok {
+			t.Errorf("checkLoopbackHost(%q) = %v, want ok %v", listen, err, ok)
 		}
 	}
 }

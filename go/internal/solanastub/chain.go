@@ -5,7 +5,7 @@
 
 // Package solanastub is a stand-in Solana node for end-to-end tests: enough
 // of a node to serve a real payer SDK against the zs_escrow program on a local
-// validator, with knobs for the endings a payer drives. It is test tooling,
+// validator or devnet, with knobs for the endings a payer drives. It is test tooling,
 // not a node: it keeps everything in memory and trusts its own clock. It
 // serves only once the open is confirmed, so a run never covers a payer
 // reading a ticket account its open hasn't reached yet.

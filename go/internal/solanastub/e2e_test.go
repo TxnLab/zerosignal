@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"sync"
@@ -28,49 +29,85 @@ import (
 	"github.com/TxnLab/zerosignal/go/zs"
 )
 
-// The scenarios run against a local validator holding zs_escrow, as
-// contracts-solana's `make localnet` starts one. ZS_SOLANA_E2E_RPC names its
-// endpoint and ZS_SOLANA_E2E_MINT_AUTHORITY the keypair file of its test USDC
-// mint's authority, which is also the Config's admin; without both they skip.
+// The scenarios run against a cluster holding zs_escrow: a local validator,
+// as contracts-solana's `make localnet` starts one, or devnet.
+// ZS_SOLANA_E2E_RPC names its endpoint. The run is funded by
+// ZS_SOLANA_E2E_MINT_AUTHORITY, the keypair file of a local validator's test
+// USDC mint's authority, which is also the Config's admin, or by
+// ZS_SOLANA_E2E_FUNDER, a wallet's holding SOL and test USDC (see
+// solanastub.Funding); without the endpoint and one of them they skip.
+// ZS_SOLANA_E2E_CLUSTER is the payers' network preset, localnet unless it
+// says devnet, and ZS_SOLANA_E2E_STUB_IDENTITY an identity file to serve as
+// rather than register a node.
 const (
 	envRPC       = "ZS_SOLANA_E2E_RPC"
 	envAuthority = "ZS_SOLANA_E2E_MINT_AUTHORITY"
+	envFunder    = "ZS_SOLANA_E2E_FUNDER"
+	envCluster   = "ZS_SOLANA_E2E_CLUSTER"
+	envIdentity  = "ZS_SOLANA_E2E_STUB_IDENTITY"
 )
 
-// localnet is the chain and the one stub node every scenario shares.
-type localnet struct{ *solanastub.Localnet }
+// harness is the chain and the one stub node every scenario shares.
+type harness struct {
+	*solanastub.Stub
+	cluster string
+	// confirm bounds a wait on a transaction the node or payer sends.
+	confirm time.Duration
+}
 
 var (
 	setupOnce sync.Once
-	shared    *localnet
+	shared    *harness
 	setupErr  error
 )
 
-func setup(t *testing.T) *localnet {
+func setup(t *testing.T) *harness {
 	t.Helper()
-	endpoint, keyFile := os.Getenv(envRPC), os.Getenv(envAuthority)
-	if endpoint == "" || keyFile == "" {
-		t.Skipf("set %s and %s to run against a local validator", envRPC, envAuthority)
+	endpoint, authority, funder := os.Getenv(envRPC), os.Getenv(envAuthority), os.Getenv(envFunder)
+	if endpoint == "" || (authority == "" && funder == "") {
+		t.Skipf("set %s and one of %s and %s to run against a cluster", envRPC, envAuthority, envFunder)
 	}
-	setupOnce.Do(func() { shared, setupErr = newLocalnet(endpoint, keyFile) })
+	setupOnce.Do(func() { shared, setupErr = newHarness(endpoint, authority, funder) })
 	if setupErr != nil {
 		t.Fatal(setupErr)
 	}
 	return shared
 }
 
-func newLocalnet(endpoint, keyFile string) (*localnet, error) {
+func newHarness(endpoint, authorityFile, funderFile string) (*harness, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	authority, err := keystore.ReadSolanaKeypairFile(keyFile)
-	if err != nil {
+	h := &harness{cluster: zs.SolanaClusterLocalnet, confirm: 30 * time.Second}
+	switch c := os.Getenv(envCluster); c {
+	case "", zs.SolanaClusterLocalnet:
+	case zs.SolanaClusterDevnet:
+		h.cluster, h.confirm = zs.SolanaClusterDevnet, time.Minute
+	default:
+		return nil, fmt.Errorf("%s=%q: want localnet or devnet", envCluster, c)
+	}
+	o := solanastub.Options{Endpoint: endpoint, Listen: "127.0.0.1:0"}
+	var err error
+	if authorityFile != "" {
+		if o.Funding.Authority, err = keystore.ReadSolanaKeypairFile(authorityFile); err != nil {
+			return nil, err
+		}
+	}
+	if funderFile != "" {
+		if o.Funding.Funder, err = keystore.ReadSolanaKeypairFile(funderFile); err != nil {
+			return nil, err
+		}
+	}
+	if path := os.Getenv(envIdentity); path != "" {
+		id, err := solanastub.ReadIdentity(path)
+		if err != nil {
+			return nil, err
+		}
+		o.Identity = &id
+	}
+	if h.Stub, err = solanastub.Start(ctx, o); err != nil {
 		return nil, err
 	}
-	l, err := solanastub.StartLocalnet(ctx, endpoint, authority, "127.0.0.1:0")
-	if err != nil {
-		return nil, err
-	}
-	return &localnet{l}, nil
+	return h, nil
 }
 
 func newKey() ed25519.PrivateKey {
@@ -79,6 +116,60 @@ func newKey() ed25519.PrivateKey {
 		panic(err)
 	}
 	return k
+}
+
+// sweep hands back what key holds once the test ends, when a funder paid for
+// it: SOL and test USDC on a shared cluster are topped up by hand, so a
+// nightly run must not bleed them into throwaway keys. A scenario can end
+// with its ticket still settling, and the settle's refund then lands between
+// the balance read and the return, whose close fails on the balance it
+// didn't send: so each step is tried again after a pause. The pool's close
+// fails for good while a ticket stays frozen, which leaves its lamports
+// behind. Any failure is logged, never a test's. Registered before the
+// payer's Client, so it runs after the Client closes.
+func (h *harness) sweep(t *testing.T, key ed25519.PrivateKey) {
+	t.Helper()
+	if h.Funding.Funder == nil {
+		return
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*h.confirm)
+		defer cancel()
+		pool := &zs.SolanaRentPool{RPC: h.Chain.RPC, Deployment: h.Chain.Deployment, Signer: payerSigner{key}}
+		closePool := func() error {
+			st, err := pool.Status(ctx)
+			if err != nil || !st.Exists {
+				return err
+			}
+			_, _, err = pool.Close(ctx)
+			return err
+		}
+		// The pool first: once the SOL is returned, nothing is left to pay
+		// its close's fee.
+		if err := retrySweep(ctx, closePool); err != nil {
+			t.Logf("sweep: the rent pool: %v", err)
+		}
+		if err := retrySweep(ctx, func() error { return h.Chain.ReturnFunds(ctx, h.Funding, key) }); err != nil {
+			t.Logf("sweep: %v", err)
+		}
+	})
+}
+
+// retrySweep runs step up to three times, five seconds apart, long enough
+// for a settle in flight to land.
+func retrySweep(ctx context.Context, step func() error) error {
+	var err error
+	for range 3 {
+		if err = step(); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return err
 }
 
 type payerSigner struct{ key ed25519.PrivateKey }
@@ -101,27 +192,28 @@ type payer struct {
 
 const payerUSDC = solanastub.PayerUSDC
 
-func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
+func (l *harness) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 	t.Helper()
 	return l.newPayerWith(t, b, nil)
 }
 
 // newPayerWith is newPayer with edit applied to the Client's Config, which it
 // gets with the payer's own key.
-func (l *localnet) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*zs.Config, solana.PublicKey)) *payer {
+func (l *harness) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*zs.Config, solana.PublicKey)) *payer {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	key := newKey()
 	pub := solanastub.PublicKey(key)
-	if err := l.FundPayer(ctx, pub); err != nil {
+	l.sweep(t, key)
+	if err := l.FundPayer(ctx, pub, payerUSDC); err != nil {
 		t.Fatal(err)
 	}
 	l.Node.SetBehavior(pub, b)
 	cfg := zs.Config{
 		SolanaSigner: payerSigner{key},
 		Network: zs.Network{Rail: ticket.RailSolana, Solana: zs.SolanaNetwork{
-			Cluster: zs.SolanaClusterLocalnet, RPCEndpoint: l.Chain.Endpoint, Program: l.Chain.Deployment.Program,
+			Cluster: l.cluster, RPCEndpoint: l.Chain.Endpoint, Program: l.Chain.Deployment.Program,
 		}},
 		// One node can't be its own relay.
 		Privacy:           zs.PrivacyDirect,
@@ -168,7 +260,7 @@ func (p *payer) askModel(t *testing.T, model string, stream bool) (string, zs.Se
 }
 
 // onlyTicket is the one ticket p opened at the stub.
-func (l *localnet) onlyTicket(t *testing.T, p *payer) [16]byte {
+func (l *harness) onlyTicket(t *testing.T, p *payer) [16]byte {
 	t.Helper()
 	ids := l.Node.Opened(p.key)
 	if len(ids) != 1 {
@@ -179,7 +271,7 @@ func (l *localnet) onlyTicket(t *testing.T, p *payer) [16]byte {
 
 // waitTicket polls the ticket until done says it has reached the state a
 // scenario waits for, or within fails the test.
-func (l *localnet) waitTicket(t *testing.T, id [16]byte, within time.Duration, what string, done func(*zsescrow.Ticket) bool) *zsescrow.Ticket {
+func (l *harness) waitTicket(t *testing.T, id [16]byte, within time.Duration, what string, done func(*zsescrow.Ticket) bool) *zsescrow.Ticket {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(within)
@@ -200,7 +292,7 @@ func (l *localnet) waitTicket(t *testing.T, id [16]byte, within time.Duration, w
 
 func closed(tk *zsescrow.Ticket) bool { return tk == nil }
 
-func (l *localnet) usdc(t *testing.T, owner solana.PublicKey) uint64 {
+func (l *harness) usdc(t *testing.T, owner solana.PublicKey) uint64 {
 	t.Helper()
 	v, err := l.Chain.USDC(context.Background(), owner)
 	if err != nil {
@@ -209,7 +301,7 @@ func (l *localnet) usdc(t *testing.T, owner solana.PublicKey) uint64 {
 	return v
 }
 
-func (l *localnet) checkStub(t *testing.T, p *payer) {
+func (l *harness) checkStub(t *testing.T, p *payer) {
 	t.Helper()
 	for _, err := range l.Node.Errors(p.key) {
 		t.Errorf("stub node: %v", err)
@@ -236,7 +328,7 @@ func TestSolanaE2E_Settles(t *testing.T) {
 				t.Errorf("settlement = %+v, want the node's settle on the payer's ack", set)
 			}
 			id := l.onlyTicket(t, p)
-			l.waitTicket(t, id, 30*time.Second, "settled", closed)
+			l.waitTicket(t, id, l.confirm, "settled", closed)
 			receipts := l.Node.Receipts(p.key)
 			if len(receipts) != 1 {
 				t.Fatalf("%d receipts, want 1", len(receipts))
@@ -285,7 +377,7 @@ func TestSolanaE2E_FreeTurnOpensNothing(t *testing.T) {
 
 // withStubIssuer has the payer fetch credits from the stub's issuer, naming
 // itself in the header the stub counts by, as a host's gate header would.
-func (l *localnet) withStubIssuer(cfg *zs.Config, pub solana.PublicKey) {
+func (l *harness) withStubIssuer(cfg *zs.Config, pub solana.PublicKey) {
 	key := base64.StdEncoding.EncodeToString(l.Node.Issuer().Key())
 	cfg.FreeCredits = zs.FreeCredits{Issuers: map[string]zs.CreditIssuer{key: &zs.HTTPCreditIssuer{
 		URL: l.URL,
@@ -375,7 +467,7 @@ func TestSolanaE2E_RefundsAnUnservedTicket(t *testing.T) {
 
 // wallet is a SolanaWallet for signer apart from any Client, as a host's
 // wallet commands build one.
-func (l *localnet) wallet(t *testing.T, signer payerSigner) *zs.SolanaWallet {
+func (l *harness) wallet(t *testing.T, signer payerSigner) *zs.SolanaWallet {
 	t.Helper()
 	w, err := zs.NewSolanaWallet(t.Context(), zs.SolanaWalletConfig{RPC: l.Chain.RPC, Deployment: l.Chain.Deployment, Signer: signer})
 	if err != nil {
@@ -395,7 +487,8 @@ func TestSolanaE2E_HostWalletCalls(t *testing.T) {
 
 	fresh := payerSigner{newKey()}
 	freshKey := solanastub.PublicKey(fresh.key)
-	if err := l.Chain.Airdrop(ctx, freshKey, 100_000_000); err != nil {
+	l.sweep(t, fresh.key)
+	if err := l.Chain.FundSOL(ctx, l.Funding, freshKey, 10_000_000); err != nil {
 		t.Fatal(err)
 	}
 	w := l.wallet(t, fresh)
@@ -472,7 +565,7 @@ func TestSolanaE2E_ProtestsABadReceipt(t *testing.T) {
 	if set.Kind != zs.SettleProtest || !set.Frozen {
 		t.Errorf("settlement = %+v, want a protest that freezes", set)
 	}
-	tk := l.waitTicket(t, l.onlyTicket(t, p), 30*time.Second, "frozen by the protest", func(tk *zsescrow.Ticket) bool {
+	tk := l.waitTicket(t, l.onlyTicket(t, p), l.confirm, "frozen by the protest", func(tk *zsescrow.Ticket) bool {
 		return tk != nil && tk.Status == zsescrow.TicketFrozen
 	})
 	if tk.FreezeOrigin != zsescrow.FreezeOriginProtest {
@@ -495,7 +588,7 @@ func TestSolanaE2E_FreezesAnOverClaim(t *testing.T) {
 	if !set.Frozen {
 		t.Errorf("settlement = %+v, want the payer's freezing half", set)
 	}
-	tk := l.waitTicket(t, l.onlyTicket(t, p), 30*time.Second, "frozen by the mismatch", func(tk *zsescrow.Ticket) bool {
+	tk := l.waitTicket(t, l.onlyTicket(t, p), l.confirm, "frozen by the mismatch", func(tk *zsescrow.Ticket) bool {
 		return tk != nil && tk.Status == zsescrow.TicketFrozen
 	})
 	if tk.FreezeOrigin != zsescrow.FreezeOriginSettleMismatch {
@@ -521,7 +614,7 @@ func TestSolanaE2E_LeavesAnUncontestedClaimToLapse(t *testing.T) {
 		t.Fatal("turn succeeded, want the node's failure")
 	}
 	id := l.onlyTicket(t, p)
-	tk := l.waitTicket(t, id, 30*time.Second, "claimed", func(tk *zsescrow.Ticket) bool {
+	tk := l.waitTicket(t, id, l.confirm, "claimed", func(tk *zsescrow.Ticket) bool {
 		return tk != nil && tk.Status == zsescrow.TicketPendingByOperator
 	})
 	// Past the watchdog's first look (the deadline plus its 15 s margin) and
@@ -542,7 +635,7 @@ func TestSolanaE2E_LeavesAnUncontestedClaimToLapse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	l.waitTicket(t, id, 30*time.Second, "lapsed", closed)
+	l.waitTicket(t, id, l.confirm, "lapsed", closed)
 	if got, want := payerUSDC-l.usdc(t, p.key), l.WithFee(tk.Pending.Amount); got != want {
 		t.Errorf("payer paid %d, want the claim's %d and its fee", got, want)
 	}

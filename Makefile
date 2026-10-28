@@ -83,8 +83,8 @@ test-examples: build-sdk
 # test: CI has no validator. The suites run one after the other because each
 # waits out deadlines on the validator's clock, which a busy machine slows.
 solana-e2e: build-ts
-	@[ -n "$$ZS_SOLANA_E2E_RPC" ] && [ -n "$$ZS_SOLANA_E2E_MINT_AUTHORITY" ] || \
-		{ echo "solana-e2e: set ZS_SOLANA_E2E_RPC and ZS_SOLANA_E2E_MINT_AUTHORITY (README \"Build & test\")"; exit 1; }
+	@[ -n "$$ZS_SOLANA_E2E_RPC" ] && [ -n "$$ZS_SOLANA_E2E_MINT_AUTHORITY$$ZS_SOLANA_E2E_FUNDER" ] || \
+		{ echo "solana-e2e: set ZS_SOLANA_E2E_RPC and ZS_SOLANA_E2E_MINT_AUTHORITY or ZS_SOLANA_E2E_FUNDER (README \"Build & test\")"; exit 1; }
 	cd go && $(GO) test -race ./internal/solanastub -count 1
 	cd sdk && GO=$(GO) $(PNPM) exec vitest run test/solana-e2e.test.ts
 
