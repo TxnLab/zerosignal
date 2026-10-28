@@ -196,8 +196,10 @@ ZS_SOLANA_E2E_RPC=http://127.0.0.1:8899 \
   make solana-e2e    # about 2 min a suite: two scenarios wait out a deadline
 ```
 
-Without both variables the scenarios skip, so `make test` and CI never need a validator. The run
-shortens the localnet Config's default grace to its minimum.
+Without both variables the scenarios skip, so `make test` and this repo's CI never need a
+validator. The run shortens the localnet Config's default grace to its minimum. contracts-solana's
+`make integration` and its `integration` workflow run both suites on a throwaway validator, with
+a real zs-node and zs-proxy; `go/cmd/solanastub -register-node` registers that node.
 
 ## Releasing
 

@@ -45,42 +45,13 @@ type Localnet struct {
 // with is also devnet's admin, and the grace change would land on every
 // devnet ticket.
 func StartLocalnet(ctx context.Context, endpoint string, authority ed25519.PrivateKey, listen string) (*Localnet, error) {
-	if err := checkLoopback(endpoint); err != nil {
-		return nil, err
-	}
-	chain, err := Dial(ctx, endpoint, zsescrow.ProgramID)
-	if err != nil {
-		return nil, err
-	}
-	if chain.Config.DefaultGrace != chain.Config.MinGrace {
-		grace := chain.Config.MinGrace
-		ix, err := chain.Deployment.SetConfig(PublicKey(authority), zsescrow.SetConfigArgs{DefaultGrace: &grace})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := chain.Send(ctx, []solana.Instruction{ix}, authority); err != nil {
-			return nil, err
-		}
-		if err := chain.Refresh(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	owner, signing := newKey(), newKey()
-	for _, k := range []ed25519.PrivateKey{owner, signing} {
-		if err := chain.Airdrop(ctx, PublicKey(k), 2_000_000_000); err != nil {
-			return nil, err
-		}
-	}
-	if err := chain.MintUSDC(ctx, authority, PublicKey(owner), chain.Config.OperatorStake+chain.Config.NodeStake); err != nil {
-		return nil, err
-	}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return nil, err
 	}
+	signing := newKey()
 	baseURL := "http://" + ln.Addr().String()
-	opID, nodeID, err := chain.RegisterNode(ctx, owner, PublicKey(signing), baseURL)
+	chain, opID, nodeID, err := RegisterLocalnetNode(ctx, endpoint, authority, signing, baseURL)
 	if err != nil {
 		_ = ln.Close()
 		return nil, err
@@ -98,6 +69,48 @@ func StartLocalnet(ctx context.Context, endpoint string, authority ed25519.Priva
 		}
 	}()
 	return l, nil
+}
+
+// RegisterLocalnetNode registers a fresh operator owning one node that signs
+// with signing and is reachable at baseURL, on the cluster at endpoint, and
+// gives the signing key SOL for its endings. It readies the Config as
+// StartLocalnet does, so a real node registered here sees the same cluster
+// as the stub, and refuses an endpoint off this machine for the same reason.
+func RegisterLocalnetNode(ctx context.Context, endpoint string, authority, signing ed25519.PrivateKey, baseURL string) (chain *Chain, operatorID, nodeID uint64, err error) {
+	if err := checkLoopback(endpoint); err != nil {
+		return nil, 0, 0, err
+	}
+	if chain, err = Dial(ctx, endpoint, zsescrow.ProgramID); err != nil {
+		return nil, 0, 0, err
+	}
+	if chain.Config.DefaultGrace != chain.Config.MinGrace {
+		grace := chain.Config.MinGrace
+		ix, err := chain.Deployment.SetConfig(PublicKey(authority), zsescrow.SetConfigArgs{DefaultGrace: &grace})
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if _, err := chain.Send(ctx, []solana.Instruction{ix}, authority); err != nil {
+			return nil, 0, 0, err
+		}
+		if err := chain.Refresh(ctx); err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	owner := newKey()
+	for _, k := range []ed25519.PrivateKey{owner, signing} {
+		if err := chain.Airdrop(ctx, PublicKey(k), 2_000_000_000); err != nil {
+			return nil, 0, 0, err
+		}
+	}
+	if err := chain.MintUSDC(ctx, authority, PublicKey(owner), chain.Config.OperatorStake+chain.Config.NodeStake); err != nil {
+		return nil, 0, 0, err
+	}
+	operatorID, nodeID, err = chain.RegisterNode(ctx, owner, PublicKey(signing), baseURL)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return chain, operatorID, nodeID, nil
 }
 
 // ServeErr delivers the error that stopped the server, if one does before
