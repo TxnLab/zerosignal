@@ -65,7 +65,8 @@ const (
 	VerdictWait Verdict = iota + 1
 	// VerdictRefund: past D with no operator claim (open, or carrying the
 	// payer's own unmatched half). refundInactive is legal and returns the full
-	// max_price to the payer. Callable by anyone, but the payer is normally the
+	// max_price to the payer, or to the treasury when the payer's account can't
+	// take it. Callable by anyone, but the payer is normally the
 	// only party that knows the ticket was orphaned.
 	VerdictRefund
 	// VerdictLapse: past D carrying an operator claim. settleLapsed is legal: it
