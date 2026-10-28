@@ -30,6 +30,7 @@ import {
     SYSTEM_PROGRAM_ID,
     TOKEN_PROGRAM_ID,
     compileMessage,
+    createAssociatedTokenAccountIdempotent,
     encodeBase58,
     encodeTransaction,
     newTransaction,
@@ -45,7 +46,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
-import { Client, httpCreditIssuer, solanaDevnet, solanaLocalnet } from '../src/index.js'
+import { Client, ZsError, httpCreditIssuer, solanaDevnet, solanaLocalnet } from '../src/index.js'
 import type { SettleResult } from '../src/index.js'
 import type { SolanaSigner } from '../src/ports.js'
 import { confirmSignature } from '../src/solana/confirm.js'
@@ -102,10 +103,12 @@ interface Behavior {
     bad_body_hash?: boolean
     over_claim?: number
     ticket_lifetime_ms?: number
+    hold_open?: boolean
 }
 
 interface TicketState {
     ticket_id: string
+    max_price: number
     closed: boolean
     status?: string
     freeze_origin?: number
@@ -116,6 +119,8 @@ interface TicketState {
 interface PayerState {
     usdc: number
     tickets: TicketState[]
+    /** Priced tickets the stub issued whose open never landed; closed says no account exists. */
+    unopened: TicketState[]
     receipt_amounts: number[]
     errors: string[]
     credits: number
@@ -157,7 +162,7 @@ async function control<T>(path: string, init?: RequestInit): Promise<T> {
 
 const payerState = (address: string) => control<PayerState>(`/stub/payers/${address}`)
 
-const withFee = (amount: number) => BigInt(amount) + (BigInt(amount) * BigInt(stub.fee_bps)) / 10_000n
+const withFee = (amount: number | bigint) => BigInt(amount) + (BigInt(amount) * BigInt(stub.fee_bps)) / 10_000n
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -176,10 +181,14 @@ class Payer {
         return this.key.signer
     }
 
-    static async create(behavior: Behavior, credits = false): Promise<Payer> {
+    /** usdc absent is the stub's PayerUSDC. */
+    static async create(behavior: Behavior, credits = false, usdc?: bigint): Promise<Payer> {
         const key = await newKey()
         const address = key.address
-        await control('/stub/payers', { method: 'POST', body: JSON.stringify({ address, behavior }) })
+        await control('/stub/payers', {
+            method: 'POST',
+            body: JSON.stringify({ address, behavior, ...(usdc === undefined ? {} : { usdc: Number(usdc) }) }),
+        })
         // The stub's issuer, naming the payer in the header it counts by, as
         // a host's gate header would.
         const freeCredits = credits
@@ -205,15 +214,22 @@ class Payer {
         return new Payer(key, client)
     }
 
-    /** Runs one chat turn, on the stub's priced model unless model names another, and waits for its settle submit. */
-    async ask(stream: boolean, model = stub.model): Promise<{ text: string; err: unknown; settled: SettleResult }> {
+    /**
+     * Runs one chat turn, on the stub's priced model unless model names another, and waits for its settle submit.
+     * withinMs is the turn's budget, longer for a node a scenario has answer slowly.
+     */
+    async ask(
+        stream: boolean,
+        model = stub.model,
+        withinMs = 120_000,
+    ): Promise<{ text: string; err: unknown; settled: SettleResult }> {
         const body = JSON.stringify({
             model,
             messages: [{ role: 'user', content: 'say hello' }],
             max_tokens: 64,
             stream,
         })
-        const s = this.client.stream({ endpoint: '/v1/chat/completions', body }, AbortSignal.timeout(120_000))
+        const s = this.client.stream({ endpoint: '/v1/chat/completions', body }, AbortSignal.timeout(withinMs))
         let text = ''
         let err: unknown
         try {
@@ -257,10 +273,16 @@ class Payer {
 }
 
 const payers: Payer[] = []
-async function newPayer(b: Behavior, credits = false): Promise<Payer> {
-    const p = await Payer.create(b, credits)
+async function newPayer(b: Behavior, credits = false, usdc?: bigint): Promise<Payer> {
+    const p = await Payer.create(b, credits, usdc)
     payers.push(p)
     return p
+}
+
+/** Fails unless err is the SDK's error carrying the node's code, so a turn that failed some other way doesn't pass for the refusal a scenario drives. */
+function expectCode(err: unknown, code: string): void {
+    expect(err, 'the turn error').toBeInstanceOf(ZsError)
+    expect((err as ZsError).code).toBe(code)
 }
 
 /** The program's deployment on the validator, its mint read from the Config. */
@@ -377,7 +399,11 @@ async function returnFunds(rpc: SolanaRpcClient, d: Deployment, decimals: number
         lamports += acct.lamports
     }
     if (lamports > SIGNATURE_FEE) ixs.push(systemTransfer(k.address, to, lamports - SIGNATURE_FEE))
-    if (ixs.length === 0) return
+    if (ixs.length > 0) await sendAs(rpc, k, ixs)
+}
+
+/** Sends ixs signed and paid for by k alone, and waits until they are confirmed. */
+async function sendAs(rpc: SolanaRpcClient, k: Key, ixs: Instruction[]): Promise<void> {
     const bh = await rpc.getLatestBlockhash({ commitment: 'confirmed' })
     const t = newTransaction(compileMessage(k.address, bh.blockhash, ixs, 'legacy'))
     signTransaction(t, k.seed)
@@ -573,13 +599,110 @@ describe.skipIf(RPC === '' || (AUTHORITY === '' && FUNDER === '')).concurrent('S
         expect(err).toBeUndefined()
         expect(settled.err).toBeUndefined()
         expect(settled.settlement.frozen).toBe(true)
-        const t = await p.waitTicket(await p.onlyTicket(), CONFIRM_MS, 'frozen by the mismatch', frozen)
+        const id = await p.onlyTicket()
+        const t = await p.waitTicket(id, CONFIRM_MS, 'frozen by the mismatch', frozen)
         expect(t.freeze_origin).toBe(FREEZE_ORIGIN_SETTLE_MISMATCH)
         // The over-claim bars the node, so the next turn finds nowhere to go.
         expect((await p.ask(false)).err, 'a second turn at the barred node').toBeDefined()
         expect((await payerState(p.address)).tickets).toHaveLength(1)
         await p.checkStub()
+
+        // Only the admin releases a frozen ticket. A run funded without it,
+        // devnet's, stops at the freeze; that is the scenario's end there,
+        // not a skip.
+        if (!stub.resolves) {
+            console.info("resolving the freeze needs the Config's admin, which this run doesn't hold")
+            return
+        }
+        // Half the pre-fee ceiling to the node, its fee on top, the rest back
+        // to the payer, as the program's resolve_split divides it.
+        const share = 5_000n
+        await control('/stub/resolve', {
+            method: 'POST',
+            body: JSON.stringify({ address: p.address, ticket_id: id, operator_share_bps: Number(share) }),
+        })
+        await p.waitTicket(id, CONFIRM_MS, 'resolved', closed)
+        const award = ((BigInt(t.max_price) * 10_000n) / (10_000n + BigInt(stub.fee_bps)) * share) / 10_000n
+        expect(BigInt(stub.payer_usdc) - (await p.usdc()), 'what the payer paid after the resolve').toBe(withFee(award))
     }, TURN_MS)
+
+    // A node that sends the payer's open only after its blockhash expired can
+    // never land it: the turn fails, no ticket account exists, and the payer
+    // is charged nothing.
+    it('charges nothing for an open whose blockhash expired', async () => {
+        const p = await newPayer({ hold_open: true })
+        // The node holds the turn for a blockhash's whole life, 150 blocks, a
+        // minute or more on a busy cluster, before it answers.
+        expectCode((await p.ask(false, stub.model, 300_000)).err, 'payment_verification_failed')
+        const s = await payerState(p.address)
+        expect(s.tickets, 'tickets the payer opened at the stub').toEqual([])
+        expect(s.unopened.length, 'priced tickets the stub held the open of').toBeGreaterThan(0)
+        expect(s.unopened.every((t) => t.closed), 'no ticket account for a held open').toBe(true)
+        expect(BigInt(s.usdc)).toBe(BigInt(stub.payer_usdc))
+        await p.checkStub()
+    }, ENDING_MS)
+
+    // Two turns at once whose max prices together exceed the payer's
+    // balance: one open lands and is served, the cluster refuses the other's
+    // transfer, and the payer pays once.
+    it('spends once for two concurrent turns it can afford one of', async () => {
+        // A turn's max price and charge, from a payer with plenty; the second
+        // payer's turns are the same request, so the same figures.
+        const warm = await newPayer({})
+        const w = await warm.ask(false)
+        expect(w.err).toBeUndefined()
+        expect(w.settled.err).toBeUndefined()
+        const ws = await payerState(warm.address)
+        expect(ws.tickets).toHaveLength(1)
+        expect(ws.receipt_amounts).toHaveLength(1)
+        // One max price held, and short of a second even after the first
+        // settles and refunds.
+        const funded = BigInt(ws.tickets[0]!.max_price) + withFee(ws.receipt_amounts[0]!) - 1n
+        const p = await newPayer({}, false, funded)
+
+        const results = await Promise.all([p.ask(false), p.ask(false)])
+        const served = results.filter((r) => r.err === undefined && r.settled.err === undefined && r.text === stub.reply)
+        expect(served, 'turns served').toHaveLength(1)
+        for (const r of results) if (!served.includes(r)) expectCode(r.err, 'payment_verification_failed')
+        await p.waitTicket(await p.onlyTicket(), CONFIRM_MS, 'settled', closed)
+        const s = await payerState(p.address)
+        expect(s.receipt_amounts).toHaveLength(1)
+        expect(funded - BigInt(s.usdc), 'what the payer paid').toBe(withFee(s.receipt_amounts[0]!))
+        expect([...s.tickets, ...s.unopened].every((t) => t.closed), 'no ticket left open').toBe(true)
+        await p.checkStub()
+    }, TURN_MS)
+
+    // A refund the payer can't take, its USDC account closed, goes to the
+    // treasury: the ticket still closes, and the payer's account stays
+    // closed.
+    it('forfeits the refund of a payer whose USDC account is closed', async () => {
+        const rpc = new SolanaRpcClient({ endpoint: RPC })
+        const p = await newPayer({ no_receipt: true, ticket_lifetime_ms: 10_000 })
+        const { err } = await p.ask(false)
+        expect(err, "the node's failure").toBeDefined()
+        const id = await p.onlyTicket()
+        const maxPrice = BigInt((await payerState(p.address)).tickets[0]!.max_price)
+        const treasuryUsdc = async () => BigInt((await payerState(stub.treasury)).usdc)
+        const before = await treasuryUsdc()
+
+        // The payer empties its USDC account and closes it, keeping its SOL
+        // for the refund's fee.
+        const d = await deployment(rpc)
+        const { usdcDecimals } = await readSolanaConfig(rpc, d)
+        const [ata, source] = [d.tokenAccount(p.address), stub.funds_source]
+        await sendAs(rpc, p.key, [
+            createAssociatedTokenAccountIdempotent(p.address, source, d.mint),
+            transferChecked(ata, d.mint, d.tokenAccount(source), p.address, await p.usdc(), usdcDecimals),
+            closeTokenAccount(ata, p.address, p.address),
+        ])
+
+        await p.waitTicket(id, 10_000 + stub.default_grace * 1000 + 120_000, 'refunded', closed)
+        // At least the forfeit: on a shared cluster another run's forfeits
+        // land on the treasury too.
+        expect((await treasuryUsdc()) - before >= maxPrice, 'the treasury gained the forfeited max price').toBe(true)
+        expect(await rpc.getAccountInfo(ata, { commitment: 'confirmed' }), "the payer's USDC account").toBeNull()
+        await p.checkStub()
+    }, ENDING_MS)
 
     // A claim the payer holds no receipt against is left to lapse: the payer
     // neither refunds nor freezes it, and it lapses to the node at the deadline.

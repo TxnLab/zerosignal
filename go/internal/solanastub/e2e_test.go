@@ -201,12 +201,19 @@ func (l *harness) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 // gets with the payer's own key.
 func (l *harness) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*zs.Config, solana.PublicKey)) *payer {
 	t.Helper()
+	return l.newPayerFunded(t, b, payerUSDC, edit)
+}
+
+// newPayerFunded is newPayerWith giving the payer usdc base units of test
+// USDC rather than payerUSDC.
+func (l *harness) newPayerFunded(t *testing.T, b solanastub.Behavior, usdc uint64, edit func(*zs.Config, solana.PublicKey)) *payer {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	key := newKey()
 	pub := solanastub.PublicKey(key)
 	l.sweep(t, key)
-	if err := l.FundPayer(ctx, pub, payerUSDC); err != nil {
+	if err := l.FundPayer(ctx, pub, usdc); err != nil {
 		t.Fatal(err)
 	}
 	l.Node.SetBehavior(pub, b)
@@ -232,6 +239,29 @@ func (l *harness) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*z
 	return &payer{key: pub, signer: payerSigner{key}, client: client}
 }
 
+// priced is every priced ticket the stub issued p, opened or not.
+func (l *harness) priced(p *payer) []solanastub.Issued {
+	var out []solanastub.Issued
+	for _, is := range l.Node.Issued(p.key) {
+		if is.MaxPrice > 0 {
+			out = append(out, is)
+		}
+	}
+	return out
+}
+
+// maxPrice is the max price of the ticket the stub issued p as id.
+func (l *harness) maxPrice(t *testing.T, p *payer, id [16]byte) uint64 {
+	t.Helper()
+	for _, is := range l.Node.Issued(p.key) {
+		if is.ID == id {
+			return is.MaxPrice
+		}
+	}
+	t.Fatalf("the stub issued payer no ticket %x", id)
+	return 0
+}
+
 func chatBody(model string, stream bool) []byte {
 	b, _ := json.Marshal(map[string]any{
 		"model":      model,
@@ -251,7 +281,14 @@ func (p *payer) ask(t *testing.T, stream bool) (string, zs.Settlement, error, er
 
 func (p *payer) askModel(t *testing.T, model string, stream bool) (string, zs.Settlement, error, error) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	return p.askWithin(t, model, stream, 2*time.Minute)
+}
+
+// askWithin is askModel with the turn's budget, for a node a scenario has
+// answer slowly.
+func (p *payer) askWithin(t *testing.T, model string, stream bool, within time.Duration) (string, zs.Settlement, error, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), within)
 	defer cancel()
 	s := p.client.Stream(ctx, zs.Request{Endpoint: zs.EndpointChatCompletions, Body: chatBody(model, stream)})
 	text, err := s.Text()
@@ -291,6 +328,17 @@ func (l *harness) waitTicket(t *testing.T, id [16]byte, within time.Duration, wh
 }
 
 func closed(tk *zsescrow.Ticket) bool { return tk == nil }
+
+// wantCode fails unless err is the SDK's error carrying the node's code, so a
+// turn that failed some other way, timing out before the node answered, say,
+// doesn't pass for the refusal a scenario drives.
+func wantCode(t *testing.T, err error, code string) {
+	t.Helper()
+	var zerr *zs.Error
+	if !errors.As(err, &zerr) || zerr.Code != code {
+		t.Errorf("turn error %v, want the node's %s", err, code)
+	}
+}
 
 func (l *harness) usdc(t *testing.T, owner solana.PublicKey) uint64 {
 	t.Helper()
@@ -588,7 +636,8 @@ func TestSolanaE2E_FreezesAnOverClaim(t *testing.T) {
 	if !set.Frozen {
 		t.Errorf("settlement = %+v, want the payer's freezing half", set)
 	}
-	tk := l.waitTicket(t, l.onlyTicket(t, p), l.confirm, "frozen by the mismatch", func(tk *zsescrow.Ticket) bool {
+	id := l.onlyTicket(t, p)
+	tk := l.waitTicket(t, id, l.confirm, "frozen by the mismatch", func(tk *zsescrow.Ticket) bool {
 		return tk != nil && tk.Status == zsescrow.TicketFrozen
 	})
 	if tk.FreezeOrigin != zsescrow.FreezeOriginSettleMismatch {
@@ -600,6 +649,159 @@ func TestSolanaE2E_FreezesAnOverClaim(t *testing.T) {
 	}
 	if n := len(l.Node.Opened(p.key)); n != 1 {
 		t.Errorf("payer opened %d tickets at the barred node, want 1", n)
+	}
+	l.checkStub(t, p)
+
+	// Only the admin releases a frozen ticket. A run funded without it,
+	// devnet's, stops at the freeze; that is the scenario's end there, not a
+	// skip.
+	if l.Funding.Admin() == nil {
+		t.Log("resolving the freeze needs the Config's admin, which this run doesn't hold")
+		return
+	}
+	// Half the pre-fee ceiling to the node, its fee on top, the rest back to
+	// the payer, as the program's resolve_split divides it.
+	const share = 5_000
+	if err := l.Resolve(t.Context(), id, p.key, share); err != nil {
+		t.Fatal(err)
+	}
+	l.waitTicket(t, id, l.confirm, "resolved", closed)
+	maxPrice, feeBps := l.maxPrice(t, p, id), uint64(l.Chain.Config.FeeBps)
+	award := maxPrice * 10_000 / (10_000 + feeBps) * share / 10_000
+	if got, want := payerUSDC-l.usdc(t, p.key), l.WithFee(award); got != want {
+		t.Errorf("payer paid %d after the resolve, want the award %d and its fee", got, want)
+	}
+}
+
+// A node that sends the payer's open only after its blockhash expired can
+// never land it: the turn fails, no ticket account exists, and the payer is
+// charged nothing.
+func TestSolanaE2E_ExpiredBlockhashChargesNothing(t *testing.T) {
+	l := setup(t)
+	t.Parallel()
+	p := l.newPayer(t, solanastub.Behavior{HoldOpen: true})
+	// The node holds the turn for a blockhash's whole life, 150 blocks, a
+	// minute or more on a busy cluster, before it answers.
+	_, _, err, _ := p.askWithin(t, solanastub.Model, false, 5*time.Minute)
+	wantCode(t, err, "payment_verification_failed")
+	if ids := l.Node.Opened(p.key); len(ids) != 0 {
+		t.Errorf("payer opened %d tickets", len(ids))
+	}
+	issued := l.priced(p)
+	if len(issued) == 0 {
+		t.Fatal("the stub issued no priced ticket, so no open was held")
+	}
+	for _, is := range issued {
+		if tk, err := l.Chain.Ticket(t.Context(), l.OperatorID, l.NodeID, is.ID); err != nil || tk != nil {
+			t.Errorf("ticket %x: %+v, %v; want no account", is.ID, tk, err)
+		}
+	}
+	if got := l.usdc(t, p.key); got != payerUSDC {
+		t.Errorf("payer holds %d, want %d", got, payerUSDC)
+	}
+	l.checkStub(t, p)
+}
+
+// Two turns at once whose max prices together exceed the payer's balance:
+// one open lands and is served, the cluster refuses the other's transfer, and
+// the payer pays once.
+func TestSolanaE2E_ConcurrentTurnsSpendOnce(t *testing.T) {
+	l := setup(t)
+	t.Parallel()
+	// A turn's max price and charge, from a payer with plenty; the second
+	// payer's turns are the same request, so the same figures.
+	warm := l.newPayer(t, solanastub.Behavior{})
+	if _, _, err, werr := warm.ask(t, false); err != nil || werr != nil {
+		t.Fatalf("warm-up turn: %v; settle: %v", err, werr)
+	}
+	maxPrice := l.maxPrice(t, warm, l.onlyTicket(t, warm))
+	receipts := l.Node.Receipts(warm.key)
+	if len(receipts) != 1 {
+		t.Fatalf("%d warm-up receipts, want 1", len(receipts))
+	}
+	// One max price held, and short of a second even after the first
+	// settles and refunds.
+	funded := maxPrice + l.WithFee(receipts[0].AmountCharged) - 1
+	p := l.newPayerFunded(t, solanastub.Behavior{}, funded, nil)
+
+	type result struct {
+		text     string
+		err, set error
+	}
+	results := make([]result, 2)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Go(func() {
+			text, _, err, werr := p.ask(t, false)
+			results[i] = result{text, err, werr}
+		})
+	}
+	wg.Wait()
+	served := 0
+	for _, r := range results {
+		if r.err == nil && r.set == nil && r.text == solanastub.Reply {
+			served++
+		} else {
+			wantCode(t, r.err, "payment_verification_failed")
+		}
+	}
+	if served != 1 {
+		t.Fatalf("%d turns served, want 1: %+v", served, results)
+	}
+	id := l.onlyTicket(t, p)
+	l.waitTicket(t, id, l.confirm, "settled", closed)
+	receipts = l.Node.Receipts(p.key)
+	if len(receipts) != 1 {
+		t.Fatalf("%d receipts, want 1", len(receipts))
+	}
+	if got, want := funded-l.usdc(t, p.key), l.WithFee(receipts[0].AmountCharged); got != want {
+		t.Errorf("payer paid %d, want one receipt's %d and its fee", got, want)
+	}
+	for _, is := range l.priced(p) {
+		if tk, err := l.Chain.Ticket(t.Context(), l.OperatorID, l.NodeID, is.ID); err != nil || tk != nil {
+			t.Errorf("ticket %x left open: %+v, %v", is.ID, tk, err)
+		}
+	}
+	l.checkStub(t, p)
+}
+
+// A refund the payer can't take, its USDC account closed, goes to the
+// treasury: the ticket still closes, and the payer's account stays closed.
+func TestSolanaE2E_ClosedAccountForfeitsTheRefund(t *testing.T) {
+	l := setup(t)
+	t.Parallel()
+	ctx := t.Context()
+	p := l.newPayer(t, solanastub.Behavior{NoReceipt: true, TicketLifetime: 10 * time.Second})
+	if _, _, err, _ := p.ask(t, false); err == nil {
+		t.Fatal("turn succeeded, want the node's failure")
+	}
+	id := l.onlyTicket(t, p)
+	maxPrice := l.maxPrice(t, p, id)
+	treasury := l.Chain.Config.Treasury
+	before := l.usdc(t, treasury)
+
+	// The payer empties its USDC account and closes it, keeping its SOL for
+	// the refund's fee.
+	d, source := l.Chain.Deployment, l.Funding.Source()
+	left := l.usdc(t, p.key)
+	if _, err := l.Chain.Send(ctx, []solana.Instruction{
+		solana.CreateAssociatedTokenAccountIdempotent(p.key, source, d.Mint),
+		solana.TransferChecked(d.TokenAccount(p.key), d.Mint, d.TokenAccount(source), p.key, left, l.Chain.Config.USDCDecimals),
+		solanastub.CloseTokenAccount(d.TokenAccount(p.key), p.key, p.key),
+	}, p.signer.key); err != nil {
+		t.Fatal(err)
+	}
+
+	grace := time.Duration(l.Chain.Config.DefaultGrace) * time.Second
+	l.waitTicket(t, id, 10*time.Second+grace+2*time.Minute, "refunded", closed)
+	// At least the forfeit: on a shared cluster another run's forfeits land
+	// on the treasury too. A fee withdrawal there could also lower it, which
+	// fails this rather than wrap.
+	if after := l.usdc(t, treasury); after < before+maxPrice {
+		t.Errorf("the treasury went from %d to %d, want at least the forfeited %d more", before, after, maxPrice)
+	}
+	if _, err := l.Chain.RPC.GetAccountInfo(ctx, d.TokenAccount(p.key), rpc.Confirmed); !errors.Is(err, rpc.ErrNotFound) {
+		t.Errorf("the payer's USDC account after the refund: %v, want none", err)
 	}
 	l.checkStub(t, p)
 }
