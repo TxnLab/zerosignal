@@ -218,8 +218,10 @@ type Identity struct {
 	NodeID     uint64 `json:"node_id"`
 	URL        string `json:"url"`
 	// SigningPhrase is the node's 24-word signing phrase, which zs-node reads
-	// as a <NAME>_MNEMONIC.
-	SigningPhrase string `json:"signing_phrase"`
+	// as a <NAME>_MNEMONIC; SigningAddress is its address, so a script can top
+	// it up without deriving it.
+	SigningPhrase  string `json:"signing_phrase"`
+	SigningAddress string `json:"signing"`
 	// OwnerPhrase is the operator owner's, which unregisters it.
 	OwnerPhrase string `json:"owner_phrase"`
 }
