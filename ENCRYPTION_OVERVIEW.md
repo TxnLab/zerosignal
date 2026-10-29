@@ -155,11 +155,13 @@ The response key is **committed at reserve, not chosen at response time**:
 3. The caller decrypts with `K_response` (`DecryptBody` /
    `DecryptSSEDataValue`).
 
-Sealing under a key whose `sha256` ≠ `commit_k`, or crossing AAD bindings, is
-cryptographically provable fraud and **slashable** (§3b (a) key-substitution,
-(d) cross-wiring). Slashing evidence keys entirely off the Ed25519 signing key,
-tickets/receipts, and `commit_k` — never an encryption key, which is why no
-encryption key has to exist on chain for the evidence to hold.
+Sealing under a key whose `sha256` ≠ `commit_k`, or crossing AAD bindings, fails
+closed on the payer's side (§3b (a) key-substitution, (d) cross-wiring). Neither
+is attributable: the node signs neither `X-Zs-Response-Key` nor the response,
+and the payer already holds `K_response`, so a payer could fabricate either
+case. What is attributable keys off the Ed25519 signing key (tickets, receipts,
+and the `commit_k` a ticket signs), never an encryption key, which is why no
+encryption key has to exist on chain.
 
 The `[DONE]` SSE sentinel is **always plaintext**, even on encrypted streams
 (§5.3). Final-frame truncation is not AEAD-detectable — application-level

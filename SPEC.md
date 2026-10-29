@@ -689,7 +689,7 @@ A refusal on the second ask is that node's answer: a refusal, with no strike.
 
 ### Why the response key is committed, not chosen
 
-`commit_k` ties the sealed response to a symmetric key the operator named before payment. When the proxy recovers `K_response` from the `X-Zs-Response-Key` header (§ 5.2 non-stream; § 5.3 stream setup), it checks `sha256(K_response)` against `ticket.commit_k` on **both** response paths, before accepting any body or frame. A mismatch is cryptographic proof that the operator did not seal with the committed key, and the ticket plus the mismatch is slashing evidence (§ 3b has the full evidence list). The commitment is anchored by the node-signed ticket, whose signed canonical bytes include `commit_k` (§ 3a "Ticket signature"), making it non-repudiable off-chain evidence. There is **no on-chain copy**: `open()`'s ABI args carry no `commit_k`, and no transaction in the open group carries a commitment note.
+`commit_k` ties the sealed response to a symmetric key the operator named before payment. When the proxy recovers `K_response` from the `X-Zs-Response-Key` header (§ 5.2 non-stream; § 5.3 stream setup), it checks `sha256(K_response)` against `ticket.commit_k` on **both** response paths, before accepting any body or frame. A mismatch fails the request closed. It is not slashing evidence: the header is an unsigned wrap to the payer's own recipient, so a payer could present one for any key (§ 3b (a)). The commitment is anchored by the node-signed ticket, whose signed canonical bytes include `commit_k` (§ 3a "Ticket signature"), making it non-repudiable off-chain evidence. There is **no on-chain copy**: `open()`'s ABI args carry no `commit_k`, and no transaction in the open group carries a commitment note.
 
 ### Sealed request envelope
 
@@ -1345,20 +1345,25 @@ This spec defines the wire format; the on-chain registry contract is the arbiter
 
 ### Design principle
 
-Every slashable offense must be **cryptographically attributable**: the arbiter verifies fault from signed artifacts the operator cannot repudiate, not from the proxy's account of events. Uptime, latency and answer quality are reputational concerns, handled by deranking (audits and ratings); they do not slash stake.
+Every offense that slashes by rule, rather than at the admin's discretion, must be **cryptographically attributable**: the arbiter verifies fault from signed artifacts the operator cannot repudiate, not from the proxy's account of events. Uptime, latency and answer quality are reputational concerns, handled by deranking (audits and ratings); they do not slash stake.
 
-The ticket (§ 3a) is the single root of attributability. Its Ed25519 signature over `sha256(CanonicalBytes())` binds the operator to `max_price`, `expires_at`, `model`, `stream` and `commit_k` before any inference runs. Every slashing case below reduces to: produce the ticket plus one more artifact, and run a deterministic check.
+The ticket (§ 3a) is the single root of attributability. Its Ed25519 signature over `sha256(CanonicalBytes())` binds the operator to `max_price`, `expires_at`, `model`, `stream` and `commit_k` before any inference runs. A case is attributable when the ticket plus one more node-signed artifact settles it by a deterministic check.
 
 ### Slashing options
 
-Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the ticket's open-time `feeBps`, which only the on-chain ticket box records, and (c) depends on on-chain settlement state.
+Four categories. (b) needs the node-signed receipt and the ticket's open-time `feeBps`, which only the on-chain ticket box records, and (c) depends on on-chain settlement state.
+
+(a) and (d) fail the design principle. The only node-signed artifact in either is the ticket. `X-Zs-Response-Key` is an age wrap to the payer's own recipient, signed by no one, and the response envelope is AEAD under a `K_response` the payer already holds from reserve (`wrapped_response_key`). A payer can therefore make either case against an honest node: wrap a key of its choosing, or present bytes that don't open. So (a) and (d) are detection rules, not attributable offenses. Each fails the request closed on the payer's side, and neither is evidence for the contract or for the admin.
+
+Only (b) has a proof the contract forces: `settle()` refuses an overcharge outright. Nothing in this section slashes automatically. The one slash is the admin's discretionary eviction (`evictOperator` on Algorand, `evict` on Solana), which moves a share of the stake to the treasury.
 
 #### (a) Key-substitution fraud
 
 - **What the operator did:** sealed the response under a symmetric key `K'` where `sha256(K') ≠ ticket.commit_k`.
 - **Evidence:** (1) the signed ticket; (2) the `X-Zs-Response-Key` header value from the response; (3) the unwrapped `K_response`, which the proxy submits directly, or its retained ephemeral X25519 private key so the arbiter can re-derive it.
-- **Arbiter verification:** recompute `sha256(K_response)` and compare it to `ticket.commit_k`.
-- **Severity:** the strongest case, since the operator demonstrably broke its pre-commitment. Full payment refund plus stake forfeiture.
+- **Check:** recompute `sha256(K_response)` and compare it to `ticket.commit_k`. Only the payer can run it, and its inputs are the payer's word: the header is not node-signed.
+- **Response:** the request fails closed. Both SDKs check `commit_k` before they accept a body or a stream frame, so a substituted key reaches the caller as an error, not as content. Neither SDK excludes the node for it. It fails closed on content, not on payment: the reference SDKs dispute a claim only against a receipt they hold, and there is none, so a node claim on the ticket lapses to the node at the deadline as any undisputed claim does, and with no claim `refundInactive` returns the escrow.
+- **Severity:** not attributable (see above). The harm is also narrower than "fraud" suggests: the node decrypts the request and generates the response, so it holds the plaintext before any key is chosen, and substitution gains it no content. What it can buy is sealing under a key a colluding relay knows, key reuse across tickets, or a pipeline other than the advertised one. Retention is addressed by other machinery: `store: false` by default, the ban on logging or persisting content, and, in confidential mode, the attested dataflow posture (§ 3e).
 
 #### (b) Overcharge
 
@@ -1382,8 +1387,8 @@ Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the 
 
 - **What the operator did:** returned a response whose `algorand_tx_id` / `ticket_id` AAD binding does not match the sealed request. That is, it attempted to splice a cached or stolen response onto a different request, or to reuse a consumed ticket's `K_response` on a new request.
 - **Evidence:** (1) the signed ticket; (2) the request envelope; (3) the response envelope (or the sealed SSE frames).
-- **Arbiter verification:** rebuild the body or frame AAD (§ 6) from the sent request's values and try to AEAD-open the response. An AEAD failure under the ticket-committed `K_response` proves the operator deliberately crossed bindings.
-- **Severity:** equivalent to (a). Deliberate splicing defeats the purpose of the AAD binding, so it is a full slash.
+- **Check:** rebuild the body or frame AAD (§ 6) from the sent request's values and try to AEAD-open the response. A failure shows the bytes don't open under the committed `K_response`, not who produced them: the payer holds that key and the response is not node-signed, and on-path tampering fails the same way (below).
+- **Severity:** the most serious harm of the four, since deliberate splicing defeats the purpose of the AAD binding, but not attributable, for the reason (a) isn't. Detection is on the payer's side and fails closed, since an AEAD failure is unrecoverable and a spliced response is never delivered. As in (a), that covers content, not payment.
 
 ### What is not slashable (reputation or passthrough only)
 
@@ -1396,7 +1401,7 @@ Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the 
 
 ### Evidence retention
 
-**What the reference proxy does.** Slashing arbitration (the arbiter for cases (a)–(d)) lives outside this spec, and the reference proxy keeps **no** local dispute buffer. It handles evidence only at detection time:
+**What the reference proxy does.** Slashing arbitration (the arbiter for the attributable cases) lives outside this spec, and the reference proxy keeps **no** local dispute buffer. It handles evidence only at detection time:
 
 - Receipt verification (signature and `ticket_id`, `amount_charged ≤ max_price`, `body_hash`) and the `commit_k` check run inline on every response (§ 3a "Settlement receipt", § 5.2 / § 5.3).
 - A `body_hash` mismatch fires `escrow.protest()` **immediately**, attaching a head-truncated excerpt of the reconstructed plaintext (no larger than the contract's dispute-excerpt cap) as on-chain dispute material, and freezes the ticket. One case does not freeze by protest: if the node has already posted a pending claim whose digest differs from the protested receipt's, the contract refuses the protest (`receiptDigest must match the pending claim`). If that claim exceeds the receipt and the escrow has `resolveFrozen`, the payer's settle at the receipt's values freezes the ticket instead, without the excerpt (§ 3a "Payer's check of an operator claim"). Otherwise each reference SDK logs the failure, and the pending claim lapses to the node at the deadline. A protest refused for arriving after `expires_at + settlement_grace_seconds` gets no settle either, since the same deadline bars it. The durable evidence is that protest transaction, which carries the receipt's `amountCharged`, `receiptDigest` and node signature `receiptSig` (verified on chain; the full receipt, including `body_hash`, is not recoverable from chain), together with any node-signed pending claim the frozen ticket already held. On Solana the protest carries no excerpt. It puts the receipt's canonical bytes on chain, `body_hash` included, with the node's signature over their digest in an Ed25519 precompile instruction, so there the full receipt is recoverable from chain. The program's refusal of a receipt other than the pending claim's is `ReceiptNotPending`, and its refusal past the deadline is `PastDeadline`, which the reference SDKs report as they report Algorand's. A Solana protest that lands and fails pays its fee, and the turn's settlement reports it.
@@ -1411,7 +1416,9 @@ Four categories. (a) and (d) rest on signed artifacts alone. (b) also needs the 
 4. **Ephemeral X25519 private key OR the unwrapped `K_response`.** The arbiter accepts either: the ephemeral private key plus the wrapped header is equivalent to `K_response`.
 5. **The node-signed receipt** (§ 3a "Settlement receipt"). Needed for case (b), and the required input to `protest()`.
 
-Retaining (4) is a privacy tradeoff: holding the ephemeral key lengthens the window in which a later compromise could decrypt this one response. A retaining proxy SHOULD hold it only as long as it needs to assert the dispute, and purge it immediately afterward. The reference proxy's wipe-on-completion policy is the privacy-maximal end of that tradeoff. It gives up after-the-fact filing of cases (a) and (d) in exchange for retaining no key material, and relies on the inline protest for the disputes it can raise.
+Items 2–4 only let a third party re-run the payer's (a) and (d) checks. A payer could fabricate them (above), so they make neither case attributable.
+
+Retaining (4) is a privacy tradeoff: holding the ephemeral key lengthens the window in which a later compromise could decrypt this one response. A retaining proxy SHOULD hold it only as long as it needs to assert the dispute, and purge it immediately afterward. The reference proxy's wipe-on-completion policy is the privacy-maximal end of that tradeoff. It gives up re-running the (a) and (d) checks after the fact, which no dispute could rest on, in exchange for retaining no key material, and relies on the inline protest for the disputes it can raise.
 
 ### Reference implementation
 
@@ -3929,7 +3936,7 @@ Two structural differences follow from that table.
 
 **There is no vendor to trust.** Every other row has a company that both operates the privacy-preserving intermediary and stands behind the retention promise. The separation between "who sees your IP" and "who sees your prompt" is organizational, and the same entity can undo it. ZeroSignal has no such party: the relay and the target are *different operators* for every request, enforced by owner-key diversity (§ 3f), and neither one is us. Apple PCC is the peer that also makes the split structural (a third party runs its OHTTP relay), but within a single-vendor trust root rather than across mutually distrusting parties.
 
-**Non-retention is not only a promise.** For Lumo, Leo, Duck.ai and Venice, the guarantee's floor is a published policy (plus, for Duck.ai, a contract with the providers): good-faith commitments with no cryptographic or economic enforcement behind them. ZeroSignal's floor is a protocol obligation (§ 3a) backed by attributable, signed artifacts and a slashable stake (§ 3b), and by hardware in confidential mode (§ 3e). That is a different *kind* of assurance, not automatically a stronger one in practice. A large vendor with a reputation to lose and a decentralized operator with a bond at risk are different bets, and § 13.6 lists where the peers are ahead.
+**Non-retention is not only a promise.** For Lumo, Leo, Duck.ai and Venice, the guarantee's floor is a published policy (plus, for Duck.ai, a contract with the providers): good-faith commitments with no cryptographic or economic enforcement behind them. ZeroSignal's floor is a protocol obligation (§ 3a) with a stake the admin can slash for misconduct (§ 3b), and hardware in confidential mode (§ 3e). Outside confidential mode no signed artifact shows that a node kept content, so that stake is at risk on the admin's judgement, not on proof. That is a different *kind* of assurance, not automatically a stronger one in practice. A large vendor with a reputation to lose and a decentralized operator with a bond at risk are different bets, and § 13.6 lists where the peers are ahead.
 
 **Where the chain of custody ends.** A ZeroSignal node may serve a model from self-hosted weights *or* by passing the request to a hosted third-party API. In the second configuration, plaintext leaves the node for that provider. That puts the hop in the same class as Duck.ai, minus a bilateral contract, plus a `store: false` default that the caller can override (§ 3a "Upstream retention: caller-controlled, default off"). Self-hosted weights, or a confidential-mode node (§ 3e), is the configuration where the custody chain actually ends at the operator.
 
