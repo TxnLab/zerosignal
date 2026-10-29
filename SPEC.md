@@ -1851,7 +1851,7 @@ The contract also maintains a set of cumulative protocol-wide totals in app **gl
 
 `ttft_ms` and `decode_ms` on the receipt are operator-measured timing, carried as two separate `uint64`s:
 
-- `ttft_ms` is time-to-first-token: prefill plus queue, up to the **first response from the LLM of any kind** (reasoning, content or a tool call).
+- `ttft_ms` is time-to-first-token: from the node's decrypt of the request, so admission (the ticket and admission-tag checks, the payment check, and on Solana under a strict open policy the open's landing) as well as queue and prefill, up to the **first response from the LLM of any kind** (reasoning, content or a tool call). It is the wait the payer sees, not the model's alone.
 - `decode_ms` is decode time, from the **first frame the upstream sent** to completion — deliberately not from the first *output* frame. See "Where the decode window starts" below.
 
 The two windows therefore **overlap**: decode opens at or before TTFT closes, and `ttft_ms + decode_ms` is not total service time. The gap between them is whatever the upstream sent before its first token, which for a provider that opens the stream and then thinks silently is the entire thinking phase. They coincide (adjacent, as they were before) whenever the first frame *is* the first output frame, which is the common case.
