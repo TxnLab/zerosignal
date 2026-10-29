@@ -229,6 +229,38 @@ describe('checkTurnReceipt', () => {
         expect(slot.expected).toBe(false)
     })
 
+    // A free Solana turn has no handle: a zero receipt is recorded and nothing
+    // submitted, and one charging more than its zero ceiling is refused and
+    // released, with no protest, since nothing opened to protest against.
+    it('submits nothing for a free Solana turn, and refuses a receipt charging over its zero ceiling', async () => {
+        const record = () => {
+            const calls: string[] = []
+            const spendGuard: SpendGuard = {
+                admit() {},
+                reserve() {},
+                settle: (id, amount) => void calls.push(`settle ${id} ${amount}`),
+                release: (id) => void calls.push(`release ${id}`),
+            }
+            return { calls, spendGuard }
+        }
+
+        let f = await fixture({ amount_charged: 0 })
+        f.ticket.max_price = 0
+        let g = record()
+        let r = await check(depsOf({ spendGuard: g.spendGuard }).deps, f, null)
+        expect(r.check.violation).toBe('')
+        expect(r.submit).toBeNull()
+        expect(g.calls).toEqual([`settle ${TICKET_ID} 0`])
+
+        f = await fixture({ amount_charged: 1 })
+        f.ticket.max_price = 0
+        g = record()
+        r = await check(depsOf({ spendGuard: g.spendGuard }).deps, f, null)
+        expect(r.check.violation).toBe('amount')
+        expect(r.submit).toBeNull()
+        expect(g.calls).toEqual([`release ${TICKET_ID}`])
+    })
+
     it('finishes the slot when the submit throws, and rethrows', async () => {
         const f = await fixture()
         const slot = new SettleSlot()
@@ -766,6 +798,17 @@ describe('bufferedResponder', () => {
         const submit = s.after[0]![1] as () => Promise<unknown>
         await submit()
         expect(s.handle.acks[0]![1]).toBe(VALID_GROUP)
+    })
+
+    // A free Solana turn opened nothing: no open fee, and nothing to submit.
+    it('reports no open fee for a free Solana turn', async () => {
+        const s = await setup()
+        s.call.handle = null
+        const { resp, body } = sealedResponse(s)
+        await bufferedResponder(s.deps, s.call)(s.em, resp, body)
+        expect(s.em.failed).toBeUndefined()
+        expect(s.em.replies[0]![3]).toMatchObject({ openFees: 0, settleFees: 0 })
+        expect(s.handle.acks).toEqual([])
     })
 
     it('reports usage in the unit the deps name', async () => {

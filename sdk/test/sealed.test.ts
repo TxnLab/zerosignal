@@ -723,6 +723,49 @@ describe('runSealed', () => {
         expect(s.sent.map((r) => r.url)).toEqual([wantUrl])
     })
 
+    // A free Solana turn opens nothing: the wallet is never asked, the
+    // envelope names no open and the tag binds an empty tx id, nothing is
+    // journaled or watched, and the reservation is released at once. Hosts
+    // still get the committed line once the turn is sealed, with no open to
+    // name.
+    it('opens nothing for a free Solana turn', async () => {
+        for (const nodeOpener of [false, true]) {
+            const s = await setup({ protoVersion: PROTO_VERSION, nodeOpener })
+            s.deps.rail = 'solana'
+            ;(s.run.reserved.ticket as { max_price: number }).max_price = 0
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.opens).toEqual([])
+            expect(s.handOffs).toEqual([])
+            expect(s.opened).toEqual([])
+            expect(s.released).toEqual(['TKT1'])
+            expect(s.em.committedArgs).toEqual(['TKT1', '', 0])
+            expect(s.em.order).toEqual(['reserved TKT1 9', 'committed'])
+            expect(s.em.failed).toBeUndefined()
+
+            const dec = await decryptRequest(s.sent[0]!.init.body as Uint8Array, s.pinned.secret)
+            expect(dec.openGroup).toBe('')
+            expect(dec.algorandTxID).toBe('')
+            expect(dec.admissionTag).toEqual(computeAdmissionTag(new Uint8Array(32).fill(3), 'TKT1', '', dec.body))
+            // No handle, so the receipt check has no ack or protest to send.
+            expect(s.calls).toHaveLength(1)
+            expect(s.calls[0]!.handle).toBeNull()
+        }
+    })
+
+    // The same ticket on Algorand, or a priced one on Solana, opens as before.
+    it.each([
+        ['algorand', 0],
+        ['solana', 5000],
+    ] as const)('opens a %s ticket at max_price %d', async (rail, maxPrice) => {
+        const s = await setup()
+        s.deps.rail = rail
+        ;(s.run.reserved.ticket as { max_price: number }).max_price = maxPrice
+        await runSealed(s.deps, s.em, s.run)
+        expect(s.opens).toHaveLength(1)
+        expect(s.released).toEqual([])
+        expect(s.em.committedArgs).toEqual(['TKT1', 'APPCALLTXID', 2000])
+    })
+
     describe('handing the open to the node', () => {
         // TestDispatch_WalletPath_HandsOpenToNodeByVersion: a group handed to
         // an older node loses the turn, since it ignores the field and waits
@@ -781,6 +824,18 @@ describe('runSealed', () => {
             await runSealed(s.deps, s.em, s.run)
             expect(s.rechecks.count).toBe(want)
             // The refusal still reaches the responder as it came.
+            expect(s.responses).toHaveLength(1)
+            expect(s.responses[0]![0]).toBe(402)
+        })
+
+        // TestRunSealed_FreeSolanaTurnRefusalRechecksNoDeposit: a free turn's
+        // refusal is about no open.
+        it('rechecks no deposit when the node refuses a free Solana turn', async () => {
+            const s = await setup({ protoVersion: NODE_SUBMITS_OPEN_MIN_VERSION, nodeOpener: true, reply: refused })
+            s.deps.rail = 'solana'
+            ;(s.run.reserved.ticket as { max_price: number }).max_price = 0
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.rechecks.count).toBe(0)
             expect(s.responses).toHaveLength(1)
             expect(s.responses[0]![0]).toBe(402)
         })
@@ -929,6 +984,20 @@ describe('runSealed', () => {
         expect(s.sent).toEqual([])
         expect(s.calls).toEqual([])
         expect(s.released).toEqual([])
+    })
+
+    // A free turn has no open to say it committed, so the seal does: one that
+    // won't seal never reached its node.
+    it('reports no commit for a free Solana turn that won’t seal', async () => {
+        const s = await setup({ responseKey: new Uint8Array(31) })
+        s.deps.rail = 'solana'
+        ;(s.run.reserved.ticket as { max_price: number }).max_price = 0
+        await runSealed(s.deps, s.em, s.run)
+        expect(s.em.order).toEqual(['reserved TKT1 9', 'fail wrap_request'])
+        expect(s.em.committedArgs).toBeUndefined()
+        expect(s.em.failed).toMatchObject({ code: 'wrap_request', paid: false })
+        expect(s.sent).toEqual([])
+        expect(s.released).toEqual(['TKT1'])
     })
 
     describe('a failed open', () => {

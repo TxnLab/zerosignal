@@ -200,7 +200,7 @@ export function checkTicketTerms(t: Ticket, terms: ReserveTerms, nowMs: number, 
 
 /**
  * BusyError is a 429. code is the node's, and it decides whether re-asking
- * can help: of the four conditions a 429 carries, only no_capacity clears in
+ * can help: of the five conditions a 429 carries, only no_capacity clears in
  * seconds, and re-asking after payer_slot_cap earns the payer a strike.
  */
 export class BusyError extends Error {

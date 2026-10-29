@@ -25,6 +25,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 2000,
         "attribution": ""
       }
@@ -53,6 +54,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 2000,
         "attribution": ""
       }
@@ -79,6 +81,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -107,6 +110,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 300000,
         "attribution": ""
       }
@@ -134,6 +138,36 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
+        "hint_ms": 0,
+        "attribution": ""
+      }
+    },
+    {
+      "name": "a spent free budget is its own refusal",
+      "error": {
+        "kind": "busy",
+        "code": "free_budget_exhausted",
+        "retry_after_ms": 3600000
+      },
+      "route": {
+        "relayed": false,
+        "relay_marks_hops": false,
+        "caller_aborted": false
+      },
+      "use_privacy": false,
+      "want": {
+        "outcome": "free_budget",
+        "stop": false,
+        "strike": false,
+        "refused": false,
+        "hard_refused": false,
+        "busy": false,
+        "busy_resweepable": false,
+        "transient": false,
+        "size_rejected": false,
+        "ephemeral_missing": false,
+        "free_budget_spent": true,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -161,6 +195,7 @@
         "transient": false,
         "size_rejected": true,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -189,6 +224,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 3600000,
         "attribution": ""
       }
@@ -215,6 +251,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": true,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -241,6 +278,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -267,6 +305,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -294,6 +333,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "unknown"
       }
@@ -320,6 +360,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "unknown"
       }
@@ -348,6 +389,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 20000,
         "attribution": "unknown"
       }
@@ -376,6 +418,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 600000,
         "attribution": "unknown"
       }
@@ -403,6 +446,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "unknown"
       }
@@ -430,6 +474,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "relay"
       }
@@ -458,6 +503,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "target"
       }
@@ -485,6 +531,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "unknown"
       }
@@ -511,6 +558,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "relay"
       }
@@ -537,6 +585,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "unknown"
       }
@@ -565,6 +614,7 @@
         "transient": true,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": "target"
       }
@@ -593,6 +643,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -622,6 +673,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -650,6 +702,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -678,6 +731,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }
@@ -706,6 +760,7 @@
         "transient": false,
         "size_rejected": false,
         "ephemeral_missing": false,
+        "free_budget_spent": false,
         "hint_ms": 0,
         "attribution": ""
       }

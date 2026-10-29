@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The four conditions a node reports behind HTTP 429 on the reserve path, and
+// The five conditions a node reports behind HTTP 429 on the reserve path, and
 // which failures may be retried after payment. Mirror of
 // proto/go/transient/busy.go, pinned by the code_cases in
 // proto/testdata/transient_vectors.json.
@@ -19,6 +19,12 @@ export const BusyCode = {
     RateLimited: 'rate_limited',
     /** The penalty box, a minute to a day. */
     Banned: 'reserve_temporarily_banned',
+    /**
+     * A Solana node's free tier for the UTC day is spent, until 00:00 UTC.
+     * Another node may still have budget, so a payer fails over; this node's
+     * answer holds for the day.
+     */
+    FreeBudgetExhausted: 'free_budget_exhausted',
 } as const
 
 /**

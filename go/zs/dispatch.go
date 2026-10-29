@@ -553,6 +553,12 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	// ceiling. Candidates come in routing order, not price order, so a cheaper
 	// one later in the list may still fit.
 	var capRefused bool
+	// freeBudgetSpent is set when a Solana node's free tier for the day was
+	// spent (429 free_budget_exhausted). When nothing better answered, the
+	// request ends with that code rather than operators_busy, since waiting
+	// seconds won't help. Only when the last sweep found no node merely
+	// unreachable (lastSweepTransient): one that is may have budget.
+	var freeBudgetSpent, lastSweepTransient bool
 	// Build the relay-candidate pool once for the whole reserve loop — it's
 	// target-independent, so rebuilding it per candidate (the old relayHopFor)
 	// was O(n)·candidates of wasted whole-fleet projection. nil when privacy is
@@ -921,6 +927,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			sweepTransient = sweepTransient || f.Transient
 			anyBusy = anyBusy || f.Busy
 			ephemeralMissing = ephemeralMissing || f.EphemeralMissing
+			freeBudgetSpent = freeBudgetSpent || f.FreeBudgetSpent
 			switch f.Outcome {
 			case outcomeBusy:
 				// Tracked apart from busyHint, since a 429 without a Retry-After
@@ -952,6 +959,14 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					relayAttr(hop),
 					slog.String("endpoint", endpoint),
 					slog.String("code", se.Code))
+			case outcomeFreeBudget:
+				// A refusal for the terminal ladder, though not for the
+				// re-sweep vote (see classifyReserveFailure).
+				anyRefusal = true
+				s.log.Info("operator's free tier is spent for the day; trying next",
+					opAttr(op),
+					relayAttr(hop),
+					slog.String("endpoint", endpoint))
 			case outcomePayerRefusal:
 				// Iterating would not just waste reserves, it would misreport the
 				// condition as congestion. Surface the node's own code and message:
@@ -1010,6 +1025,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 		if sweepRefused {
 			anyRefusal = true
 		}
+		lastSweepTransient = sweepTransient
 		// The decision is nextResweep's (candidate_verdict.go, mirrored in the TS
 		// SDK). The existing accumulators double as the record, so every path votes
 		// without extra bookkeeping.
@@ -1131,6 +1147,19 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 			"every eligible operator returned a ticket whose price failed verification (mis-priced or internally inconsistent)"))
 		return
 	}
+	// A free tier refused, no operator was merely busy, and none was left
+	// unreachable on the last sweep, so none is known to have budget: what
+	// the caller can do is wait for the day to turn or pay, not retry in
+	// seconds. operators_busy would say the opposite. The reset is computed
+	// here: every node's day is UTC's, and a node's Retry-After is only its
+	// claim.
+	if freeBudgetSpent && !anyBusy && !lastSweepTransient && !relayUnavailable {
+		e := newError("free_budget_exhausted", fmt.Sprintf(
+			"the free tier for %s is spent for the day on the operators that serve it; it resets at 00:00 UTC — switch to a paid model to continue", model))
+		e.RetryAfter = untilUTCMidnight(time.Now())
+		em.fail(e)
+		return
+	}
 	// Every candidate was unreachable through infrastructure — a gateway 5xx
 	// with no protocol error code, or a transport failure — and the whole
 	// rotation + sweep budget is spent without any operator ever refusing the
@@ -1149,6 +1178,13 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 	e := newError("operators_busy", "all eligible operators are at capacity; retry after the hint")
 	e.RetryAfter = busyHint
 	em.fail(e)
+}
+
+// untilUTCMidnight is the wait from now to the next 00:00 UTC, when a Solana
+// node's free tier resets.
+func untilUTCMidnight(now time.Time) time.Duration {
+	y, m, d := now.UTC().Date()
+	return time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC).Sub(now)
 }
 
 // transientRetryAfterHint is the Retry-After we give a client when the whole
@@ -2593,50 +2629,75 @@ func (s *Client) runSealed(
 	// way: the node finds a payer-submitted open by it, and checks that a
 	// handed-off group carries it. The group id is retained on the handle for
 	// audit/dispute logging but is NOT the lookup key.
-	var openHandle *OpenHandle
-	var err error
-	if no, ok := s.wallet.(NodeOpener); ok && wire.SubmitsOpen(op.ProtoVersion) {
-		openHandle, err = no.OpenForNode(ctx, ticket, op, rt.PresignedOpen)
-	} else {
-		openHandle, err = s.wallet.Open(ctx, ticket, op, rt.PresignedOpen)
-	}
-	if err != nil {
-		// The open didn't commit — back the reservation out so a failed attempt
-		// doesn't permanently consume the cap.
-		if s.spend != nil {
-			recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
+	//
+	// A free Solana turn opens nothing (opensOnChain): it binds an empty txid,
+	// and its settlement handle stays a nil interface, so the receipt check
+	// records the zero charge and sends no ack, protest or journal row.
+	var (
+		sh        settlementHandle
+		txID      string
+		openGroup string
+		openFees  uint64
+	)
+	if opensOnChain(s.deployment.Rail, ticket) {
+		var openHandle *OpenHandle
+		var err error
+		if no, ok := s.wallet.(NodeOpener); ok && wire.SubmitsOpen(op.ProtoVersion) {
+			openHandle, err = no.OpenForNode(ctx, ticket, op, rt.PresignedOpen)
+		} else {
+			openHandle, err = s.wallet.Open(ctx, ticket, op, rt.PresignedOpen)
 		}
-		s.log.Error("wallet open failed",
+		if err != nil {
+			// The open didn't commit — back the reservation out so a failed attempt
+			// doesn't permanently consume the cap.
+			if s.spend != nil {
+				recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
+			}
+			s.log.Error("wallet open failed",
+				slog.String("endpoint", endpoint),
+				opAttr(op),
+				relayAttr(hop),
+				slog.String("ticket_id", ticket.TicketID),
+				slog.Any("err", err))
+			em.fail(s.openFailure(err))
+			return
+		}
+		// Open committed: the reservation stays on the tally (settlement reconciles
+		// the actual charge lower on-chain; the cap intentionally counts the ceiling).
+		// Arm the refund watchdog now that USDC is locked on-chain — or, for a
+		// handed-off group, may be locked whenever the node submits it: if no
+		// settlement resolves this ticket (the node burns it on a
+		// payment-verification failure, the response never arrives, the operator
+		// dies before settling), refundInactive recovers the escrow after
+		// expires_at + grace. Resolved on a finalized atomic settle / protest in
+		// runReceiptChecks; a box the operator settled standalone is a cheap
+		// existence-probe no-op at fire time.
+		s.refunds.Track(openHandle, ticket.ExpiresAt)
+		s.journalOpen(openHandle, ticket)
+		openHandle.deliverAck = s.settleAckPoster(op, rt.SealRecipient, hop != nil)
+		sh, txID, openGroup, openFees = openHandle, openHandle.AppCallTxID, openHandle.OpenGroup, openHandle.OpenFeesMicroalgos
+		em.committed(ticket.TicketID, txID, openFees)
+		s.log.Debug("wallet open submitted",
 			slog.String("endpoint", endpoint),
 			opAttr(op),
 			relayAttr(hop),
 			slog.String("ticket_id", ticket.TicketID),
-			slog.Any("err", err))
-		em.fail(s.openFailure(err))
-		return
+			slog.String("app_call_txid", openHandle.AppCallTxID),
+			slog.String("group_id", openHandle.GroupID))
+	} else {
+		// Nothing is locked, so the reservation holds no exposure; releasing
+		// it now resolves it whatever becomes of the turn, which no watchdog
+		// or reconciler will see. The receipt check may resolve it again,
+		// which the SpendGuard contract allows.
+		if s.spend != nil {
+			recordSpend(s.log, "release", ticket.TicketID, func() { s.spend.Release(ticket.TicketID) })
+		}
+		s.log.Debug("free Solana turn: nothing to open",
+			slog.String("endpoint", endpoint),
+			opAttr(op),
+			relayAttr(hop),
+			slog.String("ticket_id", ticket.TicketID))
 	}
-	// Open committed: the reservation stays on the tally (settlement reconciles
-	// the actual charge lower on-chain; the cap intentionally counts the ceiling).
-	// Arm the refund watchdog now that USDC is locked on-chain — or, for a
-	// handed-off group, may be locked whenever the node submits it: if no
-	// settlement resolves this ticket (the node burns it on a
-	// payment-verification failure, the response never arrives, the operator
-	// dies before settling), refundInactive recovers the escrow after
-	// expires_at + grace. Resolved on a finalized atomic settle / protest in
-	// runReceiptChecks; a box the operator settled standalone is a cheap
-	// existence-probe no-op at fire time.
-	s.refunds.Track(openHandle, ticket.ExpiresAt)
-	s.journalOpen(openHandle, ticket)
-	openHandle.deliverAck = s.settleAckPoster(op, rt.SealRecipient, hop != nil)
-	txID := openHandle.AppCallTxID
-	em.committed(ticket.TicketID, txID, openHandle.OpenFeesMicroalgos)
-	s.log.Debug("wallet open submitted",
-		slog.String("endpoint", endpoint),
-		opAttr(op),
-		relayAttr(hop),
-		slog.String("ticket_id", ticket.TicketID),
-		slog.String("app_call_txid", openHandle.AppCallTxID),
-		slog.String("group_id", openHandle.GroupID))
 	// Compute the admission tag against K_response (unwrapped at reserve
 	// time). This is the proof-of-possession the node verifies before
 	// Consume — without it, a mempool-race attacker who scraped the
@@ -2667,7 +2728,7 @@ func (s *Client) runSealed(
 		TxID:         txID,
 		TicketID:     ticket.TicketID,
 		AdmissionTag: admissionTag,
-		OpenGroup:    openHandle.OpenGroup,
+		OpenGroup:    openGroup,
 		NeutralNames: wire.UsesRailNeutralNames(op.ProtoVersion),
 	}, ephemeral, sealRecipient)
 	timer.RecordEncrypt(time.Since(t0))
@@ -2680,15 +2741,15 @@ func (s *Client) runSealed(
 		em.fail(newError("wrap_request", "request could not be wrapped"))
 		return
 	}
+	if sh == nil {
+		// A free turn is committed once it is sealed for its node, so hosts
+		// get the same "the node has the turn" line as for a paid one, with
+		// no open to name. It leaves the turn unpaid: a resend costs nothing.
+		em.committed(ticket.TicketID, "", 0)
+	}
 
-	// Upcast to settlementHandle once so the builders share a single
-	// typed reference to the open handle. Fee value pulled off the
-	// concrete handle here (the interface is intentionally narrow —
-	// it only exposes the dispute/settle surface).
-	var sh settlementHandle = openHandle
-	openFees := openHandle.OpenFeesMicroalgos
 	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
-	if openHandle.OpenGroup != "" {
+	if openGroup != "" {
 		nonStreamRespond = s.recheckDepositOnRefusedOpen(nonStreamRespond)
 	}
 
@@ -4115,7 +4176,8 @@ func (s *Client) checkReceipt(
 		// Record the actual settled charge (<= MaxPrice) against the daily
 		// spend guard and drop the ticket's reserved ceiling — this is what
 		// `zs status` reports as spent today. Independent of the on-chain
-		// AckSettle below (and runs even when handle is nil in no-escrow mode).
+		// AckSettle below. A free Solana turn has no handle and released its
+		// reservation at dispatch, so this records nothing more for it.
 		// It stays ahead of journalReceipt: the reconciler reads a journaled
 		// receipt as a charge already counted.
 		if s.spend != nil {

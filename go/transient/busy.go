@@ -7,7 +7,7 @@ package transient
 
 import "github.com/TxnLab/zerosignal/go/relay"
 
-// The four conditions a node reports behind HTTP 429 on the reserve path. The
+// The five conditions a node reports behind HTTP 429 on the reserve path. The
 // node emits them from these constants and both reference payers classify
 // them with RetryableBusyCode, the same emitter/classifier split relay's hop
 // codes use.
@@ -29,6 +29,11 @@ const (
 	// BusyCodeBanned: the penalty box, lasting a minute to a day. No retry
 	// schedule outlives it.
 	BusyCodeBanned = "reserve_temporarily_banned"
+
+	// BusyCodeFreeBudgetExhausted: a Solana node's free tier for the UTC day
+	// is spent, until 00:00 UTC. Another node may still have budget, so a
+	// payer fails over; this node's answer holds for the day.
+	BusyCodeFreeBudgetExhausted = "free_budget_exhausted"
 )
 
 // RetryableBusyCode reports whether re-asking the same node after a 429

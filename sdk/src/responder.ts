@@ -318,7 +318,7 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
                     receipt,
                     ticket,
                     op,
-                    openFees: handle.openFeesMicroalgos,
+                    openFees: handle?.openFeesMicroalgos ?? 0,
                     settleFees: 0,
                     algoUsdPrice: reserved.algoUsdPrice,
                     feeUnit: deps.feeUnit,

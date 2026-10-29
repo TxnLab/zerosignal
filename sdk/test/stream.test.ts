@@ -1060,6 +1060,19 @@ describe('frameFactory', () => {
         expect(s.resolved).toEqual([TICKET_ID])
     })
 
+    // A free Solana turn opened nothing, so its usage reports no open fee and
+    // nothing is acked.
+    it('reports no open fee for a free Solana turn', async () => {
+        const s = await setup({ receipt: { amount_charged: 0 } })
+        ;(s.f.ticket as { max_price: number }).max_price = 0
+        s.call.handle = null
+        const fn = await transform(s)
+        for (const pt of s.frames) await fn(zs(s, pt))
+        const out = await fn(receiptFrame(s))
+        expect(out.usage).toMatchObject({ openFees: 0, settleFees: 0, check: { violation: '' } })
+        expect(s.handle.acks).toEqual([])
+    })
+
     it('reports the payer’s fee for a standalone ack', async () => {
         const s = await setup()
         const fn = await transform(s)

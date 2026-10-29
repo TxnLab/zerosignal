@@ -27,6 +27,7 @@ const (
 	outcomeNoEphemeral  = "no_ephemeral"
 	outcomeTransient    = "transient"
 	outcomeRefused      = "refused"
+	outcomeFreeBudget   = "free_budget"
 )
 
 // reserveFailure is one candidate's failed reserve, decided.
@@ -50,8 +51,9 @@ type reserveFailure struct {
 	Busy, BusyResweepable bool
 	// Transient is infrastructure weather that keeps the outer sweep eligible.
 	Transient bool
-	// SizeRejected and EphemeralMissing feed their own accumulators.
-	SizeRejected, EphemeralMissing bool
+	// SizeRejected, EphemeralMissing and FreeBudgetSpent feed their own
+	// accumulators.
+	SizeRejected, EphemeralMissing, FreeBudgetSpent bool
 	// Hint is the wait the failure asks for: a busy node's Retry-After capped
 	// by nodeRetryHint, a transient failure's raw, a payer refusal's reset.
 	Hint time.Duration
@@ -111,6 +113,16 @@ func narrowReserveVerdict(re *ReserveHTTPError, route reserveRoute) transient.Ve
 //     fix: a hard refusal by this operator, with no strike.
 func classifyReserveFailure(err error, route reserveRoute, usePrivacy bool) reserveFailure {
 	if be := (*BusyError)(nil); errors.As(err, &be) && be != nil {
+		if be.Code == transient.BusyCodeFreeBudgetExhausted {
+			// Not busy: the refusal holds until 00:00 UTC, so it must not read
+			// as capacity at the end of the ladder. Neither refused nor hard
+			// for the re-sweep vote, so a sibling that was only unreachable
+			// still earns its weather re-sweep, and a busy one its busy
+			// re-sweep: re-asking a spent node costs a round trip and no
+			// strike. The dispatch loop records it as a refusal for the
+			// terminal ladder itself.
+			return reserveFailure{Outcome: outcomeFreeBudget, FreeBudgetSpent: true}
+		}
 		return reserveFailure{
 			Outcome: outcomeBusy, Refused: true, Busy: true,
 			BusyResweepable: be.Retryable(), Hint: nodeRetryHint(be.RetryAfter),

@@ -52,6 +52,7 @@ export const errorShapes: ReadonlyMap<string, ErrorShape> = new Map([
     ['canceled', shape(499, 'proxy_error')],
 
     ['free_quota_exhausted', shape(403, 'invalid_request_error')],
+    ['free_budget_exhausted', shape(403, 'invalid_request_error')],
     ['payer_not_opted_in', shape(403, 'invalid_request_error')],
     ['payer_usdc_account_unusable', shape(403, 'invalid_request_error')],
     ['wallet_unfunded', shape(402, 'insufficient_quota')],

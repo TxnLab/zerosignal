@@ -385,6 +385,13 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
     let priceRejected = false
     // The spend guard refused a candidate's signed ceiling; a later, cheaper one may fit.
     let capRefused = false
+    // A Solana node's free tier for the day was spent (429
+    // free_budget_exhausted). When nothing better answered, the turn ends with
+    // that code rather than operators_busy, since waiting seconds won't help.
+    // Only when the last sweep found no node merely unreachable
+    // (lastSweepTransient): one that is may have budget.
+    let freeBudgetSpent = false
+    let lastSweepTransient = false
     // The caller's admitNode refused a candidate, or the key a re-probe handed
     // back. A refusal filters, as requireTee does at pick, so it is the turn's
     // answer only when no candidate got past it: a node that was let through
@@ -722,6 +729,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
             sweepTransient ||= f.transient
             anyBusy ||= f.busy
             ephemeralMissing ||= f.ephemeralMissing
+            freeBudgetSpent ||= f.freeBudgetSpent
             switch (f.outcome) {
                 case 'busy': {
                     if (f.hintMs > busyHint) busyHint = f.hintMs
@@ -748,6 +756,16 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     })
                     break
                 }
+                case 'free_budget':
+                    // A refusal for the terminal ladder, though not for the
+                    // re-sweep vote (see classifyReserveFailure).
+                    anyRefusal = true
+                    log.info("operator's free tier is spent for the day; trying next", {
+                        ...opAttrs(op),
+                        ...relayAttrs(hop),
+                        endpoint,
+                    })
+                    break
                 case 'payer_refusal': {
                     // Every node would refuse this payer alike, and iterating
                     // would misreport it as congestion. The node's own code
@@ -799,6 +817,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         // Sticky, so a refusal in a later sweep outranks an earlier sweep of
         // pure weather at the terminal ladder.
         if (sweepRefused) anyRefusal = true
+        lastSweepTransient = sweepTransient
         resweep = nextResweep({
             transient: sweepTransient,
             refused: sweepRefused,
@@ -894,6 +913,21 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         )
         return
     }
+    // A free tier refused, no operator was merely busy, and none was left
+    // unreachable on the last sweep, so none is known to have budget: what the
+    // caller can do is wait for the day to turn or pay, not retry in seconds.
+    // operators_busy would say the opposite. The reset is computed here: every
+    // node's day is UTC's, and a node's Retry-After is only its claim.
+    if (freeBudgetSpent && !anyBusy && !lastSweepTransient && !relayUnavailable) {
+        em.fail(
+            newError(
+                'free_budget_exhausted',
+                `the free tier for ${model} is spent for the day on the operators that serve it; it resets at 00:00 UTC — switch to a paid model to continue`,
+                { retryAfter: untilUTCMidnightMs(clock()) },
+            ),
+        )
+        return
+    }
     // The fleet-restart signature: unreachable, not full, and nobody refused.
     // operators_busy here would invite a retry storm at the wrong moment.
     if (transientExhausted && !anyRefusal && !anyBusy && !relayUnavailable) {
@@ -907,6 +941,15 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         return
     }
     em.fail(newError('operators_busy', 'all eligible operators are at capacity; retry after the hint', retryAfterOf(busyHint)))
+}
+
+/**
+ * The wait in ms from nowMs to the next 00:00 UTC, when a Solana node's free
+ * tier resets. Go's untilUTCMidnight.
+ */
+export function untilUTCMidnightMs(nowMs: number): number {
+    const d = new Date(nowMs)
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - nowMs
 }
 
 /** ReserveCallRequest is what dispatch hands the ReserveClient. */

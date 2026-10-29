@@ -136,7 +136,9 @@ export class StreamEmitter implements Emitter {
     }
 
     committed(ticketId: string, openTxId: string, networkFees: number): void {
-        this.#paid = true
+        // Paid says money is locked and a Ticket can still move it; a free
+        // Solana turn locked none, and a resend of it costs nothing.
+        this.#paid = openTxId !== ''
         this.#emit({
             type: 'payment.committed',
             ticketId,

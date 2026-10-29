@@ -266,7 +266,11 @@ export interface Emitter {
     clamped(ceiling: number): void
     /** The ticket a node signed. */
     reserved(r: Reserved, op: Operator): void
-    /** The escrow open; nothing is resent after it. */
+    /**
+     * The escrow open; nothing is resent after it. A free Solana turn reports
+     * it with no open (openTxId empty) once it is sealed, and that does not
+     * make the turn paid: nothing was locked.
+     */
     committed(ticketId: string, openTxId: string, networkFees: number): void
     /** Ends the request with err before any response has started. */
     fail(err: ZsError): void

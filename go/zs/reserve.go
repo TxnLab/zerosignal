@@ -85,7 +85,7 @@ func (rt *ReservedTicket) Wipe() {
 // clamped to a sane range; zero means no hint was provided.
 //
 // Code is the node's OpenAI-shaped `error.code`, empty when the body carried
-// none. It is load-bearing, not diagnostic: a 429 is four conditions and only
+// none. It is load-bearing, not diagnostic: a 429 is five conditions and only
 // one of them may be re-asked. Which one, and why re-asking the others is
 // harmful, is transient.RetryableBusyCode's to say — the node emits the codes
 // from the same package.

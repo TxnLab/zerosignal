@@ -46,6 +46,7 @@ interface FailureCase {
         transient: boolean
         size_rejected: boolean
         ephemeral_missing: boolean
+        free_budget_spent: boolean
         hint_ms: number
         attribution: string
     }
@@ -92,7 +93,15 @@ function errorOf(e: VectorError): unknown {
 describe('classifyReserveFailure vectors', () => {
     it('covers every outcome', () => {
         const outcomes = new Set(vectors.failures.map((c) => c.want.outcome))
-        expect([...outcomes].sort()).toEqual(['busy', 'no_ephemeral', 'payer_refusal', 'refused', 'size', 'transient'])
+        expect([...outcomes].sort()).toEqual([
+            'busy',
+            'free_budget',
+            'no_ephemeral',
+            'payer_refusal',
+            'refused',
+            'size',
+            'transient',
+        ])
     })
 
     for (const c of vectors.failures) {
@@ -114,6 +123,7 @@ describe('classifyReserveFailure vectors', () => {
                 transient: f.transient,
                 size_rejected: f.sizeRejected,
                 ephemeral_missing: f.ephemeralMissing,
+                free_budget_spent: f.freeBudgetSpent,
                 hint_ms: f.hintMs,
                 attribution: f.attribution,
             }).toEqual(c.want)

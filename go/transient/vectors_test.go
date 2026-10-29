@@ -141,7 +141,7 @@ var emittedCodes = []string{
 
 	// reserve 429s
 	transient.BusyCodeNoCapacity, transient.BusyCodePayerSlotCap,
-	transient.BusyCodeRateLimited, transient.BusyCodeBanned,
+	transient.BusyCodeRateLimited, transient.BusyCodeBanned, transient.BusyCodeFreeBudgetExhausted,
 
 	// node: admission, envelope, and ticket
 	"admission_tag_invalid", "bad_body", "bad_content_type", "bad_envelope",

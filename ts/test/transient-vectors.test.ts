@@ -185,13 +185,14 @@ describe('cross-impl transient vectors (proto/testdata/transient_vectors.json)',
     })
 
     // Literal, not derived from the fixture: the table is keyed by value, so a
-    // swap between two names would still find four matching rows.
+    // swap between two names would still find five matching rows.
     it('BusyCode maps each name to its wire string', () => {
         expect(BusyCode).toEqual({
             NoCapacity: 'no_capacity',
             PayerSlotCap: 'payer_slot_cap',
             RateLimited: 'rate_limited',
             Banned: 'reserve_temporarily_banned',
+            FreeBudgetExhausted: 'free_budget_exhausted',
         })
     })
 

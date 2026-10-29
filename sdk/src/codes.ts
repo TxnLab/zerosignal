@@ -42,6 +42,10 @@ export const errorKinds: ReadonlyMap<string, Kind> = new Map<string, Kind>([
     ['canceled', 'interrupted'],
 
     ['free_quota_exhausted', 'funds'],
+    // No Solana node that answered for the model has free tier left for the
+    // UTC day, and none was busy or unreachable; like free_quota_exhausted,
+    // the remedy is waiting or paying.
+    ['free_budget_exhausted', 'funds'],
     ['payer_not_opted_in', 'funds'],
     // Funds, not a node fault: the payer's own USDC token account can't take
     // an ending's refund, and every Solana node reads the same account.

@@ -40,6 +40,7 @@ interface Stub {
     default_grace: number
     payer_usdc: number
     model: string
+    free_model: string
     reply: string
 }
 
@@ -126,9 +127,9 @@ class Payer {
         return new Payer(address, client)
     }
 
-    /** Runs one chat turn and waits for its settle submit. */
-    async ask(stream: boolean): Promise<{ text: string; err: unknown; settled: SettleResult }> {
-        const body = JSON.stringify({ model: stub.model, messages: [{ role: 'user', content: 'say hello' }], max_tokens: 64, stream })
+    /** Runs one chat turn, on the stub's priced model unless model names another, and waits for its settle submit. */
+    async ask(stream: boolean, model = stub.model): Promise<{ text: string; err: unknown; settled: SettleResult }> {
+        const body = JSON.stringify({ model, messages: [{ role: 'user', content: 'say hello' }], max_tokens: 64, stream })
         const s = this.client.stream({ endpoint: '/v1/chat/completions', body }, AbortSignal.timeout(120_000))
         let text = ''
         let err: unknown
@@ -206,6 +207,24 @@ describe.skipIf(RPC === '' || AUTHORITY === '').concurrent('Solana end to end', 
             const { receipt_amounts } = await payerState(p.address)
             expect(receipt_amounts).toHaveLength(1)
             expect(BigInt(stub.payer_usdc) - (await p.usdc())).toBe(withFee(receipt_amounts[0]!))
+            await p.checkStub()
+        }, 180_000)
+    }
+
+    // A free turn opens nothing: the payer signs and pays nothing, the node's
+    // receipt charges zero, and nothing settles.
+    for (const stream of [false, true]) {
+        it(`opens nothing for a free ${stream ? 'streamed' : 'buffered'} turn`, async () => {
+            const p = await newPayer({})
+            const { text, err, settled } = await p.ask(stream, stub.free_model)
+            expect(err).toBeUndefined()
+            expect(settled.err).toBeUndefined()
+            expect(text).toBe(stub.reply)
+            expect(settled.settlement.kind).toBe('')
+            const { tickets, receipt_amounts } = await payerState(p.address)
+            expect(tickets, 'tickets the payer opened at the stub').toEqual([])
+            expect(receipt_amounts).toEqual([0])
+            expect(await p.usdc()).toBe(BigInt(stub.payer_usdc))
             await p.checkStub()
         }, 180_000)
     }

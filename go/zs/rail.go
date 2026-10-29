@@ -53,6 +53,14 @@ func checkSettleSlot(rail ticket.Rail, slot string) error {
 	return err
 }
 
+// opensOnChain reports whether a turn on t opens on chain. A Solana turn at
+// max_price 0 doesn't: the program refuses a zero-price open, so a free
+// Solana turn has no open, no ack and nothing for the watchdog (SPEC.md § 3a
+// "Free turns on Solana").
+func opensOnChain(rail ticket.Rail, t *ticket.Ticket) bool {
+	return rail != ticket.RailSolana || t.MaxPrice > 0
+}
+
 // requestTicketID returns the ticket id a reserve on rail asks the node to
 // issue, or "" to let the node choose. A Solana payer chooses a fresh random
 // id for every reserve, so it never signs two opens with one id at a node:

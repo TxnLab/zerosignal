@@ -9,7 +9,14 @@
 // and nextResweep in proto/go/zs/candidate_verdict.go, pinned by
 // testdata/dispatch_verdict_vectors.json.
 
-import { type AttributionValue, Attribution, type Verdict, classify, narrowRelayed } from '@txnlab/zs-proto/transient'
+import {
+    type AttributionValue,
+    Attribution,
+    BusyCode,
+    type Verdict,
+    classify,
+    narrowRelayed,
+} from '@txnlab/zs-proto/transient'
 import { setsRelayHopHeader } from '@txnlab/zs-proto/wire'
 
 import {
@@ -22,7 +29,14 @@ import {
 import type { RelayHop } from './relay.js'
 
 /** Which branch of the dispatch loop a failed reserve takes. */
-export type ReserveOutcome = 'busy' | 'size' | 'payer_refusal' | 'no_ephemeral' | 'transient' | 'refused'
+export type ReserveOutcome =
+    | 'busy'
+    | 'size'
+    | 'payer_refusal'
+    | 'no_ephemeral'
+    | 'transient'
+    | 'refused'
+    | 'free_budget'
 
 /** One candidate's failed reserve, decided. */
 export interface ReserveFailure {
@@ -52,6 +66,8 @@ export interface ReserveFailure {
     transient: boolean
     sizeRejected: boolean
     ephemeralMissing: boolean
+    /** A Solana node's free tier for the day was spent (429 free_budget_exhausted). */
+    freeBudgetSpent: boolean
     /**
      * The wait the failure asks for: a busy node's Retry-After capped at
      * MAX_NODE_RETRY_HINT_MS, a transient failure's raw, a payer refusal's reset.
@@ -131,6 +147,7 @@ const noFailure: Omit<ReserveFailure, 'outcome'> = {
     transient: false,
     sizeRejected: false,
     ephemeralMissing: false,
+    freeBudgetSpent: false,
     hintMs: 0,
     attribution: Attribution.None,
 }
@@ -150,6 +167,16 @@ const noFailure: Omit<ReserveFailure, 'outcome'> = {
  */
 export function classifyReserveFailure(err: unknown, route: ReserveRoute, usePrivacy: boolean): ReserveFailure {
     if (err instanceof BusyError) {
+        if (err.code === BusyCode.FreeBudgetExhausted) {
+            // Not busy: the refusal holds until 00:00 UTC, so it must not read
+            // as capacity at the end of the ladder. Neither refused nor hard
+            // for the re-sweep vote, so a sibling that was only unreachable
+            // still earns its weather re-sweep, and a busy one its busy
+            // re-sweep: re-asking a spent node costs a round trip and no
+            // strike. The dispatch loop records it as a refusal for the
+            // terminal ladder itself.
+            return { ...noFailure, outcome: 'free_budget', freeBudgetSpent: true }
+        }
         return {
             ...noFailure,
             outcome: 'busy',

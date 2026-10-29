@@ -60,6 +60,7 @@ type verdictWant struct {
 	Transient        bool   `json:"transient"`
 	SizeRejected     bool   `json:"size_rejected"`
 	EphemeralMissing bool   `json:"ephemeral_missing"`
+	FreeBudgetSpent  bool   `json:"free_budget_spent"`
 	HintMs           int64  `json:"hint_ms"`
 	Attribution      string `json:"attribution"`
 }
@@ -130,6 +131,7 @@ func runVerdictFailure(c verdictFailureCase) verdictFailureCase {
 		Transient:        f.Transient,
 		SizeRejected:     f.SizeRejected,
 		EphemeralMissing: f.EphemeralMissing,
+		FreeBudgetSpent:  f.FreeBudgetSpent,
 		HintMs:           f.Hint.Milliseconds(),
 		Attribution:      string(f.Attribution),
 	}
@@ -151,6 +153,9 @@ func verdictFailureInputs() []verdictFailureCase {
 		{Name: "a 429 with no code", Error: verdictError{Kind: "busy"}, Route: direct},
 		{Name: "a 429's long Retry-After is capped", Error: verdictError{Kind: "busy", Code: "no_capacity", RetryAfterMs: 3_600_000}, Route: direct},
 		{Name: "a 429 never strikes, even relayed", Error: verdictError{Kind: "busy", Code: "no_capacity"}, Route: relay91, UsePrivacy: true},
+		// Not busy, and its day-long Retry-After is no hint: the payer
+		// computes the reset itself.
+		{Name: "a spent free budget is its own refusal", Error: verdictError{Kind: "busy", Code: "free_budget_exhausted", RetryAfterMs: 3_600_000}, Route: direct},
 		{Name: "a sizing refusal", Error: verdictError{Kind: "size", Code: "context_length_exceeded"}, Route: direct},
 		{Name: "a payer-scoped refusal stops", Error: verdictError{Kind: "payer_refusal", Code: "free_quota_exhausted", RetryAfterMs: 3_600_000}, Route: direct},
 		{Name: "no ephemeral to seal to", Error: verdictError{Kind: "no_ephemeral"}, Route: direct},

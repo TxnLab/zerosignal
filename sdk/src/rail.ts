@@ -50,6 +50,16 @@ export function checkSettleSlot(rail: Rail | undefined, slot: string): void {
 }
 
 /**
+ * opensOnChain is whether a turn on a ticket at maxPrice opens on chain. A
+ * Solana turn at max_price 0 doesn't: the program refuses a zero-price open,
+ * so a free Solana turn has no open, no ack and nothing for the watchdog
+ * (SPEC.md § 3a "Free turns on Solana").
+ */
+export function opensOnChain(rail: Rail | undefined, maxPrice: number): boolean {
+    return rail !== 'solana' || maxPrice > 0
+}
+
+/**
  * requestTicketId is the ticket id a reserve on rail asks the node to issue,
  * or undefined to let the node choose. A Solana payer chooses a fresh random
  * id for every reserve, so it never signs two opens with one id at a node:
