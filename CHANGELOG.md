@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-27 — what a Solana payer's host needs (unreleased)
+### 2026-10-27 — what a Solana payer's host needs (0.12.0)
 
 The SDKs add the reads and calls a host's wallet commands make on the Solana rail, as
 Algorand's hosts make them through the escrow client. `SolanaWallet` now has a protocol fee
@@ -59,7 +59,7 @@ gains `RequestAirdrop` and `FaucetCluster`, `SolanaRentPoolStatus` gains `Shortf
 public half doesn't match its seed. Both languages gain the SPL `MintTo` builder
 (`solana.MintTo` ↔ `mintTo`), pinned in `solana_codec_vectors.json`. No wire shape changes.
 
-### 2026-10-27 — free credits: what the node does with them (unreleased)
+### 2026-10-27 — free credits: what the node does with them (0.12.0)
 
 SPEC § 3a "Free credits" describes the node's check, built in zs-node: a free reserve's
 credit is checked at reserve and spent when its turn is consumed, so a second turn on one
@@ -74,7 +74,7 @@ the new refusals. Two residuals: the node's spent set, day keys and bars are in 
 restart forgets them, and the payer's own check for a second day key is still unbuilt. No
 wire shape changes.
 
-### 2026-10-27 — free credits: the payer fetches and attaches them (unreleased)
+### 2026-10-27 — free credits: the payer fetches and attaches them (0.12.0)
 
 The SDKs carry a free credit on a free Solana reserve (SPEC § 3a "Free credits"). A host
 names the issuers it can reach in `zs.Config.FreeCredits` ↔ `Config.freeCredits`, with
@@ -95,7 +95,7 @@ backoff. The stub node serves an issuer, checks the credits it is sent, and spen
 its turn is consumed, and both e2e
 suites cover a free turn with a credit, with the issuer down, and a paid turn.
 
-### 2026-10-26 — free credits: the token, the details field, the presets (unreleased)
+### 2026-10-26 — free credits: the token, the details field, the presets (0.12.0)
 
 A new protocol package, `go/freecredit` ↔ `@txnlab/zs-proto/freecredit` (subpath only), holds
 the free credit (SPEC § 3a "Free credits"): an RFC 9474 blind signature
@@ -118,7 +118,7 @@ none yet.
 `go run ./cmd/freecreditkey -out <file>` makes an issuer key. Nothing sends or checks a
 credit yet.
 
-### 2026-10-26 — a free Solana turn opens nothing (unreleased)
+### 2026-10-26 — a free Solana turn opens nothing (0.12.0)
 
 A Solana ticket at `max_price` 0 has no on-chain open: the program refuses a zero-price
 open, and the free tier there is off chain (SPEC § 3a "Free turns on Solana"). Both SDKs
@@ -143,7 +143,7 @@ from before this change fails a free Solana turn at its open, since the wallet r
 ticket with no offer, and reads `free_budget_exhausted` as a busy code it may not re-ask,
 so it reports `operators_busy`.
 
-### 2026-10-25 — a Solana ticket stores its ticket id (unreleased)
+### 2026-10-25 — a Solana ticket stores its ticket id (0.12.0)
 
 The `zs_escrow` program's `Ticket` account stores the id its address derives from
 (`Ticket.TicketID` ↔ `ticketId`, 16 bytes after `freeze_origin`; every earlier offset stays
@@ -155,7 +155,7 @@ from 275 to 291 bytes (`TicketSize` ↔ `TICKET_SIZE`), so a ticket's rent rises
 to 2,916,240 lamports, which the rent pool's sizing reads. A deployed program and its tickets
 must be replaced, since old accounts no longer decode; devnet and testnet held none.
 
-### 2026-10-25 — the aggregate's tags are a sorted set (unreleased)
+### 2026-10-25 — the aggregate's tags are a sorted set (0.12.0)
 
 Both SDKs' `AllModelDetails` ↔ `allModelDetails` (Go's `aggregateModelDetails` ↔ `aggregateModelDetails` in
 `sdk/src/registry/aggregate.ts`) now fold each model's tags: trimmed, lowercased (Go's
