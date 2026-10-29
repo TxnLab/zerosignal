@@ -22,6 +22,7 @@ import {
     extractRoutingPreferences,
     parseToolBudgets,
 } from '@txnlab/zs-proto/selection'
+import { CODE_FREE_CREDIT_INVALID, CODE_FREE_CREDIT_SPENT } from '@txnlab/zs-proto/freecredit'
 import type { ReserveRequest } from '@txnlab/zs-proto/ticket'
 import { BOUND_VERSION_2, inputTokenBoundVersion } from '@txnlab/zs-proto/tokenize'
 import { SWEEPS, sweepDelayMs, wait } from '@txnlab/zs-proto/transient'
@@ -56,16 +57,17 @@ import {
     relayPool,
 } from './pick.js'
 import type { Clock, LogAttrs } from './ports.js'
-import { signerFloorText } from './rail.js'
+import { opensOnChain, signerFloorText } from './rail.js'
 import { parseImageEditMultipart, parseImageRequestN, streamableRequest } from './request-parse.js'
 import { operatorPricingOf, verifyReservePrice } from './reserve-price.js'
 import { reserveWithTransientRetry } from './reserve-retry.js'
-import type { BusyError, PayerRefusalError, SizeError } from './reserve.js'
+import { type BusyError, type PayerRefusalError, ReserveHTTPError, type SizeError } from './reserve.js'
 import { type RelayHop, relayRef, targetRef } from './routing/relay.js'
 import { type ResweepReason, classifyReserveFailure, nextResweep, reserveRouteFor } from './routing/verdict.js'
 import { isUnderfundedOpenError, openFailure } from './sealed.js'
 import { type SizingRequest, capacityOf, effectiveMaxOutput, reserveInputCount } from './sizing.js'
 import { sleep as sleepFor } from './sleep.js'
+import { type CreditWallet, creditIssuersFor } from './solana/credits.js'
 import type { Emitter, Turn } from './turn.js'
 import { type Endpoint, type NodeRef, type Privacy, nodeRefString } from './types.js'
 import { BelowTargetError } from './wallet.js'
@@ -121,6 +123,8 @@ export interface DispatchDeps {
     feeRate(): number | null
     runSealed: RunSealed
     clock: Clock
+    /** Holds the credits a free Solana reserve carries; undefined carries none. */
+    freeCredits?: CreditWallet | undefined
     /** Waits ms, resolving false when signal aborts first. */
     sleep?: (ms: number, signal: AbortSignal | undefined) => Promise<boolean>
 }
@@ -134,6 +138,12 @@ const relayAttrs = (hop: RelayHop | null): LogAttrs =>
 const relayOf = (hop: RelayHop | null): NodeRef | null => (hop === null ? null : relayRef(hop))
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+const reserveCodeIs = (err: unknown, code: string): boolean => findError(err, ReserveHTTPError)?.code === code
+
+// Whether a reserve failed on the credit it carried.
+const creditRefused = (err: unknown): boolean =>
+    reserveCodeIs(err, CODE_FREE_CREDIT_INVALID) || reserveCodeIs(err, CODE_FREE_CREDIT_SPENT)
 
 // The inject mutators keep the body's type, through overloads a union can't pick.
 type Mutator = { (b: string): string; (b: Uint8Array): Uint8Array }
@@ -153,7 +163,12 @@ const retryAfterOf = (ms: number): { retryAfter?: number } => (ms > 0 ? { retryA
  * since open checks the pool again and a node that doesn't require the opt-in
  * may still serve. Go's prepareDeposit.
  */
-async function prepareDeposit(deps: DispatchDeps, em: Emitter, endpoint: Endpoint, signal: AbortSignal | undefined): Promise<boolean> {
+async function prepareDeposit(
+    deps: DispatchDeps,
+    em: Emitter,
+    endpoint: Endpoint,
+    signal: AbortSignal | undefined,
+): Promise<boolean> {
     if (deps.wallet.prepareDeposit === undefined) return true
     try {
         await deps.wallet.prepareDeposit(signal)
@@ -409,7 +424,8 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         try {
             if (await t.admitNode(judged, signal)) return judged
         } catch (err) {
-            if (!signal?.aborted) log.warn('admit check failed; refusing operator', { ...opAttrs(o), err: errText(err) })
+            if (!signal?.aborted)
+                log.warn('admit check failed; refusing operator', { ...opAttrs(o), err: errText(err) })
         }
         return null
     }
@@ -440,7 +456,11 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
             const w =
                 resweep === 'busy'
                     ? busyRetryWait(sweep, busyHint, busyDeadline - clock(), deps.sweepDelay)
-                    : wait(deps.sweepDelay ? deps.sweepDelay(sweep) : sweepDelayMs(sweep), transientHint, retryDeadline - clock())
+                    : wait(
+                          deps.sweepDelay ? deps.sweepDelay(sweep) : sweepDelayMs(sweep),
+                          transientHint,
+                          retryDeadline - clock(),
+                      )
             if (!w.ok || !(await sleep(w.delayMs, signal))) break
             // A node that finished restarting is eligible again. An error just
             // ends the sweeps with what is already known.
@@ -574,61 +594,99 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     ? withToolBudgets(r, toolBudgets.generationMaxN, toolBudgets.editMaxN)
                     : r
             }
+            // A free Solana reserve carries a credit from an issuer the node
+            // trusts, when this payer can get one; without one the node serves
+            // it on its own budget. The credit goes back to the store unless
+            // the turn reaches the node or the node refuses the credit itself.
+            const creditNode = refOf(op)
+            const issuers =
+                deps.freeCredits !== undefined && !isImage && !isImageEdit
+                    ? (creditIssuersFor(deps.rail, op, model) ?? [])
+                    : []
+            let credit = issuers.length === 0 ? undefined : await deps.freeCredits?.take(issuers, creditNode, signal)
             em.note({ type: 'relay.hop', relay: relayOf(hop), target: refOf(op), reason: 'chosen' })
             // What the last attempt sent, as Go's reserveAttempt.Req: the
             // ticket answers this request, not one rebuilt afterwards.
             let lastSent = firstReq
-            const attempt = await reserveWithTransientRetry<Operator, Reserved>({
-                target: op,
-                ref: refOf,
-                hop,
-                usePrivacy,
-                deadlineMs: retryDeadline,
-                attempt: (o, h) => {
-                    lastSent = attemptRequest(o)
-                    return deps.reserveClient.reserve(o, lastSent, h, signal)
-                },
-                nextHop: (o, excluded) =>
-                    relayHopForPool(
-                        deps.pick,
-                        relaySel.filter((s) => !excluded.has(nodeRefString({ op: s.id, node: s.node_id }))),
-                        o,
-                    ),
-                // Pick admitted o under its old key; the re-probe hands back a
-                // new one its verdict does not cover. A TEE-required request
-                // takes the refreshed node only if it is attested under it, as
-                // Go's reserveWithTransientRetry checks.
-                reprobeEphemeral: async (o) => {
-                    const refreshed = await deps.pick.registry.reprobeEphemeral(o, signal)
-                    if (refreshed !== null && requireTee && !isTeeAttested(refreshed)) {
-                        log.warn('re-probed node is not attested under its new key; skipping it', {
-                            operatorId: refreshed.id,
-                            nodeId: refreshed.nodeId,
-                        })
-                        return null
-                    }
-                    if (refreshed === null) return null
-                    // Admitted under its old key, which the node no longer holds.
-                    const rejudged = await admitted(refreshed)
-                    if (rejudged === null) {
-                        admitRefused = true
-                        admittedCount--
-                        log.warn('caller refused the re-probed node under its new key; skipping it', {
-                            operatorId: refreshed.id,
-                            nodeId: refreshed.nodeId,
-                        })
-                    }
-                    return rejudged
-                },
-                recordRelayFailure: (h) => deps.pick.relayReputation?.recordRelayOutcome(relayRef(h), false),
-                note: (ev) => em.note(ev),
-                ...(signal ? { signal } : {}),
-                clock,
-                sleep,
-            })
+            const reserveFrom = (target: Operator, from: RelayHop | null) =>
+                reserveWithTransientRetry<Operator, Reserved>({
+                    target,
+                    ref: refOf,
+                    hop: from,
+                    usePrivacy,
+                    deadlineMs: retryDeadline,
+                    attempt: (o, h) => {
+                        const r = attemptRequest(o)
+                        lastSent = credit === undefined ? r : { ...r, free_credit: credit.credit }
+                        return deps.reserveClient.reserve(o, lastSent, h, signal)
+                    },
+                    nextHop: (o, excluded) =>
+                        relayHopForPool(
+                            deps.pick,
+                            relaySel.filter((s) => !excluded.has(nodeRefString({ op: s.id, node: s.node_id }))),
+                            o,
+                        ),
+                    // Pick admitted o under its old key; the re-probe hands back a
+                    // new one its verdict does not cover. A TEE-required request
+                    // takes the refreshed node only if it is attested under it, as
+                    // Go's reserveWithTransientRetry checks.
+                    reprobeEphemeral: async (o) => {
+                        const refreshed = await deps.pick.registry.reprobeEphemeral(o, signal)
+                        if (refreshed !== null && requireTee && !isTeeAttested(refreshed)) {
+                            log.warn('re-probed node is not attested under its new key; skipping it', {
+                                operatorId: refreshed.id,
+                                nodeId: refreshed.nodeId,
+                            })
+                            return null
+                        }
+                        if (refreshed === null) return null
+                        // Admitted under its old key, which the node no longer holds.
+                        const rejudged = await admitted(refreshed)
+                        if (rejudged === null) {
+                            admitRefused = true
+                            admittedCount--
+                            log.warn('caller refused the re-probed node under its new key; skipping it', {
+                                operatorId: refreshed.id,
+                                nodeId: refreshed.nodeId,
+                            })
+                        }
+                        return rejudged
+                    },
+                    recordRelayFailure: (h) => deps.pick.relayReputation?.recordRelayOutcome(relayRef(h), false),
+                    note: (ev) => em.note(ev),
+                    ...(signal ? { signal } : {}),
+                    clock,
+                    sleep,
+                })
+            let attempt = await reserveFrom(op, hop)
+            if (credit !== undefined && creditRefused(attempt.err)) {
+                // The node is asked once more: it serves a free turn without a
+                // credit, so refusing the credit must not cost the payer the node.
+                credit.drop()
+                credit = undefined
+                const attrs = { ...opAttrs(attempt.target), ...relayAttrs(attempt.hop), endpoint }
+                if (reserveCodeIs(attempt.err, CODE_FREE_CREDIT_SPENT)) {
+                    // The store held a credit the node already consumed, as
+                    // after a reload; another may be good.
+                    log.info('free credit was already spent at this node; asking again', attrs)
+                    const again = creditIssuersFor(deps.rail, attempt.target, model) ?? []
+                    credit = again.length === 0 ? undefined : await deps.freeCredits?.take(again, creditNode, signal)
+                } else {
+                    deps.freeCredits?.refuse(creditNode)
+                    log.info('node refused a free credit; asking again without one', attrs)
+                }
+                attempt = await reserveFrom(attempt.target, attempt.hop)
+            }
             op = attempt.target
             hop = attempt.hop
             const rt = attempt.result
+            if (rt === undefined) {
+                if (credit !== undefined && creditRefused(attempt.err)) {
+                    credit.drop()
+                    deps.freeCredits?.refuse(creditNode)
+                }
+                await credit?.giveBack()
+            }
             if (rt !== undefined) {
                 // This node served us: it returns to the preferred tier now
                 // rather than serving out a backoff it just disproved.
@@ -665,6 +723,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                         signed: v.got,
                     })
                     rt.responseKey.fill(0)
+                    await credit?.giveBack()
                     continue
                 }
                 logReserve(log, op, hop, rt)
@@ -686,6 +745,7 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                                 err: errText(err),
                             })
                             rt.responseKey.fill(0)
+                            await credit?.giveBack()
                             em.fail(
                                 newError(
                                     'operator_ticket_reuse',
@@ -697,8 +757,12 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                         // Every candidate would get the same Promise, and a
                         // ticket each that expires unopened.
                         if (err instanceof AsyncSpendGuardError) {
-                            log.warn('spend guard answered with a Promise; refusing request', { endpoint, ticket_id: rt.ticket.ticket_id })
+                            log.warn('spend guard answered with a Promise; refusing request', {
+                                endpoint,
+                                ticket_id: rt.ticket.ticket_id,
+                            })
                             rt.responseKey.fill(0)
+                            await credit?.giveBack()
                             em.fail(asyncGuardFailure(err))
                             return
                         }
@@ -713,9 +777,14 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                             err: errText(err),
                         })
                         rt.responseKey.fill(0)
+                        await credit?.giveBack()
                         continue
                     }
                 }
+                // The node consumes a credit only with a free ticket; one that
+                // priced the turn after all left it unused.
+                if (opensOnChain(deps.rail, rt.ticket.max_price)) await credit?.giveBack()
+                else credit?.spend()
                 await deps.runSealed(em, { endpoint, model, body, op, reserved: rt, stream: wantsStream, hop }, signal)
                 return
             }
@@ -780,7 +849,12 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
                     // The kind is set here, not looked up, so a refusal code
                     // without an errorKinds entry still reads as funds.
                     em.fail(
-                        new ZsError({ kind: 'funds', code: pr.code, message: pr.nodeMessage, ...retryAfterOf(pr.retryAfterMs) }),
+                        new ZsError({
+                            kind: 'funds',
+                            code: pr.code,
+                            message: pr.nodeMessage,
+                            ...retryAfterOf(pr.retryAfterMs),
+                        }),
                     )
                     if (pr.code === 'payer_not_opted_in') deps.wallet.recheckDeposit?.()
                     return
@@ -940,7 +1014,13 @@ export async function dispatch(deps: DispatchDeps, em: Emitter, t: Turn, signal?
         )
         return
     }
-    em.fail(newError('operators_busy', 'all eligible operators are at capacity; retry after the hint', retryAfterOf(busyHint)))
+    em.fail(
+        newError(
+            'operators_busy',
+            'all eligible operators are at capacity; retry after the hint',
+            retryAfterOf(busyHint),
+        ),
+    )
 }
 
 /**
@@ -957,7 +1037,13 @@ type ReserveCallRequest = Omit<ReserveRequest, 'proxy_recipient' | 'payer_sig' |
 
 // A dedicated image reserve: token sizing off, the image parameters on. Zero
 // fields stay off, as Go's omitempty. The bound version stays, as in Go.
-function imageRequest(r: ReserveCallRequest, n: number, size: string, quality: string, edit: boolean): ReserveCallRequest {
+function imageRequest(
+    r: ReserveCallRequest,
+    n: number,
+    size: string,
+    quality: string,
+    edit: boolean,
+): ReserveCallRequest {
     const out: ReserveCallRequest = { ...r, input_count: 0, max_output_count: 0 }
     if (n !== 0) out.image_n = n
     if (size !== '') out.image_size = size
@@ -1000,10 +1086,19 @@ function logReserve(log: PickDeps['logger'], op: Operator, hop: RelayHop | null,
 // The code a cap refusal carries, since the guard's answer stands in for one;
 // the message names the integration bug, which raising a cap can't cure.
 function asyncGuardFailure(err: AsyncSpendGuardError): ZsError {
-    return newError('spend_cap_exceeded', `${err.message}. No payment was made. The host's SpendGuard must decide before the SDK reserves or opens.`)
+    return newError(
+        'spend_cap_exceeded',
+        `${err.message}. No payment was made. The host's SpendGuard must decide before the SDK reserves or opens.`,
+    )
 }
 
-function emptyPickError(endpoint: Endpoint, model: string, sizing: SizingRequest, pick: PickResult, rail: Rail | undefined): ZsError {
+function emptyPickError(
+    endpoint: Endpoint,
+    model: string,
+    sizing: SizingRequest,
+    pick: PickResult,
+    rail: Rail | undefined,
+): ZsError {
     const q = quoted(model)
     if (pick.versionBlocked) {
         // Upgrade required: retrying against the same fleet keeps failing.

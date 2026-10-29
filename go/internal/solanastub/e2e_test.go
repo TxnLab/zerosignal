@@ -9,7 +9,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"os"
 	"sync"
 	"testing"
@@ -96,6 +98,13 @@ const payerUSDC = solanastub.PayerUSDC
 
 func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 	t.Helper()
+	return l.newPayerWith(t, b, nil)
+}
+
+// newPayerWith is newPayer with edit applied to the Client's Config, which it
+// gets with the payer's own key.
+func (l *localnet) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*zs.Config, solana.PublicKey)) *payer {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	key := newKey()
@@ -104,7 +113,7 @@ func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 		t.Fatal(err)
 	}
 	l.Node.SetBehavior(pub, b)
-	client, err := zs.New(ctx, zs.Config{
+	cfg := zs.Config{
 		SolanaSigner: payerSigner{key},
 		Network: zs.Network{Rail: ticket.RailSolana, Solana: zs.SolanaNetwork{
 			Cluster: zs.SolanaClusterLocalnet, RPCEndpoint: l.Chain.Endpoint, Program: l.Chain.Deployment.Program,
@@ -114,7 +123,11 @@ func (l *localnet) newPayer(t *testing.T, b solanastub.Behavior) *payer {
 		AllowPrivateHosts: true,
 		DisableTEE:        true,
 		Discovery:         zs.Discovery{OperatorIDs: []uint64{l.OperatorID}},
-	})
+	}
+	if edit != nil {
+		edit(&cfg, pub)
+	}
+	client, err := zs.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +276,76 @@ func TestSolanaE2E_FreeTurnOpensNothing(t *testing.T) {
 			l.checkStub(t, p)
 		})
 	}
+}
+
+// withStubIssuer has the payer fetch credits from the stub's issuer, naming
+// itself in the header the stub counts by, as a host's gate header would.
+func (l *localnet) withStubIssuer(cfg *zs.Config, pub solana.PublicKey) {
+	key := base64.StdEncoding.EncodeToString(l.Node.Issuer().Key())
+	cfg.FreeCredits = zs.FreeCredits{Issuers: map[string]zs.CreditIssuer{key: &zs.HTTPCreditIssuer{
+		URL: l.URL,
+		Header: func(_ context.Context, h http.Header) error {
+			h.Set(solanastub.IssuerPayerHeader, pub.String())
+			return nil
+		},
+	}}}
+}
+
+// A free turn at a node that trusts the issuer carries a credit the node
+// verifies; the next turn spends the batch's next credit without asking the
+// issuer again. With the issuer down the turn still goes, with no credit.
+func TestSolanaE2E_FreeTurnCarriesACredit(t *testing.T) {
+	l := setup(t)
+	t.Run("from the batch", func(t *testing.T) {
+		t.Parallel()
+		p := l.newPayerWith(t, solanastub.Behavior{}, l.withStubIssuer)
+		for turn := 1; turn <= 2; turn++ {
+			text, _, err, werr := p.askModel(t, solanastub.FreeModel, turn == 2)
+			if err != nil || werr != nil {
+				t.Fatalf("turn %d: %v; settle: %v", turn, err, werr)
+			}
+			if text != solanastub.Reply {
+				t.Errorf("turn %d: text = %q", turn, text)
+			}
+			if got := l.Node.Credits(p.key); got != turn {
+				t.Errorf("after turn %d the node verified %d credits", turn, got)
+			}
+		}
+		// The day key and one batch.
+		if got := l.Node.Issuer().Calls(p.key); got != 2 {
+			t.Errorf("%d issuer calls for two turns, want 2", got)
+		}
+		l.checkStub(t, p)
+	})
+	t.Run("issuer down", func(t *testing.T) {
+		t.Parallel()
+		p := l.newPayerWith(t, solanastub.Behavior{IssuerDown: true}, l.withStubIssuer)
+		text, _, err, werr := p.askModel(t, solanastub.FreeModel, false)
+		if err != nil || werr != nil {
+			t.Fatalf("turn: %v; settle: %v", err, werr)
+		}
+		if text != solanastub.Reply {
+			t.Errorf("text = %q", text)
+		}
+		if got := l.Node.Credits(p.key); got != 0 {
+			t.Errorf("the node verified %d credits from a down issuer", got)
+		}
+		if got := l.Node.Issuer().Calls(p.key); got != 1 {
+			t.Errorf("%d issuer calls, want the one that failed", got)
+		}
+		l.checkStub(t, p)
+	})
+	t.Run("a paid turn", func(t *testing.T) {
+		t.Parallel()
+		p := l.newPayerWith(t, solanastub.Behavior{}, l.withStubIssuer)
+		if _, _, err, werr := p.ask(t, false); err != nil || werr != nil {
+			t.Fatalf("turn: %v; settle: %v", err, werr)
+		}
+		if got := l.Node.Issuer().Calls(p.key); got != 0 {
+			t.Errorf("%d issuer calls for a paid turn", got)
+		}
+		l.checkStub(t, p)
+	})
 }
 
 // A ticket the node opened and never served is refunded in full by the

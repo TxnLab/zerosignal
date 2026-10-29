@@ -47,8 +47,15 @@ type vocabularyNetwork struct {
 }
 
 type vocabularySolanaNetwork struct {
-	RPCEndpoint string `json:"rpc_endpoint"`
-	Program     string `json:"program"`
+	RPCEndpoint       string                   `json:"rpc_endpoint"`
+	Program           string                   `json:"program"`
+	FreeCreditIssuers []vocabularyCreditIssuer `json:"free_credit_issuers"`
+}
+
+type vocabularyCreditIssuer struct {
+	Key          string `json:"key"`
+	URL          string `json:"url"`
+	LoopbackOnly bool   `json:"loopback_only"`
 }
 
 type vocabulary struct {
@@ -180,27 +187,30 @@ func buildVocabulary(t *testing.T) vocabulary {
 		Network:       map[string]vocabularyNetwork{},
 		SolanaNetwork: map[string]vocabularySolanaNetwork{},
 		Defaults: map[string]int64{
-			"reserveTimeoutMs":          DefaultReserveTimeout.Milliseconds(),
-			"concurrentSlots":           DefaultDepositSlots,
-			"affinityTtlMs":             defaultAffinityTTL.Milliseconds(),
-			"affinityMax":               defaultAffinityMax,
-			"refreshIntervalMs":         DefaultRefreshInterval.Milliseconds(),
-			"refreshTimeoutMs":          DefaultRefreshTimeout.Milliseconds(),
-			"detailsFetchTimeoutMs":     DefaultDetailsFetchTimeout.Milliseconds(),
-			"attestationFetchTimeoutMs": DefaultAttestationFetchTimeout.Milliseconds(),
-			"detailsConcurrency":        DefaultDetailsConcurrency,
-			"probeBudget":               DefaultProbeBudget,
-			"targetTopK":                DefaultTargetTopK,
-			"maxCacheAgeMs":             DefaultMaxCacheAge.Milliseconds(),
-			"maxCarryAgeMs":             DefaultMaxCarryAge.Milliseconds(),
-			"latencyStateMax":           DefaultLatencyStateMax,
-			"retryBudgetMs":             transient.OverallDeadline.Milliseconds(),
-			"maxOutputCeiling":          int64(selection.DefaultMaxOutputCeiling),
-			"settlePendingGraceMs":      settlePendingGrace.Milliseconds(),
-			"lapseFallbackMs":           defaultLapseFallback.Milliseconds(),
-			"feeRateCacheTtlMs":         feeRateCacheTTL.Milliseconds(),
-			"feeRateRefreshMs":          feeRateRefreshTimeout.Milliseconds(),
-			"escrowConfigTimeoutMs":     escrowConfigTimeout.Milliseconds(),
+			"reserveTimeoutMs":           DefaultReserveTimeout.Milliseconds(),
+			"concurrentSlots":            DefaultDepositSlots,
+			"freeCreditBatch":            DefaultFreeCreditBatch,
+			"freeCreditFetchTimeoutMs":   freeCreditFetchTimeout.Milliseconds(),
+			"freeCreditFailureBackoffMs": freeCreditFailureBackoff.Milliseconds(),
+			"affinityTtlMs":              defaultAffinityTTL.Milliseconds(),
+			"affinityMax":                defaultAffinityMax,
+			"refreshIntervalMs":          DefaultRefreshInterval.Milliseconds(),
+			"refreshTimeoutMs":           DefaultRefreshTimeout.Milliseconds(),
+			"detailsFetchTimeoutMs":      DefaultDetailsFetchTimeout.Milliseconds(),
+			"attestationFetchTimeoutMs":  DefaultAttestationFetchTimeout.Milliseconds(),
+			"detailsConcurrency":         DefaultDetailsConcurrency,
+			"probeBudget":                DefaultProbeBudget,
+			"targetTopK":                 DefaultTargetTopK,
+			"maxCacheAgeMs":              DefaultMaxCacheAge.Milliseconds(),
+			"maxCarryAgeMs":              DefaultMaxCarryAge.Milliseconds(),
+			"latencyStateMax":            DefaultLatencyStateMax,
+			"retryBudgetMs":              transient.OverallDeadline.Milliseconds(),
+			"maxOutputCeiling":           int64(selection.DefaultMaxOutputCeiling),
+			"settlePendingGraceMs":       settlePendingGrace.Milliseconds(),
+			"lapseFallbackMs":            defaultLapseFallback.Milliseconds(),
+			"feeRateCacheTtlMs":          feeRateCacheTTL.Milliseconds(),
+			"feeRateRefreshMs":           feeRateRefreshTimeout.Milliseconds(),
+			"escrowConfigTimeoutMs":      escrowConfigTimeout.Milliseconds(),
 			// The default inference client's wait for a node's response
 			// headers, read off the client so a change there moves it.
 			"responseHeaderBackstopMs": Config{}.defaultHTTPClient().Transport.(*http.Transport).ResponseHeaderTimeout.Milliseconds(),
@@ -241,7 +251,12 @@ func buildVocabulary(t *testing.T) vocabulary {
 		if !ok {
 			t.Fatalf("SolanaClusters lists %q, which has no preset", n)
 		}
-		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String()}
+		issuers, _ := SolanaClusterFreeCreditIssuers(n)
+		credit := []vocabularyCreditIssuer{}
+		for _, iss := range issuers {
+			credit = append(credit, vocabularyCreditIssuer{Key: iss.Key, URL: iss.URL, LoopbackOnly: iss.LoopbackOnly})
+		}
+		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String(), FreeCreditIssuers: credit}
 	}
 	return v
 }

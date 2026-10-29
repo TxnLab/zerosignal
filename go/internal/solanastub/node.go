@@ -22,6 +22,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/TxnLab/zerosignal/go/freecredit"
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/pricing"
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -62,6 +63,8 @@ type Behavior struct {
 	OverClaim uint64
 	// TicketLifetime is how far ahead a ticket expires; zero is a minute.
 	TicketLifetime time.Duration
+	// IssuerDown fails the stub issuer's every answer to this payer.
+	IssuerDown bool
 }
 
 // Node is the stub. Its identity is fixed when it is built; each payer's
@@ -73,11 +76,16 @@ type Node struct {
 	nodeID     uint64
 	deployment ticket.DeploymentID
 	identity   *age.X25519Identity
+	issuer     *Issuer
 
 	mu        sync.Mutex
 	behaviors map[solana.PublicKey]Behavior
 	tickets   map[string]*entry
 	errs      map[solana.PublicKey][]error
+	// spent is every credit a free turn consumed, by its SpentKey, and
+	// credits how many each payer spent.
+	spent   map[string]bool
+	credits map[solana.PublicKey]int
 }
 
 // entry is one ticket the stub issued.
@@ -86,6 +94,7 @@ type entry struct {
 	id        [16]byte
 	k         [wire.ResponseKeySize]byte
 	payer     solana.PublicKey
+	credit    string // the SpentKey of the credit its free reserve carried, if any
 	offer     []byte // the offer's message bytes
 	lastValid uint64
 	opened    bool
@@ -104,11 +113,15 @@ func NewNode(chain *Chain, signing ed25519.PrivateKey, operatorID, nodeID uint64
 	if err != nil {
 		return nil, err
 	}
+	issuer, err := newIssuer(dep)
+	if err != nil {
+		return nil, err
+	}
 	return &Node{
 		chain: chain, signing: signing, operatorID: operatorID, nodeID: nodeID,
-		deployment: dep, identity: id,
+		deployment: dep, identity: id, issuer: issuer,
 		behaviors: map[solana.PublicKey]Behavior{}, tickets: map[string]*entry{},
-		errs: map[solana.PublicKey][]error{},
+		errs: map[solana.PublicKey][]error{}, spent: map[string]bool{}, credits: map[solana.PublicKey]int{},
 	}, nil
 }
 
@@ -173,6 +186,8 @@ func (n *Node) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/zs/reserve", n.reserve)
 	mux.HandleFunc("POST /v1/chat/completions", n.chat)
 	mux.HandleFunc("POST "+wire.SettleAckPath, n.settleAck)
+	mux.HandleFunc("POST "+freecredit.DayKeyPath, n.issuerDayKey)
+	mux.HandleFunc("POST "+freecredit.IssuePath, n.issuerIssue)
 	return mux
 }
 
@@ -217,7 +232,8 @@ func (n *Node) details(w http.ResponseWriter, r *http.Request) {
 			{ID: Model, InputRateUSDPer1M: InputUSDPer1M, OutputRateUSDPer1M: OutputUSDPer1M, ContextWindow: 32_768, MaxOutputTokens: 1024},
 			{ID: FreeModel, ContextWindow: 32_768, MaxOutputTokens: 1024},
 		},
-		ProtoVersion: wire.ProtoVersion,
+		ProtoVersion:      wire.ProtoVersion,
+		FreeCreditIssuers: []string{base64.StdEncoding.EncodeToString(n.issuer.Key())},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(d)
@@ -287,8 +303,17 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_proxy_recipient", err.Error())
 		return
 	}
+	// A credit counts only on a free reserve; a priced one ignores it, as a
+	// node does.
+	var credit string
+	if inRate == 0 && outRate == 0 && len(req.FreeCredit) > 0 {
+		var ok bool
+		if credit, ok = n.checkCredit(w, req.FreeCredit); !ok {
+			return
+		}
+	}
 
-	e := &entry{payer: payer}
+	e := &entry{payer: payer, credit: credit}
 	copy(e.id[:], idRaw)
 	if _, err := rand.Read(e.k[:]); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
@@ -438,6 +463,9 @@ func (n *Node) chat(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusPaymentRequired, "payment_verification_failed", err.Error())
 			return
 		}
+	}
+	if !n.consumeCredit(w, e) {
+		return
 	}
 
 	b := n.behaviorFor(e.payer)

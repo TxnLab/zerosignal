@@ -51,6 +51,16 @@ func SolanaClusterPreset(name string) (rpcEndpoint string, program solana.Public
 	return c.RPCEndpoint, c.Program, ok
 }
 
+// FreeCreditIssuer is a free-credit issuer: its key and where it serves.
+type FreeCreditIssuer = zsescrow.FreeCreditIssuer
+
+// SolanaClusterFreeCreditIssuers is a preset's default free-credit issuers,
+// and false for a name that is no preset.
+func SolanaClusterFreeCreditIssuers(name string) ([]FreeCreditIssuer, bool) {
+	c, ok := zsescrow.ClusterPreset(name)
+	return c.FreeCreditIssuers, ok
+}
+
 // RailName is a rail as Key and the TS SDK spell it.
 func RailName(r ticket.Rail) string {
 	switch r {

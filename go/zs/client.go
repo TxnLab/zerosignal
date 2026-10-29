@@ -166,6 +166,9 @@ type Client struct {
 	debugLogBodies bool
 
 	deployment Deployment
+	// freeCredits fetches and holds the credits a free Solana reserve
+	// carries; nil carries none.
+	freeCredits *creditWallet
 
 	// stop ends the background work New started; nil when it started none.
 	stop func()
@@ -322,6 +325,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		sweepDelayFn:     cfg.SweepDelay,
 		debugLogBodies:   cfg.DebugLogBodies,
 		deployment:       dep,
+		freeCredits:      newCreditWallet(cfg.FreeCredits, dep.Rail, parts.deploymentID, cfg.Clock, cfg.Logger),
 		stop:             parts.stop,
 		ownJournal:       ownJournal,
 		durableJournal:   durableJournal,
@@ -350,6 +354,11 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		// only thing that finishes its tickets.
 		c.reconcile.handOff = durableJournal
 		c.reconcile.start()
+	}
+	if c.freeCredits == nil && len(cfg.FreeCredits.Issuers) > 0 && dep.Rail == ticket.RailSolana {
+		// A credit is minted for one deployment, and none was read, as with a
+		// host's own Registry and Wallet.
+		c.log.Warn("FreeCredits are off: the deployment id is unknown, so free reserves carry no credit")
 	}
 	c.warmFeeRate()
 	return c, nil

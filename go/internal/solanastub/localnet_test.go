@@ -5,7 +5,28 @@
 
 package solanastub
 
-import "testing"
+import (
+	"encoding/base64"
+	"slices"
+	"testing"
+
+	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
+	"github.com/TxnLab/zerosignal/go/ticket"
+)
+
+// The stub's issuer signs with the committed localnet key, whose public half
+// is the one the localnet preset names.
+func TestIssuer_IsTheLocalnetPresets(t *testing.T) {
+	is, err := newIssuer(ticket.DeploymentID{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := zsescrow.ClusterPreset(zsescrow.ClusterLocalnet)
+	key := base64.StdEncoding.EncodeToString(is.Key())
+	if !slices.ContainsFunc(c.FreeCreditIssuers, func(i zsescrow.FreeCreditIssuer) bool { return i.Key == key }) {
+		t.Errorf("the stub issuer %s is not among the localnet preset's %v", key, c.FreeCreditIssuers)
+	}
+}
 
 // The localnet's keypair is also devnet's admin, so StartLocalnet must refuse
 // before it writes the Config anywhere but this machine.

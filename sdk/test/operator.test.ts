@@ -14,6 +14,7 @@ import { type OperatorDetailsModel, parseOperatorDetails } from '@txnlab/zs-prot
 import {
     NoEphemeralError,
     type Operator,
+    creditIssuersFor,
     detailsFieldsOf,
     isTeeAttested,
     modelCapacityOf,
@@ -38,6 +39,7 @@ interface Scenario {
     details: unknown
     fields: unknown
     selection: unknown
+    creditIssuers: Record<string, string[] | null>
 }
 
 const vectors = JSON.parse(readFileSync(new URL('../../testdata/operator_vectors.json', import.meta.url), 'utf8')) as {
@@ -90,6 +92,11 @@ describe('operator vectors', () => {
         const details = parseOperatorDetails(sc.details)!
         expect(canonical(detailsFieldsOf(details))).toBe(canonical(sc.fields))
         expect(canonical(selectionOf(operatorOf(sc)))).toBe(canonical(sc.selection))
+        // Go's nil list is null.
+        const op = operatorOf(sc)
+        const issuers = Object.fromEntries(op.models.map((m) => [m, creditIssuersFor('solana', op, m) ?? null]))
+        expect(issuers).toEqual(sc.creditIssuers)
+        for (const m of op.models) expect(creditIssuersFor('algorand', op, m)).toBeUndefined()
     })
 })
 

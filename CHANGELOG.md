@@ -31,6 +31,65 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-27 — free credits: what the node does with them (unreleased)
+
+SPEC § 3a "Free credits" describes the node's check, built in zs-node: a free reserve's
+credit is checked at reserve and spent when its turn is consumed, so a second turn on one
+credit is refused `409 free_credit_spent` at its sealed request with its ticket gone; a
+credit on a priced reserve is ignored; and an issuer seen with two day keys for one epoch
+has its credits refused as `free_credit_invalid` for the rest of it, so an issuer must keep
+each day key across restarts. "Free-ticket quota", "On Solana", says what a credit buys:
+while a node trusts an issuer, free turns without one may spend only a share of its budget
+and of its places in flight. Admission step 4 checks the free cap again, so a free turn can
+now be refused `429 no_capacity` at its sealed request. The reserve and error tables name
+the new refusals. Two residuals: the node's spent set, day keys and bars are in memory, so a
+restart forgets them, and the payer's own check for a second day key is still unbuilt. No
+wire shape changes.
+
+### 2026-10-27 — free credits: the payer fetches and attaches them (unreleased)
+
+The SDKs carry a free credit on a free Solana reserve (SPEC § 3a "Free credits"). A host
+names the issuers it can reach in `zs.Config.FreeCredits` ↔ `Config.freeCredits`, with
+`zs.HTTPCreditIssuer` ↔ `httpCreditIssuer` for the issue wire and a `CreditStore` port
+(in memory by default); with none, which is the default, nothing changes. The payer fetches
+a batch of 3 credits for a node when a reserve there first needs one, under the one day key
+it verified for that day, and attaches one when the node trusts the issuer and prices the
+model at nothing (`creditIssuersFor` ↔ `creditIssuersFor`, pinned per model by
+`operator_vectors.json`). `ticket.ReserveRequest` gains `free_credit`, outside the payer
+signature's digest. A node's `400 free_credit_invalid` and `409 free_credit_spent`
+(`freecredit.CodeFreeCreditInvalid` / `CodeFreeCreditSpent`, pinned in
+`free_credit_vectors.json`) are refusals with no strike (`dispatch_verdict_vectors.json`).
+On either the payer drops the credit and asks the node once more, with another credit after
+a spent one and with none after an invalid one, and a node that refuses a credit it was sent
+is sent none for the rest of the day. `zs.Operator` gains
+`FreeCreditIssuers`, and `sdk_vocabulary_vectors.json` the batch, fetch timeout and failure
+backoff. The stub node serves an issuer, checks the credits it is sent, and spends one when
+its turn is consumed, and both e2e
+suites cover a free turn with a credit, with the issuer down, and a paid turn.
+
+### 2026-10-26 — free credits: the token, the details field, the presets (unreleased)
+
+A new protocol package, `go/freecredit` ↔ `@txnlab/zs-proto/freecredit` (subpath only), holds
+the free credit (SPEC § 3a "Free credits"): an RFC 9474 blind signature
+(`RSABSSA-SHA384-PSS-Deterministic`, via `cloudflare/circl` and `@cloudflare/blindrsa-ts`)
+by an issuer's RSA day key over a message naming the deployment, the node's routing pair,
+the UTC day and a nonce. The issuer's Ed25519 key certifies each day key for its deployment
+and day, and issuers and nodes take only the current day and, within 10 minutes of
+midnight, the neighbouring one. It has the payer's blind and finalize, the node's verify
+with a typed refusal, the spent-set key and the issuer's day signer (both Go only), and the
+issue wire's types. `testdata/free_credit_vectors.json` pins the message and certificate bytes,
+the accepted epochs, the day-key rules, the credit's JSON and each refusal, and
+`testdata/rfc9474_pss_deterministic.json`, copied from circl, pins the variant in both
+languages. `/v1/zs/details` gains `free_credit_issuers`, the issuer keys a node trusts (Go
+`inject.OperatorDetails.FreeCreditIssuers`, parsed by the TS details parser). The Solana
+presets gain default issuers (`zsescrow.Cluster.FreeCreditIssuers`, read through
+`zs.SolanaClusterFreeCreditIssuers` ↔ `solanaClusterFreeCreditIssuers`): localnet a test
+key whose private half is committed beside the stub node, marked loopback-only, which
+`zsescrow.TrustedFreeCreditIssuers` drops for a node whose RPC is off the machine; devnet
+none yet.
+`go run ./cmd/freecreditkey -out <file>` makes an issuer key. Nothing sends or checks a
+credit yet.
+
 ### 2026-10-26 — a free Solana turn opens nothing (unreleased)
 
 A Solana ticket at `max_price` 0 has no on-chain open: the program refuses a zero-price

@@ -15,6 +15,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { base64 } from '@scure/base'
 
+import type { Credit } from '../freecredit/index.js'
 import { ed25519 } from '../util/ed25519.js'
 import { CanonicalWriter } from '../util/canonical.js'
 import { parseObject } from '../util/strictjson.js'
@@ -112,6 +113,11 @@ export interface ReserveRequest {
     // the payer's own check of the ticket is the guard. Mirrors Go's
     // ReserveRequest.TicketID.
     ticket_id?: string
+    // A free credit for this node, on a free Solana reserve only (SPEC.md
+    // § 3a "Free credits"). Unsigned: the credit is a bearer token already
+    // bound to the node and the day, and a node that trusts no issuer ignores
+    // it. Mirrors Go's ReserveRequest.FreeCredit.
+    free_credit?: Credit
 }
 
 export interface ReserveResponse {

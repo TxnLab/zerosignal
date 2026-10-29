@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { MAX_REPLY_BYTES } from '../src/idle.js'
+import { FREE_CREDIT_DEFAULTS } from '../src/solana/credits.js'
 
 import {
     type AffinityPolicy,
@@ -51,6 +52,7 @@ import {
     receiptViolations,
     resolveNetwork,
     type SolanaClusterName,
+    solanaClusterFreeCreditIssuers,
     solanaClusterNames,
 } from '../src/index.js'
 
@@ -59,7 +61,14 @@ interface Vocabulary {
     records: Record<string, string[]>
     enums: Record<string, string[]>
     networks: Record<string, { algod_endpoint: string; algod_token: string; escrow_app_id: number; fee_sink: string }>
-    solana_networks: Record<string, { rpc_endpoint: string; program: string }>
+    solana_networks: Record<
+        string,
+        {
+            rpc_endpoint: string
+            program: string
+            free_credit_issuers: { key: string; url: string; loopback_only: boolean }[]
+        }
+    >
     defaults: Record<string, number>
 }
 
@@ -135,7 +144,14 @@ const errorFields = [
 const nodeRefFields = ['op', 'node'] as const satisfies readonly (keyof NodeRef)[]
 const itemFields = ['id', 'type', 'raw'] as const satisfies readonly (keyof Item)[]
 const ticketFields = ['id', 'signed', 'target'] as const satisfies readonly (keyof Ticket)[]
-const settlementFields = ['ticketId', 'kind', 'txId', 'feesMicroAlgos', 'networkFees', 'frozen'] as const satisfies readonly (keyof Settlement)[]
+const settlementFields = [
+    'ticketId',
+    'kind',
+    'txId',
+    'feesMicroAlgos',
+    'networkFees',
+    'frozen',
+] as const satisfies readonly (keyof Settlement)[]
 const feeUnitFields = ['currency', 'decimals'] as const satisfies readonly (keyof FeeUnit)[]
 const providerErrorFields = ['code', 'message', 'status'] as const satisfies readonly (keyof ProviderError)[]
 // What ProviderError adds to Error, plus the message Go declares as a field.
@@ -272,11 +288,28 @@ describe('vocabulary shared with the Go SDK', () => {
         expect(vocab.networks.localnet!.escrow_app_id).toBe(0)
     })
 
+    const issuersOf = (name: string) =>
+        vocab.solana_networks[name]!.free_credit_issuers.map((i) => ({
+            key: i.key,
+            url: i.url,
+            loopbackOnly: i.loopback_only,
+        }))
+
     it('has the Solana cluster presets Go has', () => {
         for (const [name, want] of Object.entries(vocab.solana_networks)) {
             const net = resolveNetwork({ rail: 'solana', network: name as SolanaClusterName })
             expect([net.rpcEndpoint, net.program], name).toEqual([want.rpc_endpoint, want.program])
+            expect(solanaClusterFreeCreditIssuers(name), name).toEqual(issuersOf(name))
         }
+        expect(solanaClusterFreeCreditIssuers('mainnet')).toBeUndefined()
+        expect(solanaClusterFreeCreditIssuers('__proto__')).toBeUndefined()
+        expect(solanaClusterFreeCreditIssuers('LocalNet')).toEqual(issuersOf('localnet'))
+        // The table is shared; a caller changing its copy must not change
+        // what the next caller reads, as Go's TestClusterPreset_IssuersAreACopy.
+        const mine = solanaClusterFreeCreditIssuers('localnet')!
+        mine[0]!.key = 'changed'
+        mine.push({ key: 'added', url: '', loopbackOnly: false })
+        expect(solanaClusterFreeCreditIssuers('localnet')).toEqual(issuersOf('localnet'))
         expect([...solanaClusterNames].sort()).toEqual(Object.keys(vocab.solana_networks).sort())
     })
 
@@ -309,6 +342,9 @@ describe('vocabulary shared with the Go SDK', () => {
             streamIdleMidStreamMs: DEFAULT_STREAM_IDLE.midStream,
             streamIdleToolActiveMs: DEFAULT_STREAM_IDLE.toolActive,
             maxReplyBytes: MAX_REPLY_BYTES,
+            freeCreditBatch: FREE_CREDIT_DEFAULTS.batch,
+            freeCreditFetchTimeoutMs: FREE_CREDIT_DEFAULTS.fetchTimeout,
+            freeCreditFailureBackoffMs: FREE_CREDIT_DEFAULTS.failureBackoff,
         }).toEqual(vocab.defaults)
     })
 })

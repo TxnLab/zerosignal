@@ -29,6 +29,7 @@ import (
 	"github.com/algorand/go-algorand-sdk/v2/client/v2/common/models"
 
 	"github.com/TxnLab/zerosignal/go/escrow"
+	"github.com/TxnLab/zerosignal/go/freecredit"
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/pricing"
 	protorelay "github.com/TxnLab/zerosignal/go/relay"
@@ -804,10 +805,56 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					r.InputCount, r.InputBoundVersion = reserveInputCount(o, model, body, maxOut)
 				}
 			}
+			// A free Solana reserve carries a credit from an issuer the node
+			// trusts, when this payer can get one; without one the node serves
+			// it on its own budget. The credit goes back to the store unless
+			// the turn reaches the node or the node refuses the credit itself.
+			creditNode := freecredit.Node{Operator: op.ID, Node: op.NodeID}
+			var issuers []string
+			if s.freeCredits != nil && !isImage && !isImageEdit {
+				issuers = creditIssuersFor(s.deployment.Rail, op, model)
+			}
+			credit := s.freeCredits.take(ctx, issuers, creditNode)
+			if credit != nil {
+				reserveReq.FreeCredit = credit.raw
+			}
 			em.note(RelayHopChanged{Relay: relayOf(hop), Target: RefOf(op), Reason: RelayHopChosen})
 			attempt := s.reserveWithTransientRetry(ctx, op, reserveReq, hop, relaySel, usePrivacy, requireTEE, retryDeadline, resize)
+			if credit != nil && creditRefused(attempt.Err) {
+				// The node is asked once more: it serves a free turn without a
+				// credit, so refusing the credit must not cost the payer the node.
+				credit.drop()
+				req := attempt.Req
+				req.FreeCredit = nil
+				credit = nil
+				if reserveCodeIs(attempt.Err, freecredit.CodeFreeCreditSpent) {
+					// The store held a credit the node already consumed, as
+					// after a reload; another may be good.
+					s.log.Info("free credit was already spent at this node; asking again",
+						opAttr(attempt.Op), relayAttr(attempt.Hop), slog.String("endpoint", endpoint))
+					if s.freeCredits != nil {
+						issuers = creditIssuersFor(s.deployment.Rail, attempt.Op, model)
+					}
+					credit = s.freeCredits.take(ctx, issuers, creditNode)
+				} else {
+					s.freeCredits.refuse(creditNode)
+					s.log.Info("node refused a free credit; asking again without one",
+						opAttr(attempt.Op), relayAttr(attempt.Hop), slog.String("endpoint", endpoint))
+				}
+				if credit != nil {
+					req.FreeCredit = credit.raw
+				}
+				attempt = s.reserveWithTransientRetry(ctx, attempt.Op, req, attempt.Hop, relaySel, usePrivacy, requireTEE, retryDeadline, resize)
+			}
 			op, hop = attempt.Op, attempt.Hop
 			rt, err := attempt.Ticket, attempt.Err
+			if err != nil {
+				if credit != nil && creditRefused(err) {
+					credit.drop()
+					s.freeCredits.refuse(creditNode)
+				}
+				credit.giveBack(ctx)
+			}
 			if err == nil {
 				// This node served us — clear any dispatch-failure window so it
 				// returns to the preferred tier immediately rather than serving out
@@ -846,6 +893,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 						slog.Uint64("allowed", v.Want),
 						slog.Uint64("signed", v.Got))
 					rt.Wipe()
+					credit.giveBack(ctx)
 					continue
 				}
 				if s.log.Enabled(ctx, slog.LevelDebug) {
@@ -895,6 +943,7 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 								slog.String("ticket_id", rt.Ticket.TicketID),
 								slog.Any("err", err))
 							rt.Wipe()
+							credit.giveBack(ctx)
 							em.fail(newError("operator_ticket_reuse",
 								"the operator issued a ticket id that is already in flight for this payer; no payment was made"))
 							return
@@ -909,8 +958,16 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 							slog.Uint64("max_price_microusdc", rt.Ticket.MaxPrice),
 							slog.Any("err", err))
 						rt.Wipe()
+						credit.giveBack(ctx)
 						continue
 					}
+				}
+				// The node consumes a credit only with a free ticket; one that
+				// priced the turn after all left it unused.
+				if opensOnChain(s.deployment.Rail, rt.Ticket) {
+					credit.giveBack(ctx)
+				} else {
+					credit.spend()
 				}
 				s.runSealed(ctx, em, endpoint, model, body, op, rt, wantsStream, hop)
 				return

@@ -24,7 +24,7 @@ import { FREEZE_ORIGIN_PROTEST, FREEZE_ORIGIN_SETTLE_MISMATCH } from '@txnlab/zs
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
-import { Client, solanaLocalnet } from '../src/index.js'
+import { Client, httpCreditIssuer, solanaLocalnet } from '../src/index.js'
 import type { SettleResult } from '../src/index.js'
 
 const RPC = process.env.ZS_SOLANA_E2E_RPC ?? ''
@@ -42,9 +42,12 @@ interface Stub {
     model: string
     free_model: string
     reply: string
+    credit_issuer: string
+    issuer_payer_header: string
 }
 
 interface Behavior {
+    issuer_down?: boolean
     no_receipt?: boolean
     claim_no_receipt?: boolean
     bad_body_hash?: boolean
@@ -66,6 +69,8 @@ interface PayerState {
     tickets: TicketState[]
     receipt_amounts: number[]
     errors: string[]
+    credits: number
+    issuer_calls: number
 }
 
 let stub: Stub
@@ -81,7 +86,9 @@ async function startStub(): Promise<Stub> {
     })
     // stdin is a pipe only this process holds, so the stub exits with it even
     // when the runner is killed before afterAll.
-    const p = spawn(bin, ['-rpc', RPC, '-mint-authority', AUTHORITY, '-exit-on-stdin-eof'], { stdio: ['pipe', 'pipe', 'inherit'] })
+    const p = spawn(bin, ['-rpc', RPC, '-mint-authority', AUTHORITY, '-exit-on-stdin-eof'], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+    })
     proc = p
     const line = await new Promise<string>((resolve, reject) => {
         p.once('error', reject)
@@ -110,12 +117,25 @@ class Payer {
         readonly client: Client,
     ) {}
 
-    static async create(behavior: Behavior): Promise<Payer> {
+    static async create(behavior: Behavior, credits = false): Promise<Payer> {
         const seed = crypto.getRandomValues(new Uint8Array(32))
         const publicKey = await ed25519.getPublicKeyAsync(seed)
         const address = encodeBase58(publicKey)
         await control('/stub/payers', { method: 'POST', body: JSON.stringify({ address, behavior }) })
+        // The stub's issuer, naming the payer in the header it counts by, as
+        // a host's gate header would.
+        const freeCredits = credits
+            ? {
+                  issuers: {
+                      [stub.credit_issuer]: httpCreditIssuer({
+                          url: stub.url,
+                          headers: (h) => h.set(stub.issuer_payer_header, address),
+                      }),
+                  },
+              }
+            : undefined
         const client = await Client.create({
+            ...(freeCredits ? { freeCredits } : {}),
             solanaSigner: solanaSigner({ seed, publicKey, address }),
             network: { ...solanaLocalnet(), rpcEndpoint: RPC, program: stub.program },
             // One node can't be its own relay.
@@ -129,7 +149,12 @@ class Payer {
 
     /** Runs one chat turn, on the stub's priced model unless model names another, and waits for its settle submit. */
     async ask(stream: boolean, model = stub.model): Promise<{ text: string; err: unknown; settled: SettleResult }> {
-        const body = JSON.stringify({ model, messages: [{ role: 'user', content: 'say hello' }], max_tokens: 64, stream })
+        const body = JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: 'say hello' }],
+            max_tokens: 64,
+            stream,
+        })
         const s = this.client.stream({ endpoint: '/v1/chat/completions', body }, AbortSignal.timeout(120_000))
         let text = ''
         let err: unknown
@@ -148,12 +173,18 @@ class Payer {
     }
 
     /** Polls the ticket until done says it has reached the state a scenario waits for. */
-    async waitTicket(id: string, withinMs: number, what: string, done: (t: TicketState) => boolean): Promise<TicketState> {
+    async waitTicket(
+        id: string,
+        withinMs: number,
+        what: string,
+        done: (t: TicketState) => boolean,
+    ): Promise<TicketState> {
         const deadline = Date.now() + withinMs
         for (;;) {
             const t = (await payerState(this.address)).tickets.find((x) => x.ticket_id === id)!
             if (done(t)) return t
-            if (Date.now() >= deadline) throw new Error(`ticket ${id}: not ${what} within ${withinMs} ms (now ${JSON.stringify(t)})`)
+            if (Date.now() >= deadline)
+                throw new Error(`ticket ${id}: not ${what} within ${withinMs} ms (now ${JSON.stringify(t)})`)
             await sleep(1000)
         }
     }
@@ -168,8 +199,8 @@ class Payer {
 }
 
 const payers: Payer[] = []
-async function newPayer(b: Behavior): Promise<Payer> {
-    const p = await Payer.create(b)
+async function newPayer(b: Behavior, credits = false): Promise<Payer> {
+    const p = await Payer.create(b, credits)
     payers.push(p)
     return p
 }
@@ -228,6 +259,45 @@ describe.skipIf(RPC === '' || AUTHORITY === '').concurrent('Solana end to end', 
             await p.checkStub()
         }, 180_000)
     }
+
+    // A free turn at a node that trusts the issuer carries a credit the node
+    // verifies; the next turn spends the batch's next credit without asking
+    // the issuer again. With the issuer down the turn still goes, with no
+    // credit, and a paid turn asks the issuer nothing.
+    it('carries a credit from the batch on each free turn', async () => {
+        const p = await newPayer({}, true)
+        for (const turn of [1, 2]) {
+            const { text, err, settled } = await p.ask(turn === 2, stub.free_model)
+            expect(err).toBeUndefined()
+            expect(settled.err).toBeUndefined()
+            expect(text).toBe(stub.reply)
+            expect((await payerState(p.address)).credits, `credits verified after turn ${turn}`).toBe(turn)
+        }
+        // The day key and one batch.
+        expect((await payerState(p.address)).issuer_calls).toBe(2)
+        await p.checkStub()
+    }, 180_000)
+
+    it('serves a free turn without a credit while the issuer is down', async () => {
+        const p = await newPayer({ issuer_down: true }, true)
+        const { text, err, settled } = await p.ask(false, stub.free_model)
+        expect(err).toBeUndefined()
+        expect(settled.err).toBeUndefined()
+        expect(text).toBe(stub.reply)
+        const s = await payerState(p.address)
+        expect(s.credits).toBe(0)
+        expect(s.issuer_calls).toBe(1)
+        await p.checkStub()
+    }, 180_000)
+
+    it('asks the issuer nothing for a paid turn', async () => {
+        const p = await newPayer({}, true)
+        const { err, settled } = await p.ask(false)
+        expect(err).toBeUndefined()
+        expect(settled.err).toBeUndefined()
+        expect((await payerState(p.address)).issuer_calls).toBe(0)
+        await p.checkStub()
+    }, 180_000)
 
     // A ticket the node opened and never served is refunded in full by the
     // payer's watchdog once its deadline passes.
@@ -290,7 +360,10 @@ describe.skipIf(RPC === '' || AUTHORITY === '').concurrent('Solana end to end', 
         // program reads as before the deadline.
         for (const start = Date.now(); ; await sleep(2000)) {
             try {
-                await control('/stub/lapse', { method: 'POST', body: JSON.stringify({ address: p.address, ticket_id: id }) })
+                await control('/stub/lapse', {
+                    method: 'POST',
+                    body: JSON.stringify({ address: p.address, ticket_id: id }),
+                })
                 break
             } catch (e) {
                 if (Date.now() - start > 30_000) throw e

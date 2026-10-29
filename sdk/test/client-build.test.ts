@@ -15,6 +15,7 @@ import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 
 import type { AlgodEscrowChainOptions } from '../src/escrow/algod.js'
 import type { ReserveCall } from '../src/reserve.js'
+import { FakeIssuer } from './credit-issuer.js'
 
 const GENESIS = new Uint8Array(32).fill(7)
 
@@ -54,7 +55,8 @@ vi.mock('../src/escrow/algod.js', async (importOriginal) => {
     return { ...real, AlgodEscrowChain: StandInChain, suggestedParams: () => h.params() }
 })
 
-const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, solanaDevnet, testnet } = await import('../src/index.js')
+const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, solanaDevnet, testnet } =
+    await import('../src/index.js')
 const { dispatchDepsOf, partsOf } = await import('../src/client-parts.js')
 const { testOperator } = await import('./fixtures.js')
 type Config = import('../src/index.js').Config
@@ -71,7 +73,11 @@ const base: Config = { signer, network: testnet(), registry }
 // A Solana Client with its parts supplied, so nothing reads a cluster.
 const solanaPayer = 'Vote111111111111111111111111111111111111111'
 const solanaBase: Config = {
-    solanaSigner: { address: solanaPayer, signBytes: async () => new Uint8Array(), signTransactionMessage: async () => new Uint8Array() },
+    solanaSigner: {
+        address: solanaPayer,
+        signBytes: async () => new Uint8Array(),
+        signTransactionMessage: async () => new Uint8Array(),
+    },
     network: solanaDevnet(),
     registry,
     wallet: { payerAddr: () => solanaPayer } as never,
@@ -154,7 +160,9 @@ describe('Client.create building the wallet', () => {
             protoVersion: DEPLOYMENT_BINDING_MIN_VERSION,
         })
         await expect(
-            partsOf.get(c)!.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
+            partsOf
+                .get(c)!
+                .reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
         ).rejects.toThrow('captured')
         const want = encodeDeploymentId(algorandDeploymentId(GENESIS, resolveNetwork(testnet()).escrowAppId))
         expect(h.reserveCalls[0]!.request.deployment).toBe(want)
@@ -165,11 +173,29 @@ describe('Client.create building the wallet', () => {
     // choose its ticket ids.
     it('hands the rail to the reserve client it builds', async () => {
         const c = await Client.create(solanaBase)
-        const op = testOperator({ ephemeralRecipient: 'age1live', ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600 })
+        const op = testOperator({
+            ephemeralRecipient: 'age1live',
+            ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600,
+        })
         await expect(
-            partsOf.get(c)!.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
+            partsOf
+                .get(c)!
+                .reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
         ).rejects.toThrow('captured')
         expect(base64.decode(h.reserveCalls[0]!.request.ticket_id ?? '')).toHaveLength(16)
+        c.close()
+    })
+
+    // Credits need the deployment they are minted for; a Solana Client that
+    // read none says its credits are off rather than going without silently.
+    // Go's TestNew_WarnsWhenCreditsHaveNoDeployment.
+    it('warns when credits have no deployment to be minted for', async () => {
+        const warns: string[] = []
+        const logger = { debug() {}, info() {}, warn: (m: string) => warns.push(m), error() {} }
+        const is = new FakeIssuer()
+        const c = await Client.create({ ...solanaBase, logger, freeCredits: { issuers: { [is.key]: is } } })
+        expect(partsOf.get(c)!.freeCredits).toBeUndefined()
+        expect(warns.join('\n')).toMatch(/freeCredits are off/)
         c.close()
     })
 

@@ -11,6 +11,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.5.0
 	github.com/algonode/go-algorand-hd-wallet v0.1.2
 	github.com/algorand/go-algorand-sdk/v2 v2.12.0
+	github.com/cloudflare/circl v1.6.3
 	github.com/google/go-tdx-guest v0.3.1
 	github.com/tyler-smith/go-bip39 v1.1.0
 	gocloud.dev v0.46.0

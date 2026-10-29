@@ -41,6 +41,7 @@ import (
 	"github.com/TxnLab/zerosignal/go/escrow"
 	"github.com/TxnLab/zerosignal/go/inject"
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/tools"
 	"github.com/TxnLab/zerosignal/go/wire"
 	"github.com/TxnLab/zerosignal/go/zs/tee"
@@ -145,6 +146,7 @@ type detailsFieldsVector struct {
 	MinChargeOutputTokens    uint64                    `json:"minChargeOutputTokens"`
 	MinChargeAlgoTxns        uint64                    `json:"minChargeAlgoTxns"`
 	MinChargeMicroUSDC       uint64                    `json:"minChargeMicroUsdc"`
+	FreeCreditIssuers        []string                  `json:"freeCreditIssuers,omitempty"`
 }
 
 type operatorScenario struct {
@@ -155,6 +157,9 @@ type operatorScenario struct {
 	// Selection the descriptor Operator.Selection projects from the result.
 	Fields    detailsFieldsVector `json:"fields"`
 	Selection selection.Operator  `json:"selection"`
+	// CreditIssuers is creditIssuersFor on Solana for each advertised model:
+	// the issuers a free reserve for it may carry a credit from.
+	CreditIssuers map[string][]string `json:"creditIssuers"`
 }
 
 func operatorScenarios() []operatorScenario {
@@ -296,6 +301,40 @@ func operatorScenarios() []operatorScenario {
 		sc.Node.TEE = &operatorVectorTEE{OSImageChecked: true, ComposeReleaseChecked: true}
 	})
 	add("an unreachable node", func(sc *operatorScenario) { sc.Node.Reachable = false })
+	// Each priced term alone makes the model paid, so no credit rides it; the
+	// issuers are carried whatever the models.
+	issuers := []string{"n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw=", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
+	freeModel := func(id string, edit func(*inject.OperatorDetailsModel)) inject.OperatorDetailsModel {
+		m := inject.OperatorDetailsModel{ID: id, ContextWindow: 32768}
+		if edit != nil {
+			edit(&m)
+		}
+		return m
+	}
+	add("a free model on a node that trusts issuers carries their credits", func(sc *operatorScenario) {
+		sc.Details.FreeCreditIssuers = issuers
+		sc.Details.Models = append(sc.Details.Models,
+			freeModel("free", nil),
+			freeModel("free-cache-0", func(m *inject.OperatorDetailsModel) { m.CacheReadRateUSDPer1M = f64ptr(0) }),
+			freeModel("cache-read", func(m *inject.OperatorDetailsModel) { m.CacheReadRateUSDPer1M = f64ptr(0.5) }),
+			freeModel("output-only", func(m *inject.OperatorDetailsModel) { m.OutputRateUSDPer1M = 1 }),
+			freeModel("long-context", func(m *inject.OperatorDetailsModel) {
+				m.LongContextThresholdTokens, m.LongContextInputRateUSDPer1M = 100000, f64ptr(1)
+			}),
+			freeModel("long-context-output", func(m *inject.OperatorDetailsModel) { m.LongContextOutputRateUSDPer1M = f64ptr(1) }),
+			freeModel("long-context-cache", func(m *inject.OperatorDetailsModel) { m.LongContextCacheReadRateUSDPer1M = f64ptr(1) }),
+			freeModel("free-image-route", func(m *inject.OperatorDetailsModel) { m.ServesImageGen = true }),
+			freeModel("free-image-edit", func(m *inject.OperatorDetailsModel) { m.ServesImageEdit = true }),
+			freeModel("image-tool", func(m *inject.OperatorDetailsModel) { m.ImageToolRateMicroUSDC = 30000 }),
+			freeModel("image-edit-tool", func(m *inject.OperatorDetailsModel) { m.ImageEditToolRateMicroUSDC = 35000 }),
+			freeModel("zs-tool", func(m *inject.OperatorDetailsModel) { m.ToolCallRatesMicroUSDC = map[string]uint64{"zs_web_read": 500} }),
+			freeModel("vendor-tool", func(m *inject.OperatorDetailsModel) { m.ToolCallRatesMicroUSDC = map[string]uint64{"web_search": 6000} }),
+			freeModel("vendor-catch-all", func(m *inject.OperatorDetailsModel) { m.VendorToolCatchAllMicroUSDC = 3000 }),
+		)
+	})
+	add("a free model on a node that trusts no issuer carries none", func(sc *operatorScenario) {
+		sc.Details.Models = append(sc.Details.Models, freeModel("free", nil))
+	})
 	return out
 }
 
@@ -324,8 +363,13 @@ func runOperatorScenario(sc *operatorScenario) {
 		ProtoVersion:          op.ProtoVersion,
 		MinChargeOutputTokens: op.MinChargeOutputTokens, MinChargeAlgoTxns: op.MinChargeAlgoTxns,
 		MinChargeMicroUSDC: op.MinChargeMicroUSDC,
+		FreeCreditIssuers:  op.FreeCreditIssuers,
 	}
 	sc.Selection = op.Selection()
+	sc.CreditIssuers = map[string][]string{}
+	for _, m := range op.Models {
+		sc.CreditIssuers[m] = creditIssuersFor(ticket.RailSolana, op, m)
+	}
 }
 
 // probeVerdictVector is what the scenario's verifier returns.

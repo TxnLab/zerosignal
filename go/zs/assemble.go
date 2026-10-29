@@ -39,6 +39,9 @@ type networkParts struct {
 	// store for every routing signal the caller left nil.
 	source *ChainOperatorSource
 	stop   func()
+	// deploymentID is the id read off the chain, zero when no part was built
+	// or the read failed; free credits are minted for it.
+	deploymentID ticket.DeploymentID
 }
 
 // railChain is what buildNetworkParts reads one rail's chain through.
@@ -81,6 +84,7 @@ func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (network
 			return networkParts{}, err
 		}
 	}
+	p.deploymentID = deployment
 	if p.reserve == nil {
 		p.reserve = newReserveClient(cfg, deployment)
 	}

@@ -151,6 +151,7 @@ update-vectors:
 	cd go && $(GO) test ./attest     -run TestComposeVectors        -update-compose
 	cd go && $(GO) test ./attest     -run TestTrustListTwinVectors  -update-trust-lists
 	cd go && $(GO) test ./settle     -run TestSettleVectors         -update
+	cd go && $(GO) test ./freecredit -run TestFreeCreditVectors     -update
 	cd go && $(GO) test ./escrow     -run TestEscrowVectors         -update
 	cd go && $(GO) test ./escrow     -run TestGroupVectors          -update
 	cd go && $(GO) test ./solana     -run TestCodecVectors          -update

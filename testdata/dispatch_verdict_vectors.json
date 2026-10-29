@@ -737,6 +737,64 @@
       }
     },
     {
+      "name": "a refused free credit is a refusal, no strike",
+      "error": {
+        "kind": "http",
+        "status": 400,
+        "code": "free_credit_invalid"
+      },
+      "route": {
+        "relayed": false,
+        "relay_marks_hops": false,
+        "caller_aborted": false
+      },
+      "use_privacy": false,
+      "want": {
+        "outcome": "refused",
+        "stop": false,
+        "strike": false,
+        "refused": true,
+        "hard_refused": true,
+        "busy": false,
+        "busy_resweepable": false,
+        "transient": false,
+        "size_rejected": false,
+        "ephemeral_missing": false,
+        "free_budget_spent": false,
+        "hint_ms": 0,
+        "attribution": ""
+      }
+    },
+    {
+      "name": "a spent free credit asked again is a refusal, no strike",
+      "error": {
+        "kind": "http",
+        "status": 409,
+        "code": "free_credit_spent"
+      },
+      "route": {
+        "relayed": false,
+        "relay_marks_hops": false,
+        "caller_aborted": false
+      },
+      "use_privacy": false,
+      "want": {
+        "outcome": "refused",
+        "stop": false,
+        "strike": false,
+        "refused": true,
+        "hard_refused": true,
+        "busy": false,
+        "busy_resweepable": false,
+        "transient": false,
+        "size_rejected": false,
+        "ephemeral_missing": false,
+        "free_budget_spent": false,
+        "hint_ms": 0,
+        "attribution": ""
+      }
+    },
+    {
       "name": "commit_k_mismatch is a refusal, no strike",
       "error": {
         "kind": "http",

@@ -154,6 +154,8 @@ export interface OperatorDetails {
   signing_addr?: string
   /** The base64 escrow deployment id the node issues tickets for. Unsigned. */
   deployment?: string
+  /** The base64 Ed25519 keys of the free-credit issuers the node trusts. Unsigned; absent when it trusts none. */
+  free_credit_issuers?: string[]
   /** A seal target needs all four ephemeral fields; any missing means none. */
   ephemeral_age_pubkey?: string
   ephemeral_expiry?: number
@@ -399,6 +401,7 @@ export function parseOperatorDetails(body: unknown): OperatorDetails | null {
     owner_addr: str(body.owner_addr),
     signing_addr: str(body.signing_addr),
     deployment: str(body.deployment),
+    free_credit_issuers: strings(body.free_credit_issuers),
     ephemeral_age_pubkey: str(body.ephemeral_age_pubkey),
     ephemeral_expiry: uint(body.ephemeral_expiry),
     ephemeral_issued_at: uint(body.ephemeral_issued_at),

@@ -7,6 +7,9 @@
     "owner_addr": "OWNERADDR",
     "signing_addr": "SIGNINGADDR",
     "deployment": "ZGVwbG95bWVudA==",
+    "free_credit_issuers": [
+      "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw="
+    ],
     "ephemeral_age_pubkey": "age1examplerecipient",
     "ephemeral_expiry": 1800000600,
     "ephemeral_issued_at": 1800000000,
