@@ -314,6 +314,11 @@ type Ticket struct {
 	Reserve  [7]byte  `json:"_reserve"`
 }
 
+// TicketPayerOffset is where a Ticket account's payer key sits, discriminator
+// included: what a getProgramAccounts memcmp matches to list one payer's
+// tickets.
+const TicketPayerOffset = 131
+
 // Deadline is the last moment either half, a cooperative settle or a protest
 // is accepted; settle_lapsed and refund_inactive open after it.
 func (t *Ticket) Deadline() int64 {

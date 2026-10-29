@@ -777,6 +777,96 @@
       }
     },
     {
+      "builder": "mint_to",
+      "args": {
+        "amount": "0",
+        "authority": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+        "destination": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+      },
+      "instruction": {
+        "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "accounts": [
+          {
+            "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+            "is_signer": true,
+            "is_writable": false
+          }
+        ],
+        "data_base64": "BwAAAAAAAAAA"
+      }
+    },
+    {
+      "builder": "mint_to",
+      "args": {
+        "amount": "1000000000",
+        "authority": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+        "destination": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+      },
+      "instruction": {
+        "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "accounts": [
+          {
+            "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+            "is_signer": true,
+            "is_writable": false
+          }
+        ],
+        "data_base64": "BwDKmjsAAAAA"
+      }
+    },
+    {
+      "builder": "mint_to",
+      "args": {
+        "amount": "18446744073709551615",
+        "authority": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+        "destination": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+        "mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
+      },
+      "instruction": {
+        "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "accounts": [
+          {
+            "pubkey": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",
+            "is_signer": false,
+            "is_writable": true
+          },
+          {
+            "pubkey": "Bow1CGKGDB9mNxeWdw85E2aCthQ1oZX4oFEe7fYT17ew",
+            "is_signer": true,
+            "is_writable": false
+          }
+        ],
+        "data_base64": "B///////////"
+      }
+    },
+    {
       "builder": "create_associated_token_account_idempotent",
       "args": {
         "mint": "AB3FQHskSYuWVw4M9EpGdxNzrAjBNiYGpbH4CVzLFene",

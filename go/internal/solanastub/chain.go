@@ -12,15 +12,10 @@
 package solanastub
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/solana"
@@ -148,33 +143,9 @@ func (ch *Chain) USDC(ctx context.Context, owner solana.PublicKey) (uint64, erro
 // Airdrop asks the cluster's faucet for lamports, which only a test cluster
 // has, and waits until they arrive.
 func (ch *Chain) Airdrop(ctx context.Context, to solana.PublicKey, lamports uint64) error {
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "requestAirdrop", "params": []any{to.String(), lamports}})
+	sig, err := rpc.RequestAirdrop(ctx, ch.Endpoint, to, lamports)
 	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ch.Endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	var out struct {
-		Result string          `json:"result"`
-		Error  json.RawMessage `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return fmt.Errorf("solanastub: airdrop: %w", err)
-	}
-	if out.Error != nil {
-		return fmt.Errorf("solanastub: airdrop: %s", out.Error)
-	}
-	sig, err := solana.ParseSignature(out.Result)
-	if err != nil {
-		return err
 	}
 	height, err := ch.RPC.GetBlockHeight(ctx, rpc.Confirmed)
 	if err != nil {
@@ -191,24 +162,9 @@ func (ch *Chain) MintUSDC(ctx context.Context, authority ed25519.PrivateKey, own
 	mint := ch.Deployment.Mint
 	_, err := ch.Send(ctx, []solana.Instruction{
 		solana.CreateAssociatedTokenAccountIdempotent(PublicKey(authority), owner, mint),
-		mintTo(mint, ch.Deployment.TokenAccount(owner), PublicKey(authority), amount),
+		solana.MintTo(mint, ch.Deployment.TokenAccount(owner), PublicKey(authority), amount),
 	}, authority)
 	return err
-}
-
-// tokenMintTo is SPL Token's MintTo tag.
-const tokenMintTo = 7
-
-func mintTo(mint, destination, authority solana.PublicKey, amount uint64) solana.Instruction {
-	return solana.Instruction{
-		ProgramID: solana.TokenProgramID,
-		Accounts: []solana.AccountMeta{
-			{PublicKey: mint, IsWritable: true},
-			{PublicKey: destination, IsWritable: true},
-			{PublicKey: authority, IsSigner: true},
-		},
-		Data: binary.LittleEndian.AppendUint64([]byte{tokenMintTo}, amount),
-	}
 }
 
 // RegisterNode creates an operator owned by owner and its first node, signing
@@ -241,32 +197,4 @@ func (ch *Chain) RegisterNode(ctx context.Context, owner ed25519.PrivateKey, sig
 // PublicKey is key's public half.
 func PublicKey(key ed25519.PrivateKey) solana.PublicKey {
 	return solana.PublicKey(key.Public().(ed25519.PublicKey))
-}
-
-// ReadKeypair reads a solana-keygen keypair file: a JSON array of the 64
-// bytes of the seed and the public key.
-func ReadKeypair(path string) (ed25519.PrivateKey, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var b []byte
-	var ints []int
-	if err := json.Unmarshal(raw, &ints); err != nil {
-		return nil, fmt.Errorf("solanastub: %s is not a keypair file: %w", path, err)
-	}
-	for _, v := range ints {
-		if v < 0 || v > 255 {
-			return nil, fmt.Errorf("solanastub: %s is not a keypair file", path)
-		}
-		b = append(b, byte(v))
-	}
-	if len(b) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("solanastub: %s holds %d bytes, want %d", path, len(b), ed25519.PrivateKeySize)
-	}
-	key := ed25519.NewKeyFromSeed(b[:ed25519.SeedSize])
-	if !bytes.Equal(key[ed25519.SeedSize:], b[ed25519.SeedSize:]) {
-		return nil, fmt.Errorf("solanastub: %s: the public key is not the seed's", path)
-	}
-	return key, nil
 }

@@ -65,6 +65,12 @@ type Metadata struct {
 	// plain `go build` on the encrypted file) open the same store. Empty in
 	// a wallet written before it was recorded, until the phrase is next read.
 	Backend string `json:"backend,omitempty"`
+	// SolanaAddress is the address the phrase pays as on the Solana rail,
+	// m/44'/501'/0'/0', so a host can show it without unlocking the store.
+	// Empty for a 25-word Algorand mnemonic, which has no Solana key, and in
+	// a 24-word wallet written before it was recorded, until the phrase is
+	// next read.
+	SolanaAddress string `json:"solana_address,omitempty"`
 }
 
 // Wallet is one directory's wallet: a secret store plus the descriptor.
@@ -206,6 +212,9 @@ func (w *Wallet) persist(mnemonic, network, source string, force bool) (Metadata
 			ErrExists, w.storeName(), w.dir, metaFile)
 	}
 	meta := Metadata{Address: addr, Network: network, Kind: kind, Source: source, Backend: w.backend}
+	if meta.SolanaAddress, err = solanaAddressOf(mnemonic, kind); err != nil {
+		return Metadata{}, err
+	}
 	if err := w.store.Set(w.key, mnemonic); err != nil {
 		return Metadata{}, fmt.Errorf("store secret: %w", err)
 	}
@@ -264,7 +273,7 @@ func (w *Wallet) readPhrase() (m string, legacy bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	addr, _, err := keystore.DeriveAddress(m)
+	addr, kind, err := keystore.DeriveAddress(m)
 	if err != nil {
 		return "", false, err
 	}
@@ -278,10 +287,21 @@ func (w *Wallet) readPhrase() (m string, legacy bool, err error) {
 		}
 		legacy = true
 	}
+	stale := false
 	if meta.Backend == "" && w.backend != "" {
 		// A wallet from before backends were recorded gets one the first
 		// time a store is shown to hold its phrase.
 		meta.Backend = w.backend
+		stale = true
+	}
+	if meta.SolanaAddress == "" {
+		// Likewise a wallet from before Solana addresses were recorded.
+		if sol, err := solanaAddressOf(m, kind); err == nil && sol != "" {
+			meta.SolanaAddress = sol
+			stale = true
+		}
+	}
+	if stale {
 		_ = w.writeMeta(meta)
 	}
 	return m, legacy, nil
@@ -364,6 +384,32 @@ func (w *Wallet) writeMeta(m Metadata) error {
 // Import stores the phrase in that same form.
 func DeriveAddress(mnemonic string) (addr, kind string, err error) {
 	return keystore.DeriveAddress(normalizePhrase(mnemonic))
+}
+
+// DeriveSolanaAddress validates a recovery phrase and returns the address it
+// pays as on the Solana rail, the one Phantom shows for it. A 25-word Algorand
+// mnemonic has none and is refused.
+func DeriveSolanaAddress(mnemonic string) (string, error) {
+	return solanaAddress(normalizePhrase(mnemonic))
+}
+
+// solanaAddressOf is a stored phrase's Solana address, "" for a kind with no
+// Solana key. The phrase is taken as stored, as keystore.NewSolanaKeys takes
+// it, so the descriptor names the key LoadSolanaPayer pays with.
+func solanaAddressOf(mnemonic, kind string) (string, error) {
+	if kind != KindXHD24 {
+		return "", nil
+	}
+	return solanaAddress(mnemonic)
+}
+
+func solanaAddress(phrase string) (string, error) {
+	priv, err := keystore.SolanaKeyFromPhrase(phrase)
+	if err != nil {
+		return "", err
+	}
+	defer clear(priv)
+	return keystore.SolanaAddress(priv)
 }
 
 // newMnemonic24 generates a 24-word BIP-39 phrase (256 bits of entropy).

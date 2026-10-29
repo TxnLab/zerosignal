@@ -19,13 +19,19 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import * as ed25519 from '@noble/ed25519'
-import { encodeBase58 } from '@txnlab/zs-proto/solana'
-import { FREEZE_ORIGIN_PROTEST, FREEZE_ORIGIN_SETTLE_MISMATCH } from '@txnlab/zs-proto/solana/zsescrow'
+import { base64 } from '@scure/base'
+import { TOKEN_PROGRAM_ID, encodeBase58 } from '@txnlab/zs-proto/solana'
+import { Deployment, FREEZE_ORIGIN_PROTEST, FREEZE_ORIGIN_SETTLE_MISMATCH } from '@txnlab/zs-proto/solana/zsescrow'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
 import { Client, httpCreditIssuer, solanaLocalnet } from '../src/index.js'
 import type { SettleResult } from '../src/index.js'
+import type { SolanaSigner } from '../src/ports.js'
+import { SolanaRentPool, rentPoolAvailable, rentPoolFreeSlots } from '../src/solana/rent.js'
+import { SolanaRpcClient } from '../src/solana/rpc.js'
+import { fetchSolanaPayerTickets } from '../src/solana/tickets.js'
+import { SolanaTicketGoneError, SolanaWallet, readSolanaConfig } from '../src/solana/wallet.js'
 
 const RPC = process.env.ZS_SOLANA_E2E_RPC ?? ''
 const AUTHORITY = process.env.ZS_SOLANA_E2E_MINT_AUTHORITY ?? ''
@@ -114,6 +120,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 class Payer {
     constructor(
         readonly address: string,
+        readonly signer: SolanaSigner,
         readonly client: Client,
     ) {}
 
@@ -134,9 +141,10 @@ class Payer {
                   },
               }
             : undefined
+        const signer = solanaSigner({ seed, publicKey, address })
         const client = await Client.create({
             ...(freeCredits ? { freeCredits } : {}),
-            solanaSigner: solanaSigner({ seed, publicKey, address }),
+            solanaSigner: signer,
             network: { ...solanaLocalnet(), rpcEndpoint: RPC, program: stub.program },
             // One node can't be its own relay.
             privacy: 'direct',
@@ -144,7 +152,7 @@ class Payer {
             disableTee: true,
             discovery: { operatorIds: [stub.operator_id] },
         })
-        return new Payer(address, client)
+        return new Payer(address, signer, client)
     }
 
     /** Runs one chat turn, on the stub's priced model unless model names another, and waits for its settle submit. */
@@ -203,6 +211,30 @@ async function newPayer(b: Behavior, credits = false): Promise<Payer> {
     const p = await Payer.create(b, credits)
     payers.push(p)
     return p
+}
+
+/** The program's deployment on the validator, its mint read from the Config. */
+async function deployment(rpc: SolanaRpcClient): Promise<Deployment> {
+    return new Deployment(stub.program, (await readSolanaConfig(rpc, new Deployment(stub.program, ''))).usdcMint)
+}
+
+/** A SolanaWallet for signer apart from any Client, as a host's wallet commands build one. */
+async function walletFor(rpc: SolanaRpcClient, signer: SolanaSigner): Promise<SolanaWallet> {
+    return SolanaWallet.create({ rpc, deployment: await deployment(rpc), signer })
+}
+
+/** Asks the validator's faucet for lamports and waits until they arrive. */
+async function airdrop(rpc: SolanaRpcClient, to: string, lamports: bigint): Promise<void> {
+    const r = await fetch(RPC, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'requestAirdrop', params: [to, Number(lamports)] }),
+    })
+    const body = (await r.json()) as { error?: unknown }
+    if (body.error !== undefined) throw new Error(`requestAirdrop: ${JSON.stringify(body.error)}`)
+    for (const start = Date.now(); (await rpc.getBalance(to, { commitment: 'confirmed' })) < lamports; await sleep(500)) {
+        if (Date.now() - start > 60_000) throw new Error('the airdrop never arrived')
+    }
 }
 
 const closed = (t: TicketState) => t.closed
@@ -309,6 +341,51 @@ describe.skipIf(RPC === '' || AUTHORITY === '').concurrent('Solana end to end', 
         // refund the validator's clock refused as early.
         await p.waitTicket(await p.onlyTicket(), 10_000 + stub.default_grace * 1000 + 120_000, 'refunded', closed)
         expect(await p.usdc()).toBe(BigInt(stub.payer_usdc))
+        await p.checkStub()
+    }, 300_000)
+
+    // What a host's wallet commands call, against the program: the fee rate and
+    // the USDC account create for a payer with SOL alone, then the ticket
+    // listing and recovery, and the rent pool's withdraw and close, around a
+    // ticket the watchdog refunds.
+    it("answers a host's wallet calls", async () => {
+        const rpc = new SolanaRpcClient({ endpoint: RPC })
+        const seed = crypto.getRandomValues(new Uint8Array(32))
+        const publicKey = await ed25519.getPublicKeyAsync(seed)
+        const fresh = solanaSigner({ seed, publicKey, address: encodeBase58(publicKey) })
+        await airdrop(rpc, fresh.address, 100_000_000n)
+        const w = await walletFor(rpc, fresh)
+        await expect(w.protocolFeeBps()).resolves.toBe(stub.fee_bps)
+        expect(await w.ensureUsdcAccount()).not.toBe('')
+        await expect(w.ensureUsdcAccount()).resolves.toBe('')
+        expect((await rpc.getAccountInfo(w.usdcAccount(), { commitment: 'confirmed' }))?.owner).toBe(TOKEN_PROGRAM_ID)
+
+        const p = await newPayer({ no_receipt: true, ticket_lifetime_ms: 10_000 })
+        const { err } = await p.ask(false)
+        expect(err, "the node's failure").toBeDefined()
+        const id = await p.onlyTicket()
+        const d = await deployment(rpc)
+        const listed = await fetchSolanaPayerTickets(rpc, d, p.address)
+        expect(listed.unreadable).toEqual([])
+        expect(listed.tickets.map((t) => [base64.encode(t.ticket.ticketId), t.operatorId, t.nodeId])).toEqual([
+            [id, BigInt(stub.operator_id), BigInt(stub.node_id)],
+        ])
+        // Inside its settle window the program allows no ending, so nothing goes.
+        const pw = await walletFor(rpc, p.signer)
+        const [opId, nodeId, ticketId] = [BigInt(stub.operator_id), BigInt(stub.node_id), base64.decode(id)]
+        await expect(pw.recoverTicket(opId, nodeId, ticketId)).resolves.toEqual({ verdict: 'wait', signature: '' })
+        await p.waitTicket(id, 10_000 + stub.default_grace * 1000 + 120_000, 'refunded', closed)
+        await expect(pw.recoverTicket(opId, nodeId, ticketId)).rejects.toBeInstanceOf(SolanaTicketGoneError)
+        expect((await fetchSolanaPayerTickets(rpc, d, p.address)).tickets).toEqual([])
+
+        const pool = new SolanaRentPool({ rpc, deployment: d, signer: p.signer })
+        const st = await pool.status()
+        expect([st.exists, st.openTickets, rentPoolFreeSlots(st) > 0n]).toEqual([true, 0n, true])
+        await pool.withdraw(st.ticketRent)
+        const after = await pool.status()
+        expect(rentPoolAvailable(after)).toBe(rentPoolAvailable(st) - st.ticketRent)
+        expect((await pool.close()).returned).toBe(after.lamports)
+        expect((await pool.status()).exists).toBe(false)
         await p.checkStub()
     }, 300_000)
 

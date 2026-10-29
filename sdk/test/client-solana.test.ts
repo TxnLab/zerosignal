@@ -58,6 +58,9 @@ const accountVectors = JSON.parse(
 const CONFIG = accountVectors.accounts.find((a) => a.name === 'config_initialized')!.data_base64
 const MINT = decodeConfig(base64.decode(CONFIG)).usdcMint
 const CONFIG_ADDR = new Deployment(PROGRAM_ID, '').config()
+// The Config's fee_bps, after the discriminator and its seven one-byte
+// fields, as Go's test has it.
+const CONFIG_FEE_BPS_OFFSET = 15
 const GENESIS = encodeBase58(new Uint8Array(32).fill(9))
 const ENDPOINT = 'http://rpc.test'
 
@@ -100,7 +103,11 @@ afterEach(() => {
 
 describe('Client.create on Solana', () => {
     it('builds the wallet, the reserve client and discovery from the network alone', async () => {
-        const seen = stubRpc()
+        // A fee rate no default has, so the price can only be the Config's.
+        const config = base64.decode(CONFIG)
+        new DataView(config.buffer).setUint16(CONFIG_FEE_BPS_OFFSET, 1234, true)
+        expect(decodeConfig(config).feeBps).toBe(1234)
+        const seen = stubRpc(base64.encode(config))
         const is = new FakeIssuer()
         const c = await Client.create({
             solanaSigner: signer,
@@ -118,8 +125,12 @@ describe('Client.create on Solana', () => {
             expect(parts.cfg.wallet).toBeInstanceOf(SolanaWallet)
             expect(parts.cfg.wallet!.payerAddr()).toBe(PAYER)
             // The wallet checked the Config's mint against the deployment it
-            // was built on, so it took the Config's.
+            // was built on, so it took the Config's; the fee rate is the
+            // Config's too, which a /v1/models price and the reserve check
+            // read.
+            await vi.waitFor(() => expect(c.feeRate()).toBe(1234))
             expect(seen.filter((s) => s.method === 'getAccountInfo').map((s) => s.params[0])).toEqual([
+                CONFIG_ADDR,
                 CONFIG_ADDR,
                 CONFIG_ADDR,
             ])

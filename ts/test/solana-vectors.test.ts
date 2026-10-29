@@ -30,6 +30,7 @@ import {
     isOnCurve,
     isSigner,
     isWritable,
+    mintTo,
     newTransaction,
     parseMessage,
     parsePublicKey,
@@ -247,6 +248,7 @@ describe('solana_codec_vectors.json', () => {
         set_compute_unit_limit: (a) => setComputeUnitLimit(Number(a.units)),
         set_compute_unit_price: (a) => setComputeUnitPrice(BigInt(a.micro_lamports!)),
         transfer_checked: (a) => transferChecked(a.source!, a.mint!, a.destination!, a.authority!, BigInt(a.amount!), Number(a.decimals)),
+        mint_to: (a) => mintTo(a.mint!, a.destination!, a.authority!, BigInt(a.amount!)),
         create_associated_token_account_idempotent: (a) => createAssociatedTokenAccountIdempotent(a.payer!, a.owner!, a.mint!),
     }
     it('covers every builder', () => {

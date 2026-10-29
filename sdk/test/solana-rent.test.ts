@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import * as ed25519 from '@noble/ed25519'
 import { sha256 } from '@noble/hashes/sha2.js'
 import {
+    type Instruction,
     type Transaction,
     compileMessage,
     encodeBase58,
@@ -28,11 +29,18 @@ import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../src/registry/solana.js'
 import { TransactionExpiredError } from '../src/solana/confirm.js'
 import {
+    NoRentPoolError,
     RentDepositUnaffordableError,
     RentDepositUnconfirmedError,
+    RentPoolTicketsOpenError,
+    RentPoolUnconfirmedError,
     SOLANA_SIGNATURE_FEE,
     SolanaRentPool,
     planRentDeposit,
+    readSolanaRentPool,
+    rentPoolAvailable,
+    rentPoolBackedSlots,
+    rentPoolFreeSlots,
     rentPoolGross,
 } from '../src/solana/rent.js'
 import type { Account, SendOptions, SignatureStatus, SolanaRpc } from '../src/solana/rpc.js'
@@ -132,15 +140,24 @@ function cluster(balance: bigint, poolAt: Account | null = null, land?: () => Si
             verifySignatures(tx)
             sent.push({ tx, o })
             const data = tx.message.instructions[0]!.data
-            const amount = new DataView(data.buffer, data.byteOffset).getBigUint64(data.length - 8, true)
+            const amount = data.length >= 16 ? new DataView(data.buffer, data.byteOffset).getBigUint64(data.length - 8, true) : 0n
             const st = land === undefined ? { slot: 5n, confirmations: 1n, err: null, confirmationStatus: 'confirmed' as const } : land()
             if (st !== null && st.err === null) {
-                if (state.pool === null || state.pool.owner !== PROGRAM_ID) {
-                    state.pool = poolAccount(POOL_RENT, 0n)
-                    state.balance -= POOL_RENT
+                state.balance -= SOLANA_SIGNATURE_FEE
+                if (bytesEqual(data, d.closeRentPool(PAYER).data)) {
+                    state.balance += state.pool!.lamports
+                    state.pool = null
+                } else if (bytesEqual(data.slice(0, 8), d.withdrawRent(PAYER, 0n).data.slice(0, 8))) {
+                    state.pool!.lamports -= amount
+                    state.balance += amount
+                } else {
+                    if (state.pool === null || state.pool.owner !== PROGRAM_ID) {
+                        state.pool = poolAccount(POOL_RENT, 0n)
+                        state.balance -= POOL_RENT
+                    }
+                    state.pool.lamports += amount
+                    state.balance -= amount
                 }
-                state.pool.lamports += amount
-                state.balance -= amount + SOLANA_SIGNATURE_FEE
             }
             const sig = encodeBase58(tx.signatures[0]!)
             statuses.set(sig, st)
@@ -235,4 +252,108 @@ describe('SolanaRentPool', () => {
         expect((err as RentDepositUnconfirmedError).signature).toBe(encodeBase58(c.sent[0]!.tx.signatures[0]!))
         expect((err as Error).cause).toBeInstanceOf(TransactionExpiredError)
     })
+
+    // The last transaction sent is ix alone with the payer as fee payer, preflighted at confirmed.
+    function sentAlone(c: ReturnType<typeof cluster>, ix: Instruction) {
+        const { tx, o } = c.sent.at(-1)!
+        expect(encodeMessage(tx.message)).toEqual(encodeMessage(compileMessage(PAYER, BLOCKHASH, [ix], 'legacy')))
+        expect(o?.preflightCommitment).toBe('confirmed')
+    }
+
+    it('reads its status', async () => {
+        // Three slots' rent in the pool, two more in live tickets, and a few lamports short of a fourth.
+        const c = cluster(0n, poolAccount(POOL_RENT + 4n * TICKET_RENT - 1n, 2n))
+        const want = {
+            exists: true,
+            lamports: POOL_RENT + 4n * TICKET_RENT - 1n,
+            openTickets: 2n,
+            ticketRent: TICKET_RENT,
+            poolRent: POOL_RENT,
+        }
+        const got = await readSolanaRentPool(c.rpc, d, PAYER)
+        expect(got).toEqual(want)
+        expect([rentPoolAvailable(got), rentPoolFreeSlots(got), rentPoolBackedSlots(got)]).toEqual([
+            4n * TICKET_RENT - 1n,
+            3n,
+            5n,
+        ])
+        await expect(c.pool.status()).resolves.toEqual(want)
+
+        // A pool holding less than its own rent has nothing to draw.
+        c.state.pool = poolAccount(POOL_RENT - 1n, 0n)
+        const under = await readSolanaRentPool(c.rpc, d, PAYER)
+        expect([rentPoolAvailable(under), rentPoolFreeSlots(under), rentPoolBackedSlots(under)]).toEqual([0n, 0n, 0n])
+        // Lamports at the address are no pool.
+        c.state.pool = {
+            lamports: 5n * TICKET_RENT,
+            owner: '11111111111111111111111111111111',
+            data: new Uint8Array(),
+            executable: false,
+        }
+        const stray = await readSolanaRentPool(c.rpc, d, PAYER)
+        expect([stray.exists, rentPoolAvailable(stray), rentPoolBackedSlots(stray)]).toEqual([false, 0n, 0n])
+
+        // A status no read filled in has no slots, rather than dividing by zero.
+        const zero = { exists: true, lamports: 5n * TICKET_RENT, openTickets: 1n, ticketRent: 0n, poolRent: 0n }
+        expect([rentPoolFreeSlots(zero), rentPoolBackedSlots(zero)]).toEqual([0n, 0n])
+    })
+
+    it('withdraws up to what it holds above its rent', async () => {
+        const c = cluster(0n, poolAccount(POOL_RENT + 3n * TICKET_RENT, 1n))
+        // More than the pool holds above its rent, or nothing, is refused unsent.
+        for (const n of [0n, 3n * TICKET_RENT + 1n]) {
+            await expect(c.pool.withdraw(n)).rejects.toThrow(/above its own rent/)
+        }
+        expect(c.sent).toHaveLength(0)
+        // All of it, to the lamport.
+        const sig = await c.pool.withdraw(3n * TICKET_RENT)
+        expect(sig).toBe(encodeBase58(c.sent[0]!.tx.signatures[0]!))
+        sentAlone(c, d.withdrawRent(PAYER, 3n * TICKET_RENT))
+        const st = await c.pool.status()
+        expect([rentPoolAvailable(st), st.openTickets]).toEqual([0n, 1n])
+    })
+
+    it('closes only with no ticket open', async () => {
+        const c = cluster(0n, poolAccount(POOL_RENT + 2n * TICKET_RENT, 1n))
+        const err = await c.pool.close().catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(RentPoolTicketsOpenError)
+        expect((err as RentPoolTicketsOpenError).openTickets).toBe(1n)
+        expect(c.sent).toHaveLength(0)
+        c.state.pool = poolAccount(POOL_RENT + 2n * TICKET_RENT, 0n)
+        const r = await c.pool.close()
+        expect(r).toEqual({
+            signature: encodeBase58(c.sent[0]!.tx.signatures[0]!),
+            returned: POOL_RENT + 2n * TICKET_RENT,
+        })
+        sentAlone(c, d.closeRentPool(PAYER))
+        expect(c.state.balance).toBe(POOL_RENT + 2n * TICKET_RENT - SOLANA_SIGNATURE_FEE)
+    })
+
+    it('refuses a withdraw or close without a pool', async () => {
+        const c = cluster(1_000_000_000n)
+        await expect(c.pool.withdraw(1n)).rejects.toBeInstanceOf(NoRentPoolError)
+        await expect(c.pool.close()).rejects.toBeInstanceOf(NoRentPoolError)
+        expect(c.sent).toHaveLength(0)
+    })
+
+    it('reports a failed withdraw and an expired close', async () => {
+        let land: SignatureStatus | null = {
+            slot: 5n,
+            confirmations: 1n,
+            err: { InstructionError: [0, { Custom: 6000 }] },
+            confirmationStatus: 'confirmed',
+        }
+        const c = cluster(0n, poolAccount(POOL_RENT + TICKET_RENT, 0n), () => land)
+        await expect(c.pool.withdraw(TICKET_RENT)).rejects.toThrow(/withdraw .* failed: InstructionError/)
+        land = null
+        const err = await c.pool.close().catch((e: unknown) => e)
+        expect(err).toBeInstanceOf(RentPoolUnconfirmedError)
+        expect(err).not.toBeInstanceOf(RentDepositUnconfirmedError)
+        expect((err as RentPoolUnconfirmedError).signature).toBe(encodeBase58(c.sent[1]!.tx.signatures[0]!))
+        expect((err as Error).cause).toBeInstanceOf(TransactionExpiredError)
+    })
 })
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i])
+}

@@ -178,6 +178,11 @@ func TestAccountFixtures(t *testing.T) {
 				if id, _ := hex.DecodeString(a.SeedsHex[2]); [16]byte(id) != v.TicketID {
 					t.Errorf("ticket stores id %x, its seed is %x", v.TicketID, id)
 				}
+				// The offset a payer's ticket listing filters on, against the
+				// program's own bytes.
+				if got := solana.PublicKey(data[zsescrow.TicketPayerOffset : zsescrow.TicketPayerOffset+32]); got != v.Payer {
+					t.Errorf("TicketPayerOffset reads %s, the ticket's payer is %s", got, v.Payer)
+				}
 			case *zsescrow.RentPool:
 				want = d.RentPool(v.Payer)
 				if _, bump, _ := solana.FindProgramAddress([][]byte{[]byte(zsescrow.RentPoolSeed), v.Payer[:]}, d.Program); v.Bump != bump {

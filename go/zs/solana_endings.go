@@ -56,6 +56,12 @@ func (h *OpenHandle) solanaEnd(ctx context.Context, what string, ix func(zsescro
 	if err != nil {
 		return solanaAck{}, err
 	}
+	return w.endRead(ctx, what, t, opID, nodeID, id, ix)
+}
+
+// endRead sends the ending ix builds for t, the ticket account read for id at
+// the node.
+func (w *SolanaWallet) endRead(ctx context.Context, what string, t *zsescrow.Ticket, opID, nodeID uint64, id [16]byte, ix func(zsescrow.Ending) solana.Instruction) (solanaAck, error) {
 	e, err := w.ending(ctx, what, t, opID, nodeID, id)
 	if err != nil {
 		return solanaAck{}, err

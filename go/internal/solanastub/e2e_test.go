@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"sync"
@@ -18,7 +19,10 @@ import (
 	"time"
 
 	"github.com/TxnLab/zerosignal/go/internal/solanastub"
+	"github.com/TxnLab/zerosignal/go/keystore"
+	"github.com/TxnLab/zerosignal/go/settle"
 	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/zs"
@@ -58,7 +62,7 @@ func setup(t *testing.T) *localnet {
 func newLocalnet(endpoint, keyFile string) (*localnet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	authority, err := solanastub.ReadKeypair(keyFile)
+	authority, err := keystore.ReadSolanaKeypairFile(keyFile)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +95,7 @@ func (s payerSigner) SignTransactionMessage(_ context.Context, _ string, msg []b
 // stays routable for the rest.
 type payer struct {
 	key    solana.PublicKey
+	signer payerSigner
 	client *zs.Client
 }
 
@@ -132,7 +137,7 @@ func (l *localnet) newPayerWith(t *testing.T, b solanastub.Behavior, edit func(*
 		t.Fatal(err)
 	}
 	t.Cleanup(client.Close)
-	return &payer{key: pub, client: client}
+	return &payer{key: pub, signer: payerSigner{key}, client: client}
 }
 
 func chatBody(model string, stream bool) []byte {
@@ -364,6 +369,92 @@ func TestSolanaE2E_RefundsAnUnservedTicket(t *testing.T) {
 	l.waitTicket(t, id, 10*time.Second+grace+2*time.Minute, "refunded", closed)
 	if got := l.usdc(t, p.key); got != payerUSDC {
 		t.Errorf("payer holds %d after the refund, want %d", got, payerUSDC)
+	}
+	l.checkStub(t, p)
+}
+
+// wallet is a SolanaWallet for signer apart from any Client, as a host's
+// wallet commands build one.
+func (l *localnet) wallet(t *testing.T, signer payerSigner) *zs.SolanaWallet {
+	t.Helper()
+	w, err := zs.NewSolanaWallet(t.Context(), zs.SolanaWalletConfig{RPC: l.Chain.RPC, Deployment: l.Chain.Deployment, Signer: signer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+// What a host's wallet commands call, against the program: the fee rate and
+// the USDC account create for a payer with SOL alone, then the ticket listing
+// and recovery, and the rent pool's withdraw and close, around a ticket the
+// watchdog refunds.
+func TestSolanaE2E_HostWalletCalls(t *testing.T) {
+	l := setup(t)
+	t.Parallel()
+	ctx := t.Context()
+
+	fresh := payerSigner{newKey()}
+	freshKey := solanastub.PublicKey(fresh.key)
+	if err := l.Chain.Airdrop(ctx, freshKey, 100_000_000); err != nil {
+		t.Fatal(err)
+	}
+	w := l.wallet(t, fresh)
+	if fee, err := w.ProtocolFeeBps(ctx); err != nil || fee != uint64(l.Chain.Config.FeeBps) {
+		t.Fatalf("ProtocolFeeBps = %d, %v; the Config's is %d", fee, err, l.Chain.Config.FeeBps)
+	}
+	if sig, err := w.EnsureUSDCAccount(ctx); err != nil || sig == "" {
+		t.Fatalf("EnsureUSDCAccount with no account = %q, %v", sig, err)
+	}
+	if sig, err := w.EnsureUSDCAccount(ctx); err != nil || sig != "" {
+		t.Fatalf("EnsureUSDCAccount with the account there = %q, %v", sig, err)
+	}
+	if acct, err := l.Chain.RPC.GetAccountInfo(ctx, l.Chain.Deployment.TokenAccount(freshKey), rpc.Confirmed); err != nil || acct.Owner != solana.TokenProgramID {
+		t.Fatalf("the payer's token account: %+v, %v", acct, err)
+	}
+
+	p := l.newPayer(t, solanastub.Behavior{NoReceipt: true, TicketLifetime: 10 * time.Second})
+	if _, _, err, _ := p.ask(t, false); err == nil {
+		t.Fatal("turn succeeded, want the node's failure")
+	}
+	id := l.onlyTicket(t, p)
+	listed, err := zs.FetchSolanaPayerTickets(ctx, l.Chain.RPC, l.Chain.Deployment, p.key)
+	if err != nil || len(listed.Unreadable) != 0 || len(listed.Tickets) != 1 {
+		t.Fatalf("FetchSolanaPayerTickets = %+v, %v", listed, err)
+	}
+	if pt := listed.Tickets[0]; pt.Ticket.TicketID != id || pt.OperatorID != l.OperatorID || pt.NodeID != l.NodeID {
+		t.Fatalf("listed %x at %d/%d, want %x at %d/%d", pt.Ticket.TicketID, pt.OperatorID, pt.NodeID, id, l.OperatorID, l.NodeID)
+	}
+	// Inside its settle window the program allows no ending, so nothing goes.
+	pw := l.wallet(t, p.signer)
+	if verdict, sig, err := pw.RecoverTicket(ctx, l.OperatorID, l.NodeID, id); err != nil || verdict != settle.VerdictWait || sig != "" {
+		t.Fatalf("RecoverTicket in the window = %s, %q, %v", verdict, sig, err)
+	}
+	grace := time.Duration(l.Chain.Config.DefaultGrace) * time.Second
+	l.waitTicket(t, id, 10*time.Second+grace+2*time.Minute, "refunded", closed)
+	if _, _, err := pw.RecoverTicket(ctx, l.OperatorID, l.NodeID, id); !errors.Is(err, zs.ErrSolanaTicketGone) {
+		t.Fatalf("RecoverTicket after the refund: %v", err)
+	}
+	if listed, err := zs.FetchSolanaPayerTickets(ctx, l.Chain.RPC, l.Chain.Deployment, p.key); err != nil || len(listed.Tickets) != 0 {
+		t.Fatalf("after the refund: %+v, %v", listed, err)
+	}
+
+	pool := &zs.SolanaRentPool{RPC: l.Chain.RPC, Deployment: l.Chain.Deployment, Signer: p.signer}
+	st, err := pool.Status(ctx)
+	if err != nil || !st.Exists || st.OpenTickets != 0 || st.FreeSlots() == 0 {
+		t.Fatalf("pool after the refund: %+v, %v", st, err)
+	}
+	if _, err := pool.Withdraw(ctx, st.TicketRent); err != nil {
+		t.Fatal(err)
+	}
+	after, err := pool.Status(ctx)
+	if err != nil || after.Available() != st.Available()-st.TicketRent {
+		t.Fatalf("after the withdraw: available %d, want %d (%v)", after.Available(), st.Available()-st.TicketRent, err)
+	}
+	if _, returned, err := pool.Close(ctx); err != nil || returned != after.Lamports {
+		t.Fatalf("Close = %d, %v; the pool held %d", returned, err, after.Lamports)
+	}
+	if st, err := pool.Status(ctx); err != nil || st.Exists {
+		t.Fatalf("after the close: %+v, %v", st, err)
 	}
 	l.checkStub(t, p)
 }

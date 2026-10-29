@@ -556,6 +556,101 @@ func TestDefaultDir(t *testing.T) {
 	}
 }
 
+// solanaPayerOf is the address keystore.NewSolanaKeys pays as for w's phrase,
+// the key LoadSolanaPayer would choose.
+func solanaPayerOf(t *testing.T, w *Wallet) string {
+	t.Helper()
+	ks, err := keystore.NewSolanaKeys(context.Background(), w.Provider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrs := ks.Addresses()
+	if len(addrs) != 1 {
+		t.Fatalf("Solana keys %v, want one", addrs)
+	}
+	return addrs[0]
+}
+
+// The descriptor names the key the wallet pays as on Solana, so a host can
+// show it without unlocking the store.
+func TestPersist_RecordsTheSolanaPayer(t *testing.T) {
+	gen := newTestWallet(t)
+	meta, err := gen.Generate("testnet", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := solanaPayerOf(t, gen); meta.SolanaAddress != want {
+		t.Errorf("generated: descriptor names %q, the wallet pays as %s", meta.SolanaAddress, want)
+	}
+	phrase, err := gen.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Imported as a user might paste it: another spacing and case.
+	imp := newTestWallet(t)
+	meta, err = imp.Import("  "+strings.ToUpper(strings.ReplaceAll(phrase, " ", "\n  ")), "testnet", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := solanaPayerOf(t, imp); meta.SolanaAddress != want {
+		t.Errorf("imported: descriptor names %q, the wallet pays as %s", meta.SolanaAddress, want)
+	}
+}
+
+func TestPersist_AlgorandMnemonicRecordsNoSolanaAddress(t *testing.T) {
+	meta, err := newTestWallet(t).Import(keystoreTestMnemonic25(t), "testnet", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Kind != KindAlgorand25 || meta.SolanaAddress != "" {
+		t.Errorf("25-word import: kind %q, Solana address %q; want %q and none", meta.Kind, meta.SolanaAddress, KindAlgorand25)
+	}
+}
+
+// A wallet written before Solana addresses were recorded records its own the
+// first time a store is shown to hold its phrase.
+func TestReadPhrase_RecordsTheSolanaAddressOfALegacyWallet(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(dir, fileOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := w.Generate("testnet", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDescriptor(t, dir, `{"address":"`+meta.Address+`","network":"testnet","kind":"xhd-24","source":"generated","backend":"file"}`)
+	if _, err := w.Export(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.Metadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := solanaPayerOf(t, w); got.SolanaAddress != want {
+		t.Errorf("after a read the descriptor names %q, the wallet pays as %s", got.SolanaAddress, want)
+	}
+}
+
+func TestDeriveSolanaAddress(t *testing.T) {
+	w := newTestWallet(t)
+	meta, err := w.Generate("testnet", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phrase, err := w.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DeriveSolanaAddress(" " + strings.ToUpper(phrase) + "\n")
+	if err != nil || got != meta.SolanaAddress {
+		t.Errorf("DeriveSolanaAddress = %q, %v; want %s", got, err, meta.SolanaAddress)
+	}
+	if _, err := DeriveSolanaAddress(keystoreTestMnemonic25(t)); err == nil {
+		t.Error("a 25-word Algorand mnemonic derived a Solana address")
+	}
+}
+
 func writeDescriptor(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, metaFile), []byte(body), 0o600); err != nil {

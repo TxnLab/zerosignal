@@ -15,6 +15,7 @@ import {
     type PublicKey,
     TOKEN_PROGRAM_ID,
     compileMessage,
+    createAssociatedTokenAccountIdempotent,
     ed25519Verify,
     encodeTransaction,
     newTransaction,
@@ -30,6 +31,7 @@ import {
     type OpenOfferSpec,
     TOKEN_INITIALIZED,
     type Ticket as TicketAccount,
+    classify,
     completeOpenOffer,
     decodeConfig,
     decodeOpenOffer,
@@ -40,6 +42,7 @@ import {
     signReceiptAck,
     ticketView,
 } from '@txnlab/zs-proto/solana/zsescrow'
+import type { Verdict } from '@txnlab/zs-proto/settle'
 import { type Ticket, type UsageReceipt, receiptCanonicalBytes, receiptSigDigest } from '@txnlab/zs-proto/ticket'
 import { RAIL_NEUTRAL_NAMES_MIN_VERSION, usesRailNeutralNames } from '@txnlab/zs-proto/wire'
 
@@ -57,7 +60,7 @@ import { MbrDepositUnaffordableError } from '../mbr.js'
 import type { Operator } from '../operator.js'
 import type { EscrowCall, OpenHandle, OverclaimFreeze, SettleOutcome, WalletOpener } from '../parts.js'
 import { type Logger, type SolanaSigner, discardLogger } from '../ports.js'
-import { type ClaimVerdict, type SettleArgs, judgeSolanaClaim } from '../reconcile.js'
+import { type ClaimVerdict, RECONCILE_SKEW_MS, type SettleArgs, judgeSolanaClaim } from '../reconcile.js'
 import { refundSources } from '../refund-watchdog.js'
 import { untilAborted } from '../sleep.js'
 import { decodeReceiptSig, decodeTicketId, followUpSignal, slotCount } from '../wallet.js'
@@ -184,6 +187,97 @@ export class SolanaWallet implements WalletOpener {
 
     payerAddr(): string {
         return this.#signer.address
+    }
+
+    /**
+     * The Config's fee_bps, the protocol fee on top of an operator's charge
+     * that a ticket opened now pays. set_config can change it, so it is read
+     * each time rather than kept from create. Without it a Solana payer's
+     * /v1/models carries no price and its reserve check bounds the fee by the
+     * cap instead of the Config's. Go's ProtocolFeeBps.
+     */
+    async protocolFeeBps(signal?: AbortSignal): Promise<number> {
+        try {
+            return (await readSolanaConfig(this.#rpc, this.#deployment, signal)).feeBps
+        } catch (err) {
+            throw new Error(`solana wallet: ${message(err)}`, { cause: err })
+        }
+    }
+
+    /** The payer's associated USDC account, which every offer draws on and every refund pays. Go's USDCAccount. */
+    usdcAccount(): PublicKey {
+        return this.#payerUsdc
+    }
+
+    /**
+     * Creates the payer's USDC account when the token program holds none at
+     * its address, and resolves to the transaction's signature, '' when the
+     * account was there. Nothing is checked beyond existence: a frozen
+     * account, or one of another mint, is the node's to refuse and doctor's to
+     * report. Go's EnsureUSDCAccount.
+     */
+    async ensureUsdcAccount(signal?: AbortSignal): Promise<string> {
+        let acct
+        try {
+            acct = await this.#rpc.getAccountInfo(this.#payerUsdc, { commitment: COMMITMENT, signal })
+        } catch (err) {
+            throw new Error(`solana wallet: read the payer's token account: ${message(err)}`, { cause: err })
+        }
+        if (acct !== null && acct.owner === TOKEN_PROGRAM_ID) return ''
+        const payer = this.#signer.address
+        const ix = createAssociatedTokenAccountIdempotent(payer, payer, this.#deployment.mint)
+        return (await this.#send('create usdc account', [ix], SOLANA_SIGNATURE_FEE, signal)).signature
+    }
+
+    /**
+     * Ends one of this payer's tickets with the call the program allows now,
+     * by classify on a fresh read: refund_inactive or settle_lapsed, which
+     * anyone may send and the node's own sweep races. It resolves to the
+     * verdict, and the signature when it sent one; any other verdict sends
+     * nothing. It is a host's manual path for what the refund watchdog and the
+     * reconciler missed. The deadline is padded by the reconciler's skew,
+     * since the program reads the cluster's clock. Go's RecoverTicket.
+     */
+    async recoverTicket(
+        operatorId: bigint,
+        nodeId: bigint,
+        ticketId: Uint8Array,
+        signal?: AbortSignal,
+    ): Promise<{ verdict: Verdict; signature: string }> {
+        // Go's [16]byte rules this out; a host's bytes don't.
+        if (ticketId.length !== 16) throw new Error(`solana wallet: recover: ticket id is ${ticketId.length} bytes, want 16`)
+        const t = await this.readTicket(operatorId, nodeId, ticketId, signal)
+        if (t === null) throw new SolanaTicketGoneError()
+        this.#ownsTicket('recover', t)
+        const verdict = classify(t, new Date(this.#clock() - RECONCILE_SKEW_MS))
+        // The ending is built from this read: a second one could find the
+        // ticket closed by the race and report it as something else.
+        let signature = ''
+        if (verdict === 'refundInactive') {
+            signature = await this.#endRead(t, operatorId, nodeId, ticketId, 'refund-inactive', (e) => this.#deployment.refundInactive(e), signal)
+        } else if (verdict === 'settleLapsed') {
+            signature = await this.#endRead(t, operatorId, nodeId, ticketId, 'settle-lapsed', (e) => this.#deployment.settleLapsed(e), signal)
+        }
+        return { verdict, signature }
+    }
+
+    /**
+     * Closes the payer's rent pool (SolanaRentPool.close) and clears the
+     * ready latch, as the Algorand wallet's closeDeposit does, so the next
+     * open tops the pool up again rather than signing an offer the program
+     * refuses for want of one. Go's CloseRentPool.
+     */
+    async closeRentPool(signal?: AbortSignal): Promise<{ signature: string; returned: bigint }> {
+        try {
+            return await this.#pool.close(signal)
+        } finally {
+            this.recheckDeposit()
+        }
+    }
+
+    /** The wallet's rent pool, for a host's status and withdraw. Go's RentPool. */
+    rentPool(): SolanaRentPool {
+        return this.#pool
     }
 
     /** Refuses: the sealed run calls it only for a node that doesn't submit the open, and on Solana the node always does. */
@@ -479,7 +573,19 @@ export class SolanaWallet implements WalletOpener {
     }
 
     async #endTicket(opId: bigint, nodeId: bigint, ticketId: Uint8Array, what: string, ix: (e: Ending) => Instruction, signal: AbortSignal | undefined): Promise<string> {
-        const t = await this.readTicket(opId, nodeId, ticketId, signal)
+        return this.#endRead(await this.readTicket(opId, nodeId, ticketId, signal), opId, nodeId, ticketId, what, ix, signal)
+    }
+
+    // The ending ix builds for t, already read, and its send. Go's endRead.
+    async #endRead(
+        t: TicketAccount | null,
+        opId: bigint,
+        nodeId: bigint,
+        ticketId: Uint8Array,
+        what: string,
+        ix: (e: Ending) => Instruction,
+        signal: AbortSignal | undefined,
+    ): Promise<string> {
         const e = await this.#ending(what, t, opId, nodeId, ticketId, signal)
         return (await this.#send(what, [ix(e)], SOLANA_SIGNATURE_FEE, signal)).signature
     }
@@ -755,6 +861,15 @@ export class SolanaAckSendError extends SentSettleError {
         cause?: unknown,
     ) {
         super({ txid: signature, payerFeeMicroalgos: feeLamports }, msg, cause)
+    }
+}
+
+/** A ticket with no account: never opened, or ended. Go's ErrSolanaTicketGone. */
+export class SolanaTicketGoneError extends Error {
+    override readonly name = 'SolanaTicketGoneError'
+
+    constructor() {
+        super('solana wallet: no ticket account: never opened, or already ended')
     }
 }
 

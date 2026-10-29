@@ -67,7 +67,7 @@ var clusters = map[string]Cluster{
 // remote cluster would otherwise trust a key anyone can sign with, and pay
 // out free turns to every holder of the committed PEM.
 func TrustedFreeCreditIssuers(issuers []FreeCreditIssuer, rpcEndpoint string) []FreeCreditIssuer {
-	local := isLoopbackEndpoint(rpcEndpoint)
+	local := LoopbackEndpoint(rpcEndpoint)
 	var out []FreeCreditIssuer
 	for _, iss := range issuers {
 		if !iss.LoopbackOnly || local {
@@ -77,7 +77,9 @@ func TrustedFreeCreditIssuers(issuers []FreeCreditIssuer, rpcEndpoint string) []
 	return out
 }
 
-func isLoopbackEndpoint(endpoint string) bool {
+// LoopbackEndpoint is whether endpoint names this machine, as a local
+// validator's URL does.
+func LoopbackEndpoint(endpoint string) bool {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return false

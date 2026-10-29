@@ -22,9 +22,10 @@ import { findError } from '../src/errors.js'
 import { MbrDepositUnaffordableError } from '../src/mbr.js'
 import type { SolanaSigner } from '../src/ports.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS } from '../src/registry/solana.js'
-import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE } from '../src/solana/rent.js'
+import * as root from '../src/index.js'
+import { RentDepositBelowTargetError, SOLANA_SIGNATURE_FEE, SolanaRentPool } from '../src/solana/rent.js'
 import type { Account, SolanaRpc } from '../src/solana/rpc.js'
-import { SIGNED_OPEN_RETENTION_MS, SolanaWallet } from '../src/solana/wallet.js'
+import { SIGNED_OPEN_RETENTION_MS, SolanaTicketGoneError, SolanaWallet, readSolanaConfig } from '../src/solana/wallet.js'
 import { BelowTargetError } from '../src/wallet.js'
 import { testOperator } from './fixtures.js'
 
@@ -242,6 +243,33 @@ describe('SolanaWallet', () => {
         f.wallet.recheckDeposit()
         await f.reopen()
         expect(f.state.poolReads).toBe(2)
+    })
+
+    // A host reaches the wallet only through the package root, which is all
+    // the package exports for it.
+    it('is exported from the package root', () => {
+        expect([root.SolanaWallet, root.SolanaRentPool, root.SolanaTicketGoneError, root.readSolanaConfig]).toEqual([
+            SolanaWallet,
+            SolanaRentPool,
+            SolanaTicketGoneError,
+            readSolanaConfig,
+        ])
+    })
+
+    // Closing the pool clears the latch whether or not the close lands, so
+    // the next open tops it up again rather than signing an offer the program
+    // refuses for want of a pool.
+    it('clears the latch on closeRentPool', async () => {
+        const f = await fixture(1_000_000_000n, 3n)
+        expect(f.wallet.rentPool()).toBeInstanceOf(SolanaRentPool)
+        await f.open()
+        await f.reopen()
+        const reads = f.state.poolReads
+        await f.wallet.closeRentPool().catch(() => undefined)
+        const afterClose = f.state.poolReads
+        expect(afterClose).toBeGreaterThan(reads)
+        await f.reopen()
+        expect(f.state.poolReads).toBeGreaterThan(afterClose)
     })
 
     it('forgets a ticket past its open window, and not before', async () => {

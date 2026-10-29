@@ -38,6 +38,27 @@ export {
     doctorChecks,
 } from './doctor.js'
 export { type SolanaDoctorReadings, solanaDoctorChecks } from './solana/doctor.js'
+export { SolanaTicketGoneError, SolanaWallet, type SolanaWalletOptions, readSolanaConfig } from './solana/wallet.js'
+export {
+    NoRentPoolError,
+    RentDepositBelowTargetError,
+    RentDepositUnconfirmedError,
+    RentPoolTicketsOpenError,
+    RentPoolUnconfirmedError,
+    SolanaRentPool,
+    type SolanaRentPoolOptions,
+    type SolanaRentPoolStatus,
+    readSolanaRentPool,
+    rentPoolAvailable,
+    rentPoolBackedSlots,
+    rentPoolFreeSlots,
+} from './solana/rent.js'
+export {
+    type SolanaPayerTicket,
+    type SolanaPayerTickets,
+    type SolanaUnreadableTicket,
+    fetchSolanaPayerTickets,
+} from './solana/tickets.js'
 export {
     type CreditIssuer,
     type CreditKey,
