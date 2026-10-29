@@ -19,7 +19,7 @@ import (
 
 func sampleReceipt() *UsageReceipt {
 	r := &UsageReceipt{
-		TicketID:          "dGlja2V0LXhvcnZvenp6MDA=",
+		TicketID:          "dGlja2V0LXhvcnZvenowMA==",
 		ActualInputCount:  42,
 		ActualOutputCount: 17,
 		AmountCharged:     2_600,
