@@ -479,7 +479,7 @@ describe('usageEvents', () => {
         op,
         openFees: 3,
         settleFees: 5,
-        algoUsdPrice: 0.25,
+        usdRate: 0.25,
         feeUnit: { currency: 'ALGO', decimals: 6 },
         feeBps: 0,
         haveFee: false,
@@ -518,8 +518,8 @@ describe('usageEvents', () => {
             algoUsd: 0,
             openNetworkFees: 3,
             settleNetworkFees: 5,
-            // The reserve's rate is ALGO's.
-            nativeUsd: 0,
+            // The rate is already the fee coin's (nativeUsd).
+            nativeUsd: 0.25,
             feeUnit: { currency: 'SOL', decimals: 9 },
         })
     })
@@ -718,7 +718,7 @@ describe('bufferedResponder', () => {
         const txId = 'APPCALL'
         const sealer = await ResponseSealer.create({ replyTo: identity.recipient, txID: txId, ticketID: TICKET_ID, key: f.responseKey })
         const handle = handleOf({ txid: 'ACK' })
-        const reserved = { ticket: f.ticket, identity, responseKey: f.responseKey, algoUsdPrice: 0.2, sealRecipient: '', presignedOpenTxn: '' } as unknown as Reserved
+        const reserved = { ticket: f.ticket, identity, responseKey: f.responseKey, algoUsdPrice: 0.2, solUsdPrice: 150, sealRecipient: '', presignedOpenTxn: '' } as unknown as Reserved
         const call: SealedCall = {
             endpoint: (o.endpoint ?? '/v1/chat/completions') as SealedCall['endpoint'],
             model: 'm',
@@ -786,7 +786,8 @@ describe('bufferedResponder', () => {
             op: s.f.op,
             openFees: 2000,
             settleFees: 0,
-            algoUsdPrice: 0.2,
+            // The ALGO fee unit's rate, not the SOL one beside it.
+            usdRate: 0.2,
             feeBps: 150,
             haveFee: true,
             check: { violation: '', excluded: false },
@@ -817,7 +818,8 @@ describe('bufferedResponder', () => {
         s.deps.feeUnit = sol
         const { resp, body } = sealedResponse(s, { group: VALID_GROUP })
         await bufferedResponder(s.deps, s.call)(s.em, resp, body)
-        expect(s.em.replies[0]![3]).toMatchObject({ feeUnit: sol, openFees: 2000 })
+        // At the SOL rate the reserve carried, not the ALGO one beside it.
+        expect(s.em.replies[0]![3]).toMatchObject({ feeUnit: sol, openFees: 2000, usdRate: 150 })
     })
 
     it('hands the caller its response while the settle submit is held', async () => {

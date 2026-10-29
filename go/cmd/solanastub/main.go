@@ -303,7 +303,7 @@ func (f flags) serve(funding solanastub.Funding) error {
 		"url": s.URL, "operator_id": s.OperatorID, "node_id": s.NodeID,
 		"program": zsescrow.ProgramID.String(), "fee_bps": s.Chain.Config.FeeBps,
 		"default_grace": s.Chain.Config.DefaultGrace, "payer_usdc": solanastub.PayerUSDC,
-		"model": solanastub.Model, "free_model": solanastub.FreeModel, "reply": solanastub.Reply,
+		"model": solanastub.Model, "free_model": solanastub.FreeModel, "reply": solanastub.Reply, "sol_usd": solanastub.SOLUSD,
 		"credit_issuer": base64.StdEncoding.EncodeToString(s.Node.Issuer().Key()), "issuer_payer_header": solanastub.IssuerPayerHeader,
 		"treasury": s.Chain.Config.Treasury.String(), "funds_source": funding.Source().String(),
 		"resolves": funding.Admin() != nil,

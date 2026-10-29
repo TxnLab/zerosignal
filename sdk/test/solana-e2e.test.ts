@@ -47,7 +47,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { solanaSigner } from '../src/accounts/solana.js'
 import { Client, ZsError, httpCreditIssuer, solanaDevnet, solanaLocalnet } from '../src/index.js'
-import type { SettleResult } from '../src/index.js'
+import type { ReceiptVerified, SettleResult } from '../src/index.js'
 import type { SolanaSigner } from '../src/ports.js'
 import { confirmSignature } from '../src/solana/confirm.js'
 import { SolanaRentPool, rentPoolAvailable, rentPoolFreeSlots } from '../src/solana/rent.js'
@@ -89,6 +89,7 @@ interface Stub {
     model: string
     free_model: string
     reply: string
+    sol_usd: number
     credit_issuer: string
     issuer_payer_header: string
     treasury: string
@@ -222,7 +223,7 @@ class Payer {
         stream: boolean,
         model = stub.model,
         withinMs = 120_000,
-    ): Promise<{ text: string; err: unknown; settled: SettleResult }> {
+    ): Promise<{ text: string; err: unknown; settled: SettleResult; verified: ReceiptVerified | undefined }> {
         const body = JSON.stringify({
             model,
             messages: [{ role: 'user', content: 'say hello' }],
@@ -232,12 +233,16 @@ class Payer {
         const s = this.client.stream({ endpoint: '/v1/chat/completions', body }, AbortSignal.timeout(withinMs))
         let text = ''
         let err: unknown
+        let verified: ReceiptVerified | undefined
         try {
-            text = await s.text()
+            for await (const ev of s.events()) {
+                if (ev.type === 'delta.text') text += ev.delta
+                if (ev.type === 'receipt.verified') verified = ev
+            }
         } catch (e) {
             err = e
         }
-        return { text, err, settled: await s.wait(AbortSignal.timeout(120_000)) }
+        return { text, err, settled: await s.wait(AbortSignal.timeout(120_000)), verified }
     }
 
     async onlyTicket(): Promise<string> {
@@ -450,10 +455,13 @@ describe.skipIf(RPC === '' || (AUTHORITY === '' && FUNDER === '')).concurrent('S
     for (const stream of [false, true]) {
         it(`settles a ${stream ? 'streamed' : 'buffered'} turn`, async () => {
             const p = await newPayer({})
-            const { text, err, settled } = await p.ask(stream)
+            const { text, err, settled, verified } = await p.ask(stream)
             expect(err).toBeUndefined()
             expect(settled.err).toBeUndefined()
             expect(text).toBe(stub.reply)
+            // The fees are priced at the node's SOL rate, not the ALGO one it also sends.
+            expect(verified?.nativeUsd).toBe(stub.sol_usd)
+            expect(verified?.feeUnit.currency).toBe('SOL')
             expect(settled.settlement.kind).toBe('atomic')
             expect(settled.settlement.frozen).toBeFalsy()
             await p.waitTicket(await p.onlyTicket(), CONFIRM_MS, 'settled', closed)

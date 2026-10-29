@@ -84,6 +84,11 @@ type OperatorDetails struct {
 	OracleHealthy bool      `json:"oracle_healthy"`
 	AlgoUSDPrice  float64   `json:"algo_usd_price,omitempty"`
 	AlgoUSDAt     time.Time `json:"algo_usd_at,omitempty"`
+	// A Solana node's quote is SOL/USD, the coin its fees are paid in, and
+	// rides these instead of the ALGO pair. SOLUSDAt is omitzero where
+	// AlgoUSDAt is not: it has no older wire to keep byte-for-byte.
+	SOLUSDPrice float64   `json:"sol_usd_price,omitempty"`
+	SOLUSDAt    time.Time `json:"sol_usd_at,omitzero"`
 
 	// MinChargeOutputTokens is the reference output-token count for the token
 	// component of the per-request minimum charge. Default 1000; 0 disables it.

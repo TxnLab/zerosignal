@@ -129,6 +129,9 @@ export interface ReserveResponse {
     // ALGO/USD exchange rate at reserve time. Display-only (let UI
     // express ALGO network fees in USD) — NOT used in pricing.
     algo_usd_price?: number
+    // SOL/USD at reserve, a Solana node's twin of algo_usd_price: its fees
+    // are paid in SOL. Each rail's node sends only its own coin's rate.
+    sol_usd_price?: number
     // base64(msgpack(SignedTxn)) — the node's pre-signed gtxn[1] (the
     // open() AppCall) of the 2-tx open group [usdcPayment, open()].
     presigned_open_txn?: string
@@ -145,6 +148,8 @@ export function parseReserveResponseJSON(raw: Uint8Array): ReserveResponse {
     if (wrapped) out.wrapped_response_key = wrapped
     const price = f.float('algo_usd_price')
     if (price) out.algo_usd_price = price
+    const solPrice = f.float('sol_usd_price')
+    if (solPrice) out.sol_usd_price = solPrice
     const presigned = f.str('presigned_open_txn')
     if (presigned) out.presigned_open_txn = presigned
     return out

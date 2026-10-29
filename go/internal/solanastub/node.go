@@ -43,6 +43,9 @@ const (
 	OutputTokens = 7
 	// Reply is the assistant's text in every reply.
 	Reply = "hello from the stub node"
+	// SOLUSD is the SOL/USD rate every reserve reports, which a payer prices
+	// its network fees at.
+	SOLUSD = 142.375
 )
 
 // Behavior selects how the stub departs from an honest node, for the endings
@@ -401,7 +404,10 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 	body, err := json.Marshal(ticket.ReserveResponse{
 		Ticket:             e.ticket,
 		WrappedResponseKey: base64.StdEncoding.EncodeToString(wrapped.Bytes()),
-		PreSignedOpenTxn:   offer,
+		// An ALGO rate beside it must not price the payer's SOL fees.
+		AlgoUSDPrice:     0.25,
+		SOLUSDPrice:      SOLUSD,
+		PreSignedOpenTxn: offer,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())

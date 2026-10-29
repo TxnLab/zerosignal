@@ -135,11 +135,12 @@ func TestFeeFields_NamedForALGOOnlyOnAlgorand(t *testing.T) {
 			t.Errorf("%s: settlement %+v", unit.Currency, settled)
 		}
 		u := &usageReport{receipt: &ticket.UsageReceipt{}, ticket: &ticket.Ticket{TicketID: "tid"},
-			openFees: 3, settleFees: 5, algoUSDPrice: 0.25, unit: unit, check: receiptCheck{settled: settled}}
+			openFees: 3, settleFees: 5, usdRate: 0.25, unit: unit, check: receiptCheck{settled: settled}}
 		evs := u.events()
 		rv, ss := evs[0].(ReceiptVerified), evs[1].(SettleSubmitted)
-		// The reserve's rate is ALGO's, so it prices no other coin.
-		if rv.OpenNetworkFees != 3 || rv.SettleNetworkFees != 5 || (rv.NativeUSD == 0.25) != c.algo || rv.FeeUnit != unit {
+		// The rate is already the unit's coin's (nativeUSD), so only the
+		// ALGO-named field drops it.
+		if rv.OpenNetworkFees != 3 || rv.SettleNetworkFees != 5 || rv.NativeUSD != 0.25 || rv.FeeUnit != unit {
 			t.Errorf("%s: verified network fees %+v", unit.Currency, rv)
 		}
 		if rv.OpenFeesMicroAlgos != algoOr0(3) || rv.SettleFeesMicroAlgos != algoOr0(5) || (rv.AlgoUSD == 0.25) != c.algo {
@@ -147,6 +148,24 @@ func TestFeeFields_NamedForALGOOnlyOnAlgorand(t *testing.T) {
 		}
 		if ss.NetworkFees != 7 || ss.FeesMicroAlgos != algoOr0(7) {
 			t.Errorf("%s: settle submitted %+v", unit.Currency, ss)
+		}
+	}
+}
+
+// A reserve carrying both coins' rates prices the fees at the deployment's
+// coin's alone, so a node's other rate never prices them.
+func TestNativeUSD_ReadsTheFeeCoinsRate(t *testing.T) {
+	rt := &ReservedTicket{AlgoUSDPrice: 0.25, SOLUSDPrice: 150}
+	for _, c := range []struct {
+		unit FeeUnit
+		want float64
+	}{
+		{FeeUnitOf(ticket.RailAlgorand), 0.25},
+		{FeeUnitOf(ticket.RailSolana), 150},
+		{FeeUnit{}, 0},
+	} {
+		if got := nativeUSD(c.unit, rt); got != c.want {
+			t.Errorf("%q: nativeUSD = %v, want %v", c.unit.Currency, got, c.want)
 		}
 	}
 }
@@ -693,13 +712,13 @@ func TestStreamEmitter_ResponseStartedStripsProtocolHeaders(t *testing.T) {
 // with no platform fee in it.
 func TestUsageReport_Event(t *testing.T) {
 	u := &usageReport{
-		receipt:      &ticket.UsageReceipt{TicketID: "tid"},
-		ticket:       &ticket.Ticket{MaxPrice: 9},
-		op:           Operator{ID: 7, NodeID: 2, OwnerAddr: "OWNER"},
-		openFees:     3,
-		settleFees:   5,
-		algoUSDPrice: 0.25,
-		unit:         FeeUnitOf(ticket.RailAlgorand),
+		receipt:    &ticket.UsageReceipt{TicketID: "tid"},
+		ticket:     &ticket.Ticket{MaxPrice: 9},
+		op:         Operator{ID: 7, NodeID: 2, OwnerAddr: "OWNER"},
+		openFees:   3,
+		settleFees: 5,
+		usdRate:    0.25,
+		unit:       FeeUnitOf(ticket.RailAlgorand),
 	}
 	ev := u.verified()
 	if ev.FeeBpsKnown || ev.FeeBps != 0 {

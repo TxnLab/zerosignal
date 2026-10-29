@@ -72,6 +72,11 @@ export interface ReservedTicket {
     /** ALGO/USD at reserve, for display; 0 when the node sent none. */
     algoUsdPrice: number
     /**
+     * SOL/USD at reserve, a Solana node's; dispatch reads only the fee coin's (nativeUsd). Optional so a
+     * host's own ReserveClient written before it still compiles; absent reads as 0.
+     */
+    solUsdPrice?: number
+    /**
      * The node's presigned open: on Algorand base64 msgpack of the open group,
      * on Solana base64 of the offer transaction. '' when the node sent none.
      */
@@ -137,6 +142,7 @@ export async function openReserve(
         ticket: ticket as Ticket & { sig: string },
         responseKey,
         algoUsdPrice: parsed.algo_usd_price ?? 0,
+        solUsdPrice: parsed.sol_usd_price ?? 0,
         presignedOpenTxn: parsed.presigned_open_txn ?? '',
     }
 }

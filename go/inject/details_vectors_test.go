@@ -57,6 +57,8 @@ func fullDetails() inject.OperatorDetails {
 		OracleHealthy:         true,
 		AlgoUSDPrice:          0.2375,
 		AlgoUSDAt:             time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		SOLUSDPrice:           142.375,
+		SOLUSDAt:              time.Date(2026, 9, 30, 12, 0, 5, 0, time.UTC),
 		MinChargeOutputTokens: 1000,
 		MinChargeAlgoTxns:     7,
 		MinChargeMicroUSDC:    1_663,

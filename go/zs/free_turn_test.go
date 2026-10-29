@@ -162,6 +162,23 @@ func TestRunSealed_FreeSolanaTurnOpensNothing(t *testing.T) {
 	}
 }
 
+// A Solana turn's usage is priced at the reserve's SOL rate, not the ALGO one
+// beside it.
+func TestRunSealed_SolanaUsageAtTheSOLRate(t *testing.T) {
+	c, op, rt, _ := newFreeTurn(t, 0)
+	rt.AlgoUSDPrice, rt.SOLUSDPrice = 0.25, 150
+	c.wallet, c.spend = &noOpenWallet{}, &outcomeGuard{}
+	em := &recEmitter{}
+	c.runSealed(withSettleSlot(context.Background(), newSettleSlot()), em, endpointChatCompletions, "gpt-test",
+		[]byte(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`), op, rt, false, nil)
+	if em.failed != nil {
+		t.Fatalf("turn failed: %v", em.failed)
+	}
+	if len(em.usages) != 1 || em.usages[0].usdRate != 150 || em.usages[0].verified().NativeUSD != 150 {
+		t.Fatalf("usage %+v, want one report at SOL/USD 150", em.usages)
+	}
+}
+
 // A free ticket's receipt that charges anything fails its check, as any
 // receipt over max_price does, and the reply reports it; with nothing opened
 // there is no protest to send.

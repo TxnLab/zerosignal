@@ -336,6 +336,11 @@ func (r *ReserveRequest) VerifyFor(pub ed25519.PublicKey, operatorID, nodeID uin
 // the operator's oracle was unavailable at reserve time; inference
 // pricing is unaffected.
 //
+// SOLUSDPrice is AlgoUSDPrice's twin on a Solana node, which pays its
+// network fees in SOL: the SOL/USD rate it observed at reserve, for
+// display alone, omitted when the reading was stale. Each rail's node
+// sends only its own coin's rate.
+//
 // PreSignedOpenTxn is base64(msgpack(SignedTxn)) — the operator's
 // pre-signed gtxn[1] of the 2-tx open() group. The proxy assembles
 // gtxn[0] (usdcPayment) with payerAddr-as-sender and fee=0, then submits
@@ -351,5 +356,6 @@ type ReserveResponse struct {
 	Ticket             Ticket  `json:"ticket"`
 	WrappedResponseKey string  `json:"wrapped_response_key,omitempty"`
 	AlgoUSDPrice       float64 `json:"algo_usd_price,omitempty"`
+	SOLUSDPrice        float64 `json:"sol_usd_price,omitempty"`
 	PreSignedOpenTxn   string  `json:"presigned_open_txn,omitempty"`
 }

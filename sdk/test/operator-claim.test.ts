@@ -341,7 +341,7 @@ describe('a receipt for another ticket', () => {
             op: f.op,
             openFees: 0,
             settleFees: 0,
-            algoUsdPrice: 0,
+            usdRate: 0,
             feeUnit: ALGO_FEES,
             feeBps: 0,
             haveFee: false,

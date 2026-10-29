@@ -922,6 +922,9 @@ func (s *Client) dispatch(ctx context.Context, em emitter, t turn) {
 					if rt.AlgoUSDPrice > 0 {
 						attrs = append(attrs, slog.Float64("algo_usd", rt.AlgoUSDPrice))
 					}
+					if rt.SOLUSDPrice > 0 {
+						attrs = append(attrs, slog.Float64("sol_usd", rt.SOLUSDPrice))
+					}
 					s.log.LogAttrs(ctx, slog.LevelDebug, "reserve response", attrs...)
 				}
 				// Spend guard: bound the aggregate USDC drain before committing
@@ -2675,7 +2678,7 @@ func (s *Client) runSealed(
 	// needs K_response or the reply-to identity once this returns.
 	defer rt.Wipe()
 	ticket := rt.Ticket
-	algoUSDPrice := rt.AlgoUSDPrice
+	usdRate := nativeUSD(s.deployment.FeeUnit(), rt)
 	em.reserved(rt, op)
 
 	// The caller has already reserved the ticket's ceiling with the spend guard.
@@ -2805,7 +2808,7 @@ func (s *Client) runSealed(
 		em.committed(ticket.TicketID, "", 0)
 	}
 
-	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop)
+	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, usdRate, openFees, hop)
 	if openGroup != "" {
 		nonStreamRespond = s.recheckDepositOnRefusedOpen(nonStreamRespond)
 	}
@@ -2838,7 +2841,7 @@ func (s *Client) runSealed(
 		// cancel the upstream (still generating → abandoned request).
 		var genComplete atomic.Bool
 		idle := newIdleWatchdog(s.cfg.StreamIdle)
-		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, algoUSDPrice, openFees, hop, &genComplete, idle)
+		factory := s.buildFrameFactory(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, usdRate, openFees, hop, &genComplete, idle)
 		s.forwardRawStream(ctx, em, fwdBaseURL, fwdEndpoint, envelopeJSON, wire.EncryptedContentType, fwdHeaders, hop, factory, nonStreamRespond, &genComplete, idle)
 		return
 	}
@@ -3200,7 +3203,7 @@ func (s *Client) buildNonStreamResponder(
 	handle settlementHandle,
 	timer *cryptotimer.Timer,
 	endpoint, model string,
-	algoUSDPrice float64,
+	usdRate float64,
 	openFees uint64,
 	hop *RelayHop,
 ) nonStreamResponder {
@@ -3394,7 +3397,7 @@ func (s *Client) buildNonStreamResponder(
 			// never blocks this path). ok==false degrades to no breakdown.
 			feeBps, haveFee := s.feeRateNow()
 			usage = &usageReport{receipt: receipt, ticket: ticket, op: op, openFees: openFees, settleFees: settleFees,
-				algoUSDPrice: algoUSDPrice, unit: s.deployment.FeeUnit(), feeBps: feeBps, haveFee: haveFee, check: receiptCheck{violation: violation}}
+				usdRate: usdRate, unit: s.deployment.FeeUnit(), feeBps: feeBps, haveFee: haveFee, check: receiptCheck{violation: violation}}
 		}
 		em.reply(upstreamResp.StatusCode, upstreamResp.Header, plaintext, usage)
 		return nil
@@ -4608,7 +4611,7 @@ func (s *Client) buildFrameFactory(
 	handle settlementHandle,
 	timer *cryptotimer.Timer,
 	endpoint, model string,
-	algoUSDPrice float64,
+	usdRate float64,
 	openFees uint64,
 	hop *RelayHop,
 	genComplete *atomic.Bool,
@@ -4857,16 +4860,16 @@ func (s *Client) buildFrameFactory(
 				// protocolFeeBps (background-refreshed; non-blocking).
 				feeBps, haveFee := s.feeRateNow()
 				return outFrame{usage: &usageReport{
-					receipt:      &receipt,
-					ticket:       tkt,
-					op:           op,
-					openFees:     openFees,
-					settleFees:   check.settled.NetworkFees,
-					algoUSDPrice: algoUSDPrice,
-					unit:         s.deployment.FeeUnit(),
-					feeBps:       feeBps,
-					haveFee:      haveFee,
-					check:        check,
+					receipt:    &receipt,
+					ticket:     tkt,
+					op:         op,
+					openFees:   openFees,
+					settleFees: check.settled.NetworkFees,
+					usdRate:    usdRate,
+					unit:       s.deployment.FeeUnit(),
+					feeBps:     feeBps,
+					haveFee:    haveFee,
+					check:      check,
 				}}, nil
 
 			default:

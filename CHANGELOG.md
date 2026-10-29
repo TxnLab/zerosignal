@@ -31,6 +31,17 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-29 — a Solana node's SOL/USD rate
+
+A Solana node reports its SOL/USD quote as `sol_usd_price`, in the sealed reserve response and
+in `/v1/zs/details` beside `sol_usd_at`, as an Algorand node reports `algo_usd_price`. Each
+payer reads only the rate for the coin its deployment's fees are paid in (`nativeUSD` ↔
+`nativeUsd`), so on Solana `ReceiptVerified.NativeUSD` ↔ `nativeUsd`, `X-Zs-Fees-Usd-Rate` and
+`X-Zs-Fees-Usd` now carry the fees' dollar value, where they were 0 or absent. `AlgoUSD` ↔
+`algoUsd` stays 0 off Algorand. The fields are additive: a node that omits them prices
+nothing, as before. `ReservedTicket` gains `SOLUSDPrice` ↔ `solUsdPrice` (optional in TS, so a
+host's own `ReserveClient` still compiles).
+
 ### 2026-10-27 — what a Solana payer's host needs (0.12.0)
 
 The SDKs add the reads and calls a host's wallet commands make on the Solana rail, as

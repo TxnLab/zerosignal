@@ -89,15 +89,15 @@ func relayOf(hop *RelayHop) *NodeRef {
 // usageReport is what the payer is told about a turn's receipt, and, on a
 // stream, the settle submitted before done.
 type usageReport struct {
-	receipt      *ticket.UsageReceipt
-	ticket       *ticket.Ticket
-	op           Operator
-	openFees     uint64
-	settleFees   uint64
-	algoUSDPrice float64
-	unit         FeeUnit
-	feeBps       uint64
-	haveFee      bool
+	receipt    *ticket.UsageReceipt
+	ticket     *ticket.Ticket
+	op         Operator
+	openFees   uint64
+	settleFees uint64
+	usdRate    float64
+	unit       FeeUnit
+	feeBps     uint64
+	haveFee    bool
 	// check is how the receipt fared and what its submit did.
 	check receiptCheck
 }
@@ -141,15 +141,13 @@ func (u *usageReport) verified() ReceiptVerified {
 		OwnerAddr:            u.op.OwnerAddr,
 		OpenFeesMicroAlgos:   algoOnly(u.unit, u.openFees),
 		SettleFeesMicroAlgos: algoOnly(u.unit, u.settleFees),
-		AlgoUSD:              algoOnly(u.unit, u.algoUSDPrice),
+		AlgoUSD:              algoOnly(u.unit, u.usdRate),
 		FeeBps:               u.feeBps,
 		FeeBpsKnown:          u.haveFee,
 		OpenNetworkFees:      u.openFees,
 		SettleNetworkFees:    u.settleFees,
-		// The reserve's rate is ALGO/USD (ticket.ReserveResponse.AlgoUSDPrice),
-		// so it prices no other coin.
-		NativeUSD: algoOnly(u.unit, u.algoUSDPrice),
-		FeeUnit:   u.unit,
+		NativeUSD:            u.usdRate,
+		FeeUnit:              u.unit,
 	}
 }
 

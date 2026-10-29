@@ -28,7 +28,7 @@ import type { AffinityStore } from './affinity.js'
 import { newError } from './codes.js'
 import { NodeReply, ZsError } from './errors.js'
 import type { Event } from './events.js'
-import { algoOnly } from './fees.js'
+import { algoOnly, nativeUsd } from './fees.js'
 import type { FeeUnit, Rail } from './network.js'
 import { goJSON } from './gojson.js'
 import { goDecodeRune, goDecodeUTF8, goQuote } from './gotext.js'
@@ -58,7 +58,8 @@ export interface UsageReport {
     op: Operator
     openFees: number
     settleFees: number
-    algoUsdPrice: number
+    /** The USD price of one feeUnit coin at reserve (nativeUsd); 0 when unknown. */
+    usdRate: number
     feeUnit: FeeUnit
     feeBps: number
     haveFee: boolean
@@ -87,13 +88,12 @@ export function usageEvents(u: UsageReport): Event[] {
             ownerAddr: u.op.ownerAddr,
             openFeesMicroAlgos: algoOnly(u.feeUnit, u.openFees),
             settleFeesMicroAlgos: algoOnly(u.feeUnit, u.settleFees),
-            algoUsd: algoOnly(u.feeUnit, u.algoUsdPrice),
+            algoUsd: algoOnly(u.feeUnit, u.usdRate),
             feeBps: u.feeBps,
             feeBpsKnown: u.haveFee,
             openNetworkFees: u.openFees,
             settleNetworkFees: u.settleFees,
-            // The reserve's rate is ALGO/USD, so it prices no other coin.
-            nativeUsd: algoOnly(u.feeUnit, u.algoUsdPrice),
+            nativeUsd: u.usdRate,
             feeUnit: u.feeUnit,
         },
     ]
@@ -320,7 +320,7 @@ export function bufferedResponder(deps: ResponderDeps, call: SealedCall, slot?: 
                     op,
                     openFees: handle?.openFeesMicroalgos ?? 0,
                     settleFees: 0,
-                    algoUsdPrice: reserved.algoUsdPrice,
+                    usdRate: nativeUsd(deps.feeUnit, reserved),
                     feeUnit: deps.feeUnit,
                     feeBps: feeBps ?? 0,
                     haveFee: feeBps !== null,

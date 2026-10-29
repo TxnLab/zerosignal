@@ -1078,6 +1078,7 @@ function logReserve(log: PickDeps['logger'], op: Operator, hop: RelayHop | null,
         max_price_usd: `$${(t.max_price / 1_000_000).toFixed(6)}`,
     }
     if (rt.algoUsdPrice > 0) attrs.algo_usd = rt.algoUsdPrice
+    if ((rt.solUsdPrice ?? 0) > 0) attrs.sol_usd = rt.solUsdPrice
     log.debug('reserve response', attrs)
 }
 

@@ -90,6 +90,8 @@
     "oracle_healthy": true,
     "algo_usd_price": 0.2375,
     "algo_usd_at": "2026-09-30T12:00:00Z",
+    "sol_usd_price": 142.375,
+    "sol_usd_at": "2026-09-30T12:00:05Z",
     "min_charge_output_tokens": 1000,
     "min_charge_algo_txns": 7,
     "min_charge_microusdc": 1663,
