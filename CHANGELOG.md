@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-29 — a Solana node's SOL/USD rate
+### 2026-10-29 — a Solana node's SOL/USD rate (0.13.0)
 
 A Solana node reports its SOL/USD quote as `sol_usd_price`, in the sealed reserve response and
 in `/v1/zs/details` beside `sol_usd_at`, as an Algorand node reports `algo_usd_price`. Each
