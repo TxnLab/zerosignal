@@ -21,7 +21,7 @@ import (
 // nil receiver's fields. Tests that construct OpenHandle values
 // directly (like the dispatch fakeWallet) rely on this.
 func TestOpenHandle_NilWalletGuard(t *testing.T) {
-	h := &OpenHandle{TicketID: "dGlja2V0LXhvcnZvenp6MDA="}
+	h := &OpenHandle{TicketID: "dGlja2V0LXhvcnZvenowMA=="}
 	r := &ticket.UsageReceipt{}
 
 	if _, err := h.AckSettle(context.Background(), r, ""); err == nil || !strings.Contains(err.Error(), "detached") {
