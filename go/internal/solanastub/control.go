@@ -8,6 +8,7 @@ package solanastub
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -16,10 +17,10 @@ import (
 
 // The /stub/ routes let a test in another process, the TS SDK's, drive a
 // scenario as the Go tests drive it in-process: fund a payer and pick its
-// Behavior, read back what happened on chain, and lapse a claim. They are
-// served beside the node's own routes with no auth, so anyone who reaches the
-// stub can mint its test USDC; StartLocalnet's loopback check keeps that to a
-// local validator's.
+// Behavior, read back what happened on chain, lapse a claim and resolve a
+// freeze. They are served beside the node's own routes with no auth, so
+// anyone who reaches the stub can spend the run's SOL and test USDC; Start
+// serves only on loopback.
 
 type behaviorJSON struct {
 	NoReceipt        bool   `json:"no_receipt"`
@@ -28,10 +29,12 @@ type behaviorJSON struct {
 	OverClaim        uint64 `json:"over_claim"`
 	TicketLifetimeMs int64  `json:"ticket_lifetime_ms"`
 	IssuerDown       bool   `json:"issuer_down"`
+	HoldOpen         bool   `json:"hold_open"`
 }
 
 type ticketJSON struct {
 	TicketID      string `json:"ticket_id"`
+	MaxPrice      uint64 `json:"max_price"`
 	Closed        bool   `json:"closed"`
 	Status        string `json:"status,omitempty"`
 	FreezeOrigin  uint8  `json:"freeze_origin,omitempty"`
@@ -40,8 +43,11 @@ type ticketJSON struct {
 }
 
 type payerJSON struct {
-	USDC     uint64       `json:"usdc"`
-	Tickets  []ticketJSON `json:"tickets"`
+	USDC    uint64       `json:"usdc"`
+	Tickets []ticketJSON `json:"tickets"`
+	// Unopened is every priced ticket the stub issued the payer whose open
+	// never landed; closed says no account exists at its address.
+	Unopened []ticketJSON `json:"unopened"`
 	Receipts []uint64     `json:"receipt_amounts"`
 	Errors   []string     `json:"errors"`
 	// Credits is how many verified credits the payer's free reserves
@@ -50,12 +56,14 @@ type payerJSON struct {
 	IssuerCalls int `json:"issuer_calls"`
 }
 
-func (l *Localnet) handler() http.Handler {
+func (s *Stub) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/", l.Node.Handler())
-	mux.HandleFunc("POST /stub/payers", l.addPayer)
-	mux.HandleFunc("GET /stub/payers/{address}", l.payerState)
-	mux.HandleFunc("POST /stub/lapse", l.lapse)
+	mux.Handle("/", s.Node.Handler())
+	mux.HandleFunc("POST /stub/payers", s.addPayer)
+	mux.HandleFunc("GET /stub/payers/{address}", s.payerState)
+	mux.HandleFunc("POST /stub/fund", s.fund)
+	mux.HandleFunc("POST /stub/lapse", s.lapse)
+	mux.HandleFunc("POST /stub/resolve", s.resolve)
 	return mux
 }
 
@@ -67,10 +75,12 @@ func decodeStrict(r *http.Request, v any) error {
 	return dec.Decode(v)
 }
 
-func (l *Localnet) addPayer(w http.ResponseWriter, r *http.Request) {
+func (s *Stub) addPayer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Address  string       `json:"address"`
 		Behavior behaviorJSON `json:"behavior"`
+		// USDC is the test USDC to give, in base units; zero is PayerUSDC.
+		USDC uint64 `json:"usdc"`
 	}
 	if err := decodeStrict(r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -81,76 +91,146 @@ func (l *Localnet) addPayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := l.FundPayer(r.Context(), payer); err != nil {
+	usdc := req.USDC
+	if usdc == 0 {
+		usdc = PayerUSDC
+	}
+	if err := s.FundPayer(r.Context(), payer, usdc); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	b := req.Behavior
-	l.Node.SetBehavior(payer, Behavior{
+	s.Node.SetBehavior(payer, Behavior{
 		NoReceipt: b.NoReceipt, ClaimNoReceipt: b.ClaimNoReceipt, BadBodyHash: b.BadBodyHash,
 		OverClaim: b.OverClaim, TicketLifetime: time.Duration(b.TicketLifetimeMs) * time.Millisecond,
-		IssuerDown: b.IssuerDown,
+		IssuerDown: b.IssuerDown, HoldOpen: b.HoldOpen,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (l *Localnet) payerState(w http.ResponseWriter, r *http.Request) {
+// fund gives an address SOL alone, for a wallet a test drives apart from any
+// payer the stub serves.
+func (s *Stub) fund(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Address  string `json:"address"`
+		Lamports uint64 `json:"lamports"`
+	}
+	if err := decodeStrict(r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	to, err := solana.ParsePublicKey(req.Address)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.Chain.FundSOL(r.Context(), s.Funding, to, req.Lamports); err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Stub) payerState(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	payer, err := solana.ParsePublicKey(r.PathValue("address"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	out := payerJSON{Tickets: []ticketJSON{}, Receipts: []uint64{}, Errors: []string{}}
-	if out.USDC, err = l.Chain.USDC(ctx, payer); err != nil {
+	out := payerJSON{Tickets: []ticketJSON{}, Unopened: []ticketJSON{}, Receipts: []uint64{}, Errors: []string{}}
+	if out.USDC, err = s.Chain.USDC(ctx, payer); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	for _, id := range l.Node.Opened(payer) {
-		tk, err := l.Chain.Ticket(ctx, l.OperatorID, l.NodeID, id)
+	for _, is := range s.Node.Issued(payer) {
+		if !is.Opened && is.MaxPrice == 0 {
+			continue
+		}
+		tk, err := s.Chain.Ticket(ctx, s.OperatorID, s.NodeID, is.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		tj := ticketJSON{TicketID: base64.StdEncoding.EncodeToString(id[:]), Closed: tk == nil}
+		tj := ticketJSON{TicketID: base64.StdEncoding.EncodeToString(is.ID[:]), MaxPrice: is.MaxPrice, Closed: tk == nil}
 		if tk != nil {
 			tj.Status, tj.FreezeOrigin, tj.Deadline, tj.PendingAmount = tk.Status.String(), tk.FreezeOrigin, tk.Deadline(), tk.Pending.Amount
 		}
-		out.Tickets = append(out.Tickets, tj)
+		if is.Opened {
+			out.Tickets = append(out.Tickets, tj)
+		} else {
+			out.Unopened = append(out.Unopened, tj)
+		}
 	}
-	for _, rc := range l.Node.Receipts(payer) {
+	for _, rc := range s.Node.Receipts(payer) {
 		out.Receipts = append(out.Receipts, rc.AmountCharged)
 	}
-	for _, e := range l.Node.Errors(payer) {
+	for _, e := range s.Node.Errors(payer) {
 		out.Errors = append(out.Errors, e.Error())
 	}
-	out.Credits, out.IssuerCalls = l.Node.Credits(payer), l.Node.Issuer().Calls(payer)
+	out.Credits, out.IssuerCalls = s.Node.Credits(payer), s.Node.Issuer().Calls(payer)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-func (l *Localnet) lapse(w http.ResponseWriter, r *http.Request) {
+// ticketRef is a payer's ticket, as /stub/lapse and /stub/resolve name it.
+type ticketRef struct {
+	Address  string `json:"address"`
+	TicketID string `json:"ticket_id"`
+}
+
+func (req ticketRef) parse() (solana.PublicKey, [16]byte, error) {
+	var id [16]byte
+	payer, err := solana.ParsePublicKey(req.Address)
+	if err != nil {
+		return payer, id, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(req.TicketID)
+	if err != nil || len(raw) != 16 {
+		return payer, id, errors.New("ticket_id is not 16 bytes of base64")
+	}
+	copy(id[:], raw)
+	return payer, id, nil
+}
+
+func (s *Stub) lapse(w http.ResponseWriter, r *http.Request) {
+	var req ticketRef
+	if err := decodeStrict(r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	payer, id, err := req.parse()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.Node.SettleLapsed(r.Context(), id, payer); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Stub) resolve(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Address  string `json:"address"`
-		TicketID string `json:"ticket_id"`
+		ticketRef
+		ShareBps uint16 `json:"operator_share_bps"`
 	}
 	if err := decodeStrict(r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	payer, err := solana.ParsePublicKey(req.Address)
+	payer, id, err := req.parse()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	raw, err := base64.StdEncoding.DecodeString(req.TicketID)
-	if err != nil || len(raw) != 16 {
-		http.Error(w, "ticket_id is not 16 bytes of base64", http.StatusBadRequest)
+	err = s.Resolve(r.Context(), id, payer, req.ShareBps)
+	switch {
+	case errors.Is(err, ErrNoAdmin):
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
-	}
-	var id [16]byte
-	copy(id[:], raw)
-	if err := l.Node.SettleLapsed(r.Context(), id, payer); err != nil {
+	case err != nil:
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}

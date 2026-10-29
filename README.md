@@ -185,7 +185,9 @@ cd ts && pnpm build
 
 The Solana rail also runs end to end on a local validator: each SDK against a stub node
 (`go/internal/solanastub`) and the real `zs_escrow` program, through a settle on the payer's ack,
-a protest, an over-claim freeze, a refund of an unserved ticket and a lapse, and free turns with
+a protest, an over-claim freeze and the admin's resolve of it, a refund of an unserved ticket, a
+refund forfeited to the treasury by a payer whose USDC account is closed, a lapse, an open sent
+after its blockhash expired, two concurrent turns the payer can afford one of, and free turns with
 and without a free credit from the stub's issuer. The Go scenarios
 run the stub in-process; the TS ones build and spawn it (`go/cmd/solanastub`) and check the chain
 through its `/stub/` routes. Start the validator with contracts-solana's `make localnet`, then:
@@ -196,8 +198,33 @@ ZS_SOLANA_E2E_RPC=http://127.0.0.1:8899 \
   make solana-e2e    # about 2 min a suite: two scenarios wait out a deadline
 ```
 
-Without both variables the scenarios skip, so `make test` and CI never need a validator. The run
-shortens the localnet Config's default grace to its minimum.
+Without the endpoint and a key the scenarios skip, so `make test` and this repo's CI never need a
+validator. The mint's authority is also the localnet Config's admin: the run shortens the default
+grace to its minimum, and refuses an endpoint off this machine.
+
+The same suites run on devnet with a funder in its place, a wallet holding SOL and test USDC that
+it hands out by transfer and that holds no power over the program:
+
+```bash
+# Once: register the stub's node. The URL is the loopback address later runs serve on.
+cd go && go run ./cmd/solanastub -rpc <devnet endpoint> -funder /abs/funder.json \
+  -register-node http://127.0.0.1:18765 -identity-out /abs/stub-identity.json
+
+# Each run. The paths are absolute: the suites run from go/ and sdk/.
+ZS_SOLANA_E2E_RPC=<devnet endpoint> ZS_SOLANA_E2E_CLUSTER=devnet \
+  ZS_SOLANA_E2E_FUNDER=/abs/funder.json ZS_SOLANA_E2E_STUB_IDENTITY=/abs/stub-identity.json \
+  make solana-e2e
+```
+
+The grace is then the cluster's, so the deadline scenarios take longer. Each payer hands what it
+has left back to the funder at the end, except what a frozen ticket holds, which only the admin
+can release. The identity file holds the node's signing phrase and its owner's, which unregisters
+it, so keep it as a secret. Off this machine a funder run serves only as a registered identity,
+so nightly runs reuse one operator rather than stake a new one each time.
+
+contracts-solana's `make integration` and its `integration` workflow run both suites on a
+throwaway validator, with a real zs-node and zs-proxy; `-register-node` registers that node too,
+since zs-node has no Solana register command.
 
 ## Releasing
 
