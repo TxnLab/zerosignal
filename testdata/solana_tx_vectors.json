@@ -4018,7 +4018,7 @@
       "wire_base64": "AocuEH5gVJDx5+Jmuyyn82GWQzU/QXSxxyDUsrQJ+6NuSYMf0Z+Tt/fNBAN1TL/oDcuEFoROJEzkfTLA/veiHgsF6vIdTqIyvmX/79xYfQVrv6EBHwkx4qd+bwzCrAB1b7upUnU/wb9hxaFaZ6BFr06xO5FE4pyfaDF3qudkKNoDAgEIDwvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHhZISdkNuLh+HHvVFzNwEFD2yG+TzOpuYiI9vBkddY3xeNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69XGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9grUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCBQgABQJg6gAACAAFAoA4AQAIAAkD6AMAAAAAAAAKBAINBQEKDJDQAwAAAAAABgsIAAwOBgMECQdM5NybR8e9PC1NTU1NTU1NTU1NTU1NTU1N0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzeQ0AMAAAAAAPbis2oAAAAAAAAAAA=="
     },
     {
-      "about": "open names its own grace instead of 0, which the program accepts within the configured bounds",
+      "about": "open names its own grace instead of 0, which the program accepts",
       "account_keys": [
         {
           "is_signer": true,

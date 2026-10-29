@@ -67,10 +67,15 @@ type Options struct {
 	Listen string
 }
 
+// e2eGrace is the default grace a run with the mint's authority sets, in
+// seconds: short, so the refund and lapse endings finish in minutes, and long
+// enough that a settle sent as a short ticket expires still lands.
+const e2eGrace = 60
+
 // Start serves a stub node on the cluster at o.Endpoint.
 //
-// With the mint's authority the run lowers the Config's default grace to its
-// minimum, so endings that wait out a deadline wait about a minute, and it
+// With the mint's authority the run lowers the Config's default grace to
+// e2eGrace, so endings that wait out a deadline wait about a minute, and it
 // refuses an endpoint off this machine: the keypair a localnet is set up with
 // is also devnet's admin, and the grace change would land on every devnet
 // ticket. A funder changes nothing in the Config, so the grace is the
@@ -165,10 +170,10 @@ func DialFunded(ctx context.Context, endpoint string, f Funding) (*Chain, error)
 	if err != nil {
 		return nil, err
 	}
-	if f.Authority == nil || chain.Config.DefaultGrace == chain.Config.MinGrace {
+	if f.Authority == nil || chain.Config.DefaultGrace == e2eGrace {
 		return chain, nil
 	}
-	grace := chain.Config.MinGrace
+	grace := uint32(e2eGrace)
 	ix, err := chain.Deployment.SetConfig(PublicKey(f.Authority), zsescrow.SetConfigArgs{DefaultGrace: &grace})
 	if err != nil {
 		return nil, err

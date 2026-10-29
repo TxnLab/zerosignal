@@ -27,10 +27,7 @@ const payer = (k: PublicKey): AccountMeta => ({ publicKey: k, isSigner: true, is
 export interface InitializeArgs {
     genesisHash: Hash
     feeBps: number
-    maxGrace: number
     defaultGrace: number
-    minGrace: number
-    maxTicketLifetime: bigint
     operatorStake: bigint
     nodeStake: bigint
 }
@@ -43,10 +40,7 @@ export interface InitializeArgs {
 export interface SetConfigArgs {
     paused?: boolean | null
     feeBps?: number | null
-    maxGrace?: number | null
     defaultGrace?: number | null
-    minGrace?: number | null
-    maxTicketLifetime?: bigint | null
     operatorStake?: bigint | null
     nodeStake?: bigint | null
     treasury?: PublicKey | null
@@ -191,10 +185,7 @@ export class Deployment extends Addresses {
         const w = new Writer()
         w.fixed(decodeBase58(a.genesisHash, 32), 32)
         w.u16(a.feeBps)
-        w.u32(a.maxGrace)
         w.u32(a.defaultGrace)
-        w.u32(a.minGrace)
-        w.i64(a.maxTicketLifetime)
         w.u64(a.operatorStake)
         w.u64(a.nodeStake)
         const d = this
@@ -222,10 +213,7 @@ export class Deployment extends Addresses {
         const w = new Writer()
         w.option(a.paused, (v) => w.bool(v))
         w.option(a.feeBps, (v) => w.u16(v))
-        w.option(a.maxGrace, (v) => w.u32(v))
         w.option(a.defaultGrace, (v) => w.u32(v))
-        w.option(a.minGrace, (v) => w.u32(v))
-        w.option(a.maxTicketLifetime, (v) => w.i64(v))
         w.option(a.operatorStake, (v) => w.u64(v))
         w.option(a.nodeStake, (v) => w.u64(v))
         w.option(a.treasury, (v) => w.key(v))

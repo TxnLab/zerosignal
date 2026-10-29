@@ -168,7 +168,7 @@
     },
     {
       "name": "open_grace_nonzero",
-      "about": "open names its own grace instead of 0, which the program accepts within the configured bounds",
+      "about": "open names its own grace instead of 0, which the program accepts",
       "source": "fixture",
       "message_base64": "AgEIDwvu9anmeeaj4TT+J4N7/zLHy19dROoJvLDlQrrWpMDM0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzcE/3844gZaVZqGnfWPpM9jskZyKP63dRKgYfCoSQJRHkd6gYQxeXulM4+h1drAjoEh5s9AyqSWzoPjIHQSlpTneNb2j3hFDAmmzZn+u8pllf42k/reVOKtajinB3EV69XGGdOoWxciaklQENw+ddrERDkj6YuFSxOMgqsTBuPmHf8lAsLN0AmCkJB7eRg9yW61e8HKj4UptOGoGlimK/q5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqhWFYud1Osc72P0AYQqGUJ1gm7v2KYllALUt4PQzK9grUJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCBAgABQJg6gAACAAJA+gDAAAAAAAACgQCDQUBCgyQ0AMAAAAAAAYLCAAMDgYDBAkHTOTcm0fHvTwtSkpKSkpKSkpKSkpKSkpKStBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3kNADAAAAAAD24rNqAAAAAMgAAAA=",
       "spec": {

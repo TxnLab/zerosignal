@@ -245,10 +245,7 @@ describe('solana_instruction_vectors.json', () => {
                         // The fixture writes the genesis hash as hex; the builder takes base58.
                         genesisHash: encodeBase58(hex.decode(args.genesis_hash)),
                         feeBps: args.fee_bps,
-                        maxGrace: args.max_grace,
                         defaultGrace: args.default_grace,
-                        minGrace: args.min_grace,
-                        maxTicketLifetime: BigInt(args.max_ticket_lifetime),
                         operatorStake: BigInt(args.operator_stake),
                         nodeStake: BigInt(args.node_stake),
                     })
@@ -257,10 +254,7 @@ describe('solana_instruction_vectors.json', () => {
                     ix = d.setConfig(acct.admin!, {
                         paused: args.paused,
                         feeBps: args.fee_bps,
-                        maxGrace: args.max_grace,
                         defaultGrace: args.default_grace,
-                        minGrace: args.min_grace,
-                        maxTicketLifetime: big(args.max_ticket_lifetime),
                         operatorStake: big(args.operator_stake),
                         nodeStake: big(args.node_stake),
                         treasury: args.treasury,

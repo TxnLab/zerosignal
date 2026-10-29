@@ -31,6 +31,18 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-30 — the Solana Config's grace and lifetime bounds are retired (unreleased)
+
+`zs_escrow`'s `open` bounds neither grace nor expiry, as Algorand's `open()` doesn't: any
+future `expires_at`, any grace, 0 taking `default_grace`. The payer's offer check still
+refuses a grace other than 0. The Config keeps the three fields' bytes, so the decoders read
+them as `RetiredMaxGrace`, `RetiredMaxTicketLifetime` and `RetiredMinGrace` ↔
+`retiredMaxGrace`, `retiredMaxTicketLifetime` and `retiredMinGrace`, and `InitializeArgs` and
+`SetConfigArgs` lose `MaxGrace`, `MinGrace` and `MaxTicketLifetime` ↔ `maxGrace`, `minGrace`
+and `maxTicketLifetime`. A `set_config` built by an earlier release is read by the upgraded
+program with its fields shifted, since Anchor ignores trailing argument bytes, so send it
+only from this release on.
+
 ### 2026-10-29 — a Solana node's SOL/USD rate (0.13.0)
 
 A Solana node reports its SOL/USD quote as `sol_usd_price`, in the sealed reserve response and
