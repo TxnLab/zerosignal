@@ -32,7 +32,7 @@ export class AccountVersionError extends Error {
 export const CONFIG_SIZE = 349
 export const OPERATOR_SIZE = 171
 export const NODE_SIZE = 880
-export const TICKET_SIZE = 275
+export const TICKET_SIZE = 291
 export const RENT_POOL_SIZE = 82
 export const TOKEN_ACCOUNT_SIZE = 165
 
@@ -280,6 +280,12 @@ export interface Ticket {
     /** Algorand's frozenAt and freezeOrigin (FREEZE_ORIGIN_*), for whoever resolves the ticket. */
     frozenAt: bigint
     freezeOrigin: number
+    /**
+     * The id the address derives from, which the address can't give back. Everything off chain names a ticket by
+     * it, so a walk of a node's tickets can match each to the ledger, receipts and journal that name it, as an
+     * Algorand box's name is its ticket id.
+     */
+    ticketId: Uint8Array
     reserve: Uint8Array
 }
 
@@ -320,6 +326,7 @@ export function decodeTicket(data: Uint8Array): Ticket {
         rentPayer: r.key(),
         frozenAt: r.i64(),
         freezeOrigin: r.u8(),
+        ticketId: r.array(16),
         reserve: r.array(7),
     }
 }

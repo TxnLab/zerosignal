@@ -39,14 +39,14 @@
       "name": "ack_first_half",
       "about": "the payer posts the first half on an open ticket, as submitter and fee payer; it refunds in full at the deadline unless the node answers",
       "source": "fixture",
-      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR5M17RQuB0a9IU4Iiq9IOQnUDyMbPZ8sdLCjNtvF+qCgXjW9o94RQwJps2Z/rvKZZX+NpP63lTirWo4pwdxFevVxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAIDAQoGBwgLCFvjiBd3rk/JEbCtAQAAAAAA2IItpU/RY6ik599FStu0OowdsL6BGV8jPJGebYUQ7hOkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
+      "message_base64": "AQAGDNBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BP9/OOIGWlWahp31j6TPY7JGcij+t3USoGHwqEkCUR541vaPeEUMCabNmf67ymWV/jaT+t5U4q1qOKcHcRXr1cFGQt4EYPeemKagGJio9Tj8AJwSYlNrju1tcaaMlX1TxhnTqFsXImpJUBDcPnXaxEQ5I+mLhUsTjIKrEwbj5h3/JQLCzdAJgpCQe3kYPclutXvByo+FKbThqBpYpiv6uQan1RcYe9FmNdrUBFX9wsDBJMaPIVZ1pdu6y18IAAAABt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkbzOBHxDMOFw5kw0cYGXjXPFB5Dwmjnk5mUc0yAFw0SCplVGTyg277HHNAk4G97DKcp2+6ct71Elh5pYKqWGEeTtMvY7818O7vyyXyii4fvchzrig1ZxsMlGD18S5FVqjrek6U9PCGxpPwqvEVQ4gFiEhsbUGOzNsfUNPeqI9foEJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCAQgNAAkFBAMCAQoGBwgLCFvjiBd3rk/JEbCtAQAAAAAAdebKRvYkjdROurXwTqrmoHIE2M/P4HLrA0KSL4LEqjOkAQAAAAAAALgLAAAAAAAAsAQAAAAAAABYAgAAAAAAAAEAAAAAAAAAAAD+",
       "spec": {
         "payer": "F25s3DdjXdCxYBhh2z8FBusVEMT4b9bGNFVKJi3wFoF4",
         "operator_id": "1",
         "node_id": "1",
-        "ticket_id": "09090909090909090909090909090909",
+        "ticket_id": "7369787465656e2d627974652d696421",
         "receipt": {
-          "ticket_id": "CQkJCQkJCQkJCQkJCQkJCQ==",
+          "ticket_id": "c2l4dGVlbi1ieXRlLWlkIQ==",
           "actual_input_count": 1200,
           "actual_output_count": 600,
           "amount_charged": 110000,

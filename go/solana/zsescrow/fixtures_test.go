@@ -172,8 +172,12 @@ func TestAccountFixtures(t *testing.T) {
 					t.Errorf("node stores vault %s operator %s", v.Vault, v.Operator)
 				}
 			case *zsescrow.Ticket:
-				id, _ := hex.DecodeString(a.SeedsHex[2])
-				want = d.Ticket(v.Node, [16]byte(id))
+				// From the stored id, so the field a walk ends a ticket by
+				// must be the one its address derives from.
+				want = d.Ticket(v.Node, v.TicketID)
+				if id, _ := hex.DecodeString(a.SeedsHex[2]); [16]byte(id) != v.TicketID {
+					t.Errorf("ticket stores id %x, its seed is %x", v.TicketID, id)
+				}
 			case *zsescrow.RentPool:
 				want = d.RentPool(v.Payer)
 				if _, bump, _ := solana.FindProgramAddress([][]byte{[]byte(zsescrow.RentPoolSeed), v.Payer[:]}, d.Program); v.Bump != bump {
@@ -355,8 +359,13 @@ func TestInstructionFixtures(t *testing.T) {
 				return 0, 0
 			}
 			ticketID := func(node solana.PublicKey) [16]byte {
+				// The program's fixtures fill ids with one byte, but for the
+				// one ticket given distinct bytes to pin their order.
+				ids := [][16]byte{[16]byte([]byte("sixteen-byte-id!"))}
 				for b := range 256 {
-					id := [16]byte(bytes.Repeat([]byte{byte(b)}, 16))
+					ids = append(ids, [16]byte(bytes.Repeat([]byte{byte(b)}, 16)))
+				}
+				for _, id := range ids {
 					if d.Ticket(node, id) == acct["ticket"] {
 						return id
 					}

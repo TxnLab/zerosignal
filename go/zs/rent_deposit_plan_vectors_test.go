@@ -39,7 +39,7 @@ type rentDepositPlanCase struct {
 
 func TestRentDepositPlanVectors(t *testing.T) {
 	// The rents at today's rate: (128 + data) × 6,960 lamports.
-	const rent, poolRent, fee = (128 + 275) * 6_960, (128 + 82) * 6_960, solanaSignatureFee
+	const rent, poolRent, fee = (128 + 291) * 6_960, (128 + 82) * 6_960, solanaSignatureFee
 	type in struct {
 		slots, ticketRent, poolRent uint64
 		pool                        rentPoolReading

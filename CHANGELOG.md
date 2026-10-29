@@ -31,6 +31,18 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-25 — a Solana ticket stores its ticket id (unreleased)
+
+The `zs_escrow` program's `Ticket` account stores the id its address derives from
+(`Ticket.TicketID` ↔ `ticketId`, 16 bytes after `freeze_origin`; every earlier offset stays
+put). The address is a hash of the id and can't give it back, while the wire, receipts, the
+node's ledger and the payer's journal all name a ticket by its id, so a walk of a node's
+ticket accounts could end a ticket but not say which one it was. An Algorand box's name is
+its ticket id, so its walk always could. The account grows
+from 275 to 291 bytes (`TicketSize` ↔ `TICKET_SIZE`), so a ticket's rent rises from 2,804,880
+to 2,916,240 lamports, which the rent pool's sizing reads. A deployed program and its tickets
+must be replaced, since old accounts no longer decode; devnet and testnet held none.
+
 ### 2026-10-25 — the aggregate's tags are a sorted set (unreleased)
 
 Both SDKs' `AllModelDetails` ↔ `allModelDetails` (Go's `aggregateModelDetails` ↔ `aggregateModelDetails` in

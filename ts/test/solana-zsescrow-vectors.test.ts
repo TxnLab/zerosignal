@@ -151,7 +151,10 @@ describe('solana_account_vectors.json', () => {
                     expect([v.vault, v.operator]).toEqual([d.vault(want), d.operator(v.operatorId)])
                     break
                 case 'Ticket':
-                    want = d.ticket(v.node, hex.decode(a.seeds_hex[2]))
+                    // From the stored id, so the field a walk ends a ticket by
+                    // must be the one its address derives from.
+                    want = d.ticket(v.node, v.ticketId)
+                    expect(hex.encode(v.ticketId)).toBe(a.seeds_hex[2])
                     break
                 case 'RentPool':
                     want = d.rentPool(v.payer)
@@ -203,10 +206,11 @@ describe('solana_instruction_vectors.json', () => {
                 throw new Error('no ids give the node')
             }
             const ticketId = (node: string): Uint8Array => {
-                for (let b = 0; b < 256; b++) {
-                    const id = new Uint8Array(16).fill(b)
-                    if (d.ticket(node, id) === acct.ticket) return id
-                }
+                // The program's fixtures fill ids with one byte, but for the
+                // one ticket given distinct bytes to pin their order.
+                const ids = [new TextEncoder().encode('sixteen-byte-id!')]
+                for (let b = 0; b < 256; b++) ids.push(new Uint8Array(16).fill(b))
+                for (const id of ids) if (d.ticket(node, id) === acct.ticket) return id
                 throw new Error('no ticket id gives the ticket')
             }
             const ending = (): Ending => {

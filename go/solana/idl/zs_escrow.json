@@ -3634,12 +3634,29 @@
             "type": "u8"
           },
           {
+            "name": "ticket_id",
+            "docs": [
+              "The id the address is derived from, which the address can't give",
+              "back. Everything off chain names a ticket by it (the wire, receipts,",
+              "the node's ledger, the payer's journal, protest's argument), so a walk",
+              "of a node's tickets can match each to those records and report it by",
+              "id, as an Algorand box walk can, the box's name being its ticket id."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
             "name": "_reserve",
             "docs": [
               "Smaller than the long-lived accounts' reserves: every live ticket's",
-              "rent is float the payer has out, and tickets are short-lived, so a new",
-              "layout can apply to new opens while `version` tells the few remaining",
-              "old tickets apart."
+              "rent is float the payer has out. A later field comes from here; a",
+              "Ticket grows past it only while no cluster holds a live ticket, since",
+              "Account<Ticket> refuses a shorter account before any handler can read",
+              "its `version`, which would lock the old tickets' escrow."
             ],
             "type": {
               "array": [
