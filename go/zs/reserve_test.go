@@ -258,6 +258,47 @@ func TestHTTPReserveClient_HappyPath(t *testing.T) {
 	}
 }
 
+// Each rate is read off its own wire key. The keys are written as literals,
+// not through ticket.ReserveResponse, so a changed json tag fails here.
+func TestHTTPReserveClient_ReadsBothRatesByTheirWireKeys(t *testing.T) {
+	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {})
+	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rr := h.decodeReserve(t, r)
+		raw, err := json.Marshal(h.issueValidTicket(t, rr))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		body["algo_usd_price"] = json.RawMessage(`0.25`)
+		body["sol_usd_price"] = json.RawMessage(`142.375`)
+		plaintext, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recipient, err := age.ParseX25519Recipient(rr.ProxyRecipient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := wire.SealReserveResponse(plaintext, recipient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", wire.SealedReserveResponseContentType)
+		_, _ = w.Write(sealed)
+	})
+	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	got, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if got.AlgoUSDPrice != 0.25 || got.SOLUSDPrice != 142.375 {
+		t.Errorf("rates = %v ALGO, %v SOL; want 0.25, 142.375", got.AlgoUSDPrice, got.SOLUSDPrice)
+	}
+}
+
 // A caller that leaves HTTPClient nil gets New's guard, not http.DefaultClient:
 // the reserve to a loopback node is refused at dial, and the per-reserve
 // deadline still applies.

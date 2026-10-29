@@ -40,12 +40,14 @@ import (
 // converted directly from USD with no oracle in the path); the proxy
 // uses it to surface ALGO network-fee dollar amounts in logs and on
 // the wire without querying the oracle itself. Zero on older nodes
-// that don't return it.
+// that don't return it. SOLUSDPrice is the same for a Solana node's
+// SOL/USD; dispatch reads only the one its deployment's fees are paid in.
 type ReservedTicket struct {
 	Ticket       *ticket.Ticket
 	ResponseKey  [wire.ResponseKeySize]byte
 	AgeIdentity  *age.X25519Identity
 	AlgoUSDPrice float64
+	SOLUSDPrice  float64
 
 	// SealRecipient is the age recipient this reserve's body was actually
 	// sealed to — the operator's verified, unexpired ephemeral recipient
@@ -792,6 +794,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 		ResponseKey:   key,
 		AgeIdentity:   ephemeral,
 		AlgoUSDPrice:  parsed.AlgoUSDPrice,
+		SOLUSDPrice:   parsed.SOLUSDPrice,
 		PresignedOpen: parsed.PreSignedOpenTxn,
 		SealRecipient: sealRecipient,
 	}, nil

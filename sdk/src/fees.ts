@@ -13,3 +13,18 @@ import type { FeeUnit } from './network.js'
 export function algoOnly(u: FeeUnit, v: number): number {
     return u.currency === 'ALGO' ? v : 0
 }
+
+/**
+ * nativeUsd is the reserve's USD rate for u's coin: each rail's node sends its
+ * own coin's rate, and a rate for another coin would price u's fees wrong.
+ * Go's nativeUSD.
+ */
+export function nativeUsd(u: FeeUnit, rates: { algoUsdPrice: number; solUsdPrice?: number }): number {
+    switch (u.currency) {
+        case 'ALGO':
+            return rates.algoUsdPrice
+        case 'SOL':
+            return rates.solUsdPrice ?? 0
+    }
+    return 0
+}

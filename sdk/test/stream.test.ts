@@ -1006,7 +1006,7 @@ describe('frameFactory', () => {
         const identity = await generateEphemeralIdentity()
         const sealer = await ResponseSealer.create({ replyTo: identity.recipient, txID: 'APPCALL', ticketID: TICKET_ID, key: f.responseKey })
         const handle = handleOf({ txid: 'ACK', fee: 1000 })
-        const reserved = { ticket: f.ticket, identity, responseKey: f.responseKey, algoUsdPrice: 0.2 } as unknown as Reserved
+        const reserved = { ticket: f.ticket, identity, responseKey: f.responseKey, algoUsdPrice: 0.2, solUsdPrice: 150 } as unknown as Reserved
         const call: SealedCall = { endpoint: o.endpoint ?? '/v1/chat/completions', model: 'm', op: f.op, reserved, handle, txId: 'APPCALL', hop: null }
         const logger = recLogger()
         const responseAffinity = new IDAffinity(16, 60_000)
@@ -1046,7 +1046,8 @@ describe('frameFactory', () => {
             openFees: 2000,
             // What the scripted ack reported paying.
             settleFees: 1000,
-            algoUsdPrice: 0.2,
+            // The ALGO fee unit's rate, not the SOL one beside it.
+            usdRate: 0.2,
             feeUnit: ALGO_FEES,
             feeBps: 150,
             haveFee: true,
@@ -1088,7 +1089,8 @@ describe('frameFactory', () => {
         const fn = await frameFactory({ ...s.deps, feeUnit: sol }, s.call, s.gen)(keyed(s))
         for (const pt of s.frames) await fn(zs(s, pt))
         const out = await fn(receiptFrame(s))
-        expect(out.usage).toMatchObject({ feeUnit: sol, settleFees: 1000, check: { settled: { feesMicroAlgos: 0, networkFees: 1000 } } })
+        // At the SOL rate the reserve carried, not the ALGO one beside it.
+        expect(out.usage).toMatchObject({ feeUnit: sol, usdRate: 150, settleFees: 1000, check: { settled: { feesMicroAlgos: 0, networkFees: 1000 } } })
     })
 
     it('shows the idle watchdog each opened content frame, and nothing else', async () => {

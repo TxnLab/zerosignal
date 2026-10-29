@@ -101,6 +101,18 @@ func algoOnly[T uint64 | float64](u FeeUnit, v T) T {
 	return v
 }
 
+// nativeUSD is the reserve's USD rate for u's coin: each rail's node sends its
+// own coin's rate, and a rate for another coin would price u's fees wrong.
+func nativeUSD(u FeeUnit, rt *ReservedTicket) float64 {
+	switch u.Currency {
+	case "ALGO":
+		return rt.AlgoUSDPrice
+	case "SOL":
+		return rt.SOLUSDPrice
+	}
+	return 0
+}
+
 // FeeUnit is the coin the deployment's network fees are paid in.
 func (d Deployment) FeeUnit() FeeUnit { return FeeUnitOf(d.Rail) }
 

@@ -31,6 +31,7 @@ import {
 } from '@txnlab/zs-proto/wire'
 
 import { newError } from './codes.js'
+import { nativeUsd } from './fees.js'
 import { goDecodeUTF8 } from './gotext.js'
 import { type IdleWatchdog, type StreamIdleTimeoutError, readReply } from './idle.js'
 import { type Operator, refOf } from './operator.js'
@@ -725,7 +726,7 @@ export function frameFactory(
                             op,
                             openFees: handle?.openFeesMicroalgos ?? 0,
                             settleFees: check.settled.networkFees,
-                            algoUsdPrice: reserved.algoUsdPrice,
+                            usdRate: nativeUsd(deps.feeUnit, reserved),
                             feeUnit: deps.feeUnit,
                             feeBps: feeBps ?? 0,
                             haveFee: feeBps !== null,

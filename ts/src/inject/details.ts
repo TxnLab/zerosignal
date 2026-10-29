@@ -170,6 +170,10 @@ export interface OperatorDetails {
   algo_usd_price?: number
   /** RFC 3339. */
   algo_usd_at?: string
+  /** A Solana node's quote, SOL/USD, in place of the ALGO pair. */
+  sol_usd_price?: number
+  /** RFC 3339. */
+  sol_usd_at?: string
   min_charge_output_tokens?: number
   min_charge_algo_txns?: number
   min_charge_microusdc?: number
@@ -411,6 +415,8 @@ export function parseOperatorDetails(body: unknown): OperatorDetails | null {
     oracle_source: str(body.oracle_source),
     algo_usd_price: rate(body.algo_usd_price),
     algo_usd_at: time(body.algo_usd_at),
+    sol_usd_price: rate(body.sol_usd_price),
+    sol_usd_at: time(body.sol_usd_at),
     min_charge_output_tokens: uint(body.min_charge_output_tokens),
     min_charge_algo_txns: uint(body.min_charge_algo_txns),
     min_charge_microusdc: uint(body.min_charge_microusdc),

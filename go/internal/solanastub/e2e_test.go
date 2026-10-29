@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -296,6 +297,32 @@ func (p *payer) askWithin(t *testing.T, model string, stream bool, within time.D
 	return text, set, err, werr
 }
 
+// askVerified is ask, also returning the turn's verified receipt, nil when
+// it had none.
+func (p *payer) askVerified(t *testing.T, stream bool) (string, *zs.ReceiptVerified, zs.Settlement, error, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	s := p.client.Stream(ctx, zs.Request{Endpoint: zs.EndpointChatCompletions, Body: chatBody(solanastub.Model, stream)})
+	var b strings.Builder
+	var verified *zs.ReceiptVerified
+	var err error
+	for ev, eerr := range s.Events() {
+		if eerr != nil {
+			err = eerr
+			break
+		}
+		switch ev := ev.(type) {
+		case zs.TextDelta:
+			b.WriteString(ev.Delta)
+		case zs.ReceiptVerified:
+			verified = &ev
+		}
+	}
+	set, werr := s.Wait(ctx)
+	return b.String(), verified, set, err, werr
+}
+
 // onlyTicket is the one ticket p opened at the stub.
 func (l *harness) onlyTicket(t *testing.T, p *payer) [16]byte {
 	t.Helper()
@@ -365,12 +392,17 @@ func TestSolanaE2E_Settles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			p := l.newPayer(t, solanastub.Behavior{})
-			text, set, err, werr := p.ask(t, stream)
+			text, v, set, err, werr := p.askVerified(t, stream)
 			if err != nil || werr != nil {
 				t.Fatalf("turn: %v; settle: %v", err, werr)
 			}
 			if text != solanastub.Reply {
 				t.Errorf("text = %q, want %q", text, solanastub.Reply)
+			}
+			// The fees are priced at the node's SOL rate, not the ALGO one it
+			// also sends.
+			if v == nil || v.NativeUSD != solanastub.SOLUSD || v.FeeUnit.Currency != "SOL" {
+				t.Errorf("verified receipt %+v, want its fees priced at SOL/USD %v", v, solanastub.SOLUSD)
 			}
 			if set.Kind != zs.SettleAtomic || set.Frozen {
 				t.Errorf("settlement = %+v, want the node's settle on the payer's ack", set)

@@ -80,6 +80,7 @@ async function response(id: EphemeralIdentity, over: Record<string, unknown> = {
         ticket: ticket(),
         wrapped_response_key: await wrap(key, id.recipient),
         algo_usd_price: 0.2,
+        sol_usd_price: 150,
         presigned_open_txn: 'cGc=',
         ...over,
     })
@@ -92,18 +93,20 @@ describe('openReserve', () => {
         expect(got.ticket).toEqual(ticket())
         expect(got.responseKey).toEqual(key)
         expect(got.algoUsdPrice).toBe(0.2)
+        expect(got.solUsdPrice).toBe(150)
         expect(got.presignedOpenTxn).toBe('cGc=')
     })
 
     it('reads absent extras as zero', async () => {
         const id = await generateEphemeralIdentity()
         const got = await openReserve(
-            await response(id, { algo_usd_price: undefined, presigned_open_txn: undefined }),
+            await response(id, { algo_usd_price: undefined, sol_usd_price: undefined, presigned_open_txn: undefined }),
             id,
             terms,
             { nowMs: NOW_MS },
         )
         expect(got.algoUsdPrice).toBe(0)
+        expect(got.solUsdPrice).toBe(0)
         expect(got.presignedOpenTxn).toBe('')
     })
 

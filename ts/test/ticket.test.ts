@@ -274,13 +274,13 @@ describe('parseReserveResponseJSON', () => {
         const { signer, address } = newFakeSigner()
         const ticket = sampleTicket()
         await signTicket(ticket, signer, address)
-        const r = { ticket, wrapped_response_key: 'wk', algo_usd_price: 0.25, presigned_open_txn: 'pg' }
+        const r = { ticket, wrapped_response_key: 'wk', algo_usd_price: 0.25, sol_usd_price: 142.5, presigned_open_txn: 'pg' }
         expect(parseReserveResponseJSON(enc(r))).toEqual(r)
     })
 
     it('leaves zero-valued optional fields off, as Go omitempty does', () => {
         const got = parseReserveResponseJSON(
-            enc({ ticket: sampleTicket(), wrapped_response_key: '', algo_usd_price: 0, presigned_open_txn: null }),
+            enc({ ticket: sampleTicket(), wrapped_response_key: '', algo_usd_price: 0, sol_usd_price: 0, presigned_open_txn: null }),
         )
         expect(got).toEqual({ ticket: sampleTicket() })
     })
@@ -305,6 +305,7 @@ describe('parseReserveResponseJSON', () => {
         ['ticket', []],
         ['wrapped_response_key', 5],
         ['algo_usd_price', '0.25'],
+        ['sol_usd_price', '142.5'],
         ['presigned_open_txn', {}],
     ])('refuses %s = %j', (field, value) => {
         expect(() => parseReserveResponseJSON(enc({ ticket: sampleTicket(), [field]: value }))).toThrow(
