@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-30 — the Solana Config's grace and lifetime bounds are retired (unreleased)
+### 2026-10-30 — the Solana Config's grace and lifetime bounds are retired (0.14.0)
 
 `zs_escrow`'s `open` bounds neither grace nor expiry, as Algorand's `open()` doesn't: any
 future `expires_at`, any grace, 0 taking `default_grace`. The payer's offer check still
