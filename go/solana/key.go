@@ -51,6 +51,10 @@ func (k *PublicKey) UnmarshalText(b []byte) error {
 // compiler sorts them in.
 func (k PublicKey) Compare(o PublicKey) int { return bytes.Compare(k[:], o[:]) }
 
+// DecodeBase58 decodes s into exactly size bytes. Its error never quotes s,
+// so a caller decoding a secret key can report it.
+func DecodeBase58(s string, size int) ([]byte, error) { return decodeBase58(s, size) }
+
 func ParsePublicKey(s string) (PublicKey, error) {
 	var k PublicKey
 	b, err := decodeBase58(s, len(k))

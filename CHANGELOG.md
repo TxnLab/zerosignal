@@ -31,6 +31,29 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-30 — a payer's defaults on a local chain; Solana keys in Solana's forms (0.15.0)
+
+On a local chain, `Deployment.Local` ↔ `isLocal` (the localnet preset, either rail, at a
+loopback endpoint), an unset `Privacy` ↔ `privacy` is `direct` and an unset
+`AllowPrivateHosts` ↔ `allowPrivateHosts` allows private hosts: the one node there is on this
+machine and has no relay owned by someone else. Elsewhere both stay as before, and a set value
+always wins. Go's `Config.AllowPrivateHosts` is now a `*bool` so it can be left unset. When
+these defaults loosened a setting, `New` ↔ `Client.create` and `Diagnose` ↔ `diagnose` read the
+chain's genesis hash and refuse a public chain's (`PublicChain` ↔ `publicChain`), since a
+loopback endpoint can be a tunnel to one. The `network_defaults` and `public_chains` blocks of
+`sdk_vocabulary_vectors.json` pin the rule in both languages. `zsescrow.LoopbackEndpoint` reads
+the host case-insensitively, and `isLocal` reads the host as written, as Go does, rather than
+WHATWG's rewrite of `127.1`. The TS doctor CLI leaves `privacy` and `allowPrivateHosts` unset
+without `--direct` and `--allow-private-hosts`, so it takes a Client's defaults.
+
+`wallet.HomeDir` is `ZEROSIGNAL_HOME` when set, else `DefaultDir`: a second home for a payer's
+wallet and state on one machine, whose wallet gets its own keychain item. `PayerOptions.Dir`
+and `zschat` default to it.
+
+The Go keystore's Solana keys may be a `solana-keygen` keypair file's JSON array or a base58
+secret key (a wallet's "Export private key") as well as a BIP-39 phrase, from any provider.
+The Algorand keystore skips both. `solana.DecodeBase58` is exported for it.
+
 ### 2026-10-30 — the Solana Config's grace and lifetime bounds are retired (0.14.0)
 
 `zs_escrow`'s `open` bounds neither grace nor expiry, as Algorand's `open()` doesn't: any

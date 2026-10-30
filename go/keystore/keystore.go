@@ -126,6 +126,7 @@ func (k hdKey) signBytesRaw(msg []byte) ([]byte, error) {
 func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 	ks := &KeyStore{keys: map[string]accountKey{}, unlisted: map[string]bool{}}
 	skippedName, skippedWords := "", 0
+	skippedKey := ""
 	for i, p := range providers {
 		if p == nil {
 			continue
@@ -136,6 +137,21 @@ func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 		}
 		for _, e := range entries {
 			if strings.TrimSpace(e.Mnemonic) == "" {
+				continue
+			}
+			// A Solana keypair file's array or base58 secret key is the
+			// Solana keystore's, as a Solana-only phrase is below. A malformed
+			// one is a typo either way and fails, named as the key it looks
+			// like: no Algorand form starts with "[" or is one long word.
+			if _, isKey, err := solanaSecretKey(e.Mnemonic); isKey {
+				if err != nil {
+					return nil, fmt.Errorf("keystore: secret %q %w", e.Name, err)
+				}
+				slog.WarnContext(ctx, "keystore: Solana secret key skipped; the Algorand keystore takes 25 words or a 24-word BIP-39 phrase",
+					slog.String("name", e.Name))
+				if skippedKey == "" {
+					skippedKey = e.Name
+				}
 				continue
 			}
 			// A valid 12- to 21-word BIP-39 phrase is a Solana wallet's
@@ -161,6 +177,9 @@ func New(ctx context.Context, providers ...SecretProvider) (*KeyStore, error) {
 	// instead of a later "no mnemonic loaded".
 	if len(ks.keys) == 0 && skippedWords != 0 {
 		return nil, fmt.Errorf("keystore: mnemonic %q: a %d-word phrase is a Solana wallet's; want a 25-word Algorand mnemonic or a 24-word BIP-39 phrase", skippedName, skippedWords)
+	}
+	if len(ks.keys) == 0 && skippedKey != "" {
+		return nil, fmt.Errorf("keystore: secret %q is a Solana secret key; want a 25-word Algorand mnemonic or a 24-word BIP-39 phrase", skippedKey)
 	}
 	slog.InfoContext(ctx, "keystore loaded", slog.Int("addresses", len(ks.keys)))
 	return ks, nil
