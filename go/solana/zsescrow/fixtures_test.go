@@ -404,23 +404,18 @@ func TestInstructionFixtures(t *testing.T) {
 			case "initialize":
 				ix = d.Initialize(acct["admin"], acct["treasury"], zsescrow.InitializeArgs{
 					GenesisHash: solana.Hash(args.bytes("genesis_hash")),
-					FeeBps:      uint16(args.num("fee_bps")), MaxGrace: uint32(args.num("max_grace")),
-					DefaultGrace: uint32(args.num("default_grace")), MinGrace: uint32(args.num("min_grace")),
-					MaxTicketLifetime: args.i64("max_ticket_lifetime"),
-					OperatorStake:     args.u64("operator_stake"), NodeStake: args.u64("node_stake"),
+					FeeBps:      uint16(args.num("fee_bps")), DefaultGrace: uint32(args.num("default_grace")),
+					OperatorStake: args.u64("operator_stake"), NodeStake: args.u64("node_stake"),
 				})
 			case "set_config":
 				var err error
 				ix, err = d.SetConfig(acct["admin"], zsescrow.SetConfigArgs{
-					Paused:            optional(args, "paused", func(k string) bool { return args.m[k].(bool) }),
-					FeeBps:            optional(args, "fee_bps", func(k string) uint16 { return uint16(args.num(k)) }),
-					MaxGrace:          optional(args, "max_grace", func(k string) uint32 { return uint32(args.num(k)) }),
-					DefaultGrace:      optional(args, "default_grace", func(k string) uint32 { return uint32(args.num(k)) }),
-					MinGrace:          optional(args, "min_grace", func(k string) uint32 { return uint32(args.num(k)) }),
-					MaxTicketLifetime: optional(args, "max_ticket_lifetime", args.i64),
-					OperatorStake:     optional(args, "operator_stake", args.u64),
-					NodeStake:         optional(args, "node_stake", args.u64),
-					Treasury:          optional(args, "treasury", args.key),
+					Paused:        optional(args, "paused", func(k string) bool { return args.m[k].(bool) }),
+					FeeBps:        optional(args, "fee_bps", func(k string) uint16 { return uint16(args.num(k)) }),
+					DefaultGrace:  optional(args, "default_grace", func(k string) uint32 { return uint32(args.num(k)) }),
+					OperatorStake: optional(args, "operator_stake", args.u64),
+					NodeStake:     optional(args, "node_stake", args.u64),
+					Treasury:      optional(args, "treasury", args.key),
 				})
 				if err != nil {
 					t.Fatal(err)

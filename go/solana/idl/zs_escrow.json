@@ -2461,7 +2461,7 @@
     {
       "code": 6003,
       "name": "BadExpiry",
-      "msg": "expires_at is in the past or beyond the maximum ticket lifetime"
+      "msg": "expires_at is in the past"
     },
     {
       "code": 6004,
@@ -2844,7 +2844,12 @@
             "type": "u16"
           },
           {
-            "name": "max_grace",
+            "name": "_retired_max_grace",
+            "docs": [
+              "Retired: open takes any grace the node passes and any future",
+              "expires_at, as Algorand's does. The payer's offer check, not the",
+              "program, refuses a grace other than 0."
+            ],
             "type": "u32"
           },
           {
@@ -2855,7 +2860,10 @@
             "type": "u32"
           },
           {
-            "name": "max_ticket_lifetime",
+            "name": "_retired_max_ticket_lifetime",
+            "docs": [
+              "Retired with max_grace."
+            ],
             "type": "i64"
           },
           {
@@ -2928,11 +2936,9 @@
             "type": "pubkey"
           },
           {
-            "name": "min_grace",
+            "name": "_retired_min_grace",
             "docs": [
-              "The least grace open accepts, so a node cannot leave a payer too",
-              "little time to answer a claim. Placed after the original fields so",
-              "they keep their offsets."
+              "Retired with max_grace."
             ],
             "type": "u32"
           },
@@ -2974,20 +2980,8 @@
             "type": "u16"
           },
           {
-            "name": "max_grace",
-            "type": "u32"
-          },
-          {
             "name": "default_grace",
             "type": "u32"
-          },
-          {
-            "name": "min_grace",
-            "type": "u32"
-          },
-          {
-            "name": "max_ticket_lifetime",
-            "type": "i64"
           },
           {
             "name": "operator_stake",
@@ -3453,27 +3447,9 @@
             }
           },
           {
-            "name": "max_grace",
-            "type": {
-              "option": "u32"
-            }
-          },
-          {
             "name": "default_grace",
             "type": {
               "option": "u32"
-            }
-          },
-          {
-            "name": "min_grace",
-            "type": {
-              "option": "u32"
-            }
-          },
-          {
-            "name": "max_ticket_lifetime",
-            "type": {
-              "option": "i64"
             }
           },
           {

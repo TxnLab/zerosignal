@@ -55,14 +55,11 @@ func (d Deployment) programData() solana.PublicKey {
 
 // InitializeArgs are the terms initialize sets.
 type InitializeArgs struct {
-	GenesisHash       solana.Hash `json:"genesis_hash"`
-	FeeBps            uint16      `json:"fee_bps"`
-	MaxGrace          uint32      `json:"max_grace"`
-	DefaultGrace      uint32      `json:"default_grace"`
-	MinGrace          uint32      `json:"min_grace"`
-	MaxTicketLifetime int64       `json:"max_ticket_lifetime"`
-	OperatorStake     uint64      `json:"operator_stake"`
-	NodeStake         uint64      `json:"node_stake"`
+	GenesisHash   solana.Hash `json:"genesis_hash"`
+	FeeBps        uint16      `json:"fee_bps"`
+	DefaultGrace  uint32      `json:"default_grace"`
+	OperatorStake uint64      `json:"operator_stake"`
+	NodeStake     uint64      `json:"node_stake"`
 }
 
 // Initialize must be signed by the program's upgrade authority, which becomes
@@ -72,10 +69,7 @@ func (d Deployment) Initialize(admin, treasury solana.PublicKey, a InitializeArg
 	w := writer{}
 	w.bytes(a.GenesisHash[:])
 	w.u16(a.FeeBps)
-	w.u32(a.MaxGrace)
 	w.u32(a.DefaultGrace)
-	w.u32(a.MinGrace)
-	w.i64(a.MaxTicketLifetime)
 	w.u64(a.OperatorStake)
 	w.u64(a.NodeStake)
 	return d.ix("initialize", w.b,
@@ -95,15 +89,12 @@ func (d Deployment) Initialize(admin, treasury solana.PublicKey, a InitializeArg
 // stops open and every registry write, as Algorand's paused does; settles,
 // unregisters and the admin's levers run through a pause.
 type SetConfigArgs struct {
-	Paused            *bool             `json:"paused"`
-	FeeBps            *uint16           `json:"fee_bps"`
-	MaxGrace          *uint32           `json:"max_grace"`
-	DefaultGrace      *uint32           `json:"default_grace"`
-	MinGrace          *uint32           `json:"min_grace"`
-	MaxTicketLifetime *int64            `json:"max_ticket_lifetime"`
-	OperatorStake     *uint64           `json:"operator_stake"`
-	NodeStake         *uint64           `json:"node_stake"`
-	Treasury          *solana.PublicKey `json:"treasury"`
+	Paused        *bool             `json:"paused"`
+	FeeBps        *uint16           `json:"fee_bps"`
+	DefaultGrace  *uint32           `json:"default_grace"`
+	OperatorStake *uint64           `json:"operator_stake"`
+	NodeStake     *uint64           `json:"node_stake"`
+	Treasury      *solana.PublicKey `json:"treasury"`
 }
 
 // ErrZeroTreasury refuses a treasury of the default key: the program accepts
@@ -121,10 +112,7 @@ func (d Deployment) SetConfig(admin solana.PublicKey, a SetConfigArgs) (solana.I
 	w := writer{}
 	option(&w, a.Paused, w.bool)
 	option(&w, a.FeeBps, w.u16)
-	option(&w, a.MaxGrace, w.u32)
 	option(&w, a.DefaultGrace, w.u32)
-	option(&w, a.MinGrace, w.u32)
-	option(&w, a.MaxTicketLifetime, w.i64)
 	option(&w, a.OperatorStake, w.u64)
 	option(&w, a.NodeStake, w.u64)
 	option(&w, a.Treasury, w.key)

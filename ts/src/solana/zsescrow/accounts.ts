@@ -51,7 +51,8 @@ function accountReader(name: string, data: Uint8Array, size: number): Reader {
 
 /**
  * The retired fields are the program's: retired with the owed vault, the
- * separate registry pause and the arbiter seat, but kept in the layout so
+ * separate registry pause, the arbiter seat and the grace and lifetime bounds
+ * (open takes any, as Algorand's does), but kept in the layout so
  * every later offset stays put on the clusters that already hold a Config.
  * A Config initialized before their retirement holds values there until the
  * admin's next set_config, which zeroes them; nothing reads them.
@@ -66,9 +67,9 @@ export interface Config {
     paused: boolean
     retiredPauseRegistry: boolean
     feeBps: number
-    maxGrace: number
+    retiredMaxGrace: number
     defaultGrace: number
-    maxTicketLifetime: bigint
+    retiredMaxTicketLifetime: bigint
     operatorStake: bigint
     nodeStake: bigint
     nextOperatorId: bigint
@@ -78,7 +79,7 @@ export interface Config {
     treasury: PublicKey
     genesisHash: Hash
     pendingAdmin: PublicKey
-    minGrace: number
+    retiredMinGrace: number
     retiredPendingArbiter: PublicKey
     reserve: Uint8Array
 }
@@ -94,9 +95,9 @@ export function decodeConfig(data: Uint8Array): Config {
         paused: r.bool(),
         retiredPauseRegistry: r.bool(),
         feeBps: r.u16(),
-        maxGrace: r.u32(),
+        retiredMaxGrace: r.u32(),
         defaultGrace: r.u32(),
-        maxTicketLifetime: r.i64(),
+        retiredMaxTicketLifetime: r.i64(),
         operatorStake: r.u64(),
         nodeStake: r.u64(),
         nextOperatorId: r.u64(),
@@ -106,7 +107,7 @@ export function decodeConfig(data: Uint8Array): Config {
         treasury: r.key(),
         genesisHash: encodeBase58(r.array(32)),
         pendingAdmin: r.key(),
-        minGrace: r.u32(),
+        retiredMinGrace: r.u32(),
         retiredPendingArbiter: r.key(),
         reserve: r.array(64),
     }

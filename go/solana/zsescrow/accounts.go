@@ -48,34 +48,35 @@ const (
 )
 
 // Config's Retired fields are the program's: retired with the owed vault,
-// the separate registry pause and the arbiter seat, but kept in the layout so
+// the separate registry pause, the arbiter seat and the grace and lifetime
+// bounds (open takes any, as Algorand's does), but kept in the layout so
 // every later offset stays put on the clusters that already hold a Config.
 // A Config initialized before their retirement holds values there until the
 // admin's next set_config, which zeroes them; nothing reads them.
 type Config struct {
-	Version               uint8            `json:"version"`
-	Bump                  uint8            `json:"bump"`
-	StakeVaultBump        uint8            `json:"stake_vault_bump"`
-	RetiredOwedVaultBump  uint8            `json:"_retired_owed_vault_bump"`
-	USDCDecimals          uint8            `json:"usdc_decimals"`
-	Paused                bool             `json:"paused"`
-	RetiredPauseRegistry  bool             `json:"_retired_pause_registry"`
-	FeeBps                uint16           `json:"fee_bps"`
-	MaxGrace              uint32           `json:"max_grace"`
-	DefaultGrace          uint32           `json:"default_grace"`
-	MaxTicketLifetime     int64            `json:"max_ticket_lifetime"`
-	OperatorStake         uint64           `json:"operator_stake"`
-	NodeStake             uint64           `json:"node_stake"`
-	NextOperatorID        uint64           `json:"next_operator_id"`
-	Admin                 solana.PublicKey `json:"admin"`
-	RetiredArbiter        solana.PublicKey `json:"_retired_arbiter"`
-	USDCMint              solana.PublicKey `json:"usdc_mint"`
-	Treasury              solana.PublicKey `json:"treasury"`
-	GenesisHash           solana.Hash      `json:"genesis_hash"`
-	PendingAdmin          solana.PublicKey `json:"pending_admin"`
-	MinGrace              uint32           `json:"min_grace"`
-	RetiredPendingArbiter solana.PublicKey `json:"_retired_pending_arbiter"`
-	Reserve               [64]byte         `json:"_reserve"`
+	Version                  uint8            `json:"version"`
+	Bump                     uint8            `json:"bump"`
+	StakeVaultBump           uint8            `json:"stake_vault_bump"`
+	RetiredOwedVaultBump     uint8            `json:"_retired_owed_vault_bump"`
+	USDCDecimals             uint8            `json:"usdc_decimals"`
+	Paused                   bool             `json:"paused"`
+	RetiredPauseRegistry     bool             `json:"_retired_pause_registry"`
+	FeeBps                   uint16           `json:"fee_bps"`
+	RetiredMaxGrace          uint32           `json:"_retired_max_grace"`
+	DefaultGrace             uint32           `json:"default_grace"`
+	RetiredMaxTicketLifetime int64            `json:"_retired_max_ticket_lifetime"`
+	OperatorStake            uint64           `json:"operator_stake"`
+	NodeStake                uint64           `json:"node_stake"`
+	NextOperatorID           uint64           `json:"next_operator_id"`
+	Admin                    solana.PublicKey `json:"admin"`
+	RetiredArbiter           solana.PublicKey `json:"_retired_arbiter"`
+	USDCMint                 solana.PublicKey `json:"usdc_mint"`
+	Treasury                 solana.PublicKey `json:"treasury"`
+	GenesisHash              solana.Hash      `json:"genesis_hash"`
+	PendingAdmin             solana.PublicKey `json:"pending_admin"`
+	RetiredMinGrace          uint32           `json:"_retired_min_grace"`
+	RetiredPendingArbiter    solana.PublicKey `json:"_retired_pending_arbiter"`
+	Reserve                  [64]byte         `json:"_reserve"`
 }
 
 func DecodeConfig(data []byte) (*Config, error) {
@@ -86,13 +87,13 @@ func DecodeConfig(data []byte) (*Config, error) {
 	c := &Config{
 		Version: r.u8(), Bump: r.u8(), StakeVaultBump: r.u8(), RetiredOwedVaultBump: r.u8(), USDCDecimals: r.u8(),
 		Paused: r.bool(), RetiredPauseRegistry: r.bool(),
-		FeeBps: r.u16(), MaxGrace: r.u32(), DefaultGrace: r.u32(), MaxTicketLifetime: r.i64(),
+		FeeBps: r.u16(), RetiredMaxGrace: r.u32(), DefaultGrace: r.u32(), RetiredMaxTicketLifetime: r.i64(),
 		OperatorStake: r.u64(), NodeStake: r.u64(), NextOperatorID: r.u64(),
 		Admin: r.key(), RetiredArbiter: r.key(), USDCMint: r.key(), Treasury: r.key(),
 	}
 	r.array(c.GenesisHash[:])
 	c.PendingAdmin = r.key()
-	c.MinGrace = r.u32()
+	c.RetiredMinGrace = r.u32()
 	c.RetiredPendingArbiter = r.key()
 	r.array(c.Reserve[:])
 	return c, r.err

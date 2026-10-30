@@ -200,7 +200,7 @@ ZS_SOLANA_E2E_RPC=http://127.0.0.1:8899 \
 
 Without the endpoint and a key the scenarios skip, so `make test` and this repo's CI never need a
 validator. The mint's authority is also the localnet Config's admin: the run shortens the default
-grace to its minimum, and refuses an endpoint off this machine.
+grace to 60 s, and refuses an endpoint off this machine.
 
 The same suites run on devnet with a funder in its place, a wallet holding SOL and test USDC that
 it hands out by transfer and that holds no power over the program:

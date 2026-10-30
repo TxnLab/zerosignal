@@ -123,14 +123,11 @@
         "default_grace": 120,
         "fee_bps": 500,
         "genesis_hash": "0707070707070707070707070707070707070707070707070707070707070707",
-        "max_grace": 600,
-        "max_ticket_lifetime": "3600",
-        "min_grace": 90,
         "node_stake": "25000000",
         "operator_stake": "250000000"
       },
       "case": "initialize",
-      "data_base64": "r69tHw2Ym+0HBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB/QBWAIAAHgAAABaAAAAEA4AAAAAAACAsuYOAAAAAEB4fQEAAAAA",
+      "data_base64": "r69tHw2Ym+0HBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB/QBeAAAAICy5g4AAAAAQHh9AQAAAAA=",
       "discriminator_hex": "afaf6d1f0d989bed",
       "instruction": "initialize",
       "program": "ok"
@@ -513,18 +510,15 @@
         }
       ],
       "args": {
-        "default_grace": null,
+        "default_grace": 120,
         "fee_bps": null,
-        "max_grace": null,
-        "max_ticket_lifetime": "3600",
-        "min_grace": null,
         "node_stake": null,
         "operator_stake": null,
         "paused": false,
         "treasury": null
       },
       "case": "set_config",
-      "data_base64": "bJ6ar9RiNEIBAAAAAAABEA4AAAAAAAAAAAA=",
+      "data_base64": "bJ6ar9RiNEIBAAABeAAAAAAAAA==",
       "discriminator_hex": "6c9e9aafd4623442",
       "instruction": "set_config",
       "program": "ok"
@@ -559,16 +553,13 @@
       "args": {
         "default_grace": null,
         "fee_bps": 500,
-        "max_grace": null,
-        "max_ticket_lifetime": null,
-        "min_grace": null,
         "node_stake": null,
         "operator_stake": null,
         "paused": null,
         "treasury": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
       },
       "case": "set_config_treasury",
-      "data_base64": "bJ6ar9RiNEIAAfQBAAAAAAAAAQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "data_base64": "bJ6ar9RiNEIAAfQBAAAAAQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
       "discriminator_hex": "6c9e9aafd4623442",
       "instruction": "set_config",
       "program": "ok"

@@ -193,16 +193,21 @@ func decodeAs(typ string, data []byte) (any, error) {
 // The offsets of the fields the cases change, read off the program's
 // layouts: the 8-byte discriminator, then the fields in order.
 const (
-	configPausedAt    = 8 + 5
-	nodeBaseURLLenAt  = 8 + 5
-	nodeBaseURLAt     = 8 + 8 + 3*32
-	ticketStatusAt    = 8 + 1
-	rentPoolReserveAt = 8 + 2 + 8 + 32
-	tokenDelegateAt   = 32 + 32 + 8
-	tokenStateAt      = tokenDelegateAt + 4 + 32
-	tokenIsNativeAt   = tokenStateAt + 1
-	tokenDelegatedAt  = tokenIsNativeAt + 4 + 8
-	tokenCloseAuthAt  = tokenDelegatedAt + 8
+	configPausedAt = 8 + 5
+	// The retired bounds: max_grace and max_ticket_lifetime either side of
+	// default_grace, min_grace after pending_admin.
+	configRetiredMaxGraceAt = 8 + 7 + 2
+	configRetiredLifetimeAt = configRetiredMaxGraceAt + 4 + 4
+	configRetiredMinGraceAt = 8 + 7 + 2 + 4 + 4 + 8 + 3*8 + 2*32 + 2*32 + 32 + 32
+	nodeBaseURLLenAt        = 8 + 5
+	nodeBaseURLAt           = 8 + 8 + 3*32
+	ticketStatusAt          = 8 + 1
+	rentPoolReserveAt       = 8 + 2 + 8 + 32
+	tokenDelegateAt         = 32 + 32 + 8
+	tokenStateAt            = tokenDelegateAt + 4 + 32
+	tokenIsNativeAt         = tokenStateAt + 1
+	tokenDelegatedAt        = tokenIsNativeAt + 4 + 8
+	tokenCloseAuthAt        = tokenDelegatedAt + 8
 )
 
 func buildZsVectors(t *testing.T) zsVectors {
@@ -247,6 +252,16 @@ func buildZsVectors(t *testing.T) zsVectors {
 	refuse("config_wrong_discriminator", "Config", "the first discriminator byte flipped", b)
 	refuse("ticket_as_config", "Config", "a Ticket's bytes", account(t, f, "ticket_open"))
 	refuse("config_as_ticket", "Ticket", "a Config's bytes", config)
+	// The program now writes zeros there, so only a Config from before the
+	// retirement shows each retired bound is read from its own bytes.
+	b = bytes.Clone(config)
+	binary.LittleEndian.PutUint32(b[configRetiredMaxGraceAt:], 600)
+	binary.LittleEndian.PutUint64(b[configRetiredLifetimeAt:], 86_400)
+	binary.LittleEndian.PutUint32(b[configRetiredMinGraceAt:], 60)
+	accept("config_retired_bounds_set", "Config", "a Config initialized before the grace and lifetime bounds retired, read as written", b)
+	if c, _ := zsescrow.DecodeConfig(b); c.RetiredMaxGrace != 600 || c.RetiredMaxTicketLifetime != 86_400 || c.RetiredMinGrace != 60 {
+		t.Fatalf("config_retired_bounds_set decodes as %+v", c)
+	}
 	refuse("empty", "Operator", "no data", []byte{})
 
 	node := account(t, f, "node_with_metrics")
