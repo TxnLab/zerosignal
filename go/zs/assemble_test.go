@@ -156,8 +156,22 @@ func TestRegistryConfig_ThreadsEveryField(t *testing.T) {
 func TestBuiltClients_BlockPrivateTargetsUnlessAllowed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer srv.Close()
-	for _, allow := range []bool{false, true} {
-		cfg := Config{Signer: fakeSigner{addr: "PAYER"}, AllowPrivateHosts: allow}.withDefaults()
+	solanaLocalnet := Network{Rail: ticket.RailSolana, Solana: SolanaNetwork{Cluster: SolanaClusterLocalnet}}
+	for _, tc := range []struct {
+		set     *bool
+		network Network
+		allow   bool
+	}{
+		{set: new(false), allow: false},
+		{set: new(true), allow: true},
+		// Unset: refused on mainnet, allowed on a local chain, where the nodes
+		// are on this machine.
+		{set: nil, allow: false},
+		{set: nil, network: solanaLocalnet, allow: true},
+		{set: new(false), network: solanaLocalnet, allow: false},
+	} {
+		allow := tc.allow
+		cfg := Config{Signer: fakeSigner{addr: "PAYER"}, Network: tc.network, AllowPrivateHosts: tc.set}.withDefaults()
 		src := newChainSource(cfg, 1, nil, ticket.DeploymentID{})
 		for name, hc := range map[string]*http.Client{
 			"reserve":     newReserveClient(cfg, ticket.DeploymentID{}).HTTPClient,

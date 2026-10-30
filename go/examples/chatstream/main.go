@@ -69,12 +69,6 @@ func run(model, network string, appID uint64, prompt string) error {
 		Signer:  signer,
 		Network: zs.Network{Algod: algod.Config{Network: network}, EscrowAppID: appID},
 	}
-	if network == "localnet" {
-		// A localnet node registers a loopback URL, which the SDK otherwise
-		// refuses to dial; a single node has no other node to relay through;
-		// and a node registered for testing is often marked staging.
-		cfg.AllowPrivateHosts, cfg.Privacy, cfg.AllowStaging = true, zs.PrivacyDirect, true
-	}
 	client, err := zs.New(ctx, cfg)
 	if err != nil {
 		return err

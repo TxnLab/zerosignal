@@ -24,8 +24,10 @@ options:
   --network <name>       on Algorand mainnet (default), testnet or localnet;
                          on Solana devnet or localnet, with no default
   --direct               probe nodes directly instead of through relays
+                         (the default on a localnet at a loopback endpoint)
   --allow-staging        count staging nodes as able to serve
-  --allow-private-hosts  probe nodes on private addresses (a local fleet)
+  --allow-private-hosts  probe nodes on private addresses (a local fleet; the
+                         default on a localnet at a loopback endpoint)
   --json                 print the report as JSON
 
 Algorand options:
@@ -120,9 +122,11 @@ export async function main(
         report = await run(
             {
                 network,
-                privacy: values.direct ? 'direct' : 'relay_required',
+                // Absent flags leave the settings to the network's defaults,
+                // as a Client's config does.
+                ...(values.direct && { privacy: 'direct' as const }),
                 allowStaging: values['allow-staging'] ?? false,
-                allowPrivateHosts: values['allow-private-hosts'] ?? false,
+                ...(values['allow-private-hosts'] !== undefined && { allowPrivateHosts: values['allow-private-hosts'] }),
             },
             address,
         )

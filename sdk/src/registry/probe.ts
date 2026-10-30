@@ -151,8 +151,10 @@ export interface ProbeOptions {
      */
     fetch?: Fetch | undefined
     /**
-     * relay_required when absent, as in Config: a source left at a direct
-     * default would show the payer's IP to every node it probes.
+     * relay_required when absent, whatever the network: a source left at a
+     * direct default would show the payer's IP to every node it probes. A
+     * Client hands its source Config's resolved privacy, which is direct on a
+     * local chain.
      */
     privacy?: Privacy | undefined
     /** One details probe, and the attestation probe after it; absent, zero or negative is DEFAULT_DETAILS_TIMEOUT_MS. */

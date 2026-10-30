@@ -26,7 +26,7 @@ export function nodeRefString(r: NodeRef): string {
     return `${r.op}/${r.node}`
 }
 
-/** Privacy is the transport-privacy mode. The default is relay_required. */
+/** Privacy is the transport-privacy mode. Config's default is relay_required, or direct on a local chain (isLocal). */
 export type Privacy = 'relay_required' | 'direct'
 
 export type AffinityPolicy = 'prefer' | 'strict' | 'none'

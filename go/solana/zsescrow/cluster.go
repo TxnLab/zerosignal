@@ -84,7 +84,9 @@ func LoopbackEndpoint(endpoint string) bool {
 	if err != nil {
 		return false
 	}
-	host := u.Hostname()
+	// A host name's case is not significant, and WHATWG's URL, which the TS
+	// twin reads, lowercases it.
+	host := strings.ToLower(u.Hostname())
 	if host == "localhost" {
 		return true
 	}

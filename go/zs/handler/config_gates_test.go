@@ -106,8 +106,10 @@ func TestDispatch_RelayPosture(t *testing.T) {
 		bodyRelay string
 		wantRelay bool
 	}{
-		// A caller who never set Privacy.
-		{"zero Privacy relays", &policy{Affinity: zs.AffinityNone}, "", "", true},
+		// A caller who never set Privacy, on a public network and on a local
+		// chain, where the one node has no relay.
+		{"zero Privacy relays", &policy{Network: "testnet", Affinity: zs.AffinityNone}, "", "", true},
+		{"zero Privacy on localnet sends direct", &policy{Network: "localnet", Affinity: zs.AffinityNone}, "", "", false},
 		{"direct sends direct", &policy{Privacy: zs.PrivacyDirect, Affinity: zs.AffinityNone}, "", "", false},
 		// A caller's relay=off must not override a payer who didn't allow it.
 		{"off refused without override", &policy{Privacy: zs.PrivacyRelayRequired, Affinity: zs.AffinityNone}, "off", "", true},

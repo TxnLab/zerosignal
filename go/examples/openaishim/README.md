@@ -21,8 +21,8 @@ ZS_MNEMONIC="word word …" go run ./examples/openaishim -model <model id> -ask 
 - `ZS_MNEMONIC`: the payer's 25-word Algorand mnemonic (a 24-word recovery phrase works
   too). The account must hold USDC and ALGO on the network.
 - `-network`: `mainnet` (default), `testnet` or `localnet`. Localnet also needs
-  `-app-id`, and turns on direct sends, private hosts and staging nodes for the
-  single local node.
+  `-app-id`; there the SDK sends direct and reaches a node on this machine by
+  default.
 - `-budget`: the most the process may spend, in µUSDC (default 1 000 000, $1). An
   open ticket counts at its ceiling until it settles. Past the budget, requests fail
   with a spend-cap error.

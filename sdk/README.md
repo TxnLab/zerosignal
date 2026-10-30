@@ -58,7 +58,9 @@ against the same resolution the socket uses, so a DNS rebind can't slip between 
 the connection. The same goes for an IPv6 address that reaches such a range through NAT64, SIIT
 or 6to4, and for the IPv6 ranges whose target can't be read off the address (`::/96`, local-use
 NAT64 `64:ff9b:1::/48`, Teredo), which are refused whole. That fetch rejects with a `TypeError` whose `cause` is a `PrivateTargetError`.
-`allowPrivateHosts: true` lifts the check, for localnet.
+`allowPrivateHosts: true` lifts the check. On a local chain (`isLocal`: the localnet preset at a
+loopback endpoint) it is lifted by default, and `privacy` defaults to `direct`, since the one
+node there is on this machine and has no relay owned by someone else.
 
 The guard is `nodeFetch` from `@txnlab/zerosignal/node`, built on
 [undici](https://github.com/nodejs/undici)'s fetch over its own connection pool, so its
@@ -555,7 +557,9 @@ app (and that its admin hasn't paused it), the account's ALGO, its USDC opt-in a
 the prepaid MBR pool (and what the first request will deposit), and one discovery cycle over
 the fleet. It exits 1 when a check fails, 2 on a usage error and 3 when the doctor itself
 fails. `--json` prints the report, `--direct` probes nodes without relays, `--allow-staging`
-and `--allow-private-hosts` match a Client's settings of those names, and `--algod-url`,
+and `--allow-private-hosts` match a Client's settings of those names (left out, each takes a
+Client's default for the network: direct and private hosts allowed on a localnet at a loopback
+endpoint), and `--algod-url`,
 `--algod-token` and `--escrow-app-id` point it at another chain. `diagnose(config, address)`
 is the same as a function, taking a `Config` without a signer, and `doctorChecks(readings)` is
 the judgment alone.

@@ -45,11 +45,16 @@ import {
     FEE_RATE_REFRESH_TIMEOUT_MS,
     RESPONSE_HEADER_BACKSTOP_MS,
     SETTLE_PENDING_GRACE_MS,
+    type Network,
+    type NetworkName,
     defaults,
+    isLocal,
     kinds,
     localnet,
     networkNames,
+    publicChain,
     receiptViolations,
+    resolveConfig,
     resolveNetwork,
     type SolanaClusterName,
     solanaClusterFreeCreditIssuers,
@@ -70,6 +75,17 @@ interface Vocabulary {
         }
     >
     defaults: Record<string, number>
+    network_defaults: {
+        name: string
+        network: { rail: 'algorand' | 'solana'; network?: string; algod_endpoint?: string; escrow_app_id?: number; rpc_endpoint?: string }
+        privacy?: Privacy
+        allow_private_hosts?: boolean
+        want_local: boolean
+        want_privacy: Privacy
+        want_allow_private_hosts: boolean
+        want_check_genesis: boolean
+    }[]
+    public_chains: { rail: 'algorand' | 'solana'; genesis_hex: string; want: string }[]
 }
 
 const vocab: Vocabulary = JSON.parse(
@@ -311,6 +327,53 @@ describe('vocabulary shared with the Go SDK', () => {
         mine.push({ key: 'added', url: '', loopbackOnly: false })
         expect(solanaClusterFreeCreditIssuers('localnet')).toEqual(issuersOf('localnet'))
         expect([...solanaClusterNames].sort()).toEqual(Object.keys(vocab.solana_networks).sort())
+    })
+
+    // Go's withDefaults gives an unresolvable Network the strict defaults and
+    // leaves the refusal to validate; resolveConfig refuses it at once, so
+    // such a case checks only that it is not local.
+    it('defaults privacy and private hosts by network as Go does', () => {
+        expect(vocab.network_defaults.length).toBeGreaterThan(0)
+        for (const c of vocab.network_defaults) {
+            const n = c.network
+            const network: Network = {
+                rail: n.rail,
+                ...(n.network !== undefined && { network: n.network as NetworkName }),
+                ...(n.algod_endpoint !== undefined && { algodEndpoint: n.algod_endpoint }),
+                ...(n.escrow_app_id !== undefined && { escrowAppId: BigInt(n.escrow_app_id) }),
+                ...(n.rpc_endpoint !== undefined && { rpcEndpoint: n.rpc_endpoint }),
+            }
+            let resolved
+            try {
+                resolved = resolveNetwork(network)
+            } catch {
+                expect(c.want_local, c.name).toBe(false)
+                continue
+            }
+            expect(isLocal(resolved), c.name).toBe(c.want_local)
+            const keys =
+                n.rail === 'solana'
+                    ? { solanaSigner: { address: 'Vote111111111111111111111111111111111111111', signBytes: async () => new Uint8Array(), signTransactionMessage: async () => new Uint8Array() } }
+                    : { signer: { address: 'PAYER', signBytes: async () => new Uint8Array(), signTransactions: async () => [] } }
+            const cfg = resolveConfig({
+                ...keys,
+                network,
+                ...(c.privacy !== undefined && { privacy: c.privacy }),
+                ...(c.allow_private_hosts !== undefined && { allowPrivateHosts: c.allow_private_hosts }),
+            })
+            expect([cfg.privacy, cfg.allowPrivateHosts, cfg.localDefaults], c.name).toEqual([
+                c.want_privacy,
+                c.want_allow_private_hosts,
+                c.want_check_genesis,
+            ])
+        }
+    })
+
+    it('names the public chains by genesis as Go does', () => {
+        expect(vocab.public_chains.length).toBeGreaterThan(0)
+        for (const c of vocab.public_chains) {
+            expect(publicChain(c.rail, Buffer.from(c.genesis_hex, 'hex')), `${c.rail} ${c.genesis_hex}`).toBe(c.want)
+        }
     })
 
     it('defaults Config as Go does', () => {

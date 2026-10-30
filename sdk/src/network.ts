@@ -7,10 +7,12 @@
 // proto/go/algod's presets, and proto/go/solana/zsescrow's cluster presets
 // (pinned by testdata/sdk_vocabulary_vectors.json).
 
-import { publicKeyBytes } from '@txnlab/zs-proto/solana'
+import { base64 as scureBase64 } from '@scure/base'
+import { encodeBase58, publicKeyBytes } from '@txnlab/zs-proto/solana'
 import { PROGRAM_ID } from '@txnlab/zs-proto/solana/zsescrow'
 
 import { configError } from './errors.js'
+import { isLoopbackAddress } from './privateip.js'
 
 /** An Algorand preset. */
 export type NetworkName = 'localnet' | 'testnet' | 'mainnet'
@@ -303,6 +305,70 @@ function resolveSolana(n: Network): ResolvedNetwork {
         feeSink: '',
         warnings,
     }
+}
+
+/**
+ * isLocal reports whether d is a development chain on this machine: the
+ * localnet preset, reached at a loopback endpoint, as Go's Deployment.Local.
+ * Nothing there is real money and its nodes run on this machine, so a payer's
+ * defaults loosen (Config.privacy, Config.allowPrivateHosts). The endpoint
+ * check keeps a config that names localnet but points at another chain from
+ * loosening them: a Solana program has one id on every cluster.
+ */
+export function isLocal(d: ResolvedNetwork): boolean {
+    if (d.label !== 'localnet') return false
+    return loopbackEndpoint(d.rail === 'solana' ? d.rpcEndpoint : d.algodEndpoint)
+}
+
+/** loopbackEndpoint is whether endpoint names this machine, as Go's zsescrow.LoopbackEndpoint. */
+export function loopbackEndpoint(endpoint: string): boolean {
+    try {
+        new URL(endpoint)
+    } catch {
+        return false
+    }
+    // The host as written, not WHATWG's hostname: that rewrites 127.1,
+    // 0x7f000001 and a long IPv6 form into canonical addresses, which Go's
+    // URL.Hostname and net.ParseIP leave as they are.
+    const host = writtenHost(endpoint).toLowerCase()
+    return host === 'localhost' || isLoopbackAddress(host)
+}
+
+/** writtenHost is endpoint's host as Go's URL.Hostname reads it: no userinfo, port or IPv6 brackets. */
+function writtenHost(endpoint: string): string {
+    let authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/.exec(endpoint)?.[1] ?? ''
+    authority = authority.slice(authority.lastIndexOf('@') + 1)
+    if (authority.startsWith('[')) {
+        const end = authority.indexOf(']')
+        return end < 0 ? '' : authority.slice(1, end)
+    }
+    const colon = authority.indexOf(':')
+    return colon < 0 ? authority : authority.slice(0, colon)
+}
+
+/** The public chains by genesis hash, in each rail's usual encoding: Go's publicGenesis. */
+const publicGenesis: Record<Rail, Record<string, string>> = {
+    algorand: {
+        'wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=': 'mainnet',
+        'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=': 'testnet',
+        'mFgazF+2uRS1tMiL9dsj01hJGySEmPN28B/TjjvpVW0=': 'betanet',
+    },
+    solana: {
+        '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta',
+        '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet',
+        EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG: 'devnet',
+    },
+}
+
+/**
+ * publicChain names the public chain whose genesis hash genesis is, or ''
+ * for any other: Go's PublicChain. isLocal reads only a URL, and a loopback
+ * URL can be a tunnel or a forwarder to a public chain, so a payer whose
+ * defaults isLocal loosened checks the chain itself before it trusts them.
+ */
+export function publicChain(rail: Rail, genesis: Uint8Array): string {
+    if (rail === 'solana') return genesis.length === 32 ? (publicGenesis.solana[encodeBase58(genesis)] ?? '') : ''
+    return publicGenesis.algorand[scureBase64.encode(genesis)] ?? ''
 }
 
 function deploymentLabel(appId: bigint, named: string): string {

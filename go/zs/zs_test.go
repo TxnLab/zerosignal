@@ -297,7 +297,7 @@ func TestDefaultHTTPClientBlocksPrivateTargets(t *testing.T) {
 		resp.Body.Close()
 		t.Error("default client reached a loopback server")
 	}
-	resp, err := Config{AllowPrivateHosts: true}.defaultHTTPClient().Get(srv.URL)
+	resp, err := Config{AllowPrivateHosts: new(true)}.defaultHTTPClient().Get(srv.URL)
 	if err != nil {
 		t.Fatalf("AllowPrivateHosts client: %v", err)
 	}

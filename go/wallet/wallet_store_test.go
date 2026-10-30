@@ -47,6 +47,32 @@ func TestKeyFor(t *testing.T) {
 	}
 }
 
+// A second home is a second wallet: its keychain key is not the default
+// wallet's, which an override of DefaultDir itself would have made it.
+func TestHomeDir(t *testing.T) {
+	def, err := DefaultDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(HomeEnv, "")
+	if got, err := HomeDir(); err != nil || got != def {
+		t.Errorf("unset: HomeDir = %q, %v; want DefaultDir %q", got, err, def)
+	}
+	home := t.TempDir()
+	t.Chdir(filepath.Dir(home))
+	t.Setenv(HomeEnv, filepath.Base(home))
+	got, err := HomeDir()
+	if err != nil || got != home {
+		t.Fatalf("relative: HomeDir = %q, %v; want %q", got, err, home)
+	}
+	if after, _ := DefaultDir(); after != def {
+		t.Errorf("DefaultDir moved to %q with %s set", after, HomeEnv)
+	}
+	if k := keyFor(got, "keychain"); k == secretKey {
+		t.Errorf("the home's keychain key is the default wallet's %q", k)
+	}
+}
+
 // The key is stored in the keychain: any change to its form, hash length
 // included, loses every wallet already written outside DefaultDir.
 func TestKeyFor_Golden(t *testing.T) {

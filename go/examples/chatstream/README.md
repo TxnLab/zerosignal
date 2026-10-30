@@ -13,8 +13,8 @@ ZS_MNEMONIC="word word …" go run ./examples/chatstream -model <model id> "hell
 - `ZS_MNEMONIC`: the payer's 25-word Algorand mnemonic (a 24-word recovery phrase works
   too). The account must hold USDC and ALGO on the network.
 - `-network`: `mainnet` (default), `testnet` or `localnet`. Localnet also needs
-  `-app-id`, and turns on direct sends, private hosts and staging nodes for the
-  single local node.
+  `-app-id`; there the SDK sends direct and reaches a node on this machine by
+  default.
 
 **On mainnet this spends real USDC.** The open ticket is journaled in memory only, so a
 ticket left open when the run exits is refunded only by hand; set

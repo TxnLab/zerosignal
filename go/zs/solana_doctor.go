@@ -231,6 +231,9 @@ func diagnoseSolana(ctx context.Context, cfg Config, address string) (DoctorRepo
 		r = base
 		r.RPCErr = err.Error()
 	} else {
+		if err := checkLocalChain(ctx, cfg, ticket.RailSolana, solanaGenesis(rc)); err != nil {
+			return DoctorReport{}, err
+		}
 		r = gatherSolanaDoctorReadings(ctx, &rpcDoctorChain{cfg: cfg, rpc: rc, program: sn.Program, payer: payer}, base)
 	}
 	return doctorReport(r.Network, address, SolanaDoctorChecks(r), warnings), nil

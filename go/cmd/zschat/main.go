@@ -123,7 +123,7 @@ func run(o options) error {
 	defer stop()
 
 	// 2. A client, with a journal that outlives the process.
-	dir, err := wallet.DefaultDir()
+	dir, err := wallet.HomeDir()
 	if err != nil {
 		return err
 	}
