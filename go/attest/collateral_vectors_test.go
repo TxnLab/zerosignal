@@ -56,6 +56,8 @@ type crlVector struct {
 	Name   string          `json:"name"`
 	CRLHex string          `json:"crl_hex"`
 	Time   *collateralTime `json:"time"` // null when Go refuses to date it
+	// Null when Go refuses to date the CRL or it carries no nextUpdate.
+	NextUpdate *collateralTime `json:"next_update"`
 }
 
 type issuedAtVector struct {
@@ -77,6 +79,7 @@ type collateralVectorsFile struct {
 	Version          int              `json:"version"`
 	Comment          string           `json:"comment"`
 	EmbeddedMaxAgeMs int64            `json:"embedded_collateral_max_age_ms"`
+	MinRootCACRLMs   int64            `json:"min_root_ca_crl_this_update_unix_ms"`
 	CRLThisUpdate    []crlVector      `json:"crl_this_update"`
 	IssuedAt         []issuedAtVector `json:"issued_at"`
 	CollateralFresh  []freshVector    `json:"collateral_fresh"`
@@ -107,28 +110,43 @@ var (
 )
 
 type crlParts struct {
-	version, tbsAlg, issuer, thisUpdate, outerAlg, sig []byte
+	version, tbsAlg, issuer, thisUpdate, nextUpdate, outerAlg, sig []byte
 }
 
 func defaultCRLParts(thisUpdate []byte) crlParts {
-	return crlParts{version: crlV2, tbsAlg: crlAlg, issuer: crlIssuer, thisUpdate: thisUpdate, outerAlg: crlAlg, sig: crlSig}
+	return crlParts{version: crlV2, tbsAlg: crlAlg, issuer: crlIssuer, thisUpdate: thisUpdate,
+		nextUpdate: crlNext, outerAlg: crlAlg, sig: crlSig}
 }
 
 func (p crlParts) der() []byte {
-	tbs := tlv(0x30, p.version, p.tbsAlg, p.issuer, p.thisUpdate, crlNext)
+	tbs := tlv(0x30, p.version, p.tbsAlg, p.issuer, p.thisUpdate, p.nextUpdate)
 	return tlv(0x30, tbs, p.outerAlg, p.sig)
 }
 
 func utcCRL(s string) string { return hex.EncodeToString(defaultCRLParts(tlv(0x17, []byte(s))).der()) }
 func genCRL(s string) string { return hex.EncodeToString(defaultCRLParts(tlv(0x18, []byte(s))).der()) }
 
-// crlAt is a CRL whose thisUpdate is t. A CRL time has whole seconds only, so
-// the sub-second boundary cases below move a JSON document instead.
-func crlAt(t time.Time) string {
+func genTime(t time.Time) []byte {
 	if t.Nanosecond() != 0 {
 		panic("a CRL cannot carry " + t.String())
 	}
-	return genCRL(t.UTC().Format("20060102150405Z0700"))
+	return tlv(0x18, []byte(t.UTC().Format("20060102150405Z0700")))
+}
+
+// crlAt is a CRL whose thisUpdate is t. A CRL time has whole seconds only, so
+// the sub-second boundary cases below move a JSON document instead.
+func crlAt(t time.Time) string {
+	return hex.EncodeToString(defaultCRLParts(genTime(t)).der())
+}
+
+// crlWindowAt is a CRL valid from this to next; a nil next omits nextUpdate.
+func crlWindowAt(this time.Time, next *time.Time) string {
+	p := defaultCRLParts(genTime(this))
+	p.nextUpdate = nil
+	if next != nil {
+		p.nextUpdate = genTime(*next)
+	}
+	return hex.EncodeToString(p.der())
 }
 
 func docAt(t time.Time) string {
@@ -214,6 +232,16 @@ func buildCRLVectors() []crlVector {
 		{"sig_only_padding", partsHex(func(p *crlParts) { p.sig = tlv(0x03, []byte{1}) })},
 		{"sig_absent", partsHex(func(p *crlParts) { p.sig = nil })},
 		{"sig_wrong_tag", partsHex(func(p *crlParts) { p.sig = tlv(0x04, []byte{0, 0}) })},
+		{"next_update_absent", partsHex(func(p *crlParts) { p.nextUpdate = nil })},
+		{"next_update_absent_revoked_list_follows", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x30) })},
+		{"next_update_utc", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x17, []byte("270226130400Z")) })},
+		{"next_update_utc_offset", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x17, []byte("270226130400+0130")) })},
+		{"next_update_generalized", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x18, []byte("20270226130400Z")) })},
+		{"next_update_go_zero_time", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x18, []byte("00010101000000Z")) })},
+		{"next_update_malformed", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x17, []byte("2702261Z")) })},
+		{"next_update_generalized_fraction", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0x18, []byte("20270226130400.5Z")) })},
+		{"next_update_overlong", partsHex(func(p *crlParts) { p.nextUpdate = []byte{0x17, 0x05, '2'} })},
+		{"next_update_absent_extensions_follow", partsHex(func(p *crlParts) { p.nextUpdate = tlv(0xa0, tlv(0x30)) })},
 		{"issuer_non_minimal_length", nonMinimal},
 		{"issuer_long_form", longIssuer(0x30, 0x81, 0x84)},
 		{"issuer_long_form_leading_zero", longIssuer(0x30, 0x82, 0x00, 0x84)},
@@ -232,8 +260,9 @@ func buildCRLVectors() []crlVector {
 	}
 	out := make([]crlVector, 0, len(cases))
 	for _, c := range cases {
-		t, ok := crlThisUpdate(c.hex)
-		out = append(out, crlVector{Name: c.name, CRLHex: c.hex, Time: collTime(t, ok)})
+		this, next, ok := crlWindow(c.hex)
+		out = append(out, crlVector{Name: c.name, CRLHex: c.hex, Time: collTime(this, ok),
+			NextUpdate: collTime(next, ok && !next.IsZero())})
 	}
 	return out
 }
@@ -312,7 +341,6 @@ func buildFreshVectors() []freshVector {
 		{"tcb_info_a_nanosecond_past_the_floor", set(edge.Add(-time.Nanosecond), now, now, now), maxAge},
 		{"qe_identity_a_nanosecond_past_the_floor", set(now, edge.Add(-time.Nanosecond), now, now), maxAge},
 		{"pck_crl_a_second_past_the_floor", set(now, now, edge.Add(-time.Second), now), maxAge},
-		{"root_ca_crl_a_second_past_the_floor", set(now, now, now, edge.Add(-time.Second)), maxAge},
 		{"tcb_info_a_nanosecond_ahead", set(now.Add(time.Nanosecond), now, now, now), maxAge},
 		{"qe_identity_a_nanosecond_ahead", set(now, now.Add(time.Nanosecond), now, now), maxAge},
 		{"pck_crl_a_second_ahead", set(now, now, now.Add(time.Second), now), maxAge},
@@ -343,6 +371,32 @@ func buildFreshVectors() []freshVector {
 	undated.PCKCRL = "00"
 	cases = append(cases, c{"pck_crl_undatable", undated, maxAge})
 
+	// The root CA CRL is judged by its own window and the pinned minimum,
+	// not by maxAge.
+	day := 24 * time.Hour
+	pin := MinRootCACRLThisUpdate()
+	at := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+	yearAfterPin := pin.AddDate(1, 0, 0)
+	for _, w := range []struct {
+		name  string
+		this  time.Time
+		next  *time.Time
+		limit time.Duration
+	}{
+		{"root_ca_crl_at_the_pinned_minimum", pin, &yearAfterPin, maxAge},
+		{"root_ca_crl_a_second_before_the_pinned_minimum", pin.Add(-time.Second), &yearAfterPin, maxAge},
+		{"root_ca_crl_a_second_past_the_floor", edge.Add(-time.Second), at(day), maxAge},
+		{"root_ca_crl_at_its_next_update", pin, at(0), maxAge},
+		{"root_ca_crl_a_second_past_its_next_update", pin, at(-time.Second), maxAge},
+		{"root_ca_crl_next_update_before_this_update", now.Add(-time.Hour), at(-2 * time.Hour), maxAge},
+		{"root_ca_crl_no_next_update", now.Add(-time.Hour), nil, maxAge},
+		{"root_ca_crl_at_the_pinned_minimum_with_zero_max_age", pin, &yearAfterPin, 0},
+	} {
+		coll := all(now)
+		coll.RootCACRL = crlWindowAt(w.this, w.next)
+		cases = append(cases, c{w.name, coll, w.limit})
+	}
+
 	out := make([]freshVector, 0, len(cases))
 	for _, tc := range cases {
 		out = append(out, freshVector{
@@ -362,6 +416,7 @@ func TestCollateralVectors(t *testing.T) {
 		Comment: "Generated by proto/go/attest/collateral_vectors_test.go. Do not hand-edit; " +
 			"regenerate with `cd proto/go && go test ./attest -run TestCollateralVectors -update`.",
 		EmbeddedMaxAgeMs: EmbeddedCollateralMaxAge.Milliseconds(),
+		MinRootCACRLMs:   MinRootCACRLThisUpdate().UnixMilli(),
 		CRLThisUpdate:    buildCRLVectors(),
 		IssuedAt:         buildIssuedAtVectors(),
 		CollateralFresh:  buildFreshVectors(),
@@ -374,14 +429,28 @@ func TestCollateralVectors(t *testing.T) {
 		"utc_canonical": true, "utc_offset_24h": true, "gen_canonical": true,
 		"utc_offset_plus_zero": false, "gen_fraction": false, "version_0": false,
 		"issuer_long_form": true, "issuer_long_form_leading_zero": false,
+		"next_update_absent": true, "next_update_malformed": false, "next_update_overlong": false,
 	}
 	for _, v := range f.CRLThisUpdate {
 		if ok, listed := want[v.Name]; listed && (v.Time != nil) != ok {
 			t.Fatalf("crl %s: dated = %v, want %v", v.Name, v.Time != nil, ok)
 		}
 	}
+	hasNext := map[string]bool{
+		"utc_canonical": true, "next_update_absent": false, "next_update_absent_revoked_list_follows": false,
+		"next_update_utc_offset": true, "next_update_go_zero_time": false, "next_update_absent_extensions_follow": false,
+	}
+	for _, v := range f.CRLThisUpdate {
+		if ok, listed := hasNext[v.Name]; listed && (v.NextUpdate != nil) != ok {
+			t.Fatalf("crl %s: has nextUpdate = %v, want %v", v.Name, v.NextUpdate != nil, ok)
+		}
+	}
 	fresh := map[string]bool{
 		"all_at_the_floor": true, "tcb_info_a_nanosecond_past_the_floor": false, "pck_crl_a_second_ahead": false,
+		"root_ca_crl_at_the_pinned_minimum": true, "root_ca_crl_a_second_before_the_pinned_minimum": false,
+		"root_ca_crl_at_its_next_update": true, "root_ca_crl_a_second_past_its_next_update": false,
+		"root_ca_crl_no_next_update": false,
+		"root_ca_crl_a_second_ahead": false, "root_ca_crl_a_second_past_the_floor": true,
 	}
 	for _, v := range f.CollateralFresh {
 		if ok, listed := fresh[v.Name]; listed && v.Fresh != ok {

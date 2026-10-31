@@ -449,8 +449,8 @@ type TEEEvidenceBundle struct {
 	// node-served collateral would therefore let the party being
 	// attested choose the criteria it is attested against. Verifiers
 	// SHOULD fetch from a PCCS and use this only when that fetch
-	// fails, and SHOULD apply a freshness floor tighter than Intel's
-	// own nextUpdate to what they accept here.
+	// fails, and SHOULD bound the vintage they accept here (SPEC §3e,
+	// collateral rule 3; attest.CollateralFreshEnough).
 	//
 	// What it buys, then, is availability rather than latency: a
 	// verdict during a PCCS outage or (in a browser) a CORS

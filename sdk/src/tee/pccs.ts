@@ -14,9 +14,12 @@
 // it chooses which Intel-signed vintage to serve, and a CRL or TCB info from
 // before a revocation still verifies inside its nextUpdate window, so a
 // revoked platform can pass with no outage anywhere. Go fetches from Intel's
-// PCS directly. The default here is Phala's mirror, because Intel sends no
-// CORS header and a browser cannot reach it, so a payer on the default trusts
-// Phala for the currency of the documents.
+// PCS directly. The default here is Phala's mirror, so a payer on the default
+// trusts Phala for the currency of the documents. The mirror sends CORS
+// headers (since 2026-10-31) and Intel's PCS does not, so a browser payer on
+// Intel's URL, or on the mirror while it is down, fails every fetch as an
+// outage and its verdicts rest on the node's carried collateral under attest's
+// collateralFreshEnough.
 
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'

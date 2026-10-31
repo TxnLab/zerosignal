@@ -6,4 +6,4 @@
 export * from './dstack.js'
 export * from './compose.js'
 export * from './trust-lists.js'
-export { EMBEDDED_COLLATERAL_MAX_AGE_MS, collateralFreshEnough } from './collateral.js'
+export { EMBEDDED_COLLATERAL_MAX_AGE_MS, MIN_ROOT_CA_CRL_THIS_UPDATE_MS, collateralFreshEnough } from './collateral.js'

@@ -1,0 +1,73 @@
+name: Root CA CRL pin
+
+# attest.MinRootCACRLThisUpdate is hand-moved when Intel publishes a new root CA
+# CRL, yearly or off-cycle after a revocation, and nothing else notices one.
+# Until it moves, a revocation in the new CRL is invisible to a payer verifying
+# on node-carried collateral (go/attest/collateral.go says why). This checks
+# weekly, opens an issue on any verdict but "ok", and comments on that issue
+# when the verdict changes (a pending bump becoming possible, say).
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Two overlapping runs could each find no open issue and open one.
+concurrency:
+  group: root-crl-pin
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # 1.26.x, not go-version-file: see ci.yml.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go/go.sum
+
+      # Exit 1 is a verdict (the pin is behind or ahead) and opens the issue;
+      # exit 2 is an unreachable Intel endpoint and only fails the run. Built
+      # and run directly: make and go run both flatten the exit code.
+      - name: Compare the pin with Intel's root CA CRL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd go && go build -o "$RUNNER_TEMP/rootcrlpin" ./cmd/rootcrlpin)
+          set +e
+          "$RUNNER_TEMP/rootcrlpin" > report.txt 2>&1
+          status=$?
+          set -e
+          cat report.txt
+          if [ "$status" -eq 1 ]; then
+            title="Root CA CRL pin needs attention"
+            verdict=$(tail -n 1 report.txt)
+            {
+              echo 'The root-crl-pin check reports (the last line is the action):'
+              echo
+              echo '```'
+              cat report.txt
+              echo '```'
+              echo
+              echo 'The `attest.MinRootCACRLThisUpdate` godoc (go/attest/collateral.go) has the bump steps. Payers are covered only once a proto release carrying the new pin reaches them through the client and proxy pin bumps.'
+            } > body.md
+            num=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file body.md
+            else
+              last=$(gh issue view "$num" --json body,comments --jq '([.body] + [.comments[].body]) | last')
+              if ! grep -qF -- "$verdict" <<<"$last"; then
+                gh issue comment "$num" --body-file body.md
+              fi
+            fi
+          fi
+          exit "$status"

@@ -145,9 +145,8 @@ export type QuoteChainVerifier = (quote: Uint8Array, signal?: AbortSignal) => Pr
  * QuoteChainVerifier against collateral the node carried. A separate type
  * because the extra argument is the whole difference: no wiring reaches this
  * path without having decided to accept node-supplied criteria. DstackVerifier
- * calls it only with a complete set whose documents are inside
- * EMBEDDED_COLLATERAL_MAX_AGE_MS, so an implementation verifies and need not
- * repeat those checks. carriedChainVerifier is the real one.
+ * calls it only with a complete set that passes collateralFreshEnough, so an
+ * implementation verifies and need not repeat those checks. carriedChainVerifier is the real one.
  */
 export type CarriedChainVerifier = (
     quote: Uint8Array,

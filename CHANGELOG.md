@@ -31,6 +31,25 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-10-31 — a node's carried collateral is usable again (unreleased)
+
+The carried-collateral gate (`attest.CollateralFreshEnough` ↔ `collateralFreshEnough`) held
+the root CA CRL to the 14-day floor, but Intel reissues that CRL about once a year: the copy
+Intel served on 2026-10-31 was issued 2026-02-26. Every honest carried set was refused, so a
+payer that could not reach a PCCS reported every dstack-tdx node as `collateral_unreachable`.
+On 2026-10-31 a browser payer was always in that position, because `pccs.phala.network`
+sent no CORS headers until Phala added them that day. The root CA CRL is now held to a pinned minimum `thisUpdate`
+(`attest.MinRootCACRLThisUpdate` ↔ `MIN_ROOT_CA_CRL_THIS_UPDATE_MS`, 2026-02-26T13:04:00Z)
+and to its own `thisUpdate`..`nextUpdate` window, and is refused without a `nextUpdate`. The
+other three documents keep the 14-day floor. Bump the pin when Intel publishes a new root CA
+CRL and the mirror serves it, re-recording `testdata/attest/ds_collateral.json` in the same
+change (`make record-collateral`; the godoc says why). `make check-root-crl-pin` compares the
+pin with Intel's current CRL and the mirror's, and the `root-crl-pin` workflow runs it
+weekly and opens an issue on any verdict but ok. The TS CRL reader now reads `nextUpdate`
+(internal to `ts/src/attest/collateral.ts`, not exported from `@txnlab/zs-proto/attest`) and
+refuses a CRL whose `nextUpdate` is malformed, as Go always did. SPEC §3e collateral rule 3
+states the root CA CRL rule.
+
 ### 2026-10-30 — a payer's defaults on a local chain; Solana keys in Solana's forms (0.15.0)
 
 On a local chain, `Deployment.Local` ↔ `isLocal` (the localnet preset, either rail, at a

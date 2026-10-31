@@ -54,17 +54,54 @@ import (
 // nextUpdate (~30 days for TCB info), so this floor is deliberately
 // tighter than Intel's window.
 //
-// 14 days rejects essentially nothing honest, which was measured rather
-// than assumed: two FMSPCs and the global QE identity all carried an
-// issueDate of the day they were fetched, with a rolling 30-day
-// nextUpdate. Intel RE-ISSUES CONTINUOUSLY, so 30 days is a staleness
-// ceiling and never a publication cadence — which also means the
-// rollback window is nearly always the full width, not the narrow one
-// the shape suggests.
+// For three of the four documents 14 days rejects essentially nothing
+// honest, which was measured rather than assumed: two FMSPCs, the global
+// QE identity and both PCK CRLs all carried an issue date of the day they
+// were fetched, with a rolling 30-day nextUpdate. Intel RE-ISSUES THEM
+// CONTINUOUSLY, so 30 days is a staleness ceiling and never a publication
+// cadence — which also means the rollback window is nearly always the
+// full width, not the narrow one the shape suggests.
+//
+// The root CA CRL is the fourth, and this floor does not apply to it:
+// Intel reissues it about once a year, with a one-year nextUpdate. See
+// MinRootCACRLThisUpdate.
 //
 // Mirrors EMBEDDED_COLLATERAL_MAX_AGE_MS in proto/ts/src/attest/collateral.ts;
 // testdata/collateral_vectors.json pins the two.
 const EmbeddedCollateralMaxAge = 14 * 24 * time.Hour
+
+// MinRootCACRLThisUpdate is the oldest root CA CRL a verifier accepts
+// from a node's carried set: the thisUpdate of the newest one Intel has
+// published that this module knows of.
+//
+// THE ROOT CA CRL IS WHAT THE OTHER THREE DOCUMENTS' FLOOR RESTS ON. It
+// lists the revoked certificates Intel's root issued — the PCK Platform
+// and Processor CAs and the TCB Signing certificate — and those keys sign
+// the other three documents. A holder of a revoked one can sign them with
+// today's date, so they pass EmbeddedCollateralMaxAge by construction,
+// and pairing them with a root CA CRL from before the revocation hides
+// it. Inside its own one-year window that CRL hides it for up to a year.
+// With this pin, a revocation after the pinned CRL was issued stays hidden
+// until a release with a bumped pin reaches the payer, or the pinned CRL's
+// own nextUpdate passes, whichever comes first.
+//
+// Bump it when Intel publishes a new root CA CRL, on its yearly cycle or
+// off it after a revocation (the root certificate's CRL distribution
+// point, https://certificates.trustedservices.intel.com/IntelSGXRootCA.der;
+// Intel's PCS has no rootcacrl route), but only once pccs.phala.network,
+// the mirror nodes default to, serves the new one: an honest node carries
+// what its PCCS serves, and a caching PCCS can lag Intel. A bump also
+// re-records testdata/attest/ds_collateral.json (make record-collateral),
+// whose root CA CRL is the pinned one, or
+// TestCollateralFreshEnough_AcceptsIntelsRecordedSet and its SDK twin in
+// tee-pccs-real.test.ts refuse it. make check-root-crl-pin compares the pin
+// with Intel's, and the root-crl-pin workflow runs it weekly.
+//
+// Mirrors MIN_ROOT_CA_CRL_THIS_UPDATE_MS in proto/ts/src/attest/collateral.ts;
+// testdata/collateral_vectors.json pins the two.
+func MinRootCACRLThisUpdate() time.Time {
+	return time.Date(2026, time.February, 26, 13, 4, 0, 0, time.UTC)
+}
 
 // CollateralArtifact names one of the four documents a DCAP verifier
 // fetches. The consumer maps these onto its own library's URLs.
@@ -288,22 +325,30 @@ func parsePEMChain(chain string) ([]*x509.Certificate, error) {
 	return out, nil
 }
 
-// CollateralFreshEnough reports whether every document in the set was
-// published recently enough to be trusted as a fallback.
+// CollateralFreshEnough reports whether every document in the set is
+// recent enough to be trusted as a fallback.
 //
 // FAIL-CLOSED: an unparseable or undated document is not fresh. What it
 // gates is a convenience, so refusing costs only the "collateral
 // unreachable" outcome that would otherwise have been reported anyway.
 //
-// ALL FOUR DOCUMENTS, because the rollback it bounds is per-document: a
-// node can pair freshly-dated TCB info with an older, still validly
+// EVERY DOCUMENT IS DATED, because the rollback it bounds is per-document:
+// a node can pair freshly-dated TCB info with an older, still validly
 // signed CRL that predates the revocation of its own PCK certificate.
-// Checking the newest of them would let the other three be anything.
+// Checking the newest of them would let the others be anything.
+//
+// TCB info, QE identity and the PCK CRL are held to maxAge. The root CA
+// CRL cannot be: Intel reissues it about once a year, so any floor
+// shorter than that refuses every honest set for most of the year. It
+// must instead be no older than MinRootCACRLThisUpdate and inside its own
+// window, thisUpdate <= now <= nextUpdate, and is refused without a
+// nextUpdate, since that window has no end. Its rollback is the larger
+// one; MinRootCACRLThisUpdate says what it hides.
 //
 // Mirrors collateralFreshEnough in proto/ts/src/attest/collateral.ts, pinned
-// by testdata/collateral_vectors.json down to how issuedAt and crlThisUpdate
-// read a date: a TypeScript reader that dated a document this one refuses
-// would accept a set this one falls back from.
+// by testdata/collateral_vectors.json down to how issuedAt and the CRL
+// readers read a date: a TypeScript reader that dated a document this one
+// refuses would accept a set this one falls back from.
 func CollateralFreshEnough(c *inject.TEECollateral, now time.Time, maxAge time.Duration) bool {
 	if !c.Complete() {
 		return false
@@ -312,7 +357,6 @@ func CollateralFreshEnough(c *inject.TEECollateral, now time.Time, maxAge time.D
 		func() (time.Time, bool) { return issuedAt(c.TCBInfo, "tcbInfo") },
 		func() (time.Time, bool) { return issuedAt(c.QEIdentity, "enclaveIdentity") },
 		func() (time.Time, bool) { return crlThisUpdate(c.PCKCRL) },
-		func() (time.Time, bool) { return crlThisUpdate(c.RootCACRL) },
 	}
 	for _, at := range dates {
 		t, ok := at()
@@ -327,7 +371,11 @@ func CollateralFreshEnough(c *inject.TEECollateral, now time.Time, maxAge time.D
 			return false
 		}
 	}
-	return true
+	this, next, ok := crlWindow(c.RootCACRL)
+	if !ok || next.IsZero() || this.Before(MinRootCACRLThisUpdate()) {
+		return false
+	}
+	return !this.After(now) && !now.After(next)
 }
 
 // issuedAt reads issueDate off a signed collateral document.
@@ -367,18 +415,27 @@ func issuedAt(doc, wrapper string) (time.Time, bool) {
 // crlThisUpdate reads thisUpdate off a hex-encoded DER CRL. Dating only
 // — validating the CRL is the verifier's job.
 func crlThisUpdate(hexDER string) (time.Time, bool) {
+	this, _, ok := crlWindow(hexDER)
+	return this, ok
+}
+
+// crlWindow reads thisUpdate and nextUpdate off a hex-encoded DER CRL.
+// nextUpdate is OPTIONAL in a CRL and comes back zero when absent; Go
+// cannot tell that from an explicit 0001-01-01T00:00:00Z, so both read as
+// absent.
+func crlWindow(hexDER string) (this, next time.Time, ok bool) {
 	der, err := hex.DecodeString(strings.TrimSpace(hexDER))
 	if err != nil || len(der) == 0 {
-		return time.Time{}, false
+		return time.Time{}, time.Time{}, false
 	}
 	crl, err := x509.ParseRevocationList(der)
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, time.Time{}, false
 	}
 	if crl.ThisUpdate.IsZero() {
-		return time.Time{}, false
+		return time.Time{}, time.Time{}, false
 	}
-	return crl.ThisUpdate, true
+	return crl.ThisUpdate, crl.NextUpdate, true
 }
 
 // oidSGXExtension is Intel's SGX extension on a PCK certificate;

@@ -25,8 +25,10 @@ import (
 // nothing about WHICH validly-signed vintage the party under attestation
 // chose to hand over, so preferring the carried set would make the node
 // the supplier of the criteria it is judged by. attest's
-// EmbeddedCollateralMaxAge bounds that; the ordering is what keeps this
-// path rare.
+// CollateralFreshEnough bounds that; the ordering is what keeps this path
+// rare for a payer that can reach a PCCS. A browser can reach only a PCCS
+// that sends CORS headers (the default mirror does; Intel's PCS does not),
+// so the TS SDK in a browser takes this path whenever that mirror is down.
 //
 // WHY THIS IS SHAPED AS A FAKE PCS RATHER THAN AS A VALUE.
 // go-tdx-guest's verify.Options has no field for collateral values —
@@ -182,15 +184,16 @@ func (g *embeddedGetter) getWithContext(ctx context.Context, url string) (map[st
 // would report "collateral was gathered" about a verification that asked
 // Intel for nothing. Complete() and CollateralFreshEnough are what this
 // path CAN assert — every document present (a partial set is a check that
-// would not run) and none of them older than attest's floor.
+// would not run) and each one passing attest's freshness rule.
 func VerifyTDXQuoteChainCarried(ctx context.Context, quote []byte, c *inject.TEECollateral) error {
 	if !c.Complete() {
 		return fmt.Errorf("%w: the bundle carries no complete set", ErrNoUsableCarriedCollateral)
 	}
 	if !attest.CollateralFreshEnough(c, time.Now(), attest.EmbeddedCollateralMaxAge) {
-		return fmt.Errorf("%w: the carried set is older than %v, which is the point past which "+
-			"an operator's choice of vintage stops being one we will accept",
-			ErrNoUsableCarriedCollateral, attest.EmbeddedCollateralMaxAge)
+		return fmt.Errorf("%w: a carried document is undated, future-dated or older than %v, or the "+
+			"root CA CRL is older than %s or outside its own validity window",
+			ErrNoUsableCarriedCollateral, attest.EmbeddedCollateralMaxAge,
+			attest.MinRootCACRLThisUpdate().Format(time.RFC3339))
 	}
 	getter, err := newEmbeddedGetter(quote, c)
 	if err != nil {

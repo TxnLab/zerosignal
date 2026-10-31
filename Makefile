@@ -21,7 +21,7 @@ PNPM ?= pnpm
 
 .PHONY: test test-go test-ts test-sdk test-examples build-ts build-sdk check-lockstep verify-vectors update-vectors update-sealed-vectors \
 	update-ts-sealed-vectors check-vector-generators check-no-hayai check-gofmt check-escrow-client vet typecheck \
-	release-pr release-tag release-status check-release-script solana-e2e
+	release-pr release-tag release-status check-release-script solana-e2e check-root-crl-pin record-collateral
 
 # Default goal: run both implementations' suites. test-go includes every
 # Test*Vectors, which fails if its fixture has drifted from current Go output, so
@@ -57,6 +57,19 @@ release-tag:
 
 release-status:
 	./scripts/release.sh status $(VERSION)
+
+# Both reach the network, so neither is in `test`. The first says whether
+# attest.MinRootCACRLThisUpdate is still Intel's current root CA CRL (the
+# root-crl-pin workflow runs it weekly). After moving the pin, the second
+# re-records testdata/attest/ds_collateral.json, whose root CA CRL must be at or
+# after it (PCCS=<url> overrides the mirror); then `make update-vectors` and
+# `make test`. make exits 2 on any failure; the workflow runs the binary for the
+# command's own exit code.
+check-root-crl-pin:
+	cd go && $(GO) run ./cmd/rootcrlpin
+
+record-collateral: build-ts
+	cd sdk && node scripts/record-collateral.mjs $(PCCS)
 
 # A real release meets release.sh's guards once, with tags that can't be moved, so
 # they are tested here against a scratch remote.

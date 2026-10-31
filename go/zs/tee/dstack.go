@@ -204,7 +204,7 @@ func (v *DstackVerifier) verifyQuoteChain(ctx context.Context, quote []byte, car
 		return err
 	}
 	// WARN, not Info: this verdict rests on collateral the attested
-	// party supplied, bounded only by attest.EmbeddedCollateralMaxAge.
+	// party supplied, bounded only by attest.CollateralFreshEnough.
 	// It is a real pass and routing treats it as one, but an operator
 	// reading their logs should see how often their proxy is reaching
 	// for it — a permanent state of it means egress to Intel is broken.
