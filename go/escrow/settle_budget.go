@@ -7,7 +7,7 @@ import (
 
 // Gap-aware op-up sizing for the single-app-call settle paths (settleLapsed and
 // the standalone operator/ack settle). These MIRROR finalizeSettlement's
-// gap-aware ensureBudget in contracts/contracts/ZeroSignalEscrow.algo.ts
+// gap-aware ensureBudget in zerosignal-contracts' algorand/contracts/ZeroSignalEscrow.algo.ts
 // (target = SETTLE_BASE_BUDGET + ringGapIters*RING_GAP_OPCODES_PER_ITER) — keep
 // them in lockstep with that contract. The contract sizes its opcode-budget
 // op-up to the daily-revenue ring's catch-up loop a multi-day-gap settle will

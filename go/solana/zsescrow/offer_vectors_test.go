@@ -221,7 +221,7 @@ func verdictOf(err error) string {
 }
 
 // The fixtures' verdicts, from why the program's tests wrote each shape
-// (contracts-solana README "Transactions").
+// (zerosignal-contracts' solana/README.md "Transactions").
 var fixtureVerdicts = map[string]string{
 	"open":                          "ok",
 	"open_v0":                       "ok",

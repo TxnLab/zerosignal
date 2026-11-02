@@ -411,6 +411,6 @@
       }
     }
   ],
-  "generator": "contracts-solana: make fixtures (programs/zs-escrow/tests/fixtures.rs); copied to proto's testdata/ by make sync-proto-fixtures",
+  "generator": "zerosignal-contracts solana/: make fixtures (programs/zs-escrow/tests/fixtures.rs); copied to proto's testdata/ by make sync-proto-fixtures",
   "program_id": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
 }

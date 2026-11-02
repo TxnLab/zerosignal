@@ -6,7 +6,7 @@
 package zsescrow_test
 
 // Replays the instructions, accounts and events the zs_escrow program's own
-// tests recorded (contracts-solana `make sync-proto-fixtures`): every builder
+// tests recorded (`make sync-proto-fixtures` in zerosignal-contracts' solana/): every builder
 // must give the instruction the program was sent, byte for byte and meta for
 // meta, and every decoder must read what the program wrote as the program's
 // own deserialization does. proto/ts replays the same files.

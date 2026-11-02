@@ -262,7 +262,7 @@ Capability is advertised off-chain via `/v1/zs/details` (the `tee.mode` field, p
 
 **This section is the source of truth for the deferred on-chain migration. Do not duplicate it.**
 
-Adding a `teeCapabilities` field to `OperatorRecord` (`contracts/ZeroSignalEscrow.algo.ts` + `proto/go/escrow/operators.go`) — so the directory layer carries a tamper-resistant capability hint — was considered and explicitly deferred:
+Adding a `teeCapabilities` field to `OperatorRecord` (`contracts/algorand/contracts/ZeroSignalEscrow.algo.ts` + `proto/go/escrow/operators.go`) — so the directory layer carries a tamper-resistant capability hint — was considered and explicitly deferred:
 
 - The evidence shape (`TEEAdvertisement` / `TEEEvidenceBundle` in `proto/go/inject/tee.go`) is still iterating through the real-evidence verifier slice. Locking it into the contract now would freeze it prematurely.
 - The proxy already verifies attestation cryptographically at refresh time. An on-chain capability would only add tamper-evidence at the *directory* layer — useful for a third party auditing operator advertisements without speaking the protocol, but it adds zero security to the per-request seal path.

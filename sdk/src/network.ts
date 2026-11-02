@@ -151,7 +151,7 @@ export interface FreeCreditIssuer {
 const LOCALNET_FREE_CREDIT_ISSUER = 'n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw='
 
 // One program id: devnet's deployment, which a localnet started by
-// contracts-solana's `make localnet` loads at the same address. Devnet has no
+// `make localnet` in zerosignal-contracts' solana/ loads at the same address. Devnet has no
 // issuer until ZeroSignal's key is made.
 const solanaPresets: Record<SolanaClusterName, { rpcEndpoint: string; program: string; freeCreditIssuers: readonly FreeCreditIssuer[] }> = {
     devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: PROGRAM_ID, freeCreditIssuers: [] },

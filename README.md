@@ -190,11 +190,13 @@ refund forfeited to the treasury by a payer whose USDC account is closed, a laps
 after its blockhash expired, two concurrent turns the payer can afford one of, and free turns with
 and without a free credit from the stub's issuer. The Go scenarios
 run the stub in-process; the TS ones build and spawn it (`go/cmd/solanastub`) and check the chain
-through its `/stub/` routes. Start the validator with contracts-solana's `make localnet`, then:
+through its `/stub/` routes. Start the validator with `make localnet` in zerosignal-contracts' `solana/`, then:
 
 ```bash
+# The localnet's own deploy key, from the zerosignal-contracts checkout beside this one
+# (a `KEYS=` directory instead, if the validator started with one).
 ZS_SOLANA_E2E_RPC=http://127.0.0.1:8899 \
-  ZS_SOLANA_E2E_MINT_AUTHORITY=$HOME/.config/zs-solana/deployer.json \
+  ZS_SOLANA_E2E_MINT_AUTHORITY=$PWD/../contracts/solana/target/localnet-keys/deployer.json \
   make solana-e2e    # about 2 min a suite: two scenarios wait out a deadline
 ```
 
@@ -222,7 +224,7 @@ can release. The identity file holds the node's signing phrase and its owner's, 
 it, so keep it as a secret. Off this machine a funder run serves only as a registered identity,
 so nightly runs reuse one operator rather than stake a new one each time.
 
-contracts-solana's `make integration` and its `integration` workflow run both suites on a
+zerosignal-contracts' `make integration` (in `solana/`) and its `integration` workflow run both suites on a
 throwaway validator, with a real zs-node and zs-proxy; `-register-node` registers that node too,
 since zs-node has no Solana register command.
 

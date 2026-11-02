@@ -14,7 +14,7 @@ import (
 )
 
 // Box key prefixes mirror the contract's BoxMap declarations in
-// contracts/ZeroSignalEscrow.algo.ts — `t:` for the ticket map keyed by the
+// algorand/contracts/ZeroSignalEscrow.algo.ts — `t:` for the ticket map keyed by the
 // 16-byte ticket id, `o:` for the operator map keyed by the 8-byte
 // big-endian uint64 operator id assigned by ZeroSignalEscrow.createOperator,
 // `n:` for the node map keyed by the compound 16-byte (operatorId ‖ nodeId)
