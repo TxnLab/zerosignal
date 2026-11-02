@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 
@@ -224,8 +225,13 @@ func TestNewSolanaKeys(t *testing.T) {
 	// Algorand mnemonics and nothing else fail the load, naming the first, as
 	// New fails on Solana phrases and nothing else.
 	_, err = NewSolanaKeys(ctx, staticProvider{entries: []MnemonicEntry{{Name: "ALGO", Mnemonic: algo}, {Name: "E", Mnemonic: ""}}})
-	if err == nil || !strings.Contains(err.Error(), `"ALGO"`) || !strings.Contains(err.Error(), "has no Solana key") {
+	if err == nil || !strings.Contains(err.Error(), `"ALGO"`) || !errors.Is(err, ErrNoSolanaKey) {
 		t.Fatalf("only an Algorand mnemonic: %v", err)
+	}
+	// A bad phrase beside it is that phrase's error, not this one.
+	_, err = NewSolanaKeys(ctx, staticProvider{entries: []MnemonicEntry{{Name: "ALGO", Mnemonic: algo}, {Name: "B", Mnemonic: swapLast(keygen12, "zoo")}}})
+	if err == nil || errors.Is(err, ErrNoSolanaKey) {
+		t.Fatalf("an Algorand mnemonic beside a bad phrase: %v", err)
 	}
 	if ks, err := NewSolanaKeys(ctx); err != nil || len(ks.Addresses()) != 0 {
 		t.Fatalf("no providers: %v %v", ks, err)

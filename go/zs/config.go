@@ -95,8 +95,37 @@ func SolanaLocalnet() Network {
 	return Network{Rail: ticket.RailSolana, Solana: SolanaNetwork{Cluster: SolanaClusterLocalnet}}
 }
 
+// NetworkNames are the names NetworkNamed takes, for a host's help and error
+// text: algod's networks, then each Solana cluster prefixed "solana-", as
+// zs-proxy's --network and the TUI's -network spell them. The TS SDK has no
+// twin, since the chat app takes no network name.
+const NetworkNames = "mainnet|testnet|localnet|solana-devnet|solana-localnet"
+
+// NetworkNamed is the preset a NetworkNames entry names; ok is false for any
+// other name. A host that lets a config override the preset's endpoint
+// decides itself which presets it applies to. These names are not
+// Network.Name's, which drops the rail: Name is "localnet" for both
+// Localnet() and SolanaLocalnet(), and NetworkNamed("localnet") is Algorand's.
+func NetworkNamed(name string) (n Network, ok bool) {
+	switch name {
+	case "mainnet":
+		return Mainnet(), true
+	case "testnet":
+		return Testnet(), true
+	case "localnet":
+		return Localnet(), true
+	case "solana-devnet":
+		return SolanaDevnet(), true
+	case "solana-localnet":
+		return SolanaLocalnet(), true
+	}
+	return Network{}, false
+}
+
 // Name is the preset a resolved Network names on its rail, as Client.Config
-// returns it, and empty when only an endpoint named the chain.
+// returns it, and empty when only an endpoint named the chain. It is not a
+// NetworkNames entry: NetworkNamed would read a Solana "localnet" as
+// Algorand's.
 func (n Network) Name() string {
 	if n.Rail == ticket.RailSolana {
 		return n.Solana.Cluster
