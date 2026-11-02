@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-10-31 — a node's carried collateral is usable again (unreleased)
+### 2026-10-31 — a node's carried collateral is usable again (0.15.0)
 
 The carried-collateral gate (`attest.CollateralFreshEnough` ↔ `collateralFreshEnough`) held
 the root CA CRL to the 14-day floor, but Intel reissues that CRL about once a year: the copy
