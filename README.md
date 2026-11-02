@@ -144,7 +144,8 @@ listing that pays nothing, one turn built from the SDK's parts, a durable ticket
 generation, and a localnet setup. The TypeScript ones are pnpm workspace members on
 `@txnlab/zerosignal` `workspace:*`; the Go ones live in [`go/examples/`](./go/examples/) inside the
 module. `make test` compiles all of them but runs none. See
-[`examples/README.md`](./examples/README.md).
+[`examples/README.md`](./examples/README.md). To run every piece of ZeroSignal yourself on a local
+chain (chain, operator dashboard, node, payer, chat), see [`LOCALNET.md`](./LOCALNET.md).
 
 ### Golden vectors — [`testdata/`](./testdata/)
 
