@@ -29,6 +29,10 @@ import (
 // no caller can change the path every later derivation takes.
 var solanaPath = [...]uint32{44, 501, 0, 0}
 
+// ErrNoSolanaKey is NewSolanaKeys given only 25-word Algorand mnemonics. A
+// host holding a 25-word wallet tells the payer how to replace it.
+var ErrNoSolanaKey = errors.New("a 25-word Algorand mnemonic has no Solana key")
+
 const hardened = 0x80000000
 
 // Slip10Ed25519 derives the SLIP-0010 Ed25519 key and chain code at path from
@@ -157,7 +161,7 @@ func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKey
 	// nothing else: the startup error names the phrase instead of a later "no
 	// key loaded".
 	if len(ks.keys) == 0 && skippedName != "" {
-		return nil, fmt.Errorf("keystore: mnemonic %q: a 25-word Algorand mnemonic has no Solana key; want a BIP-39 phrase of 12 to 24 words, a solana-keygen keypair file's contents or a base58 secret key", skippedName)
+		return nil, fmt.Errorf("keystore: mnemonic %q: %w; want a BIP-39 phrase of 12 to 24 words, a solana-keygen keypair file's contents or a base58 secret key", skippedName, ErrNoSolanaKey)
 	}
 	return ks, nil
 }

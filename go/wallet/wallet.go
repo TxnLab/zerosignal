@@ -404,9 +404,17 @@ func DeriveAddress(mnemonic string) (addr, kind string, err error) {
 
 // DeriveSolanaAddress validates a recovery phrase and returns the address it
 // pays as on the Solana rail, the one Phantom shows for it. A 25-word Algorand
-// mnemonic has none and is refused.
+// mnemonic has none and is refused with ErrNoSolanaKey, so a host can refuse
+// to import one for Solana before storing it.
 func DeriveSolanaAddress(mnemonic string) (string, error) {
-	return solanaAddress(normalizePhrase(mnemonic))
+	m := normalizePhrase(mnemonic)
+	// Counted first: DeriveAddress runs a full derivation on 24 words.
+	if len(strings.Fields(m)) == 25 {
+		if _, kind, err := keystore.DeriveAddress(m); err == nil && kind == KindAlgorand25 {
+			return "", fmt.Errorf("%w; a wallet's Solana key comes from a 24-word phrase", ErrNoSolanaKey)
+		}
+	}
+	return solanaAddress(m)
 }
 
 // solanaAddressOf is a stored phrase's Solana address, "" for a kind with no

@@ -646,8 +646,12 @@ func TestDeriveSolanaAddress(t *testing.T) {
 	if err != nil || got != meta.SolanaAddress {
 		t.Errorf("DeriveSolanaAddress = %q, %v; want %s", got, err, meta.SolanaAddress)
 	}
-	if _, err := DeriveSolanaAddress(keystoreTestMnemonic25(t)); err == nil {
-		t.Error("a 25-word Algorand mnemonic derived a Solana address")
+	if _, err := DeriveSolanaAddress(keystoreTestMnemonic25(t)); !errors.Is(err, ErrNoSolanaKey) {
+		t.Errorf("a 25-word Algorand mnemonic: %v, want ErrNoSolanaKey", err)
+	}
+	// A bad phrase is its own error, not a missing Solana key.
+	if _, err := DeriveSolanaAddress(strings.Repeat("abandon ", 23) + "zoo"); err == nil || errors.Is(err, ErrNoSolanaKey) {
+		t.Errorf("a bad 24-word phrase: %v", err)
 	}
 }
 
