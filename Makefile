@@ -92,7 +92,7 @@ test-examples: build-sdk
 	$(PNPM) --filter ./examples/browser-openai-shim build
 
 # The Solana rail end to end, Go's Client and then TS's, against a local
-# validator holding zs_escrow (contracts-solana's `make localnet`). Not part of
+# validator holding zs_escrow (`make localnet` in zerosignal-contracts' solana/). Not part of
 # test: CI has no validator. The suites run one after the other because each
 # waits out deadlines on the validator's clock, which a busy machine slows.
 solana-e2e: build-ts

@@ -15,7 +15,7 @@ import "encoding/binary"
 //
 // It is ONE type, embedded anonymously in both records, because carving a
 // typed field out of the reserve is the documented growth path
-// (contracts/AGENTS.md) and every carve has to be mirrored into the Go
+// (zerosignal-contracts' algorand/AGENTS.md) and every carve has to be mirrored into the Go
 // positional parsers. As two hand-maintained copies, a carve mirrored into one
 // parser and not the other still passed TestRecordSizes_UnchangedByCarves —
 // the totals stay constant across a carve by construction — and silently

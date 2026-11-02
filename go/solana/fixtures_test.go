@@ -6,7 +6,7 @@
 package solana_test
 
 // Replays the transactions and addresses the zs_escrow program's own tests
-// wrote (contracts-solana `make sync-proto-fixtures`). Rust built these, so
+// wrote (`make sync-proto-fixtures` in zerosignal-contracts' solana/). Rust built these, so
 // matching them byte for byte is what shows this codec is the runtime's.
 // proto/ts replays the same files.
 

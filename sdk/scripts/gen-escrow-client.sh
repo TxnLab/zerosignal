@@ -2,7 +2,7 @@
 # Generates the typed escrow app client from the in-repo ARC-56 into $1.
 #
 # `pnpm gen:client` writes the committed copy; `make check-escrow-client` writes
-# to a scratch file and compares, so an ARC-56 synced from contracts/ without a
+# to a scratch file and compares, so an ARC-56 synced from contracts/algorand without a
 # regeneration fails CI instead of shipping a client for the previous contract.
 set -euo pipefail
 out="${1:?usage: gen-escrow-client.sh <output.ts>}"

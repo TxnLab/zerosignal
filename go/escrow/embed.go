@@ -4,7 +4,7 @@
  */
 
 // Package escrow wraps the ZeroSignalEscrow smart contract (see
-// contracts/contracts/ZeroSignalEscrow.algo.ts) with typed Go helpers used
+// algorand/contracts/ZeroSignalEscrow.algo.ts in zerosignal-contracts) with typed Go helpers used
 // by both the proxy and the node. The ARC-56 JSON the puya-ts build
 // emits is embedded into the binary so the Go surface can't drift from
 // the contract: rebuild the contract → rebuild the Go binary → new
@@ -31,9 +31,8 @@ import (
 
 // ZeroSignalEscrowARC56 is the ARC-56 JSON spec for the ZeroSignalEscrow
 // contract, embedded at build time. The source of truth is
-// contracts/contracts/artifacts/ZeroSignalEscrow.arc56.json; to refresh,
-// run `pnpm build` in contracts/ and re-copy the file here. A small
-// TODO for later: have go generate copy it automatically.
+// algorand/contracts/artifacts/ZeroSignalEscrow.arc56.json in zerosignal-contracts;
+// to refresh, run `pnpm build` in its algorand/, which copies the file here.
 //
 //go:embed ZeroSignalEscrow.arc56.json
 var ZeroSignalEscrowARC56 []byte

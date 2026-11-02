@@ -60,7 +60,7 @@
     "usdc_mint": "6JhaGdekBjU2RfiYWSjYdQAibx4LfSfTNFEeMUHnUVz7"
   },
   "encoding": "u64 and i64 are decimal strings, smaller integers JSON numbers; keys and signatures are base58; account data, instruction data, transactions and events are base64; every other byte field is hex. The exception is receipt_value, a copy of proto's receipt_v3.value shape: its integers are JSON numbers and its ticket_id and deployment base64",
-  "generator": "contracts-solana: make fixtures (programs/zs-escrow/tests/fixtures.rs); copied to proto's testdata/ by make sync-proto-fixtures",
+  "generator": "zerosignal-contracts solana/: make fixtures (programs/zs-escrow/tests/fixtures.rs); copied to proto's testdata/ by make sync-proto-fixtures",
   "instructions": [
     {
       "accounts": [

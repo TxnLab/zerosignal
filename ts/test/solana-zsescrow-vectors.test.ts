@@ -5,7 +5,7 @@
 
 // Replays the instructions, accounts and events the zs_escrow program's own
 // tests recorded (solana_instruction_vectors.json, solana_account_vectors.json,
-// solana_event_vectors.json, from contracts-solana `make sync-proto-fixtures`)
+// solana_event_vectors.json, from `make sync-proto-fixtures` in zerosignal-contracts' solana/)
 // against proto/ts/src/solana/zsescrow, as proto/go/solana/zsescrow does. If
 // this fails, the TS port has drifted from the program — fix the divergence,
 // never the fixture.

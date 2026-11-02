@@ -31,7 +31,7 @@ import (
 )
 
 // The scenarios run against a cluster holding zs_escrow: a local validator,
-// as contracts-solana's `make localnet` starts one, or devnet.
+// as `make localnet` in zerosignal-contracts' solana/ starts one, or devnet.
 // ZS_SOLANA_E2E_RPC names its endpoint. The run is funded by
 // ZS_SOLANA_E2E_MINT_AUTHORITY, the keypair file of a local validator's test
 // USDC mint's authority, which is also the Config's admin, or by
