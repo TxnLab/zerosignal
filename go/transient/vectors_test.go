@@ -161,7 +161,7 @@ var emittedCodes = []string{
 	"provider_overloaded", "provider_unavailable", "session_not_accepted",
 	"stream_unsupported", "text_inference_not_supported", "unknown_builtin_tool",
 	"unsupported_endpoint", "unsupported_model", "upstream_attestation_required", "upstream_privacy_required",
-	"upstream_verification_failed", "zero_data_retention_required",
+	"upstream_verification_failed", "watermarked_output_refused", "zero_data_retention_required",
 
 	// node: lifecycle, ephemeral keys, and attestation
 	"attestation_disabled", "attestation_rate_limited", "attestation_unavailable",

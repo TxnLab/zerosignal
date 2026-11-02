@@ -1651,6 +1651,15 @@
       "retryable_after_payment": false
     },
     {
+      "code": "watermarked_output_refused",
+      "classify": {
+        "retryable": false,
+        "attribution": ""
+      },
+      "retryable_busy": false,
+      "retryable_after_payment": false
+    },
+    {
       "code": "zero_data_retention_required",
       "classify": {
         "retryable": false,
