@@ -125,6 +125,22 @@ func DefaultDir() (string, error) {
 	return filepath.Join(base, "zerosignal"), nil
 }
 
+// HomeEnv names a directory that holds a whole second set of state: wallet,
+// config, journals, logs. It lets one machine run a payer independent of the
+// one in DefaultDir, as a local test does beside the user's own.
+const HomeEnv = "ZEROSIGNAL_HOME"
+
+// HomeDir is the directory a program keeps its wallet and state in: HomeEnv's
+// when set, else DefaultDir. It never changes DefaultDir, which keyFor
+// compares against: a wallet in another home gets its own keychain item
+// rather than the default wallet's.
+func HomeDir() (string, error) {
+	if dir := os.Getenv(HomeEnv); dir != "" {
+		return filepath.Abs(dir)
+	}
+	return DefaultDir()
+}
+
 // Open opens the wallet in dir on a keyring store. The backend is
 // opts.Override if set, else the one the descriptor records, else
 // opts.Backend. Opening never prompts; the first read or write may. A

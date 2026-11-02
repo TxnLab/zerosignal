@@ -332,5 +332,339 @@
     "streamIdlePreStreamMs": 300000,
     "streamIdleToolActiveMs": 300000,
     "targetTopK": 8
-  }
+  },
+  "network_defaults": [
+    {
+      "name": "algorand localnet",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "escrow_app_id": 1006
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "algorand localnet at 127.0.0.1",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "algod_endpoint": "http://127.0.0.1:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "algorand localnet named, another host",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "algod_endpoint": "http://10.0.0.5:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand loopback endpoint alone",
+      "network": {
+        "rail": "algorand",
+        "algod_endpoint": "http://localhost:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand localnet with no app id",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand testnet",
+      "network": {
+        "rail": "algorand",
+        "network": "testnet"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand mainnet",
+      "network": {
+        "rail": "algorand"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana localnet",
+      "network": {
+        "rail": "solana",
+        "network": "localnet"
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet at [::1]",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "http://[::1]:8899"
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet named, another cluster",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "https://api.mainnet-beta.solana.com"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana loopback endpoint alone",
+      "network": {
+        "rail": "solana",
+        "rpc_endpoint": "http://127.0.0.1:8899"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana devnet",
+      "network": {
+        "rail": "solana",
+        "network": "devnet"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana localnet, relay asked for",
+      "network": {
+        "rail": "solana",
+        "network": "localnet"
+      },
+      "privacy": "relay_required",
+      "want_local": true,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet, private hosts refused",
+      "network": {
+        "rail": "solana",
+        "network": "localnet"
+      },
+      "allow_private_hosts": false,
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": true
+    },
+    {
+      "name": "algorand testnet, private hosts allowed",
+      "network": {
+        "rail": "algorand",
+        "network": "testnet"
+      },
+      "allow_private_hosts": true,
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana localnet, both set",
+      "network": {
+        "rail": "solana",
+        "network": "localnet"
+      },
+      "privacy": "direct",
+      "allow_private_hosts": true,
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand localnet at LOCALHOST",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "algod_endpoint": "http://LOCALHOST:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "algorand localnet at 127.1",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "algod_endpoint": "http://127.1:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "algorand localnet at 0x7f000001",
+      "network": {
+        "rail": "algorand",
+        "network": "localnet",
+        "algod_endpoint": "http://0x7f000001:4001",
+        "escrow_app_id": 1006
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    },
+    {
+      "name": "solana localnet at the full ::1",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "http://[0:0:0:0:0:0:0:1]:8899"
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet at v4-mapped 127.0.0.1",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "http://[::ffff:127.0.0.1]:8899"
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet with userinfo",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "http://user@127.0.0.1:8899"
+      },
+      "want_local": true,
+      "want_privacy": "direct",
+      "want_allow_private_hosts": true,
+      "want_check_genesis": true
+    },
+    {
+      "name": "solana localnet at 127.0.0.1.example",
+      "network": {
+        "rail": "solana",
+        "network": "localnet",
+        "rpc_endpoint": "http://127.0.0.1.example:8899"
+      },
+      "want_local": false,
+      "want_privacy": "relay_required",
+      "want_allow_private_hosts": false,
+      "want_check_genesis": false
+    }
+  ],
+  "public_chains": [
+    {
+      "rail": "algorand",
+      "genesis_hex": "c061c4d8fc1dbdded2d7604be4568e3f6d041987ac37bde4b620b5ab39248adf",
+      "want": "mainnet"
+    },
+    {
+      "rail": "algorand",
+      "genesis_hex": "4863b518a4b3c84ec810f22d4f1081cb0f71f059a7ac20dec62f7f70e5093a22",
+      "want": "testnet"
+    },
+    {
+      "rail": "algorand",
+      "genesis_hex": "98581acc5fb6b914b5b4c88bf5db23d358491b248498f376f01fd38e3be9556d",
+      "want": "betanet"
+    },
+    {
+      "rail": "algorand",
+      "genesis_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "want": ""
+    },
+    {
+      "rail": "algorand",
+      "genesis_hex": "ce59db5080fc2c6d3bcf7ca90712d3c2e5e6c28f27f0dfbb9953bdb0894c03ab",
+      "want": ""
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "45296998a6f8e2a784db5d9f95e18fc23f70441a1039446801089879b08c7ef0",
+      "want": "mainnet-beta"
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "3a132ece10305ec1830725502fa2b7e7eb8157e9123d4c1f654a71787161dc21",
+      "want": "testnet"
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "ce59db5080fc2c6d3bcf7ca90712d3c2e5e6c28f27f0dfbb9953bdb0894c03ab",
+      "want": "devnet"
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+      "want": ""
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "4863b518a4b3c84ec810f22d4f1081cb0f71f059a7ac20dec62f7f70e5093a22",
+      "want": ""
+    },
+    {
+      "rail": "solana",
+      "genesis_hex": "ce59db5080fc2c6d3bcf7ca90712d3c2e5e6c28f27f0dfbb9953bdb0894c03",
+      "want": ""
+    }
+  ]
 }

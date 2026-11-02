@@ -225,7 +225,7 @@ func (l *harness) newPayerFunded(t *testing.T, b solanastub.Behavior, usdc uint6
 		}},
 		// One node can't be its own relay.
 		Privacy:           zs.PrivacyDirect,
-		AllowPrivateHosts: true,
+		AllowPrivateHosts: new(true),
 		DisableTEE:        true,
 		Discovery:         zs.Discovery{OperatorIDs: []uint64{l.OperatorID}},
 	}

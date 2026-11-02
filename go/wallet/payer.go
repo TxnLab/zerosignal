@@ -20,7 +20,7 @@ type PayerOptions struct {
 	// Address is the paying address, base58 for LoadSolanaPayer; "" takes the
 	// only key loaded.
 	Address string
-	// Dir holds the wallet; "" is DefaultDir.
+	// Dir holds the wallet; "" is HomeDir.
 	Dir string
 	// Backend opens a wallet whose descriptor records no backend; "" is
 	// BackendFile (see KeyringOptions.Backend). A release zs-proxy passes
@@ -135,7 +135,7 @@ func loadSolanaPayer(ctx context.Context, opts PayerOptions, kr KeyringOptions, 
 func payerProviders(opts PayerOptions, kr KeyringOptions, env []keystore.SecretProvider) (string, Metadata, []keystore.SecretProvider, error) {
 	dir := opts.Dir
 	if dir == "" {
-		d, err := DefaultDir()
+		d, err := HomeDir()
 		if err != nil {
 			return "", Metadata{}, nil, err
 		}

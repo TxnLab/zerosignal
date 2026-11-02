@@ -104,7 +104,8 @@ func (n Network) Name() string {
 	return string(n.Algod.ResolvedNetwork)
 }
 
-// Privacy is the transport-privacy mode. The zero value is PrivacyRelayRequired.
+// Privacy is the transport-privacy mode. The zero value in a Config is the
+// network's default: PrivacyRelayRequired, or PrivacyDirect on a Local one.
 type Privacy string
 
 const (
@@ -204,7 +205,9 @@ type Config struct {
 	SolanaSigner SolanaSigner
 	Network      Network
 
-	Privacy Privacy // PrivacyRelayRequired
+	// Privacy is PrivacyRelayRequired, or PrivacyDirect on a Local
+	// deployment, whose one node has no relay owned by someone else.
+	Privacy Privacy
 	// AllowPrivacyOverride lets a request's relay preference turn relaying
 	// off (Request.Relay, or the body's provider.relay); without it such an
 	// opt-out is ignored. Asking for a relay is always honored.
@@ -259,10 +262,16 @@ type Config struct {
 	// busy re-sweep, the node's Retry-After included.
 	SweepDelay func(sweep int) time.Duration
 
-	// AllowStaging and AllowPrivateHosts admit staging nodes and nodes on
-	// private addresses. Development only.
-	AllowStaging      bool
-	AllowPrivateHosts bool
+	// AllowStaging admits staging nodes. Development only.
+	AllowStaging bool
+	// AllowPrivateHosts admits nodes on private addresses. Nil allows them
+	// only on a Local deployment, whose nodes are on this machine; anywhere
+	// else any operator can register any URL, so a private one is refused.
+	AllowPrivateHosts *bool
+	// localDefaults is set by withDefaults when the Local defaults loosened
+	// Privacy or AllowPrivateHosts, so New and Diagnose check the chain's
+	// genesis before they act on them (checkLocalChain).
+	localDefaults bool
 
 	Stores     Stores
 	SpendGuard SpendGuard // none: no cap
@@ -372,7 +381,7 @@ func (c Config) defaultHTTPClient() *http.Client {
 func (c Config) nodeHTTPClient(timeout, headerTimeout time.Duration) *http.Client {
 	hc := httpx.Client(timeout, httpx.Options{
 		ResponseHeaderTimeout: headerTimeout,
-		BlockPrivateTargets:   !c.AllowPrivateHosts,
+		BlockPrivateTargets:   !c.privateHostsAllowed(),
 	})
 	if !c.UseEnvProxy {
 		hc.Transport.(*http.Transport).Proxy = nil
@@ -405,10 +414,30 @@ const (
 	defaultAffinityMax = 1024
 )
 
+// privateHostsAllowed is AllowPrivateHosts, with nil as false: a Config that
+// never went through withDefaults has not resolved whether it is Local.
+func (c Config) privateHostsAllowed() bool {
+	return c.AllowPrivateHosts != nil && *c.AllowPrivateHosts
+}
+
 // withDefaults returns c with every zero field set to its default.
 func (c Config) withDefaults() Config {
+	// A Network that does not resolve gets the strict defaults here and
+	// fails in validate.
+	local := false
+	if d, _, err := ResolveNetwork(c.Network); err == nil {
+		local = d.Local()
+	}
 	if c.Privacy == "" {
 		c.Privacy = PrivacyRelayRequired
+		if local {
+			c.Privacy = PrivacyDirect
+			c.localDefaults = true
+		}
+	}
+	if c.AllowPrivateHosts == nil {
+		c.AllowPrivateHosts = new(local)
+		c.localDefaults = c.localDefaults || local
 	}
 	if c.Affinity.Policy == "" {
 		c.Affinity.Policy = AffinityPrefer

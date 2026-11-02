@@ -32,6 +32,7 @@ import {
     isMemoryJournal,
     memoryJournal,
 } from './parts.js'
+import { type GenesisRead, algodGenesis, checkLocalChain, solanaGenesis } from './local.js'
 import { feeUnitOf } from './network.js'
 import { type PickDeps, relayHopForPool, relayPool } from './pick.js'
 import { type Fetch, payerBytesSigner } from './ports.js'
@@ -115,6 +116,7 @@ export class Client {
         const cfg = resolveConfig(config)
         for (const w of cfg.warnings) cfg.logger.warn(w)
         const chain = cfg.wallet === undefined || cfg.registry === undefined ? railChain(cfg) : undefined
+        if (chain) await checkLocalChain(cfg, chain.genesis, signal)
         // The wallet first, as in Go: its read is the one that fails create,
         // so it fails before the slow discovery rather than after.
         const builtWallet = cfg.wallet === undefined
@@ -497,6 +499,7 @@ interface RailChain {
     reader: algosdk.Algodv2 | ChainReader
     wallet(signal?: AbortSignal): Promise<WalletOpener>
     deployment(signal?: AbortSignal): Promise<Uint8Array>
+    genesis: GenesisRead
 }
 
 function railChain(cfg: ResolvedConfig): RailChain {
@@ -513,6 +516,7 @@ function railChain(cfg: ResolvedConfig): RailChain {
             reader,
             wallet: (signal) => buildSolanaWallet(cfg, rpc, signal),
             deployment: (signal) => reader.readDeployment(withTimeout(signal, ESCROW_CONFIG_TIMEOUT_MS)),
+            genesis: solanaGenesis(rpc),
         }
     }
     const algod = chainAlgod(cfg)
@@ -520,6 +524,7 @@ function railChain(cfg: ResolvedConfig): RailChain {
         reader: algod,
         wallet: (signal) => buildWallet(cfg, algod, signal),
         deployment: (signal) => readDeploymentId(algod, cfg.network.escrowAppId, ESCROW_CONFIG_TIMEOUT_MS, signal),
+        genesis: algodGenesis(algod),
     }
 }
 

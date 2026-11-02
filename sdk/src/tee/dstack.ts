@@ -470,8 +470,7 @@ function normalizeHex(s: string): string {
 }
 
 // The checks Go's VerifyTDXQuoteChainCarried makes before verifying: all nine
-// members present, and every document no older than
-// EMBEDDED_COLLATERAL_MAX_AGE_MS and not future-dated.
+// members present, and every document passing collateralFreshEnough.
 function guardCarried(
     verify: CarriedChainVerifier,
     now: Clock,
@@ -487,7 +486,9 @@ function guardCarried(
             throw new NoUsableCarriedCollateralError('the bundle carries no complete collateral set')
         }
         if (!collateralFreshEnough(collateral, now(), EMBEDDED_COLLATERAL_MAX_AGE_MS)) {
-            throw new NoUsableCarriedCollateralError('a carried document is undated, future-dated or too old')
+            throw new NoUsableCarriedCollateralError(
+                'a carried document is undated, future-dated or too old, or the root CA CRL is older than the pinned minimum or outside its own validity window',
+            )
         }
         return verify(quote, collateral, signal)
     }

@@ -17,6 +17,7 @@ import { chainAlgod } from './assemble.js'
 import { type Config, type ResolvedConfig, resolveConfig } from './config.js'
 import { configError, findError } from './errors.js'
 import { AlgodEscrowChain, requestOptions, requestTimeoutOrDefault, spendableOf } from './escrow/algod.js'
+import { algodGenesis, checkLocalChain } from './local.js'
 import { type PayerDeposit, planMbrDeposit } from './mbr.js'
 import type { Operator } from './operator.js'
 import type { Signer, SolanaSigner } from './ports.js'
@@ -252,6 +253,7 @@ export async function diagnose(config: Omit<Config, 'signer'>, address: string, 
         throw configError(`address ${JSON.stringify(address)} is not an Algorand address`)
     }
     const cfg = resolveConfig({ ...config, signer: readOnlySigner(address), solanaSigner: undefined })
+    await checkLocalChain(cfg, algodGenesis(chainAlgod(cfg)), signal)
     const r = await gatherDoctorReadings(algodDoctorChain(cfg, address), doctorBase(cfg, address), signal)
     return doctorReport(r.network, address, doctorChecks(r), cfg.warnings)
 }

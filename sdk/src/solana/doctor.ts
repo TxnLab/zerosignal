@@ -35,6 +35,7 @@ import {
     readOnlySolanaSigner,
 } from '../doctor.js'
 import { configError, findError } from '../errors.js'
+import { checkLocalChain, solanaGenesis } from '../local.js'
 import type { Operator } from '../operator.js'
 import { ChainOperatorSource, NoOperatorsError } from '../registry/chain.js'
 import { SOLANA_SIGNER_RESERVE_LAMPORTS, SolanaChainReader } from '../registry/solana.js'
@@ -208,6 +209,7 @@ export async function diagnoseSolana(config: Omit<Config, 'signer'>, address: st
         r = { ...base, rpcErr: message(err) }
         return doctorReport(r.network, address, solanaDoctorChecks(r), cfg.warnings)
     }
+    await checkLocalChain(cfg, solanaGenesis(rpc), signal)
     r = await gatherSolanaDoctorReadings(rpcDoctorChain(cfg, rpc, payer), base, signal)
     return doctorReport(r.network, address, solanaDoctorChecks(r), cfg.warnings)
 }

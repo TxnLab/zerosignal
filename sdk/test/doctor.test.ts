@@ -424,8 +424,13 @@ describe('zerosignal doctor', () => {
         return got!
     }
 
-    it('relays by default and probes directly with --direct', async () => {
-        expect((await configFor([]))[0]).toMatchObject({ privacy: 'relay_required', allowStaging: false, allowPrivateHosts: false })
+    // Absent flags leave privacy and allowPrivateHosts unset, so diagnose takes
+    // a Client's defaults for the network rather than the strict ones on a
+    // localnet a Client would reach directly.
+    it('leaves the network defaults unset and probes directly with --direct', async () => {
+        const [config] = await configFor([])
+        expect(config).toMatchObject({ allowStaging: false })
+        expect('privacy' in config || 'allowPrivateHosts' in config, JSON.stringify(config)).toBe(false)
         expect((await configFor(['--direct']))[0].privacy).toBe('direct')
     })
 

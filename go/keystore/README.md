@@ -39,7 +39,13 @@ A valid 12-, 15-, 18- or 21-word BIP-39 phrase is skipped here (logged at Warn),
 
 ### Solana keys
 
-`NewSolanaKeys` reads the same providers and loads every BIP-39 phrase of 12 to 24 words at **m/44'/501'/0'/0'** (SLIP-0010 Ed25519, empty passphrase), keyed by base58 address. That is Phantom's and Solflare's default account, so the client's exported 24-word phrase loads the same Solana address a user sees after importing it there. `solana-keygen` gives the same address only at that path (`--derivation-path`, or `prompt://?key=0/0`); plain `solana-keygen new` / `recover` use no path. A 25-word Algorand mnemonic is skipped, unless it is all the providers held, which fails the load naming it. The `slip10` and `solana` rows of `testdata/account_vectors.json` pin this to the TS twin, `@txnlab/zerosignal/accounts/solana`.
+`NewSolanaKeys` reads the same providers (so the same env vars, cloud secrets and `file://` paths) and loads, keyed by base58 address, each secret in one of three forms:
+
+- **A BIP-39 phrase of 12 to 24 words**, derived at **m/44'/501'/0'/0'** (SLIP-0010 Ed25519, empty passphrase). That is Phantom's and Solflare's first account, so the client's exported 24-word phrase loads the same Solana address a user sees after importing it there. `solana-keygen` gives the same address only at that path (`--derivation-path`, or `prompt://?key=0/0`); plain `solana-keygen new` / `recover` use no path, and their keypair file is the form to use instead.
+- **A `solana-keygen` keypair file's contents**: the JSON array of 64 bytes, the usual form of a Solana server's key. `ZS_MNEMONIC_URLS=signing=file:///etc/zs/node.json?decoder=string` reads one from disk.
+- **A base58 secret key**: the 64 bytes as Phantom's and Solflare's "Export private key" gives them, for any account in a wallet, the second one included.
+
+The last two are the key itself; its public half must be its seed's. A malformed one fails the load naming its entry and never quoting it. A 25-word Algorand mnemonic is skipped, unless it is all the providers held, which fails the load naming it; `New` skips a Solana phrase or key the same way, so one provider chain can hold keys for both rails. The `slip10` and `solana` rows of `testdata/account_vectors.json` pin the phrase derivation to the TS twin, `@txnlab/zerosignal/accounts/solana`. The TS SDK loads phrases only, since its host, the client, derives its keys from a passkey, so the other two forms are Go's alone.
 
 `LoadSolanaFromEnv(ctx)` is `LoadFromEnv` for Solana: the same two providers and timeout, through `NewSolanaKeys`. `wallet.LoadSolanaPayer` adds the local wallet, as `wallet.LoadPayer` does, and picks the paying Solana key.
 

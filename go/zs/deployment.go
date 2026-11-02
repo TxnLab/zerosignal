@@ -6,6 +6,7 @@
 package zs
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
@@ -115,6 +117,53 @@ func nativeUSD(u FeeUnit, rt *ReservedTicket) float64 {
 
 // FeeUnit is the coin the deployment's network fees are paid in.
 func (d Deployment) FeeUnit() FeeUnit { return FeeUnitOf(d.Rail) }
+
+// Local reports whether d is a development chain on this machine: the localnet
+// preset, reached at a loopback endpoint. Nothing there is real money and its
+// nodes run on this machine, so a payer's defaults loosen (Config.Privacy,
+// Config.AllowPrivateHosts). The endpoint check is what keeps a config that
+// names localnet but points at another chain from loosening them: a Solana
+// program has one id on every cluster, so the label alone proves nothing.
+func (d Deployment) Local() bool {
+	if d.Network != "localnet" {
+		return false
+	}
+	endpoint := d.Algod.ResolvedEndpoint
+	if d.Rail == ticket.RailSolana {
+		endpoint = d.Solana.RPCEndpoint
+	}
+	return zsescrow.LoopbackEndpoint(endpoint)
+}
+
+// publicGenesis names the public chains by their genesis hash, in each rail's
+// usual encoding.
+var publicGenesis = map[ticket.Rail]map[string]string{
+	ticket.RailAlgorand: {
+		"wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=": "mainnet",
+		"SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=": "testnet",
+		"mFgazF+2uRS1tMiL9dsj01hJGySEmPN28B/TjjvpVW0=": "betanet",
+	},
+	ticket.RailSolana: {
+		rpc.MainnetGenesis: "mainnet-beta",
+		rpc.TestnetGenesis: "testnet",
+		rpc.DevnetGenesis:  "devnet",
+	},
+}
+
+// PublicChain names the public chain whose genesis hash genesis is, or ""
+// for any other. Local's endpoint check reads only a URL, and a loopback URL
+// can be a tunnel or a forwarder to a public chain, so a payer whose defaults
+// Local loosened checks the chain itself before it trusts them.
+func PublicChain(rail ticket.Rail, genesis []byte) string {
+	enc := base64.StdEncoding.EncodeToString(genesis)
+	if rail == ticket.RailSolana {
+		if len(genesis) != len(solana.Hash{}) {
+			return ""
+		}
+		enc = solana.Hash(genesis).String()
+	}
+	return publicGenesis[rail][enc]
+}
 
 // Escrow is the escrow's id on its rail, as text: the app id, or the program
 // id in base58.

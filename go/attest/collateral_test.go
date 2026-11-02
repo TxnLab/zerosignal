@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +112,11 @@ func TestPCKPlatformID_RefusesTruncatedQuotes(t *testing.T) {
 // supposed to find, which tests the fixture rather than the code.
 func testCRLDER(t *testing.T, thisUpdate time.Time) []byte {
 	t.Helper()
+	return testCRLWindowDER(t, thisUpdate, thisUpdate.Add(30*24*time.Hour))
+}
+
+func testCRLWindowDER(t *testing.T, thisUpdate, nextUpdate time.Time) []byte {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("key: %v", err)
@@ -135,7 +141,7 @@ func testCRLDER(t *testing.T, thisUpdate time.Time) []byte {
 	crl, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
 		Number:     big.NewInt(1),
 		ThisUpdate: thisUpdate,
-		NextUpdate: thisUpdate.Add(30 * 24 * time.Hour),
+		NextUpdate: nextUpdate,
 	}, issuer, key)
 	if err != nil {
 		t.Fatalf("CRL: %v", err)
@@ -402,12 +408,15 @@ func TestCollateralFreshEnough(t *testing.T) {
 		// looked at one document would pass every one of these.
 		old := now.Add(-EmbeddedCollateralMaxAge - time.Hour)
 		stale := testCRLDER(t, old)
+		// The root CA CRL is judged by its own window, so stale means
+		// past its nextUpdate (testCRLDER sets thisUpdate + 30 days).
+		expired := testCRLDER(t, now.Add(-31*24*time.Hour))
 
 		cases := map[string]func(*inject.TEECollateral){
 			"tcb_info":    func(c *inject.TEECollateral) { c.TCBInfo = tcbInfoDoc(old) },
 			"qe_identity": func(c *inject.TEECollateral) { c.QEIdentity = qeIdentityDoc(old) },
 			"pck_crl":     func(c *inject.TEECollateral) { c.PCKCRL = hex.EncodeToString(stale) },
-			"root_ca_crl": func(c *inject.TEECollateral) { c.RootCACRL = hex.EncodeToString(stale) },
+			"root_ca_crl": func(c *inject.TEECollateral) { c.RootCACRL = hex.EncodeToString(expired) },
 		}
 		for name, age := range cases {
 			c := completeCollateral(t, now.Add(-time.Hour))
@@ -416,6 +425,28 @@ func TestCollateralFreshEnough(t *testing.T) {
 				t.Errorf("a set whose %s is stale was accepted — the other three documents "+
 					"were fresh, so only a per-document check catches this", name)
 			}
+		}
+	})
+
+	t.Run("accepts the pinned root CA CRL long after the floor", func(t *testing.T) {
+		// Intel reissues the root CA CRL about yearly, so held to the
+		// floor it refused every honest carried set.
+		c := completeCollateral(t, now.Add(-time.Hour))
+		c.RootCACRL = hex.EncodeToString(testCRLWindowDER(t,
+			MinRootCACRLThisUpdate(), now.Add(30*24*time.Hour)))
+		if !CollateralFreshEnough(c, now, EmbeddedCollateralMaxAge) {
+			t.Error("the pinned root CA CRL, inside its nextUpdate, was refused")
+		}
+	})
+
+	t.Run("refuses a root CA CRL older than the pin, inside its window", func(t *testing.T) {
+		// The rollback the pin exists for: a root CA CRL from before an
+		// intermediate's revocation, still inside its own year.
+		c := completeCollateral(t, now.Add(-time.Hour))
+		c.RootCACRL = hex.EncodeToString(testCRLWindowDER(t,
+			MinRootCACRLThisUpdate().Add(-time.Second), now.Add(30*24*time.Hour)))
+		if CollateralFreshEnough(c, now, EmbeddedCollateralMaxAge) {
+			t.Error("a root CA CRL older than MinRootCACRLThisUpdate was accepted")
 		}
 	})
 
@@ -456,6 +487,26 @@ func TestCollateralFreshEnough(t *testing.T) {
 			t.Error("an incomplete set was called fresh")
 		}
 	})
+}
+
+// Every synthetic set dates its root CA CRL with the other three, which is
+// how a 14-day floor on it refused every real carried set unnoticed. This one
+// is Intel's own, recorded for the capture's platform.
+func TestCollateralFreshEnough_AcceptsIntelsRecordedSet(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/attest/ds_collateral.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		VerifyAt   time.Time             `json:"verify_at"`
+		Collateral *inject.TEECollateral `json:"collateral"`
+	}
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if !CollateralFreshEnough(rec.Collateral, rec.VerifyAt, EmbeddedCollateralMaxAge) {
+		t.Fatal("Intel's recorded set was refused at its verify_at")
+	}
 }
 
 func TestQEIdentityIssuerCertificates_NamesTheZeroCertificateCase(t *testing.T) {

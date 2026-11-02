@@ -49,6 +49,7 @@ type railChain struct {
 	wallet     func(context.Context) (WalletOpener, error)
 	deployment func(context.Context) (ticket.DeploymentID, error)
 	source     func(ticket.DeploymentID) *ChainOperatorSource
+	genesis    func(context.Context) ([]byte, error)
 }
 
 // buildNetworkParts builds each nil network part. The registry's refresh loop
@@ -66,6 +67,9 @@ func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (network
 			chain, err = algorandRailChain(cfg, dep.Algod, dep.EscrowAppID)
 		}
 		if err != nil {
+			return networkParts{}, err
+		}
+		if err := checkLocalChain(ctx, cfg, dep.Rail, chain.genesis); err != nil {
 			return networkParts{}, err
 		}
 	}
@@ -135,6 +139,7 @@ func algorandRailChain(cfg Config, ac algod.Config, appID uint64) (*railChain, e
 		},
 		deployment: func(ctx context.Context) (ticket.DeploymentID, error) { return readDeploymentID(ctx, chain, appID) },
 		source:     func(d ticket.DeploymentID) *ChainOperatorSource { return newChainSource(cfg, appID, chain, d) },
+		genesis:    algodGenesis(chain),
 	}, nil
 }
 
@@ -161,7 +166,28 @@ func solanaRailChain(cfg Config, sn SolanaNetwork) (*railChain, error) {
 			s.Chain = reader
 			return s
 		},
+		genesis: solanaGenesis(rc),
 	}, nil
+}
+
+func algodGenesis(chain algod.Client) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		sp, err := chain.SuggestedParams(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return sp.GenesisHash, nil
+	}
+}
+
+func solanaGenesis(rc rpc.Client) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		h, err := rc.GetGenesisHash(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return h[:], nil
+	}
 }
 
 // buildSolanaWallet reads the program's Config for its mint, then builds the

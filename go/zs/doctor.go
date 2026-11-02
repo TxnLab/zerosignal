@@ -329,6 +329,9 @@ func Diagnose(ctx context.Context, cfg Config, address string) (DoctorReport, er
 		r = base
 		r.AlgodErr = err.Error()
 	} else {
+		if err := checkLocalChain(ctx, cfg, ticket.RailAlgorand, algodGenesis(chain)); err != nil {
+			return DoctorReport{}, err
+		}
 		r = gatherDoctorReadings(ctx, &algodDoctorChain{cfg: cfg, chain: chain, appID: appID, address: address}, base)
 	}
 	return doctorReport(r.Network, address, DoctorChecks(r), warnings), nil

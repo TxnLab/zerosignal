@@ -14,7 +14,7 @@ import { configError } from './errors.js'
 import { withHeaderBackstop } from './header-backstop.js'
 import { DEFAULT_STREAM_IDLE, type StreamIdle } from './idle.js'
 import type { Network, ResolvedNetwork } from './network.js'
-import { resolveNetwork } from './network.js'
+import { isLocal, resolveNetwork } from './network.js'
 import type { RegistryProvider, ReserveClient, Stores, WalletOpener } from './parts.js'
 import { type FreeCredits, checkFreeCredits } from './solana/credits.js'
 import {
@@ -145,7 +145,10 @@ export interface Config {
     /** Mainnet when absent. */
     network?: Network
 
-    /** relay_required when absent. */
+    /**
+     * relay_required when absent, or direct on a local chain (isLocal), whose
+     * one node has no relay owned by someone else.
+     */
     privacy?: Privacy
     /**
      * Lets a request's relay preference turn relaying off; without it such an
@@ -211,7 +214,9 @@ export interface Config {
     allowStaging?: boolean
     /**
      * Let the default fetch reach a node at a private, loopback or link-local
-     * address, in Node and in a browser alike. Development only.
+     * address, in Node and in a browser alike. Absent allows it only on a
+     * local chain (isLocal), whose nodes are on this machine; anywhere else
+     * any operator can register any URL, so a private one is refused.
      */
     allowPrivateHosts?: boolean
 
@@ -285,6 +290,12 @@ export interface ResolvedConfig {
     sweepDelay: ((sweep: number) => number) | undefined
     allowStaging: boolean
     allowPrivateHosts: boolean
+    /**
+     * Whether the local defaults loosened privacy or allowPrivateHosts, so
+     * create and diagnose check the chain's genesis before they act on them
+     * (checkLocalChain): Go's Config.localDefaults.
+     */
+    localDefaults: boolean
     spendGuard: SpendGuard | undefined
     /** As given; the batch default is applied where it is read. */
     freeCredits: FreeCredits | undefined
@@ -388,10 +399,9 @@ function checkSigner(c: Config): PayerSigner {
 /** resolveConfig applies the defaults and validates, or throws a ZsError. */
 export function resolveConfig(c: Config): ResolvedConfig {
     const payerSigner = checkSigner(c)
-    // || rather than ??: an empty string is unset in Go, where it is the zero value.
-    const privacy = c.privacy || 'relay_required'
-    if (privacy !== 'relay_required' && privacy !== 'direct') {
-        throw configError(`unknown privacy ${JSON.stringify(privacy)}`)
+    // A privacy Go refuses before resolving the network is refused first here too.
+    if (c.privacy && c.privacy !== 'relay_required' && c.privacy !== 'direct') {
+        throw configError(`unknown privacy ${JSON.stringify(c.privacy)}`)
     }
     const policy = c.affinity?.policy || defaults.affinity.policy
     if (policy !== 'prefer' && policy !== 'strict' && policy !== 'none') {
@@ -399,6 +409,9 @@ export function resolveConfig(c: Config): ResolvedConfig {
     }
     checkFreeCredits(c.freeCredits)
     const network = resolveNetwork(c.network)
+    const local = isLocal(network)
+    // || rather than ??: an empty string is unset in Go, where it is the zero value.
+    const privacy: Privacy = c.privacy || (local ? 'direct' : 'relay_required')
     const warnings = [...network.warnings]
     if (Object.keys(c.freeCredits?.issuers ?? {}).length > 0 && network.rail !== 'solana') {
         warnings.push("freeCredits are used on the Solana rail only; this network's free tickets are rationed on chain")
@@ -448,7 +461,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         discovery.operatorIds = d.operatorIds
     }
 
-    const allowPrivateHosts = c.allowPrivateHosts ?? false
+    const allowPrivateHosts = c.allowPrivateHosts ?? local
     const fetch = c.fetch ?? defaultFetch(allowPrivateHosts)
     if (!fetch) {
         throw configError('this runtime has no global fetch: set Config.fetch')
@@ -489,6 +502,7 @@ export function resolveConfig(c: Config): ResolvedConfig {
         sweepDelay: c.sweepDelay,
         allowStaging: c.allowStaging ?? false,
         allowPrivateHosts,
+        localDefaults: local && (!c.privacy || c.allowPrivateHosts === undefined),
         spendGuard: c.spendGuard,
         freeCredits: c.freeCredits,
         stores: { ...c.stores },

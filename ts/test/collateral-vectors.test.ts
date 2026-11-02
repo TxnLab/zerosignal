@@ -17,8 +17,10 @@ import { fileURLToPath } from 'node:url'
 import {
     collateralFreshEnough,
     collateralIssuedAt,
+    crlNextUpdate,
     crlThisUpdate,
     EMBEDDED_COLLATERAL_MAX_AGE_MS,
+    MIN_ROOT_CA_CRL_THIS_UPDATE_MS,
 } from '../src/attest/collateral.js'
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -45,9 +47,16 @@ describe('collateral_vectors.json', () => {
         expect(EMBEDDED_COLLATERAL_MAX_AGE_MS).toBe(v.embedded_collateral_max_age_ms)
     })
 
+    it('agrees on the pinned root CA CRL minimum', () => {
+        expect(MIN_ROOT_CA_CRL_THIS_UPDATE_MS).toBe(v.min_root_ca_crl_this_update_unix_ms)
+    })
+
     for (const c of v.crl_this_update) {
         it(`crlThisUpdate ${c.name}`, () => {
             expect(crlThisUpdate(c.crl_hex)).toBe(nanos(c.time))
+        })
+        it(`crlNextUpdate ${c.name}`, () => {
+            expect(crlNextUpdate(c.crl_hex)).toBe(nanos(c.next_update))
         })
     }
 

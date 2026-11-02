@@ -389,7 +389,7 @@ func TestRPCDoctorChain_ReadsTheFleet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{AllowPrivateHosts: true, DisableTEE: true}.withDefaults()
+	cfg := Config{AllowPrivateHosts: new(true), DisableTEE: true}.withDefaults()
 	r := gatherSolanaDoctorReadings(t.Context(), &rpcDoctorChain{cfg: cfg, rpc: rc, program: program}, SolanaDoctorReadings{})
 	if r.OperatorsErr != "" || len(r.Nodes) != len(c.Want) {
 		t.Fatalf("operators err %q, %d nodes, want %d", r.OperatorsErr, len(r.Nodes), len(c.Want))

@@ -179,3 +179,12 @@ export function isPrivateAddress(address: string): boolean {
     const ip = parseIP(address)
     return ip === null || isPrivateIP(ip)
 }
+
+/** isLoopbackAddress is Go's net.IP.IsLoopback: 127/8, in either form, or ::1. */
+export function isLoopbackAddress(address: string): boolean {
+    const ip = parseIP(address)
+    if (ip === null) return false
+    const v4 = to4(ip)
+    if (v4) return v4[0] === 127
+    return ip.subarray(0, 15).every((x) => x === 0) && ip[15] === 1
+}

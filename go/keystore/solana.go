@@ -96,8 +96,10 @@ func SolanaAddress(priv ed25519.PrivateKey) (string, error) {
 	return solana.PublicKey(priv.Public().(ed25519.PublicKey)).String(), nil
 }
 
-// SolanaKeys is the Solana counterpart of KeyStore: the phrases the same
-// providers hold, each derived at m/44'/501'/0'/0', keyed by base58 address.
+// SolanaKeys is the Solana counterpart of KeyStore: the keys the same
+// providers hold, keyed by base58 address. A phrase is derived at
+// m/44'/501'/0'/0'; a keypair file's array or an exported base58 secret key is
+// the key itself.
 // A 25-word Algorand mnemonic has no Solana derivation any wallet shares, so
 // it is skipped rather than loaded as a key nobody else could recover, as New
 // skips a phrase only Solana takes, unless it is all NewSolanaKeys was given.
@@ -105,7 +107,8 @@ type SolanaKeys struct {
 	keys map[string]ed25519.PrivateKey
 }
 
-// NewSolanaKeys loads every BIP-39 phrase the providers hold. A phrase that
+// NewSolanaKeys loads every Solana key the providers hold: a BIP-39 phrase, a
+// solana-keygen keypair file's JSON array, or a base58 secret key. One that
 // fails to decode fails the load, as in New.
 func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKeys, error) {
 	ks := &SolanaKeys{keys: map[string]ed25519.PrivateKey{}}
@@ -123,15 +126,20 @@ func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKey
 			if n == 0 {
 				continue
 			}
-			if n == 25 {
-				if skippedName == "" {
-					skippedName = e.Name
-				}
-				continue
-			}
-			priv, err := SolanaKeyFromPhrase(e.Mnemonic)
+			priv, isKey, err := solanaSecretKey(e.Mnemonic)
 			if err != nil {
-				return nil, fmt.Errorf("keystore: mnemonic %q: %w", e.Name, err)
+				return nil, fmt.Errorf("keystore: secret %q %w", e.Name, err)
+			}
+			if !isKey {
+				if n == 25 {
+					if skippedName == "" {
+						skippedName = e.Name
+					}
+					continue
+				}
+				if priv, err = SolanaKeyFromPhrase(e.Mnemonic); err != nil {
+					return nil, fmt.Errorf("keystore: mnemonic %q: %w", e.Name, err)
+				}
 			}
 			addr, err := SolanaAddress(priv)
 			if err != nil {
@@ -149,7 +157,7 @@ func NewSolanaKeys(ctx context.Context, providers ...SecretProvider) (*SolanaKey
 	// nothing else: the startup error names the phrase instead of a later "no
 	// key loaded".
 	if len(ks.keys) == 0 && skippedName != "" {
-		return nil, fmt.Errorf("keystore: mnemonic %q: a 25-word Algorand mnemonic has no Solana key; want a BIP-39 phrase of 12 to 24 words", skippedName)
+		return nil, fmt.Errorf("keystore: mnemonic %q: a 25-word Algorand mnemonic has no Solana key; want a BIP-39 phrase of 12 to 24 words, a solana-keygen keypair file's contents or a base58 secret key", skippedName)
 	}
 	return ks, nil
 }

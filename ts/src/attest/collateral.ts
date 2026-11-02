@@ -17,8 +17,8 @@
 //
 // One part is not mirrored. Go dates a CRL with x509.ParseRevocationList,
 // which also parses the algorithm identifier's contents, the issuer name and
-// everything after thisUpdate. This reads the CRL's structure up to
-// thisUpdate with the same DER rules and stops there, so it dates some CRLs
+// everything after nextUpdate. This reads the CRL's structure up to
+// nextUpdate with the same DER rules and stops there, so it dates some CRLs
 // Go refuses. None of those is one Intel signed, and the verifier that
 // consumes the set refuses it; the two differ only in which failure a payer
 // sees.
@@ -31,19 +31,34 @@ import { goTrimSpace } from '../inject/gostrings.js'
 /**
  * How stale node-carried collateral may be before a verifier refuses to fall
  * back to it. Mirrors EmbeddedCollateralMaxAge (14 days), deliberately tighter
- * than Intel's own ~30-day nextUpdate.
+ * than Intel's own ~30-day nextUpdate. The root CA CRL is not held to it; see
+ * collateralFreshEnough.
  */
 export const EMBEDDED_COLLATERAL_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 
 /**
- * collateralFreshEnough reports whether every document in the set was
- * published within maxAgeMs of nowMs. Mirrors Go's CollateralFreshEnough.
+ * The oldest root CA CRL a verifier accepts from a node's carried set: the
+ * thisUpdate of the newest one Intel has published that this module knows of.
+ * Mirrors Go's MinRootCACRLThisUpdate, whose godoc says what an older one would
+ * hide and when to bump it.
+ */
+export const MIN_ROOT_CA_CRL_THIS_UPDATE_MS = Date.UTC(2026, 1, 26, 13, 4, 0)
+
+/**
+ * collateralFreshEnough reports whether every document in the set is recent
+ * enough to fall back to. Mirrors Go's CollateralFreshEnough.
  *
  * Fail-closed: an incomplete set, or an unparseable or undated document, is not
- * fresh. All four documents are dated, because a node can pair fresh TCB info
- * with an older CRL that predates the revocation of its own PCK certificate. A
+ * fresh. Every document is dated, because a node can pair fresh TCB info with
+ * an older CRL that predates the revocation of its own PCK certificate. A
  * document dated after nowMs is refused too: now minus a future instant is
  * negative and would otherwise pass any floor.
+ *
+ * TCB info, QE identity and the PCK CRL must be no older than maxAgeMs. The
+ * root CA CRL cannot be: Intel reissues it about once a year, so any shorter
+ * floor refuses every honest set. It must instead be no older than
+ * MIN_ROOT_CA_CRL_THIS_UPDATE_MS and inside its own window,
+ * thisUpdate <= now <= nextUpdate, and is refused without a nextUpdate.
  */
 export function collateralFreshEnough(
     c: TEECollateral | null | undefined,
@@ -57,13 +72,15 @@ export function collateralFreshEnough(
         () => collateralIssuedAt(c.tcb_info, 'tcbInfo'),
         () => collateralIssuedAt(c.qe_identity, 'enclaveIdentity'),
         () => crlThisUpdate(c.pck_crl),
-        () => crlThisUpdate(c.root_ca_crl),
     ]
     for (const at of dates) {
         const t = at()
         if (t === null || t > now || now - t > maxAge) return false
     }
-    return true
+    const root = crlWindow(c.root_ca_crl)
+    if (root === null || root.nextUpdate === null) return false
+    if (root.thisUpdate < epochNanosFromMillis(MIN_ROOT_CA_CRL_THIS_UPDATE_MS)) return false
+    return root.thisUpdate <= now && now <= root.nextUpdate
 }
 
 /**
@@ -90,10 +107,23 @@ export function collateralIssuedAt(doc: string, wrapper: string): bigint | null 
 
 /**
  * crlThisUpdate reads thisUpdate off a hex-encoded DER CRL, as nanoseconds
- * since the epoch, or null. Mirrors Go's crlThisUpdate up to thisUpdate; see
- * the file header for what it does not read.
+ * since the epoch, or null. Mirrors Go's crlThisUpdate; see the file header
+ * for what it does not read.
  */
 export function crlThisUpdate(hexDER: string): bigint | null {
+    return crlWindow(hexDER)?.thisUpdate ?? null
+}
+
+/**
+ * crlNextUpdate reads nextUpdate off a hex-encoded DER CRL, or null when the
+ * CRL cannot be dated or carries none. An explicit Go zero time reads as none,
+ * because Go cannot tell it from an absent one.
+ */
+export function crlNextUpdate(hexDER: string): bigint | null {
+    return crlWindow(hexDER)?.nextUpdate ?? null
+}
+
+function crlWindow(hexDER: string): { thisUpdate: bigint; nextUpdate: bigint | null } | null {
     const der = hexDecode(goTrimSpace(hexDER))
     if (der === null || der.length === 0) return null
 
@@ -120,14 +150,26 @@ export function crlThisUpdate(hexDER: string): bigint | null {
     if (issuer === null) return null
     const thisUpdate = readElement(der, issuer.next, tbs.end)
     if (thisUpdate === null) return null
-
-    const text = latin1(der.subarray(thisUpdate.start, thisUpdate.end))
-    let t: bigint | null
-    if (thisUpdate.tag === TAG_UTC_TIME) t = utcTime(text)
-    else if (thisUpdate.tag === TAG_GENERALIZED_TIME) t = generalizedTime(text)
-    else return null
+    const t = derTime(der, thisUpdate)
     // Go refuses the zero time.Time, 0001-01-01T00:00:00Z, as undated.
-    return t === null || t === GO_ZERO_TIME ? null : t
+    if (t === null || t === GO_ZERO_TIME) return null
+
+    // nextUpdate Time OPTIONAL. Go reads it whenever the next tag is a time,
+    // and refuses the whole CRL when that read fails.
+    const tag = thisUpdate.next < tbs.end ? der[thisUpdate.next] : undefined
+    if (tag !== TAG_UTC_TIME && tag !== TAG_GENERALIZED_TIME) return { thisUpdate: t, nextUpdate: null }
+    const nextUpdate = readElement(der, thisUpdate.next, tbs.end)
+    if (nextUpdate === null) return null
+    const n = derTime(der, nextUpdate)
+    if (n === null) return null
+    return { thisUpdate: t, nextUpdate: n === GO_ZERO_TIME ? null : n }
+}
+
+function derTime(der: Uint8Array, el: Element): bigint | null {
+    const text = latin1(der.subarray(el.start, el.end))
+    if (el.tag === TAG_UTC_TIME) return utcTime(text)
+    if (el.tag === TAG_GENERALIZED_TIME) return generalizedTime(text)
+    return null
 }
 
 const TAG_INTEGER = 0x02

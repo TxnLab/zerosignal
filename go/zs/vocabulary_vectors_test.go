@@ -18,6 +18,8 @@ package zs
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -34,6 +36,9 @@ import (
 
 	"github.com/TxnLab/zerosignal/go/algod"
 	"github.com/TxnLab/zerosignal/go/selection"
+	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
+	"github.com/TxnLab/zerosignal/go/ticket"
 	"github.com/TxnLab/zerosignal/go/transient"
 )
 
@@ -69,6 +74,125 @@ type vocabulary struct {
 	SolanaNetwork map[string]vocabularySolanaNetwork `json:"solana_networks"`
 	// Defaults are Config's, durations in milliseconds.
 	Defaults map[string]int64 `json:"defaults"`
+	// NetworkDefaults are the Config defaults that follow the network: what
+	// withDefaults gives Privacy and AllowPrivateHosts for each Network, and
+	// whether the deployment is Local.
+	NetworkDefaults []vocabularyNetworkDefault `json:"network_defaults"`
+	// PublicChains is PublicChain's answer for each genesis, in hex.
+	PublicChains []vocabularyPublicChain `json:"public_chains"`
+}
+
+type vocabularyPublicChain struct {
+	Rail    string `json:"rail"`
+	Genesis string `json:"genesis_hex"`
+	Want    string `json:"want"`
+}
+
+// vocabularyNetworkDefault's network is in the TS Network's terms, which both
+// languages can build; Privacy and AllowPrivateHosts are the caller's, and
+// absent ones are left unset.
+type vocabularyNetworkDefault struct {
+	Name              string                  `json:"name"`
+	Network           vocabularyNetworkConfig `json:"network"`
+	Privacy           Privacy                 `json:"privacy,omitempty"`
+	AllowPrivateHosts *bool                   `json:"allow_private_hosts,omitempty"`
+	WantLocal         bool                    `json:"want_local"`
+	WantPrivacy       Privacy                 `json:"want_privacy"`
+	WantPrivateHosts  bool                    `json:"want_allow_private_hosts"`
+	// WantCheckGenesis is whether the defaults loosened a setting, so New
+	// checks the chain is not a public one.
+	WantCheckGenesis bool `json:"want_check_genesis"`
+}
+
+type vocabularyNetworkConfig struct {
+	Rail          string `json:"rail"`
+	Network       string `json:"network,omitempty"`
+	AlgodEndpoint string `json:"algod_endpoint,omitempty"`
+	EscrowAppID   uint64 `json:"escrow_app_id,omitempty"`
+	RPCEndpoint   string `json:"rpc_endpoint,omitempty"`
+}
+
+func (n vocabularyNetworkConfig) network() Network {
+	if n.Rail == "solana" {
+		return Network{Rail: ticket.RailSolana, Solana: SolanaNetwork{Cluster: n.Network, RPCEndpoint: n.RPCEndpoint}}
+	}
+	return Network{Algod: algod.Config{Network: n.Network, Endpoint: n.AlgodEndpoint}, EscrowAppID: n.EscrowAppID}
+}
+
+// networkDefaultCases cover each preset, a localnet named but reached off this
+// machine, and a localnet reached at loopback without its name, which is not
+// Local either: only the preset says it is a development chain.
+var networkDefaultCases = []vocabularyNetworkDefault{
+	{Name: "algorand localnet", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", EscrowAppID: 1006}},
+	{Name: "algorand localnet at 127.0.0.1", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", AlgodEndpoint: "http://127.0.0.1:4001", EscrowAppID: 1006}},
+	{Name: "algorand localnet named, another host", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", AlgodEndpoint: "http://10.0.0.5:4001", EscrowAppID: 1006}},
+	{Name: "algorand loopback endpoint alone", Network: vocabularyNetworkConfig{Rail: "algorand", AlgodEndpoint: "http://localhost:4001", EscrowAppID: 1006}},
+	{Name: "algorand localnet with no app id", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet"}},
+	{Name: "algorand testnet", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "testnet"}},
+	{Name: "algorand mainnet", Network: vocabularyNetworkConfig{Rail: "algorand"}},
+	{Name: "solana localnet", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet"}},
+	{Name: "solana localnet at [::1]", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "http://[::1]:8899"}},
+	{Name: "solana localnet named, another cluster", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "https://api.mainnet-beta.solana.com"}},
+	{Name: "solana loopback endpoint alone", Network: vocabularyNetworkConfig{Rail: "solana", RPCEndpoint: "http://127.0.0.1:8899"}},
+	{Name: "solana devnet", Network: vocabularyNetworkConfig{Rail: "solana", Network: "devnet"}},
+	{Name: "solana localnet, relay asked for", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet"}, Privacy: PrivacyRelayRequired},
+	{Name: "solana localnet, private hosts refused", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet"}, AllowPrivateHosts: new(false)},
+	{Name: "algorand testnet, private hosts allowed", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "testnet"}, AllowPrivateHosts: new(true)},
+	{Name: "solana localnet, both set", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet"}, Privacy: PrivacyDirect, AllowPrivateHosts: new(true)},
+	// Host spellings a URL parser may rewrite: Go reads the host as written,
+	// lowered, so the TS twin must not take WHATWG's rewrite of it.
+	{Name: "algorand localnet at LOCALHOST", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", AlgodEndpoint: "http://LOCALHOST:4001", EscrowAppID: 1006}},
+	{Name: "algorand localnet at 127.1", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", AlgodEndpoint: "http://127.1:4001", EscrowAppID: 1006}},
+	{Name: "algorand localnet at 0x7f000001", Network: vocabularyNetworkConfig{Rail: "algorand", Network: "localnet", AlgodEndpoint: "http://0x7f000001:4001", EscrowAppID: 1006}},
+	{Name: "solana localnet at the full ::1", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "http://[0:0:0:0:0:0:0:1]:8899"}},
+	{Name: "solana localnet at v4-mapped 127.0.0.1", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "http://[::ffff:127.0.0.1]:8899"}},
+	{Name: "solana localnet with userinfo", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "http://user@127.0.0.1:8899"}},
+	{Name: "solana localnet at 127.0.0.1.example", Network: vocabularyNetworkConfig{Rail: "solana", Network: "localnet", RPCEndpoint: "http://127.0.0.1.example:8899"}},
+}
+
+// publicChainCases are each public chain's genesis, a local validator's, one
+// rail's genesis asked of the other, and a Solana hash of the wrong length.
+func publicChainCases(t *testing.T) []vocabularyPublicChain {
+	b64 := func(s string) []byte {
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	b58 := func(s string) []byte {
+		h, err := solana.ParseHash(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h[:]
+	}
+	local := bytes.Repeat([]byte{7}, 32)
+	cases := []struct {
+		rail    ticket.Rail
+		genesis []byte
+	}{
+		{ticket.RailAlgorand, b64("wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=")},
+		{ticket.RailAlgorand, b64("SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=")},
+		{ticket.RailAlgorand, b64("mFgazF+2uRS1tMiL9dsj01hJGySEmPN28B/TjjvpVW0=")},
+		{ticket.RailAlgorand, local},
+		{ticket.RailAlgorand, b58(rpc.DevnetGenesis)},
+		{ticket.RailSolana, b58(rpc.MainnetGenesis)},
+		{ticket.RailSolana, b58(rpc.TestnetGenesis)},
+		{ticket.RailSolana, b58(rpc.DevnetGenesis)},
+		{ticket.RailSolana, local},
+		{ticket.RailSolana, b64("SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=")},
+		{ticket.RailSolana, b58(rpc.DevnetGenesis)[:31]},
+	}
+	var out []vocabularyPublicChain
+	for _, c := range cases {
+		rail := "algorand"
+		if c.rail == ticket.RailSolana {
+			rail = "solana"
+		}
+		out = append(out, vocabularyPublicChain{Rail: rail, Genesis: hex.EncodeToString(c.genesis), Want: PublicChain(c.rail, c.genesis)})
+	}
+	return out
 }
 
 // tsName lowers a Go field name to the TypeScript one. A word is an upper-case
@@ -258,6 +382,16 @@ func buildVocabulary(t *testing.T) vocabulary {
 		}
 		v.SolanaNetwork[n] = vocabularySolanaNetwork{RPCEndpoint: rpcEndpoint, Program: program.String(), FreeCreditIssuers: credit}
 	}
+	for _, c := range networkDefaultCases {
+		cfg := Config{Network: c.Network.network(), Privacy: c.Privacy, AllowPrivateHosts: c.AllowPrivateHosts}.withDefaults()
+		d, _, err := ResolveNetwork(cfg.Network)
+		c.WantLocal = err == nil && d.Local()
+		c.WantPrivacy = cfg.Privacy
+		c.WantPrivateHosts = cfg.privateHostsAllowed()
+		c.WantCheckGenesis = cfg.localDefaults
+		v.NetworkDefaults = append(v.NetworkDefaults, c)
+	}
+	v.PublicChains = publicChainCases(t)
 	return v
 }
 

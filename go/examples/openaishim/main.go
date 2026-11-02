@@ -89,11 +89,6 @@ func run(o options) error {
 		// bounds what anyone reaching it can spend.
 		SpendGuard: &budgetGuard{limit: o.budget, open: map[string]uint64{}},
 	}
-	if o.network == "localnet" {
-		// A loopback node URL, no second node to relay through, and a node
-		// registered for testing is often marked staging.
-		cfg.AllowPrivateHosts, cfg.Privacy, cfg.AllowStaging = true, zs.PrivacyDirect, true
-	}
 	client, err := zs.New(ctx, cfg)
 	if err != nil {
 		return err
