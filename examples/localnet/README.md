@@ -13,6 +13,8 @@ relay owned by someone else and is on this machine. Elsewhere both stay off unle
 
 ## The stack
 
+[`LOCALNET.md`](../../LOCALNET.md) walks through each step, on either rail.
+
 1. `algokit localnet start`.
 2. Deploy the escrow contract to localnet. Its bootstrap mints a local USDC asset and prints the app
    id.
