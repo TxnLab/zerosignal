@@ -110,11 +110,13 @@ loads but is not the node's, the node refuses to start with `signing address X n
 
 `init` asks for the operator and node ids, finds the models your LLM backend serves (LM Studio,
 Ollama, vLLM, an OpenAI key, …), prices them and writes `localnet.yaml`, leaving any `config.yaml`
-of yours alone. Its chain check reads the program and your node's record, and says when the
-signing key is short of SOL. It ends with what to export before the node starts: for a generic
-OpenAI-compatible backend that includes `NODE_LLM_OPENAI_API_KEY`, which any placeholder
-satisfies when the backend takes no key. Every command that reads the config needs it, so export
-it first.
+of yours alone. The node's ledger is `localnet.settlement.db`, separate from `config.yaml`'s
+`settlement.db`. `init` probes every model the backend lists, which may make LM Studio or Ollama
+load each one, so `--models=<id>,…` keeps it to the ones you mean to serve. Its chain check reads
+the program and your node's record, and says when the signing key is short of SOL. It ends with
+what to export before the node starts: for a generic OpenAI-compatible backend that includes
+`NODE_LLM_OPENAI_API_KEY`, which any placeholder satisfies when the backend takes no key. Every
+command that reads the config needs it, so export it first.
 
 Give the signing key SOL for its fees, then run the node:
 
@@ -140,6 +142,10 @@ go run . proxy start --network solana-localnet --port 9377
 
 The empty `PROXY_CONFIG` matters in a proxy checkout: with no config in `ZEROSIGNAL_HOME`, the
 proxy otherwise reads a `config.yaml` in the current directory, which may be your own.
+
+On a later run the wallet is still in `~/zs-local`, and `wallet new` refuses to replace it. Skip
+it (`go run . wallet address --network solana-localnet` prints the address), then run
+`make localnet-fund` and `fund` again, since each `make localnet` starts a new chain.
 
 No privacy or private-host setting is needed. On the localnet preset at a loopback endpoint the
 payer sends straight to the node, since there is no second operator to relay through, and may
