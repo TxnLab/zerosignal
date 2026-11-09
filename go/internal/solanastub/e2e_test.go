@@ -819,7 +819,7 @@ func TestSolanaE2E_ClosedAccountForfeitsTheRefund(t *testing.T) {
 	if _, err := l.Chain.Send(ctx, []solana.Instruction{
 		solana.CreateAssociatedTokenAccountIdempotent(p.key, source, d.Mint),
 		solana.TransferChecked(d.TokenAccount(p.key), d.Mint, d.TokenAccount(source), p.key, left, l.Chain.Config.USDCDecimals),
-		solanastub.CloseTokenAccount(d.TokenAccount(p.key), p.key, p.key),
+		solana.CloseAccount(d.TokenAccount(p.key), p.key, p.key),
 	}, p.signer.key); err != nil {
 		t.Fatal(err)
 	}

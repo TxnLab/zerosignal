@@ -139,7 +139,7 @@ type codecVectors struct {
 	Builders            []builderCase    `json:"builders"`
 }
 
-// builderCase is one call of a token or compute-budget builder: numbers are
+// builderCase is one call of a token, system or compute-budget builder: numbers are
 // decimal strings, keys base58.
 type builderCase struct {
 	Builder     string             `json:"builder"`
@@ -180,6 +180,15 @@ func buildBuilderCases() []builderCase {
 	for _, k := range [][3]solana.PublicKey{{a, b, c}, {a, a, c}} {
 		add("create_associated_token_account_idempotent", solana.CreateAssociatedTokenAccountIdempotent(k[0], k[1], k[2]),
 			"payer", k[0].String(), "owner", k[1].String(), "mint", k[2].String())
+	}
+	// The owner is the destination when a payer closes its own account.
+	for _, k := range [][3]solana.PublicKey{{a, b, c}, {a, c, c}} {
+		add("close_account", solana.CloseAccount(k[0], k[1], k[2]),
+			"account", k[0].String(), "destination", k[1].String(), "owner", k[2].String())
+	}
+	for _, l := range []uint64{0, 1, math.MaxUint64} {
+		add("system_transfer", solana.SystemTransfer(a, b, l),
+			"from", a.String(), "to", b.String(), "lamports", strconv.FormatUint(l, 10))
 	}
 	return out
 }
@@ -433,7 +442,7 @@ func buildCodecVectors(t *testing.T) codecVectors {
 			"create_program_address: the address, or \"\" where the seeds are refused. on_curve: whether a key decodes as a point. " +
 			"signatures: verify_strict's verdict (valid), with the cofactored verdict beside it. " +
 			"compile: instructions and the message they compile to. " +
-			"builders: a token or compute-budget builder's arguments and the instruction it returns.",
+			"builders: a token, system or compute-budget builder's arguments and the instruction it returns.",
 	}
 	for _, h := range []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",
@@ -890,4 +899,22 @@ func TestBuildersMatchTheInterfaceCrates(t *testing.T) {
 	}
 	k = ata[0].Accounts
 	same("CreateIdempotent", solana.CreateAssociatedTokenAccountIdempotent(k[0].PublicKey, k[2].PublicKey, k[3].PublicKey), ata[0])
+
+	// The fixture writer builds these two by hand rather than with the
+	// crates, but its transactions ran against the real programs, which
+	// refuse a wrong tag, layout or signer flag.
+	last := func(name string) solana.Instruction {
+		ix := built(name)
+		return ix[len(ix)-1]
+	}
+	tr := last("open_foreign_program")
+	if tr.ProgramID != solana.SystemProgramID {
+		t.Fatal("the open_foreign_program fixture doesn't end in a system transfer")
+	}
+	same("SystemTransfer", solana.SystemTransfer(tr.Accounts[0].PublicKey, tr.Accounts[1].PublicKey, binary.LittleEndian.Uint64(tr.Data[4:])), tr)
+	cl := last("open_close_account")
+	if cl.ProgramID != solana.TokenProgramID {
+		t.Fatal("the open_close_account fixture doesn't end in a token instruction")
+	}
+	same("CloseAccount", solana.CloseAccount(cl.Accounts[0].PublicKey, cl.Accounts[1].PublicKey, cl.Accounts[2].PublicKey), cl)
 }

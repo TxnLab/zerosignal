@@ -22,7 +22,9 @@ export {
     retryingAlgod,
 } from './algod-transport.js'
 export { type BuiltDiscovery, type RoutingStores, buildDiscovery, catalogStorageKey, chainAlgod, solanaRpc } from './assemble.js'
-export type { SolanaRpcClient } from './solana/rpc.js'
+export { type SolanaRpcClient, txErrorName } from './solana/rpc.js'
+// For a host's own Solana transactions, which wait as the SDK's do.
+export { type ConfirmOptions, TransactionExpiredError, confirmSignature } from './solana/confirm.js'
 export * from './attestation.js'
 export * from './client.js'
 export * from './config.js'

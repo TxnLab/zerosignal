@@ -50,6 +50,24 @@ func MintTo(mint, destination, authority PublicKey, amount uint64) Instruction {
 	}
 }
 
+// TokenCloseAccount is SPL Token's CloseAccount tag, its only data byte.
+const TokenCloseAccount = 9
+
+// CloseAccount closes account, which must hold no tokens, and sends its rent
+// to destination, signed by owner, the account's owner. A payer moving to a
+// new key closes its old token account so its rent goes with it.
+func CloseAccount(account, destination, owner PublicKey) Instruction {
+	return Instruction{
+		ProgramID: TokenProgramID,
+		Accounts: []AccountMeta{
+			{PublicKey: account, IsWritable: true},
+			{PublicKey: destination, IsWritable: true},
+			{PublicKey: owner, IsSigner: true},
+		},
+		Data: []byte{TokenCloseAccount},
+	}
+}
+
 // AssociatedTokenCreateIdempotent is the associated token program's
 // CreateIdempotent tag, its only data byte.
 const AssociatedTokenCreateIdempotent = 1

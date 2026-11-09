@@ -8,7 +8,6 @@ package solanastub
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -57,7 +56,7 @@ func (ch *Chain) FundSOL(ctx context.Context, f Funding, to solana.PublicKey, la
 	if f.Funder == nil {
 		return ch.Airdrop(ctx, to, lamports)
 	}
-	_, err := ch.Send(ctx, []solana.Instruction{SystemTransfer(PublicKey(f.Funder), to, lamports)}, f.Funder)
+	_, err := ch.Send(ctx, []solana.Instruction{solana.SystemTransfer(PublicKey(f.Funder), to, lamports)}, f.Funder)
 	if err != nil {
 		return fmt.Errorf("solanastub: send SOL: %w", err)
 	}
@@ -123,11 +122,11 @@ func (ch *Chain) ReturnFunds(ctx context.Context, f Funding, owner ed25519.Priva
 		if ta.Amount > 0 {
 			ixs = append(ixs, solana.TransferChecked(d.TokenAccount(from), d.Mint, d.TokenAccount(to), from, ta.Amount, ch.Config.USDCDecimals))
 		}
-		ixs = append(ixs, CloseTokenAccount(d.TokenAccount(from), from, from))
+		ixs = append(ixs, solana.CloseAccount(d.TokenAccount(from), from, from))
 		lamports += acct.Lamports
 	}
 	if lamports > signatureFee {
-		ixs = append(ixs, SystemTransfer(from, to, lamports-signatureFee))
+		ixs = append(ixs, solana.SystemTransfer(from, to, lamports-signatureFee))
 	}
 	if len(ixs) == 0 {
 		return nil
@@ -140,38 +139,3 @@ func (ch *Chain) ReturnFunds(ctx context.Context, f Funding, owner ed25519.Priva
 
 // signatureFee is a one-signature transaction's fee on every cluster today.
 const signatureFee = 5_000
-
-// systemTransfer is the system program's Transfer tag, the first data word.
-const systemTransfer = 2
-
-// SystemTransfer moves lamports from from, which signs, to to. Test tooling
-// alone sends SOL between wallets, so the builder lives here rather than in
-// go/solana.
-func SystemTransfer(from, to solana.PublicKey, lamports uint64) solana.Instruction {
-	data := binary.LittleEndian.AppendUint32(nil, systemTransfer)
-	return solana.Instruction{
-		ProgramID: solana.SystemProgramID,
-		Accounts: []solana.AccountMeta{
-			{PublicKey: from, IsSigner: true, IsWritable: true},
-			{PublicKey: to, IsWritable: true},
-		},
-		Data: binary.LittleEndian.AppendUint64(data, lamports),
-	}
-}
-
-// tokenCloseAccount is SPL Token's CloseAccount tag.
-const tokenCloseAccount = 9
-
-// CloseTokenAccount closes account, which must hold no tokens, and sends its
-// rent to destination; owner signs.
-func CloseTokenAccount(account, destination, owner solana.PublicKey) solana.Instruction {
-	return solana.Instruction{
-		ProgramID: solana.TokenProgramID,
-		Accounts: []solana.AccountMeta{
-			{PublicKey: account, IsWritable: true},
-			{PublicKey: destination, IsWritable: true},
-			{PublicKey: owner, IsSigner: true},
-		},
-		Data: []byte{tokenCloseAccount},
-	}
-}
