@@ -22,13 +22,16 @@ import {
     type ClaimVerdict,
     DEFAULT_LAPSE_FALLBACK_MS,
     type ReconcileAction,
+    SETTLE_PENDING_GRACE_MS,
     type SettleArgs,
     type TicketRecord,
+    boxClaimArgs,
     decideSolanaTicket,
     decideTicket,
     judgeClaim,
     judgeSolanaClaim,
     signedArgs,
+    zeroClaimArgs,
 } from './reconcile.js'
 import { idle } from './sleep.js'
 import { guardRecords } from './spend-guard.js'
@@ -62,6 +65,8 @@ export interface SweepChain {
     lapse(rec: TicketRecord, t: SweptTicket | null, signal: AbortSignal): Promise<string>
     resettle(rec: TicketRecord, t: SweptTicket | null, signal: AbortSignal): Promise<string>
     freeze(rec: TicketRecord, t: SweptTicket | null, args: SettleArgs, signal: AbortSignal): Promise<string>
+    /** Sends the payer's half at t's own pending claim. Reached only with a ticket read. */
+    accept(rec: TicketRecord, t: SweptTicket, signal: AbortSignal): Promise<string>
     freezes(signal: AbortSignal): Promise<boolean>
     /**
      * One submit's budget when it must outlast callTimeoutMs; absent, it is
@@ -82,6 +87,11 @@ export function boxSweep(chain: TicketChain): SweepChain {
         lapse: (rec, t, signal) => chain.lapse(rec, boxOf(t), signal),
         resettle: (rec, t, signal) => chain.resettle(rec, boxOf(t), signal),
         freeze: (rec, t, args, signal) => chain.freeze(rec, boxOf(t), args, signal),
+        accept: async (rec, t, signal) => {
+            const box = boxOf(t)
+            if (box === null) throw new Error('wallet: accept claim: no box read')
+            return chain.accept(rec, box, zeroClaimArgs(boxClaimArgs(box)), signal)
+        },
         freezes: (signal) => chain.freezes(signal),
     }
 }
@@ -111,6 +121,8 @@ export interface TicketChain {
     resettle(rec: TicketRecord, box: TicketBox | null, signal: AbortSignal): Promise<string>
     /** Sends the payer's settle at args, against an operator claim on box that takes more. */
     freeze(rec: TicketRecord, box: TicketBox | null, args: SettleArgs, signal: AbortSignal): Promise<string>
+    /** Sends the payer's settle at args, the operator's own claim on box, which finalizes the ticket. */
+    accept(rec: TicketRecord, box: TicketBox, args: SettleArgs, signal: AbortSignal): Promise<string>
     /**
      * Whether the deployed escrow has resolveFrozen. Without it freeze is never
      * called: the frozen escrow would be locked for good. A rejection reads as
@@ -163,6 +175,9 @@ export function walletChain(wallet: object): TicketChain | undefined {
             return settleAt('re-settle', rec, box, settle, false, signal)
         },
         freeze: (rec, box, args, signal) => settleAt('freeze', rec, box, args, true, signal),
+        // The full settle fee, unlike freeze: a matching half finalizes the
+        // ticket, and finalization needs the op-up.
+        accept: (rec, box, args, signal) => settleAt('accept claim', rec, box, args, false, signal),
         freezes: async (signal) => {
             try {
                 return (await chain.config(signal)).resolvesFrozen === true
@@ -294,11 +309,21 @@ export class Reconciler {
         for (const rec of recs) {
             if (this.#stopped()) return
             if (this.#exhausted(rec.ticketId)) continue
-            // A watched row is read only when it records a receipt, the one
-            // case a freeze can come of, and only on an escrow that can
-            // resolve one.
+            // A watched row is read only when the sweep may act on it: a
+            // freeze needs a receipt and an escrow that can resolve one, and a
+            // $0 claim's acceptance waits out the settle-pending grace. The
+            // watchdog would hold such a claim's pool slot to the deadline.
+            // A row time that isn't a number reads as long past, as
+            // decideTicket reads it.
             const watched = this.#watching(rec.ticketId)
-            if (watched && (signedArgs(rec) === undefined || !(await canFreeze()))) continue
+            const updatedAt = Number.isFinite(rec.updatedAt) ? rec.updatedAt : 0
+            if (
+                watched &&
+                !(signedArgs(rec) !== undefined && (await canFreeze())) &&
+                this.#clock() - updatedAt < SETTLE_PENDING_GRACE_MS
+            ) {
+                continue
+            }
             // A row that throws, a box it can't decide say, must not end the
             // sweep loop for the rows after it. It counts as a failed
             // attempt, so a row that always throws is given up on.
@@ -314,8 +339,8 @@ export class Reconciler {
         return (this.#failures.get(ticketId) ?? 0) >= RECONCILE_MAX_FAILURES
     }
 
-    // A watched ticket gets a freeze or nothing: every other call is its
-    // watchdog's.
+    // A watched ticket gets a freeze, a $0 claim's acceptance or nothing:
+    // every other call is its watchdog's.
     async #reconcile(rec: TicketRecord, watched: boolean, canFreeze: () => Promise<boolean>): Promise<void> {
         let t: SweptTicket | null
         try {
@@ -330,7 +355,7 @@ export class Reconciler {
         // No freeze, and still no lapse: decideSettlement never lapses an
         // over-claim, which the operator can lapse itself.
         if (action === 'freeze' && !(await canFreeze())) action = 'wait'
-        if (watched && action !== 'freeze') return
+        if (watched && action !== 'freeze' && action !== 'acceptZeroClaim') return
         let submit: (signal: AbortSignal) => Promise<string>
         switch (action) {
             case 'wait':
@@ -352,6 +377,12 @@ export class Reconciler {
                 // own figure would match it and pay it.
                 const args = signedArgs(rec)!
                 submit = (signal) => this.#chain.freeze(rec, t, args, signal)
+                break
+            }
+            case 'acceptZeroClaim': {
+                // Only a pending claim is accepted, so a ticket was read.
+                const read = t!
+                submit = (signal) => this.#chain.accept(rec, read, signal)
                 break
             }
         }
@@ -383,7 +414,8 @@ export class Reconciler {
         // charge for a refund, the operator's claim for a lapse. A journaled
         // receipt means the request path already counted its charge, so a lapse
         // only drops what reservation is left rather than counting it twice.
-        if (action === 'refundInactive' || (action === 'settleLapsed' && rec.settle !== undefined)) {
+        // An accepted $0 claim charges nothing, so it only releases.
+        if (action === 'refundInactive' || action === 'acceptZeroClaim' || (action === 'settleLapsed' && rec.settle !== undefined)) {
             guardRecords(this.#log, 'release', rec.ticketId, () => spend.release(rec.ticketId))
         } else if (action === 'settleLapsed') {
             guardRecords(this.#log, 'settle', rec.ticketId, () => spend.settle(rec.ticketId, Number(pendingAmountOf(t))))

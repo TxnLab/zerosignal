@@ -279,12 +279,13 @@ describe('decideTicket', () => {
 
         // Go's vectors always carry 32 bytes; a journal can hold fewer. A
         // prefix of the claim must not match it: that settle would freeze.
+        // A claim above $0, which the sweep never accepts blind.
         it('does not match a receipt digest shorter than the claim', () => {
-            const claim = { ...open, status: 5, pendingBy: 1, pendingDigest: new Uint8Array(32).fill(7) }
-            const full = { ...rec, settle: { ...settle, receiptDigest: new Uint8Array(32).fill(7) } }
+            const claim = { ...open, status: 5, pendingBy: 1, pendingAmount: 9n, pendingDigest: new Uint8Array(32).fill(7) }
+            const full = { ...rec, settle: { ...settle, amountCharged: 9n, receiptDigest: new Uint8Array(32).fill(7) } }
             expect(decideTicket(full, claim, { nowMs: D - 60_000 })).toBe('settle')
             for (const digest of [new Uint8Array(16).fill(7), new Uint8Array(0)]) {
-                const short = { ...rec, settle: { ...settle, receiptDigest: digest } }
+                const short = { ...rec, settle: { ...settle, amountCharged: 9n, receiptDigest: digest } }
                 expect(decideTicket(short, claim, { nowMs: D - 60_000 })).toBe('wait')
             }
         })
@@ -299,7 +300,7 @@ describe('decideTicket', () => {
     // Go's generator guarantees this too; a fixture that lost an action would
     // leave the port's branch for it unchecked.
     it('has a vector for every action, on each rail', () => {
-        const actions: ReconcileAction[] = ['wait', 'forget', 'refundInactive', 'settleLapsed', 'settle', 'freeze']
+        const actions: ReconcileAction[] = ['wait', 'forget', 'refundInactive', 'settleLapsed', 'settle', 'freeze', 'acceptZeroClaim']
         for (const solana of [false, true]) {
             const rail = vectors.filter((v) => (v.ticket !== undefined || v.ticket_closed === true) === solana)
             expect(new Set(rail.map((v) => v.action))).toEqual(new Set(actions))

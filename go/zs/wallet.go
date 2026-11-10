@@ -889,6 +889,16 @@ func (c walletChain) freeze(ctx context.Context, rec TicketRecord, box *escrow.T
 	return res.TxID, nil
 }
 
+// accept pays the full settle fee, unlike freeze: a matching half finalizes
+// the ticket, and finalization needs the op-up.
+func (c walletChain) accept(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error) {
+	res, err := c.handle(rec, box).settleStandalone(ctx, a)
+	if err != nil {
+		return "", fmt.Errorf("wallet: accept claim: %w", err)
+	}
+	return res.TxID, nil
+}
+
 // settleGroupSpec builds the escrow.SettleGroupSpec the atomic-settle
 // verifier compares the node-composed group against. Every value is
 // sourced from the operator's signature-verified receipt (and the

@@ -1011,6 +1011,43 @@ describe('Solana reconciler', () => {
         expect(barred).toEqual(c.barred ? [rec.target] : [])
     })
 
+    // A node's $0 claim is accepted with the payer's ack at the claim's own
+    // fields, not the receipt's: the program settles at once only on a
+    // match, and the row's receipt here differs from the claim in more than
+    // the amount. Go's TestReconciler_AcceptsASolanaZeroClaim.
+    it("accepts a node's $0 claim at its own fields", async () => {
+        const ttft = (c: ClaimFields) => void (c.ttftMs += 5n)
+        const f = await fixture()
+        setTicket(f, TICKET_PENDING_BY_OPERATOR, 0n, ttft)
+        setTicketDeadline(f, nowSeconds() + 3600n)
+        const rec = rowOf('settle_pending', ARGS)
+        const { r, spend } = await solanaReconciler(f, rec)
+        await r.sweep()
+        expect(f.state.sent).toHaveLength(1)
+
+        // The same ack built by hand, from the claim's fields as the program
+        // stores them.
+        const want = await fixture()
+        setTicket(want, TICKET_PENDING_BY_OPERATOR, 0n, ttft)
+        setTicketDeadline(want, nowSeconds() + 3600n)
+        await want.wallet.sendAck(await want.ticket(), OPERATOR_ID, NODE_ID, TICKET_ID, { ...ARGS, amountCharged: 0n, ttftMs: ARGS.ttftMs + 5n })
+        expect(encodeTransaction(f.state.sent[0]!)).toEqual(encodeTransaction(want.state.sent[0]!))
+        expect(spend).toEqual([`release ${rec.ticketId}`])
+    })
+
+    // The accept itself refuses a claim above $0 before anything is sent, as
+    // the box path's does, so a caller other than decideSettlement can't echo
+    // a paid claim the payer holds no receipt for. Go's
+    // TestSolanaChain_AcceptRefusesAPaidClaim.
+    it('refuses to accept a claim above $0', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_PENDING_BY_OPERATOR, 1n)
+        setTicketDeadline(f, nowSeconds() + 3600n)
+        const t = await f.ticket()
+        await expect(solanaSweep(f.wallet).accept(rowOf('settle_pending'), { solana: t! }, new AbortController().signal)).rejects.toThrow('not $0')
+        expect(f.state.sent).toHaveLength(0)
+    })
+
     // A Solana submit waits for its confirmation, which can outlast the
     // sweep's callTimeoutMs. It is waited for, so a refund that lands late
     // frees its reservation that sweep, rather than read as a ticket gone on
@@ -1075,7 +1112,16 @@ describe('Solana reconciler', () => {
         expect(spend).toEqual([])
     })
 
-    // A re-settle or freeze that fails says which, over the cause.
+    // A re-settle, freeze or accept that fails says which, over the cause.
+    it('wraps a failed accept claim', async () => {
+        const f = await fixture()
+        setTicket(f, TICKET_PENDING_BY_OPERATOR, 0n)
+        const t = { solana: { ...(await f.ticket()), payer: '11111111111111111111111111111111' } }
+        const err = await solanaSweep(f.wallet)
+            .accept(rowOf('settle_pending', ARGS), t, new AbortController().signal)
+            .catch((x: unknown) => x)
+        expect((err as Error).message).toMatch(/^wallet: accept claim: .*not this wallet's/)
+    })
     it.each([
         ['re-settle', (s: ReturnType<typeof solanaSweep>, rec: TicketRecord) => s.resettle(rec, null, new AbortController().signal)],
         ['freeze', (s: ReturnType<typeof solanaSweep>, rec: TicketRecord) => s.freeze(rec, null, ARGS, new AbortController().signal)],

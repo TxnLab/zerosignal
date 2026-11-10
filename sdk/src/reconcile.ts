@@ -90,8 +90,10 @@ export function signedArgs(rec: Pick<TicketRecord, 'status' | 'settle' | 'signed
  * ReconcileAction is named for the escrow call it makes; wait and forget make
  * none. freeze is the payer's settle() at the row's receipt, sent because it
  * will mismatch the operator's claim, and paid for the freeze it causes.
+ * acceptZeroClaim is the payer's settle() at the operator's own $0 claim,
+ * which matches it and finalizes the ticket at once.
  */
-export type ReconcileAction = 'wait' | 'forget' | 'refundInactive' | 'settleLapsed' | 'settle' | 'freeze'
+export type ReconcileAction = 'wait' | 'forget' | 'refundInactive' | 'settleLapsed' | 'settle' | 'freeze' | 'acceptZeroClaim'
 
 /**
  * ClaimVerdict is how the operator's pending settle claim on a ticket stands
@@ -208,6 +210,8 @@ export const RECONCILE_SKEW_MS = 15_000
  *   - A claim that takes more than a receipt the node signed, verified or
  *     not, is frozen with the receipt's settle inside the window, and the
  *     payer never lapses it after.
+ *   - An operator claim of $0 inside the window is accepted at its own
+ *     values, receipt or none, once the row is past the settle-pending grace.
  *   - Past the window any other operator claim goes to settleLapsed, but only
  *     once lapseFallbackMs has passed, since the node's own driver normally
  *     does it.
@@ -230,10 +234,10 @@ export function decideTicket(
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
-    if (box === null) return decideSettlement(rec, null, '', clock, lapseFallbackMs)
+    if (box === null) return decideSettlement(rec, null, '', 0n, clock, lapseFallbackMs)
     const a = signedArgs(rec)
     const claim = a !== undefined ? judgeClaim(a, box) : ''
-    return decideSettlement(rec, ticketView(box), claim, clock, lapseFallbackMs)
+    return decideSettlement(rec, ticketView(box), claim, box.pendingAmount, clock, lapseFallbackMs)
 }
 
 /** The Solana ticket account fields decideSolanaTicket reads. */
@@ -249,21 +253,69 @@ export function decideSolanaTicket(
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
-    if (t === null) return decideSettlement(rec, null, '', clock, lapseFallbackMs)
+    if (t === null) return decideSettlement(rec, null, '', 0n, clock, lapseFallbackMs)
     const a = signedArgs(rec)
     const claim = a !== undefined ? judgeSolanaClaim(a, t) : ''
-    return decideSettlement(rec, solanaTicketView(t), claim, clock, lapseFallbackMs)
+    return decideSettlement(rec, solanaTicketView(t), claim, t.pending.amount, clock, lapseFallbackMs)
+}
+
+/**
+ * The operator's pending claim on a box as the payer's settle args: sent back,
+ * they match the claim and finalize it. Go's boxTicket.claimArgs.
+ */
+export function boxClaimArgs(box: TicketBoxView): SettleArgs {
+    return {
+        amountCharged: box.pendingAmount,
+        receiptDigest: box.pendingDigest,
+        ttftMs: box.pendingTtftMs,
+        decodeMs: box.pendingDecodeMs,
+        inputTokens: box.pendingInputCount,
+        outputTokens: box.pendingOutputCount,
+        outputUsageType: box.pendingOutputUsageType,
+        auxOutputUsageType: box.pendingAuxOutputUsageType,
+        auxOutputCount: box.pendingAuxOutputCount,
+    }
+}
+
+/**
+ * A claim's settle args, refused unless it claims $0. decideSettlement only
+ * picks the accept for a $0 claim; this keeps any other caller from echoing a
+ * paid claim the payer holds no receipt for. Go's zeroClaimArgs.
+ */
+export function zeroClaimArgs(a: SettleArgs): SettleArgs {
+    if (a.amountCharged !== 0n) throw new Error(`wallet: accept claim: the claim is ${a.amountCharged}, not $0`)
+    return a
+}
+
+/**
+ * The claim on a Solana ticket account as the payer's settle args. Go's
+ * solanaSweptTicket.claimArgs.
+ */
+export function solanaClaimArgs(p: ClaimFields): SettleArgs {
+    return {
+        amountCharged: p.amount,
+        receiptDigest: p.receiptDigest,
+        ttftMs: p.ttftMs,
+        decodeMs: p.decodeMs,
+        inputTokens: p.inputUnits,
+        outputTokens: p.outputUnits,
+        outputUsageType: p.outputUsageType,
+        auxOutputUsageType: p.auxUsageType,
+        auxOutputCount: p.auxCount,
+    }
 }
 
 // decideSettlement is decideTicket over the rail-neutral view of the ticket
 // (null when gone), with the rail's answer to how the operator's pending claim
-// stands against the payer's recorded receipt. Module-private, like Go's:
+// stands against the payer's recorded receipt, and the amount of that claim.
+// Module-private, like Go's:
 // each rail's wrapper calls it, and exporting it would make semver surface of
 // what is the wrappers' shared core.
 function decideSettlement(
     rec: Pick<TicketRecord, 'status' | 'expiresAt' | 'updatedAt' | 'settle' | 'signed'>,
     view: TicketView | null,
     claim: ClaimVerdict,
+    pending: bigint,
     clock: { nowMs: number; chainMs?: number },
     lapseFallbackMs: number = DEFAULT_LAPSE_FALLBACK_MS,
 ): ReconcileAction {
@@ -301,6 +353,15 @@ function decideSettlement(
             // amount, so no such ack can be what left an over-claim on the
             // box. Waiting would only spend window the freeze has to land in.
             if (view.status === SettleStatus.PendingOperator && claim === 'overclaims') return 'freeze'
+            // A turn that ended without a receipt sends no ack, and the node's
+            // lone claim then holds a pool slot until the deadline. Echoing the
+            // claim is safe only at $0: it moves no money, while the payer has
+            // nothing to check a larger claim against. The grace keeps it off
+            // a live ack that is still confirming, which would make one of the
+            // two revert.
+            if (view.status === SettleStatus.PendingOperator && pending === 0n && nowMs - updatedAt >= SETTLE_PENDING_GRACE_MS) {
+                return 'acceptZeroClaim'
+            }
             if (rec.status !== 'settle_pending' || rec.settle === undefined || nowMs - updatedAt < SETTLE_PENDING_GRACE_MS) {
                 return 'wait'
             }

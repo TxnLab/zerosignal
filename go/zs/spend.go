@@ -32,8 +32,10 @@ func recordSpend(log *slog.Logger, method, ticketID string, call func()) {
 // again, Settle at 0 or Release. When it cannot (no verified receipt arrived), the
 // refund watchdog and the ticket reconciler may resolve it once the ticket
 // ends on chain. Both Release on a refund they submitted. The reconciler also
-// Settles a lapse it submitted, at the operator's claim, and Releases
-// whatever is left of a ticket whose receipt the request already settled. A
+// Settles a lapse it submitted, at the operator's claim, Releases whatever is
+// left of a ticket whose receipt the request already settled, and Releases a
+// ticket whose $0 operator claim it accepted. A guard that already counted a
+// receipt above 0 for that ticket keeps the charge, overstating the spend. A
 // ticket none of them sees end is never resolved here, because until the box
 // closes the operator can still claim up to MaxPrice; the guard keeps that
 // exposure until its own window ends. Neither resolves a lapse the node sends

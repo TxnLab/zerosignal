@@ -207,6 +207,9 @@ func (f *fakeChain) resettle(_ context.Context, rec TicketRecord, _ *escrow.Tick
 func (f *fakeChain) freeze(_ context.Context, rec TicketRecord, _ *escrow.TicketRecord, _ SettleArgs) (string, error) {
 	return f.record("freeze " + rec.TicketID)
 }
+func (f *fakeChain) accept(_ context.Context, rec TicketRecord, _ *escrow.TicketRecord, _ SettleArgs) (string, error) {
+	return f.record("accept " + rec.TicketID)
+}
 
 func (f *fakeChain) seen() []string {
 	f.mu.Lock()
@@ -324,6 +327,10 @@ func (c *boxRecordingChain) freeze(ctx context.Context, rec TicketRecord, b *esc
 	c.handed = append(c.handed, b)
 	return c.fakeChain.freeze(ctx, rec, b, a)
 }
+func (c *boxRecordingChain) accept(ctx context.Context, rec TicketRecord, b *escrow.TicketRecord, a SettleArgs) (string, error) {
+	c.handed = append(c.handed, b)
+	return c.fakeChain.accept(ctx, rec, b, a)
+}
 
 // Each call that names the box gets the one the sweep read: walletChain takes
 // the operator's owner address, which the contract pays, from it.
@@ -339,6 +346,7 @@ func TestReconciler_HandsTheChainTheBoxItRead(t *testing.T) {
 		{"lapse", openRec(), box(escrow.StatusPendingSettle, escrow.PendingByOperator, -11*time.Minute), "lapse T"},
 		{"re-settle", pendingRec(time.Hour), box(escrow.StatusOpen, 0, time.Hour), "settle T"},
 		{"freeze", pendingRec(time.Hour), over, "freeze T"},
+		{"accept", openRec(), box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), "accept T"},
 	} {
 		j := newMemJournal()
 		put(t, j, tc.rec)
@@ -397,6 +405,9 @@ func TestReconciler_FreezesAWatchedOverclaimOnly(t *testing.T) {
 		want []string
 	}{
 		{"claim above a verified receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), []string{"freeze T"}},
+		// Inside the settle-pending grace too: the window can close before the
+		// grace ends, and an over-claim left to it lapses to the node.
+		{"claim above a verified receipt, inside the grace", pendingRec(time.Minute), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), []string{"freeze T"}},
 		{"claim above a receipt that failed a check", failed, withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), []string{"freeze T"}},
 		{"stranded receipt", pendingRec(time.Hour), box(escrow.StatusOpen, 0, time.Hour), nil},
 		{"claim matching the receipt", pendingRec(time.Hour), withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), settled), nil},
@@ -429,8 +440,9 @@ func TestReconciler_FreezesAWatchedOverclaimOnly(t *testing.T) {
 
 // On an escrow without resolveFrozen a freeze would lock the ticket's escrow
 // for good, so the sweep sends none: an unwatched over-claim is left to the
-// operator's lapse, still never lapsed by the payer, and a watched row is not
-// read at all.
+// operator's lapse, still never lapsed by the payer, and a watched row inside
+// the settle-pending grace, where no $0 claim is accepted either, is not read
+// at all.
 func TestReconciler_SendsNoFreezeWithoutResolveFrozen(t *testing.T) {
 	over := settled
 	over.AmountCharged += 100
@@ -444,12 +456,14 @@ func TestReconciler_SendsNoFreezeWithoutResolveFrozen(t *testing.T) {
 		{"watched", withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), over), true},
 	} {
 		j := newMemJournal()
-		put(t, j, pendingRec(time.Hour))
-		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}, noResolveFrozen: true}
 		var watching []string
 		if tc.watched {
 			watching = []string{"T"}
+			put(t, j, pendingRec(time.Minute))
+		} else {
+			put(t, j, pendingRec(time.Hour))
 		}
+		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": tc.box}, noResolveFrozen: true}
 		r := testReconciler(j, chain, watching...)
 		var reads int
 		r.overclaimed = func(TicketRecord) { reads++ }
@@ -509,7 +523,8 @@ func TestReconciler_BarsAnOverclaimingNode(t *testing.T) {
 	}
 }
 
-// argsChain is fakeChain recording the settle args each freeze sends.
+// argsChain is fakeChain recording the settle args each freeze and accept
+// sends.
 type argsChain struct {
 	fakeChain
 	sent []SettleArgs
@@ -518,6 +533,100 @@ type argsChain struct {
 func (c *argsChain) freeze(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error) {
 	c.sent = append(c.sent, a)
 	return c.fakeChain.freeze(ctx, rec, box, a)
+}
+
+func (c *argsChain) accept(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error) {
+	c.sent = append(c.sent, a)
+	return c.fakeChain.accept(ctx, rec, box, a)
+}
+
+// A $0 operator claim is accepted at the claim's own values, every one, since
+// the contract freezes a half that differs in any, and whatever receipt the
+// row records: a receipt that contradicts a $0 claim still owes nothing.
+// The accept itself refuses a claim above $0, before anything is sent, so a
+// caller other than decideSettlement can't echo a paid claim.
+func TestBoxChain_AcceptRefusesAPaidClaim(t *testing.T) {
+	chain := &argsChain{}
+	b := box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour)
+	b.PendingAmount = 1
+	if _, err := (boxChain{chain}).accept(context.Background(), openRec(), boxTicket{b}); err == nil {
+		t.Error("accept of a 1-microUSDC claim succeeded")
+	}
+	if len(chain.sent) != 0 {
+		t.Errorf("sent %+v for a paid claim", chain.sent)
+	}
+}
+
+func TestReconciler_AcceptsAZeroClaimAtItsOwnValues(t *testing.T) {
+	claim := SettleArgs{AmountCharged: 0, ReceiptDigest: [32]byte{7, 7}, TtftMs: 11, DecodeMs: 12, InputTokens: 13, OutputTokens: 14,
+		OutputUsageType: 1, AuxOutputUsageType: 2, AuxOutputCount: 15}
+	for name, rec := range map[string]TicketRecord{"no receipt": openRec(), "a contradicting receipt": pendingRec(time.Hour)} {
+		j := newMemJournal()
+		put(t, j, rec)
+		chain := &argsChain{fakeChain: fakeChain{boxes: map[string]*escrow.TicketRecord{
+			"T": withClaim(box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour), claim),
+		}}}
+		testReconciler(j, chain).sweep()
+		if got := chain.seen(); !slices.Equal(got, []string{"accept T"}) {
+			t.Fatalf("%s: calls %v, want the claim accepted", name, got)
+		}
+		if len(chain.sent) != 1 || chain.sent[0] != claim {
+			t.Errorf("%s: sent %+v, want the claim's own values %+v", name, chain.sent, claim)
+		}
+	}
+}
+
+// A watched row's $0 claim is the sweep's to accept once the row is past the
+// settle-pending grace, receipt or none and on an escrow without resolveFrozen
+// too; inside the grace the row is not read at all, so a turn shorter than the
+// grace costs no box reads.
+func TestReconciler_AcceptsAWatchedZeroClaimPastTheGrace(t *testing.T) {
+	zero := func() *escrow.TicketRecord {
+		return box(escrow.StatusPendingSettle, escrow.PendingByOperator, time.Hour)
+	}
+	young := openRec()
+	young.UpdatedAt = reconcileNow.Add(-settlePendingGrace + time.Second)
+	atGrace := openRec()
+	atGrace.UpdatedAt = reconcileNow.Add(-settlePendingGrace)
+	for _, tc := range []struct {
+		name            string
+		rec             TicketRecord
+		noResolveFrozen bool
+		want            []string
+		read            bool
+	}{
+		{"no receipt, past the grace", openRec(), false, []string{"accept T"}, true},
+		{"no receipt, past the grace, no resolveFrozen", openRec(), true, []string{"accept T"}, true},
+		{"receipt, past the grace", pendingRec(time.Hour), false, []string{"accept T"}, true},
+		{"no receipt, inside the grace", young, false, nil, false},
+		{"no receipt, exactly at the grace", atGrace, false, []string{"accept T"}, true},
+	} {
+		j := newMemJournal()
+		put(t, j, tc.rec)
+		chain := &fakeChain{boxes: map[string]*escrow.TicketRecord{"T": zero()}, noResolveFrozen: tc.noResolveFrozen}
+		r := testReconciler(j, chain, "T")
+		reads := 0
+		inner := r.chain
+		r.chain = countingReads{sweepChain: inner, n: &reads}
+		r.sweep()
+		if got := chain.seen(); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: calls %v, want %v", tc.name, got, tc.want)
+		}
+		if (reads > 0) != tc.read {
+			t.Errorf("%s: %d reads, want read=%v", tc.name, reads, tc.read)
+		}
+	}
+}
+
+// countingReads counts the sweep's ticket reads.
+type countingReads struct {
+	sweepChain
+	n *int
+}
+
+func (c countingReads) read(ctx context.Context, rec TicketRecord) (sweptTicket, error) {
+	*c.n++
+	return c.sweepChain.read(ctx, rec)
 }
 
 // A frozen ticket is the admin's, and no call the payer can make touches it, so the sweep

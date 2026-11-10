@@ -5,7 +5,7 @@
 
 // Internal: the journal sweep over a Solana wallet, Go's solanaChain.
 
-import type { SettleArgs, TicketRecord } from '../reconcile.js'
+import { type SettleArgs, type TicketRecord, solanaClaimArgs, zeroClaimArgs } from '../reconcile.js'
 import type { SweepChain, SweptTicket } from '../reconciler.js'
 import { decodeTicketId } from '../wallet.js'
 import { SOLANA_ENDING_TIMEOUT_MS, type SolanaWallet } from './wallet.js'
@@ -46,6 +46,12 @@ export function solanaSweep(w: SolanaWallet): SweepChain {
         // The payer's ack at args, which the program answers with a freeze
         // against a node claim that differs from it.
         freeze: (rec, t, args, signal) => ack('freeze', rec, t, args, signal),
+        // The payer's ack at the claim's own fields, which the program answers
+        // by settling at once.
+        accept: async (rec, t, signal) => {
+            if (!('solana' in t)) throw new Error('wallet: accept claim: no ticket account read')
+            return ack('accept claim', rec, t, zeroClaimArgs(solanaClaimArgs(t.solana.pending)), signal)
+        },
         // The program has resolve_frozen.
         freezes: async () => true,
         // A Solana submit waits for its confirmation, and one cut short that

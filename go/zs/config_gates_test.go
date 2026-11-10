@@ -578,9 +578,11 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	rec := TicketRecord{TicketID: "NkImzFiSJz3WK6cx7PFU1Q==", Target: NodeRef{Op: 3, Node: 4}, MaxPrice: 99, Settle: &settled}
 	box := &escrow.TicketRecord{OperatorOwnerAddr: crypto.GenerateAccount().Address.String()}
 	ctx := context.Background()
-	// A freeze sends the args it is given, not the row's.
+	// A freeze and an accept send the args they are given, not the row's.
 	frozeAt := settled
 	frozeAt.AmountCharged++
+	acceptAt := settled
+	acceptAt.AmountCharged = 0
 	for _, step := range []struct {
 		method string
 		call   func() (string, error)
@@ -589,6 +591,7 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 		{"refundInactive", func() (string, error) { return chain.refund(ctx, rec) }},
 		{"settle", func() (string, error) { return chain.resettle(ctx, rec, box) }},
 		{"settle", func() (string, error) { return chain.freeze(ctx, rec, box, frozeAt) }},
+		{"settle", func() (string, error) { return chain.accept(ctx, rec, box, acceptAt) }},
 	} {
 		before := len(submitted())
 		if _, err := step.call(); err != nil {
@@ -600,8 +603,8 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 		}
 	}
 	calls := escrowCalls(t, submitted(), "settle")
-	if len(calls) != 2 {
-		t.Fatalf("%d settle calls, want the re-settle's and the freeze's", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("%d settle calls, want the re-settle's, the freeze's and the accept's", len(calls))
 	}
 	if got, asOperator := settleCallArgs(t, calls[0]); got != settled || asOperator {
 		t.Errorf("re-settle carried\n  %+v (asOperator %v)\nwant the journaled\n  %+v as the payer", got, asOperator, settled)
@@ -613,6 +616,21 @@ func TestWalletChain_LapseAndResettleSubmit(t *testing.T) {
 	// 1000 minimum for its own call; the re-settle pays for what finalize fires.
 	if calls[1].Fee != 1000 || calls[0].Fee <= calls[1].Fee {
 		t.Errorf("fees: re-settle %d, freeze %d; want the freeze at the 1000 minimum and the re-settle above it", calls[0].Fee, calls[1].Fee)
+	}
+	// An accept matches the claim and so finalizes: it pays what a re-settle
+	// at the same values pays, or algod refuses it for the op-up it can't fund.
+	if got, asOperator := settleCallArgs(t, calls[2]); got != acceptAt || asOperator {
+		t.Errorf("accept carried\n  %+v (asOperator %v)\nwant\n  %+v as the payer", got, asOperator, acceptAt)
+	}
+	zeroRec := rec
+	zeroRec.Settle = &acceptAt
+	before := len(submitted())
+	if _, err := chain.resettle(ctx, zeroRec, box); err != nil {
+		t.Fatal(err)
+	}
+	zeroResettle := escrowCalls(t, submitted()[before:], "settle")
+	if len(zeroResettle) != 1 || calls[2].Fee <= 1000 || calls[2].Fee != zeroResettle[0].Fee {
+		t.Errorf("fees: accept %d; want above the 1000 minimum and equal to a re-settle at the same values (%+v)", calls[2].Fee, zeroResettle)
 	}
 }
 

@@ -31,7 +31,7 @@ import {
     journalReceipt,
     walletChain,
 } from '../src/reconciler.js'
-import type { SettleArgs, TicketRecord } from '../src/reconcile.js'
+import { SETTLE_PENDING_GRACE_MS, type SettleArgs, type TicketRecord } from '../src/reconcile.js'
 import { type EscrowChain, Wallet, decodeTicketId } from '../src/wallet.js'
 import { recLogger } from './turn-fixtures.js'
 
@@ -118,6 +118,13 @@ class FakeChain implements TicketChain {
         this.handed.push(box)
         this.frozeWith.push(args)
         return this.#record(`freeze ${rec.ticketId}`)
+    }
+    /** Each accept's args, in order. */
+    acceptedWith: SettleArgs[] = []
+    accept = (rec: TicketRecord, box: TicketBox, args: SettleArgs) => {
+        this.handed.push(box)
+        this.acceptedWith.push(args)
+        return this.#record(`accept ${rec.ticketId}`)
     }
     /** Fakes an escrow without resolveFrozen. */
     noResolveFrozen = false
@@ -356,6 +363,9 @@ describe('Reconciler', () => {
     // else to freeze it inside the window.
     for (const [name, rec, b, want] of [
         ['claim above a verified receipt', pendingRec(HOUR), overclaimBox(), ['freeze T']],
+        // Inside the settle-pending grace too: the window can close before the
+        // grace ends, and an over-claim left to it lapses to the node.
+        ['claim above a verified receipt, inside the grace', pendingRec(MIN), overclaimBox(), ['freeze T']],
         ['claim above a receipt that failed a check', openRec({ signed: settled }), overclaimBox(), ['freeze T']],
         ['stranded receipt', pendingRec(HOUR), box(STATUS_OPEN, 0, HOUR), []],
         ['claim above the receipt, past the lapse fallback', pendingRec(HOUR), overclaimBox(-11 * MIN), []],
@@ -377,7 +387,8 @@ describe('Reconciler', () => {
     // On an escrow without resolveFrozen a freeze would lock the ticket's
     // escrow for good, so the sweep sends none: an unwatched over-claim is
     // left to the operator's lapse, still never lapsed by the payer, and a
-    // watched row is not read at all. Go's
+    // watched row inside the settle-pending grace, where no $0 claim is
+    // accepted either, is not read at all. Go's
     // TestReconciler_SendsNoFreezeWithoutResolveFrozen.
     for (const [name, b, watched] of [
         ['unwatched, inside the window', overclaimBox(), false],
@@ -386,7 +397,7 @@ describe('Reconciler', () => {
     ] as const) {
         it(`sends no freeze without resolveFrozen: ${name}`, async () => {
             const j = memoryJournal()
-            await put(j, pendingRec(HOUR))
+            await put(j, pendingRec(watched ? MIN : HOUR))
             const chain = new FakeChain()
             chain.noResolveFrozen = true
             chain.boxes.set('T', b)
@@ -433,9 +444,9 @@ describe('Reconciler', () => {
         })
     }
 
-    it('never reads a watched row with no receipt', async () => {
+    it('never reads a watched row with no receipt inside the settle-pending grace', async () => {
         const j = memoryJournal()
-        await put(j, openRec())
+        await put(j, openRec({ updatedAt: NOW - SETTLE_PENDING_GRACE_MS + 1 }))
         const chain = new FakeChain()
         let reads = 0
         chain.readBox = async () => {
@@ -445,6 +456,86 @@ describe('Reconciler', () => {
         await testReconciler(j, chain, ['T']).r.sweep()
         expect([reads, chain.calls]).toEqual([0, []])
     })
+
+    // A $0 operator claim is accepted at the claim's own values, every one,
+    // since the contract freezes a half that differs in any, and whatever
+    // receipt the row records. Go's
+    // TestReconciler_AcceptsAZeroClaimAtItsOwnValues.
+    for (const [name, rec] of [
+        ['no receipt', openRec()],
+        ['a contradicting receipt', pendingRec(HOUR)],
+    ] as const) {
+        it(`accepts a $0 claim at its own values: ${name}`, async () => {
+            const claim: SettleArgs = {
+                amountCharged: 0n,
+                receiptDigest: new Uint8Array(32).fill(7),
+                ttftMs: 11n,
+                decodeMs: 12n,
+                inputTokens: 13n,
+                outputTokens: 14n,
+                outputUsageType: 1,
+                auxOutputUsageType: 2,
+                auxOutputCount: 15n,
+            }
+            const j = memoryJournal()
+            await put(j, rec)
+            const chain = new FakeChain()
+            const b = {
+                ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, HOUR),
+                pendingAmount: claim.amountCharged,
+                pendingDigest: claim.receiptDigest,
+                pendingTtftMs: claim.ttftMs,
+                pendingDecodeMs: claim.decodeMs,
+                pendingInputCount: claim.inputTokens,
+                pendingOutputCount: claim.outputTokens,
+                pendingOutputUsageType: claim.outputUsageType,
+                pendingAuxOutputUsageType: claim.auxOutputUsageType,
+                pendingAuxOutputCount: claim.auxOutputCount,
+            }
+            chain.boxes.set('T', b)
+            const g = outcomeGuard()
+            await testReconciler(j, chain, [], g).r.sweep()
+            expect([chain.calls, chain.acceptedWith, chain.handed]).toEqual([['accept T'], [claim], [b]])
+            expect(g.calls).toEqual(['release T'])
+        })
+    }
+
+    // The accept itself refuses a claim above $0, before anything is sent, so
+    // a caller other than decideSettlement can't echo a paid claim. Go's
+    // TestBoxChain_AcceptRefusesAPaidClaim.
+    it('refuses to accept a claim above $0', async () => {
+        const chain = new FakeChain()
+        const b = { ...box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, HOUR), pendingAmount: 1n }
+        await expect(boxSweep(chain).accept(openRec(), { box: b }, new AbortController().signal)).rejects.toThrow('not $0')
+        expect(chain.acceptedWith).toEqual([])
+    })
+
+    // A watched row's $0 claim is the sweep's to accept once the row is past
+    // the settle-pending grace, receipt or none and on an escrow without
+    // resolveFrozen too; inside the grace the row is not read. Go's
+    // TestReconciler_AcceptsAWatchedZeroClaimPastTheGrace.
+    for (const [name, rec, noResolveFrozen, want, read] of [
+        ['no receipt, past the grace', openRec(), false, ['accept T'], true],
+        ['no receipt, past the grace, no resolveFrozen', openRec(), true, ['accept T'], true],
+        ['receipt, past the grace', pendingRec(HOUR), false, ['accept T'], true],
+        ['no receipt, inside the grace', openRec({ updatedAt: NOW - SETTLE_PENDING_GRACE_MS + 1 }), false, [], false],
+        ['no receipt, exactly at the grace', openRec({ updatedAt: NOW - SETTLE_PENDING_GRACE_MS }), false, ['accept T'], true],
+        // A row time that isn't a number reads as long past.
+        ['no receipt, no row time', openRec({ updatedAt: Number.NaN }), false, ['accept T'], true],
+    ] as const) {
+        it(`accepts a watched $0 claim only past the grace: ${name}`, async () => {
+            const j = memoryJournal()
+            await put(j, rec)
+            const chain = new FakeChain()
+            chain.noResolveFrozen = noResolveFrozen
+            chain.boxes.set('T', box(STATUS_PENDING_SETTLE, PENDING_BY_OPERATOR, HOUR))
+            let reads = 0
+            const readBox = chain.readBox
+            chain.readBox = async (id: string) => (reads++, readBox(id))
+            await testReconciler(j, chain, ['T']).r.sweep()
+            expect([chain.calls, reads > 0]).toEqual([want, read])
+        })
+    }
 
     it('logs each submit it made', async () => {
         const j = memoryJournal()
@@ -834,6 +925,19 @@ describe('walletChain', () => {
         expect(calls.settleStandalone).toEqual([
             { ...ids, args: settled, maxPrice: 99n, payer: PAYER, operatorOwnerAddr: 'BOXOWNER' },
             { ...ids, args: frozeAt, maxPrice: 99n, payer: PAYER, operatorOwnerAddr: 'BOXOWNER', outerFeeOnly: true },
+        ])
+    })
+
+    // An accept matches the claim, so it finalizes and pays for the finalize,
+    // as a re-settle does: on the outer call's fee alone algod refuses it.
+    // Go's TestWalletChain_LapseAndResettleSubmit.
+    it('accepts a claim at the args it is handed, paying the finalizing fee', async () => {
+        const { w, calls } = wallet()
+        const chain = walletChain(w)!
+        const acceptAt = { ...settled, amountCharged: 0n }
+        expect(await chain.accept(rec, owned, acceptAt, new AbortController().signal)).toBe('SETTLE')
+        expect(calls.settleStandalone).toEqual([
+            { ...ids, args: acceptAt, maxPrice: 99n, payer: PAYER, operatorOwnerAddr: 'BOXOWNER' },
         ])
     })
 

@@ -64,6 +64,20 @@ func (c solanaChain) freeze(ctx context.Context, rec TicketRecord, t sweptTicket
 	return sig, nil
 }
 
+// accept is the payer's ack at t's own pending claim, which the program
+// answers by settling at once. Reached only with a ticket read.
+func (c solanaChain) accept(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error) {
+	a, err := zeroClaimArgs(t)
+	if err != nil {
+		return "", err
+	}
+	sig, err := c.ack(ctx, rec, t, a)
+	if err != nil {
+		return sig, fmt.Errorf("wallet: accept claim: %w", err)
+	}
+	return sig, nil
+}
+
 // ack sends the payer's half at a over the ticket account the sweep read.
 func (c solanaChain) ack(ctx context.Context, rec TicketRecord, t sweptTicket, a SettleArgs) (string, error) {
 	id, err := solanaTicketID("ack", rec.TicketID)

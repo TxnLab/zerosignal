@@ -185,6 +185,60 @@ func TestReconciler_SweepsASolanaTicket(t *testing.T) {
 	}
 }
 
+// A node's $0 claim is accepted with the payer's ack at the claim's own
+// fields, not the receipt's: the program settles at once only on a match, and
+// the row's receipt here differs from the claim in more than the amount.
+func TestReconciler_AcceptsASolanaZeroClaim(t *testing.T) {
+	ttft := func(fl *zsescrow.ClaimFields) { fl.TTFTMs += 5 }
+	f := newSolanaAckFixture(t)
+	f.setTicket(t, zsescrow.TicketPendingByOperator, 0, ttft)
+	f.setTicketDeadline(t, time.Now().Add(time.Hour))
+	a := f.args
+	rec := f.row(TicketSettlePending, &a)
+	j := newMemJournal()
+	if err := j.Put(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	g := &outcomeGuard{}
+	f.reconciler(j, g).sweep()
+	if len(f.cluster.acks) != 1 {
+		t.Fatalf("%d sent, want the payer's ack at the claim", len(f.cluster.acks))
+	}
+	got, _ := f.cluster.acks[0].MarshalBinary()
+
+	// The same ack built by hand, from the claim's fields as the program
+	// stores them.
+	want := newSolanaAckFixture(t)
+	want.setTicket(t, zsescrow.TicketPendingByOperator, 0, ttft)
+	want.setTicketDeadline(t, time.Now().Add(time.Hour))
+	claim := f.args
+	claim.AmountCharged, claim.TtftMs = 0, f.args.TtftMs+5
+	if _, err := want.wallet.sendAck(t.Context(), want.ticket(t), want.operatorID, want.nodeID, want.ticketID, claim); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := want.cluster.acks[0].MarshalBinary(); !bytes.Equal(got, w) {
+		t.Fatal("the reconciler's ack is not the payer's at the claim's own fields")
+	}
+	if seen := g.seen(); !slices.Equal(seen, []string{"release " + rec.TicketID}) {
+		t.Errorf("spend guard heard %q, want the reservation released", seen)
+	}
+}
+
+// The Solana accept refuses a claim above $0 before anything is sent, as the
+// box path's does, so a caller other than decideSettlement can't echo a paid
+// claim the payer holds no receipt for.
+func TestSolanaChain_AcceptRefusesAPaidClaim(t *testing.T) {
+	f := newSolanaAckFixture(t)
+	f.setTicket(t, zsescrow.TicketPendingByOperator, 1, nil)
+	rec := f.row(TicketSettlePending, nil)
+	if _, err := (solanaChain{f.wallet}).accept(t.Context(), rec, sweptSolana(f.ticket(t))); err == nil {
+		t.Error("accept of a 1-microUSDC claim succeeded")
+	}
+	if len(f.cluster.acks) != 0 {
+		t.Errorf("%d acks sent for a paid claim", len(f.cluster.acks))
+	}
+}
+
 // A Solana submit waits for its confirmation, which can outlast the sweep's
 // callTimeout. It is waited for, so a refund that lands late frees its
 // reservation that sweep, rather than read as a ticket gone on the next.
@@ -268,7 +322,7 @@ func TestReconciler_KeepsASolanaRowItCannotRead(t *testing.T) {
 	}
 }
 
-// A re-settle or freeze that fails says which, over the cause.
+// A re-settle, freeze or accept that fails says which, over the cause.
 func TestSolanaChain_WrapsAFailedAck(t *testing.T) {
 	f := newSolanaAckFixture(t)
 	rec := f.row(TicketSettlePending, &f.args)
@@ -280,6 +334,11 @@ func TestSolanaChain_WrapsAFailedAck(t *testing.T) {
 		if _, err := call(); err == nil || !strings.HasPrefix(err.Error(), what) || !strings.Contains(err.Error(), "no ticket account") {
 			t.Errorf("err %v, want %q over the wallet's refusal", err, what)
 		}
+	}
+	// An accept always has a ticket read; another payer's is refused.
+	if _, err := ch.accept(t.Context(), rec, solanaSweptTicket{&zsescrow.Ticket{}}); err == nil ||
+		!strings.HasPrefix(err.Error(), "wallet: accept claim: ") || !strings.Contains(err.Error(), "not this wallet's") {
+		t.Errorf("accept err %v, want it wrapped over the wallet's refusal", err)
 	}
 }
 

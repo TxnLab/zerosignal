@@ -55,6 +55,9 @@ const (
 	// because it will mismatch the operator's claim, and paid for the freeze
 	// it causes.
 	reconcileFreeze
+	// reconcileAcceptZeroClaim is the payer's settle() at the operator's own
+	// $0 claim, which matches it and finalizes the ticket at once.
+	reconcileAcceptZeroClaim
 )
 
 func (a reconcileAction) String() string {
@@ -69,6 +72,8 @@ func (a reconcileAction) String() string {
 		return "settle"
 	case reconcileFreeze:
 		return "freeze"
+	case reconcileAcceptZeroClaim:
+		return "acceptZeroClaim"
 	}
 	return "wait"
 }
@@ -172,6 +177,9 @@ type sweptTicket interface {
 	pendingAmount() uint64
 	// judge is how the operator's claim stands against a.
 	judge(a SettleArgs) ClaimVerdict
+	// claimArgs is the operator's pending claim as the payer's settle args:
+	// sent back, they match the claim and finalize it.
+	claimArgs() SettleArgs
 }
 
 type boxTicket struct{ *escrow.TicketRecord }
@@ -179,6 +187,22 @@ type boxTicket struct{ *escrow.TicketRecord }
 func (b boxTicket) view() settle.Ticket             { return b.View() }
 func (b boxTicket) pendingAmount() uint64           { return b.PendingAmount }
 func (b boxTicket) judge(a SettleArgs) ClaimVerdict { return judgeClaim(a, b.TicketRecord) }
+
+// The box stores both usage types as one byte (arc4.Uint8), so the narrowing
+// loses nothing.
+func (b boxTicket) claimArgs() SettleArgs {
+	return SettleArgs{
+		AmountCharged:      b.PendingAmount,
+		ReceiptDigest:      b.PendingDigest,
+		TtftMs:             b.PendingTtftMs,
+		DecodeMs:           b.PendingDecodeMs,
+		InputTokens:        b.PendingInputCount,
+		OutputTokens:       b.PendingOutputCount,
+		OutputUsageType:    ticket.UsageType(b.PendingOutputUsageType),
+		AuxOutputUsageType: ticket.UsageType(b.PendingAuxOutputUsageType),
+		AuxOutputCount:     b.PendingAuxOutputCount,
+	}
+}
 
 // sweptBox is box as a sweptTicket: nil, not a typed nil, when gone.
 func sweptBox(box *escrow.TicketRecord) sweptTicket {
@@ -193,6 +217,21 @@ type solanaSweptTicket struct{ *zsescrow.Ticket }
 func (t solanaSweptTicket) view() settle.Ticket             { return t.View() }
 func (t solanaSweptTicket) pendingAmount() uint64           { return t.Pending.Amount }
 func (t solanaSweptTicket) judge(a SettleArgs) ClaimVerdict { return judgeSolanaClaim(a, t.Ticket) }
+
+func (t solanaSweptTicket) claimArgs() SettleArgs {
+	p := t.Pending
+	return SettleArgs{
+		AmountCharged:      p.Amount,
+		ReceiptDigest:      p.ReceiptDigest,
+		TtftMs:             p.TTFTMs,
+		DecodeMs:           p.DecodeMs,
+		InputTokens:        p.InputUnits,
+		OutputTokens:       p.OutputUnits,
+		OutputUsageType:    ticket.UsageType(p.OutputUsageType),
+		AuxOutputUsageType: ticket.UsageType(p.AuxUsageType),
+		AuxOutputCount:     p.AuxCount,
+	}
+}
 
 // sweptSolana is t as a sweptTicket: nil, not a typed nil, when closed.
 func sweptSolana(t *zsescrow.Ticket) sweptTicket {
@@ -223,14 +262,14 @@ func decideSolanaTicket(rec TicketRecord, t *zsescrow.Ticket, now time.Time, lap
 
 func decideSwept(rec TicketRecord, t sweptTicket, now time.Time, lapseFallback time.Duration) reconcileAction {
 	if t == nil {
-		return decideSettlement(rec, nil, ClaimUnread, now, lapseFallback)
+		return decideSettlement(rec, nil, ClaimUnread, 0, now, lapseFallback)
 	}
 	view := t.view()
 	claim := ClaimUnread
 	if a := rec.signedArgs(); a != nil {
 		claim = t.judge(*a)
 	}
-	return decideSettlement(rec, &view, claim, now, lapseFallback)
+	return decideSettlement(rec, &view, claim, t.pendingAmount(), now, lapseFallback)
 }
 
 // decideSettlement is what the sweep does about one journaled ticket, given
@@ -244,13 +283,17 @@ func decideSwept(rec TicketRecord, t sweptTicket, now time.Time, lapseFallback t
 //   - A claim that takes more than a receipt the node signed, verified or
 //     not, is frozen with the receipt's settle inside the window, and the
 //     payer never lapses it after.
+//   - An operator claim of $0 inside the window is accepted at its own values,
+//     receipt or none, once the row is past the settle-pending grace.
 //   - Past the window any other operator claim goes to settleLapsed, but only
 //     once lapseFallback has passed, since the node's own driver normally does
 //     it.
 //   - A missing ticket is finished only once it has expired: the open is
 //     submitted without waiting for confirmation, and the contract accepts it
 //     until expires_at.
-func decideSettlement(rec TicketRecord, t *settle.Ticket, claim ClaimVerdict, now time.Time, lapseFallback time.Duration) reconcileAction {
+//
+// pending is the amount of the operator's claim t carries.
+func decideSettlement(rec TicketRecord, t *settle.Ticket, claim ClaimVerdict, pending uint64, now time.Time, lapseFallback time.Duration) reconcileAction {
 	if t == nil {
 		if now.After(rec.ExpiresAt.Add(reconcileSkew)) {
 			return reconcileForget
@@ -280,6 +323,14 @@ func decideSettlement(rec TicketRecord, t *settle.Ticket, claim ClaimVerdict, no
 		// only spend window the freeze has to land in.
 		if t.Status == settle.StatusPendingOperator && claim == ClaimOverclaims {
 			return reconcileFreeze
+		}
+		// A turn that ended without a receipt sends no ack, and the node's lone
+		// claim then holds a pool slot until the deadline. Echoing the claim is
+		// safe only at $0: it moves no money, while the payer has nothing to
+		// check a larger claim against. The grace keeps it off a live ack that
+		// is still confirming, which would make one of the two revert.
+		if t.Status == settle.StatusPendingOperator && pending == 0 && now.Sub(rec.UpdatedAt) >= settlePendingGrace {
+			return reconcileAcceptZeroClaim
 		}
 		if rec.Status != TicketSettlePending || rec.Settle == nil || now.Sub(rec.UpdatedAt) < settlePendingGrace {
 			return reconcileWait
@@ -319,6 +370,9 @@ type ticketChain interface {
 	// freeze sends the payer's settle at a, against an operator claim on box
 	// that takes more.
 	freeze(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error)
+	// accept sends the payer's settle at a, the operator's own claim on box,
+	// which finalizes the ticket.
+	accept(ctx context.Context, rec TicketRecord, box *escrow.TicketRecord, a SettleArgs) (string, error)
 	// freezes is whether the deployed escrow has resolveFrozen. Without it
 	// freeze is never called: the frozen escrow would be locked for good.
 	freezes() bool
@@ -333,6 +387,8 @@ type sweepChain interface {
 	lapse(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error)
 	resettle(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error)
 	freeze(ctx context.Context, rec TicketRecord, t sweptTicket, a SettleArgs) (string, error)
+	// accept sends the payer's half at t's own pending claim.
+	accept(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error)
 	freezes() bool
 	// submitTimeout bounds each submit in place of the reconciler's
 	// callTimeout, for a rail whose submit waits for its outcome; 0 keeps it.
@@ -360,6 +416,27 @@ func (c boxChain) resettle(ctx context.Context, rec TicketRecord, t sweptTicket)
 
 func (c boxChain) freeze(ctx context.Context, rec TicketRecord, t sweptTicket, a SettleArgs) (string, error) {
 	return c.ticketChain.freeze(ctx, rec, boxOf(t), a)
+}
+
+// accept is reached only with a ticket read, since only a pending claim is
+// accepted.
+func (c boxChain) accept(ctx context.Context, rec TicketRecord, t sweptTicket) (string, error) {
+	a, err := zeroClaimArgs(t)
+	if err != nil {
+		return "", err
+	}
+	return c.ticketChain.accept(ctx, rec, boxOf(t), a)
+}
+
+// zeroClaimArgs is t's claim as the payer's settle args, refused unless it
+// claims $0. decideSettlement only picks the accept for a $0 claim; this keeps
+// any other caller from echoing a paid claim the payer holds no receipt for.
+func zeroClaimArgs(t sweptTicket) (SettleArgs, error) {
+	a := t.claimArgs()
+	if a.AmountCharged != 0 {
+		return SettleArgs{}, fmt.Errorf("wallet: accept claim: the claim is %d, not $0", a.AmountCharged)
+	}
+	return a, nil
 }
 
 func (boxChain) submitTimeout() time.Duration { return 0 }
@@ -529,10 +606,12 @@ func (r *reconciler) sweep() {
 		if r.exhausted(rec.TicketID) {
 			continue
 		}
-		// A watched row is read only when it records a receipt, the one case
-		// a freeze can come of, and only on an escrow that can resolve one.
+		// A watched row is read only when the sweep may act on it: a freeze
+		// needs a receipt and an escrow that can resolve one, and a $0 claim's
+		// acceptance waits out the settle-pending grace. The watchdog would
+		// hold such a claim's pool slot to the deadline.
 		watched := r.watching(rec.TicketID)
-		if watched && (rec.signedArgs() == nil || !r.chain.freezes()) {
+		if watched && !(rec.signedArgs() != nil && r.chain.freezes()) && r.now().Sub(rec.UpdatedAt) < settlePendingGrace {
 			continue
 		}
 		r.reconcileRow(rec, watched)
@@ -564,8 +643,8 @@ func (r *reconciler) exhausted(ticketID string) bool {
 	return r.failures[ticketID] >= reconcileMaxFailures
 }
 
-// reconcile acts on rec. A watched ticket gets a freeze or nothing: every
-// other call is its watchdog's.
+// reconcile acts on rec. A watched ticket gets a freeze, a $0 claim's
+// acceptance or nothing: every other call is its watchdog's.
 func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 	ctx, cancel := context.WithTimeout(r.ctx, r.callTimeout)
 	t, err := r.chain.read(ctx, rec)
@@ -584,7 +663,7 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 		// over-claim, which the operator can lapse itself.
 		action = reconcileWait
 	}
-	if watched && action != reconcileFreeze {
+	if watched && action != reconcileFreeze && action != reconcileAcceptZeroClaim {
 		return
 	}
 	var submit func(context.Context) (string, error)
@@ -604,6 +683,8 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 		// The receipt's values, not the box's: settling at the claim's own
 		// figure would match it and pay it.
 		submit = func(ctx context.Context) (string, error) { return r.chain.freeze(ctx, rec, t, *rec.signedArgs()) }
+	case reconcileAcceptZeroClaim:
+		submit = func(ctx context.Context) (string, error) { return r.chain.accept(ctx, rec, t) }
 	}
 	budget := r.callTimeout
 	if d := r.chain.submitTimeout(); d > 0 {
@@ -634,8 +715,10 @@ func (r *reconciler) reconcile(rec TicketRecord, watched bool) {
 			// operator's claim for a lapse. A journaled receipt means the
 			// request path already counted its charge, so a lapse only drops
 			// what reservation is left, rather than counting a second charge.
+			// An accepted $0 claim charges nothing, so it only releases.
 			switch {
-			case action == reconcileRefund, action == reconcileLapse && rec.Settle != nil:
+			case action == reconcileRefund, action == reconcileAcceptZeroClaim,
+				action == reconcileLapse && rec.Settle != nil:
 				recordSpend(r.log, "release", rec.TicketID, func() { r.spend.Release(rec.TicketID) })
 			case action == reconcileLapse:
 				recordSpend(r.log, "settle", rec.TicketID, func() { r.spend.Settle(rec.TicketID, t.pendingAmount()) })
