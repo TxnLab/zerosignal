@@ -1,6 +1,6 @@
 module github.com/TxnLab/zerosignal/go
 
-go 1.26
+go 1.27.0
 
 require (
 	filippo.io/age v1.3.2
