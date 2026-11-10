@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
     type Instruction,
+    closeAccount,
     compileMessage,
     createAssociatedTokenAccountIdempotent,
     createProgramAddress,
@@ -39,6 +40,7 @@ import {
     setComputeUnitLimit,
     setComputeUnitPrice,
     signTransaction,
+    systemTransfer,
     transferChecked,
     verifySignatures,
     verifyStrict,
@@ -250,6 +252,8 @@ describe('solana_codec_vectors.json', () => {
         transfer_checked: (a) => transferChecked(a.source!, a.mint!, a.destination!, a.authority!, BigInt(a.amount!), Number(a.decimals)),
         mint_to: (a) => mintTo(a.mint!, a.destination!, a.authority!, BigInt(a.amount!)),
         create_associated_token_account_idempotent: (a) => createAssociatedTokenAccountIdempotent(a.payer!, a.owner!, a.mint!),
+        close_account: (a) => closeAccount(a.account!, a.destination!, a.owner!),
+        system_transfer: (a) => systemTransfer(a.from!, a.to!, BigInt(a.lamports!)),
     }
     it('covers every builder', () => {
         expect(new Set((codec.builders as Json[]).map((c) => c.builder))).toEqual(new Set(Object.keys(builders)))
@@ -272,6 +276,15 @@ describe('solana_codec_vectors.json', () => {
         expect(() => setComputeUnitPrice((1n << 64n) - 1n)).not.toThrow()
         expect(() => setComputeUnitPrice(1n << 64n)).toThrow(RangeError)
         expect(() => setComputeUnitPrice(-1n)).toThrow(RangeError)
+    })
+
+    // setBigUint64 wraps silently: a balance less a fee gone negative would
+    // otherwise ask to send 2^64 − 5000 lamports.
+    it('refuses a transfer its data cannot carry', () => {
+        const k = '11111111111111111111111111111111'
+        expect(() => systemTransfer(k, k, (1n << 64n) - 1n)).not.toThrow()
+        expect(() => systemTransfer(k, k, 1n << 64n)).toThrow(RangeError)
+        expect(() => systemTransfer(k, k, -1n)).toThrow(RangeError)
     })
 
     it('derives program addresses as Go does', () => {

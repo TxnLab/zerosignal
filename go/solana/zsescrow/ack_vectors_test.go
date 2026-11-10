@@ -20,7 +20,6 @@ package zsescrow_test
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -287,10 +286,8 @@ func buildAckVectors(t *testing.T) ackVectors {
 	built("compute_budget_twice", "a second SetComputeUnitLimit", "computeBudget.duplicate", compile(relayer, cbLimit, solana.SetComputeUnitLimit(80_000), ack), spec)
 	built("compute_budget_after_ack", "a compute-budget instruction after the ack", "computeBudget.order", compile(relayer, ack, cbPrice), spec)
 
-	systemTransfer := solana.Instruction{ProgramID: solana.SystemProgramID,
-		Accounts: []solana.AccountMeta{{PublicKey: relayer, IsSigner: true, IsWritable: true}, {PublicKey: w.attacker, IsWritable: true}},
-		Data:     binary.LittleEndian.AppendUint64([]byte{2, 0, 0, 0}, 1_000_000)}
-	built("system_transfer_beside", "a System Program transfer from the relayer's own key beside the ack", "instruction.program", compile(relayer, ack, systemTransfer), spec)
+	built("system_transfer_beside", "a System Program transfer from the relayer's own key beside the ack", "instruction.program",
+		compile(relayer, ack, solana.SystemTransfer(relayer, w.attacker, 1_000_000)), spec)
 	built("token_transfer_beside", "a TransferChecked of the payer's USDC to another key's account beside the ack", "instruction.program",
 		compile(relayer, solana.TransferChecked(d.TokenAccount(spec.Payer), d.Mint, d.TokenAccount(w.attacker), spec.Payer, 1, w.decimals), ack), spec)
 	built("precompile_beside", "an Ed25519 precompile instruction before the ack", "instruction.program",

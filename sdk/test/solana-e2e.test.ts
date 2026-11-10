@@ -26,15 +26,15 @@ import * as ed25519 from '@noble/ed25519'
 import { base64 } from '@scure/base'
 import {
     type Instruction,
-    type PublicKey,
-    SYSTEM_PROGRAM_ID,
     TOKEN_PROGRAM_ID,
+    closeAccount,
     compileMessage,
     createAssociatedTokenAccountIdempotent,
     encodeBase58,
     encodeTransaction,
     newTransaction,
     signTransaction,
+    systemTransfer,
     transferChecked,
 } from '@txnlab/zs-proto/solana'
 import {
@@ -325,36 +325,6 @@ async function newKey(): Promise<Key> {
 // A one-signature transaction's fee on every cluster today.
 const SIGNATURE_FEE = 5_000n
 
-// The system program's Transfer and SPL Token's CloseAccount. Test tooling
-// alone sends SOL between wallets or closes a token account, so these live
-// here, as they do in go/internal/solanastub, rather than in ts/src/solana.
-function systemTransfer(from: PublicKey, to: PublicKey, lamports: bigint): Instruction {
-    const data = new Uint8Array(12)
-    const v = new DataView(data.buffer)
-    v.setUint32(0, 2, true)
-    v.setBigUint64(4, lamports, true)
-    return {
-        programId: SYSTEM_PROGRAM_ID,
-        accounts: [
-            { publicKey: from, isSigner: true, isWritable: true },
-            { publicKey: to, isSigner: false, isWritable: true },
-        ],
-        data,
-    }
-}
-
-function closeTokenAccount(account: PublicKey, destination: PublicKey, owner: PublicKey): Instruction {
-    return {
-        programId: TOKEN_PROGRAM_ID,
-        accounts: [
-            { publicKey: account, isSigner: false, isWritable: true },
-            { publicKey: destination, isSigner: false, isWritable: true },
-            { publicKey: owner, isSigner: true, isWritable: false },
-        ],
-        data: Uint8Array.of(9),
-    }
-}
-
 /**
  * Hands back what k holds when a funder paid for it: SOL and test USDC on a
  * shared cluster are topped up by hand, so a nightly run must not bleed them
@@ -400,7 +370,7 @@ async function returnFunds(rpc: SolanaRpcClient, d: Deployment, decimals: number
     if (acct) {
         const { amount } = decodeTokenAccount(acct.data)
         if (amount > 0n) ixs.push(transferChecked(ata, d.mint, d.tokenAccount(to), k.address, amount, decimals))
-        ixs.push(closeTokenAccount(ata, k.address, k.address))
+        ixs.push(closeAccount(ata, k.address, k.address))
         lamports += acct.lamports
     }
     if (lamports > SIGNATURE_FEE) ixs.push(systemTransfer(k.address, to, lamports - SIGNATURE_FEE))
@@ -701,7 +671,7 @@ describe.skipIf(RPC === '' || (AUTHORITY === '' && FUNDER === '')).concurrent('S
         await sendAs(rpc, p.key, [
             createAssociatedTokenAccountIdempotent(p.address, source, d.mint),
             transferChecked(ata, d.mint, d.tokenAccount(source), p.address, await p.usdc(), usdcDecimals),
-            closeTokenAccount(ata, p.address, p.address),
+            closeAccount(ata, p.address, p.address),
         ])
 
         await p.waitTicket(id, 10_000 + stub.default_grace * 1000 + 120_000, 'refunded', closed)

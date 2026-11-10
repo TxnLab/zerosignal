@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SPL Token's TransferChecked and MintTo, and the associated token program's
-// CreateIdempotent. Mirrors proto/go/solana/token.go.
+// SPL Token's TransferChecked, MintTo and CloseAccount, and the associated
+// token program's CreateIdempotent. Mirrors proto/go/solana/token.go.
 
 import { ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID, TOKEN_PROGRAM_ID, type PublicKey } from './key.js'
 import type { Instruction } from './message.js'
@@ -59,6 +59,26 @@ export function mintTo(mint: PublicKey, destination: PublicKey, authority: Publi
             { publicKey: authority, isSigner: true, isWritable: false },
         ],
         data,
+    }
+}
+
+/** SPL Token's CloseAccount tag, its only data byte. */
+export const TOKEN_CLOSE_ACCOUNT = 9
+
+/**
+ * Closes account, which must hold no tokens, and sends its rent to
+ * destination, signed by owner, the account's owner. A payer moving to a new
+ * key closes its old token account so its rent goes with it.
+ */
+export function closeAccount(account: PublicKey, destination: PublicKey, owner: PublicKey): Instruction {
+    return {
+        programId: TOKEN_PROGRAM_ID,
+        accounts: [
+            { publicKey: account, isSigner: false, isWritable: true },
+            { publicKey: destination, isSigner: false, isWritable: true },
+            { publicKey: owner, isSigner: true, isWritable: false },
+        ],
+        data: Uint8Array.of(TOKEN_CLOSE_ACCOUNT),
     }
 }
 
