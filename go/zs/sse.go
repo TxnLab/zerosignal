@@ -82,11 +82,14 @@ func (t *streamTally) record(n int) {
 // attrs renders the tally for a log line.
 //
 // start is forwardStart, which is stamped AFTER http.Client.Do returns — i.e.
-// once the operator's response headers are already in hand. So ttfb here is
-// headers→first frame, which is the node's admission (including its mempool
-// wait for the open txn) plus the upstream's prefill. It is NOT the client's
-// wait: the proxy-side preamble (reserve + escrow open + seal + connect) all
-// happens before start and is excluded. That preamble is still recoverable —
+// once the operator's response headers are already in hand. A node writes its
+// streaming headers after admission (the open's submit included) and before
+// it calls its upstream, so ttfb here is headers→first frame: the upstream's
+// queue and prefill, not admission. A relay or LB that holds the headers until
+// the first body bytes collapses it toward zero and moves that time before
+// start. It is NOT the client's wait: the proxy-side preamble (reserve +
+// escrow open + seal + connect) and the node's admission all happen before
+// start and are excluded. That preamble is still recoverable —
 // it is the request line's `duration` minus this `elapsed`, both of which are
 // emitted for the same request.
 //
