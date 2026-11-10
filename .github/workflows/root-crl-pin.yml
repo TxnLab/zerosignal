@@ -28,12 +28,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # 1.26.x, not go-version-file: see ci.yml.
+      # 1.27.x, not go-version-file: see ci.yml.
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.x'
+          go-version: '1.27.x'
           cache-dependency-path: go/go.sum
+
+      # setup-go's manifest can trail go.dev by a patch: see ci.yml.
+      - name: Use the newest Go patch
+        run: |
+          minor="$(go env GOVERSION | cut -d. -f1-2)"
+          tc="$(curl -fsSL --max-time 30 --retry 3 --proto '=https' 'https://go.dev/dl/?mode=json' | jq -r --arg m "$minor." '[.[].version | select(startswith($m))] | first')"
+          [[ "$tc" =~ ^go1\.[0-9]+\.[0-9]+$ ]] || { echo "::error::go.dev lists no supported $minor release"; exit 1; }
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
 
       # Exit 1 is a verdict (the pin is behind or ahead) and opens the issue;
       # exit 2 is an unreachable Intel endpoint and only fails the run. Built
