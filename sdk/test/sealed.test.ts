@@ -867,6 +867,37 @@ describe('runSealed', () => {
             await buffered(s.em, r, new Uint8Array(await r.arrayBuffer()))
             expect(s.rechecks.count).toBe(1)
         })
+
+        // Go's TestRecheckDepositOnRefusedOpen_PoolRefusal: a node refusing a
+        // handed-off open for want of a free prepaid-pool slot ends the turn
+        // as the payer's own submit would have: mbr_pool_exhausted with a
+        // Retry-After, and the node's refusal not passed on. Its reservation
+        // stays held, since the open not landing is the node's unverified
+        // word. Any other category passes it on as before.
+        const poolRefused = (message: string, reason?: string) => () =>
+            new Response(
+                JSON.stringify({ error: { message, type: 'invalid_request_error', code: 'payment_verification_failed', ...(reason ? { reason } : {}) } }),
+                { status: 402, headers: { 'Content-Type': 'application/json' } },
+            )
+        it.each([
+            ['the reason', poolRefused('payment verification failed: open group rejected by algod (mbr_pool)', 'mbr_pool'), true],
+            ['an older node’s message', poolRefused('payment verification failed: open group rejected by algod (mbr_pool)'), true],
+            ['a Solana node’s message', poolRefused('payment verification failed: open rejected by the cluster (rent_pool)'), true],
+            ['another category', poolRefused('payment verification failed: open group rejected by algod (contract)', 'contract'), false],
+        ] as const)('reads a pool refusal from %s', async (_name, reply, pool) => {
+            const s = await setup({ protoVersion: NODE_SUBMITS_OPEN_MIN_VERSION, nodeOpener: true, reply })
+            await runSealed(s.deps, s.em, s.run)
+            expect(s.rechecks.count).toBe(1)
+            expect(s.released).toEqual([])
+            if (!pool) {
+                expect([s.responses.length, s.em.failed]).toEqual([1, undefined])
+                return
+            }
+            expect(s.responses).toEqual([])
+            expect(s.em.order.at(-1)).toBe('fail mbr_pool_exhausted')
+            expect(s.em.failed?.kind).toBe('busy')
+            expect(s.em.failed?.retryAfter).toBeGreaterThan(0)
+        })
     })
 
     it('opens escrow, seals to the pinned recipient with the app-call txid, and sends it direct', async () => {

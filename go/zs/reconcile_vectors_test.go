@@ -292,6 +292,61 @@ func reconcileVectorInputs() []reconcileVectorCase {
 		}
 	}
 
+	// A $0 operator claim, across every boundary and record, plus rows on
+	// either side of the settle-pending grace: accepted inside the window once
+	// the row is past the grace, whatever receipt it records, and lapsed like
+	// any claim after the window.
+	zeroRecords := append(slices.Clone(records),
+		record{"open_young", TicketOpen, false, grace - 1, false},
+		record{"open_at_grace", TicketOpen, false, grace, false})
+	for _, off := range offsets {
+		for _, r := range zeroRecords {
+			box := rvBox(escrow.StatusPendingSettle, escrow.PendingByOperator)
+			box.PendingAmount = 0
+			otherDigest(&box)
+			cases = append(cases, mk(fmt.Sprintf("pending_operator/zero_claim/%s at D%+dms", r.name, off), r, &box, deadlineMs+off))
+		}
+	}
+
+	// A $0 pending amount on a box that holds no operator claim: an OPEN box
+	// carries zeros, and accepting there would post the payer's first half at
+	// $0 for the node's honest claim to freeze against.
+	for _, b := range []struct {
+		name      string
+		status    uint64
+		pendingBy uint64
+	}{
+		{"open", escrow.StatusOpen, 0},
+		{"pending_payer", escrow.StatusPendingSettle, escrow.PendingByPayer},
+		{"pending_no_side", escrow.StatusPendingSettle, 0},
+		{"frozen", escrow.StatusFrozen, escrow.PendingByOperator},
+	} {
+		for _, off := range offsets {
+			for _, r := range zeroRecords {
+				box := rvBox(b.status, b.pendingBy)
+				box.PendingAmount = 0
+				cases = append(cases, mk(fmt.Sprintf("%s/zero_pending/%s at D%+dms", b.name, r.name, off), r, &box, deadlineMs+off))
+			}
+		}
+	}
+
+	// A claim of one microUSDC is not a $0 claim, which pins the accept's bound
+	// at exactly zero: with no agreeing receipt it is treated like any other
+	// claim, and a receipt that agrees with it resettles it.
+	for _, off := range offsets {
+		for _, r := range zeroRecords {
+			box := rvBox(escrow.StatusPendingSettle, escrow.PendingByOperator)
+			box.PendingAmount = 1
+			otherDigest(&box)
+			cases = append(cases, mk(fmt.Sprintf("pending_operator/claim_of_one/%s at D%+dms", r.name, off), r, &box, deadlineMs+off))
+		}
+		box := rvBox(escrow.StatusPendingSettle, escrow.PendingByOperator)
+		box.PendingAmount = 1
+		c := mk(fmt.Sprintf("pending_operator/claim_of_one/agreeing_receipt at D%+dms", off), records[1], &box, deadlineMs+off)
+		c.Settle.AmountCharged = 1
+		cases = append(cases, c)
+	}
+
 	// Other lapse fallbacks: one below the skew, where the classify cut-off
 	// decides instead, and one longer than the default.
 	for _, lf := range []int64{10_000, 30 * 60_000} {
@@ -443,7 +498,7 @@ func TestReconcileVectorsCoverEveryAction(t *testing.T) {
 	for _, c := range reconcileVectorInputs() {
 		seen[runReconcileVector(t, c)] = true
 	}
-	for a := reconcileWait; a <= reconcileFreeze; a++ {
+	for a := reconcileWait; a <= reconcileAcceptZeroClaim; a++ {
 		if !seen[a.String()] {
 			t.Errorf("no vector yields %s", a)
 		}

@@ -248,7 +248,7 @@ async function sealAndSend(deps: SealedDeps, em: Emitter, run: SealedRun, signal
 
     const call: SealedCall = { endpoint, model, op, reserved: rt, handle, txId, hop, signal }
     const buffered = deps.buffered(call)
-    const respond = handle?.openGroup ? recheckDepositOnRefusedOpen(deps.wallet, buffered) : buffered
+    const respond = handle?.openGroup ? recheckDepositOnRefusedOpen(deps, ticket.ticket_id, buffered) : buffered
     // Relayed, the envelope goes to the relay's route with the inner request
     // in its headers; it stays sealed to the target, which the relay can't open.
     const fwd = applyRelay(hop, op.baseUrl + endpoint, 'POST', operatorHeaders(ENCRYPTED_CONTENT_TYPE), endpoint)
@@ -329,18 +329,84 @@ export function settleAckPoster(
  * deposit before the next open rather than trusting a cached "ready" every
  * later open would fail on too. Rechecking after some other refusal costs one
  * read.
+ *
+ * A refusal that names the prepaid pool ends the turn as mbr_pool_exhausted,
+ * with its Retry-After, rather than as the node's payment_verification_failed:
+ * the payer's own submit of the same open would have answered that. It stays
+ * paid, as ZsError.paid says of any node's word that the open did not land, so
+ * the reservation is held and the watchdog still drives the ticket.
  */
-export function recheckDepositOnRefusedOpen(wallet: Pick<WalletOpener, 'recheckDeposit'>, next: BufferedResponder): BufferedResponder {
-    return (em, resp, body) => {
-        if (
-            resp.status === 402 &&
-            !resp.headers.get(RESPONSE_KEY_HEADER) &&
-            openAIError(new TextDecoder().decode(body)).code === 'payment_verification_failed'
-        ) {
-            wallet.recheckDeposit?.()
+export function recheckDepositOnRefusedOpen(
+    deps: Pick<SealedDeps, 'wallet' | 'logger' | 'network' | 'remedies'>,
+    ticketId: string,
+    next: BufferedResponder,
+): BufferedResponder {
+    return async (em, resp, body) => {
+        const text = new TextDecoder().decode(body)
+        if (resp.status !== 402 || resp.headers.get(RESPONSE_KEY_HEADER) || openAIError(text).code !== 'payment_verification_failed') {
+            return next(em, resp, body)
         }
-        return next(em, resp, body)
+        deps.wallet.recheckDeposit?.()
+        const category = openRefusalCategory(text)
+        if (!poolRefusal(category)) return next(em, resp, body)
+        deps.logger.warn('node refused the open: the prepaid pool has no free slot', { ticket_id: ticketId, category })
+        em.fail(poolExhaustedError(deps.wallet.payerAddr(), deps.network, deps.remedies))
     }
+}
+
+/**
+ * openRefusalCategory is the category of a node's refusal of an open it was
+ * handed: the error's reason, or, from a node that sends none, the
+ * parenthesized category ending its message. Empty when there is neither.
+ * Go's openRefusalCategory; testdata/open_refusal_vectors.json pins it.
+ */
+export function openRefusalCategory(body: string): string {
+    let env: unknown
+    try {
+        env = JSON.parse(body)
+    } catch {
+        return ''
+    }
+    // Go decodes into string fields, and a field of another type fails the
+    // whole decode, so it reads as no category at all.
+    if (env === null || typeof env !== 'object' || Array.isArray(env)) return ''
+    const e = (env as { error?: unknown }).error
+    if (e === undefined || e === null) return ''
+    if (typeof e !== 'object' || Array.isArray(e)) return ''
+    const { reason, message } = e as { reason?: unknown; message?: unknown }
+    if ((reason !== undefined && reason !== null && typeof reason !== 'string') || (message !== undefined && message !== null && typeof message !== 'string')) {
+        return ''
+    }
+    if (typeof reason === 'string' && reason !== '') return reason
+    const m = typeof message === 'string' ? message : ''
+    for (const prefix of LEGACY_OPEN_REFUSAL_PREFIXES) {
+        if (m.startsWith(prefix) && m.endsWith(')') && m.length > prefix.length) return m.slice(prefix.length, -1)
+    }
+    return ''
+}
+
+// The messages a node's open refusal began with before it named the category
+// in error.reason, each followed by the category and a closing parenthesis.
+const LEGACY_OPEN_REFUSAL_PREFIXES = [
+    'payment verification failed: open group rejected by algod (',
+    'payment verification failed: open rejected by the cluster (',
+]
+
+/**
+ * poolRefusal is whether a refusal category is the escrow's prepaid pool
+ * refusing the open: Algorand's MBR pool asserts, or the Solana rent pool.
+ */
+export function poolRefusal(category: string): boolean {
+    return category === 'mbr_pool' || category === 'rent_pool'
+}
+
+/** The payer's open refused for want of a free prepaid-pool slot, whichever side submitted it. */
+function poolExhaustedError(payer: string, network: string, remedies: Remedies): ZsError {
+    return newError(
+        'mbr_pool_exhausted',
+        `zerosignal wallet ${payer} has all concurrent ticket slots in use by in-flight requests on ${network} — retry once in-flight requests settle, or to allow more at once, ${remedies.raiseSlots}.`,
+        { retryAfter: MBR_POOL_EXHAUSTED_RETRY_AFTER_MS },
+    )
 }
 
 /** openFailure is the error a failed open ends the turn with, most specific first. */
@@ -360,13 +426,7 @@ export function openFailure(payer: string, network: string, remedies: Remedies, 
     }
     // The wallet holds the ALGO but every slot backs an in-flight ticket: a
     // concurrency cap that clears as those settle, not an unfunded wallet.
-    if (isPoolExhaustedOpenError(err)) {
-        return newError(
-            'mbr_pool_exhausted',
-            `zerosignal wallet ${payer} has all concurrent ticket slots in use by in-flight requests on ${network} — retry once in-flight requests settle, or to allow more at once, ${remedies.raiseSlots}.`,
-            { retryAfter: MBR_POOL_EXHAUSTED_RETRY_AFTER_MS },
-        )
-    }
+    if (isPoolExhaustedOpenError(err)) return poolExhaustedError(payer, network, remedies)
     if (isUnderfundedOpenError(err)) {
         return newError(
             'wallet_unfunded',

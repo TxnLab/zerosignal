@@ -179,8 +179,11 @@ export class StreamTally {
 
     /**
      * attrs renders the tally for a log line. start is when the node's headers
-     * arrived, so ttfb is headers to first frame: the node's admission and
-     * prefill, not the caller's whole wait. Durations are milliseconds.
+     * arrived. A node writes its streaming headers after admission (the open's
+     * submit included) and before it calls its upstream, so ttfb is headers to
+     * first frame: the upstream's queue and prefill, not admission and not the
+     * caller's whole wait. A relay or LB that holds the headers until the first
+     * body bytes collapses it toward zero. Durations are milliseconds.
      */
     attrs(start: number): LogAttrs {
         const now = this.#clock()

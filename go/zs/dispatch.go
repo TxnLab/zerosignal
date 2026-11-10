@@ -2586,17 +2586,85 @@ func bandByResponsiveness(ops []Operator, preferred *Operator, lat RelayLatency,
 // Rechecking after some other refusal costs one read. The recheck runs after
 // the refusal is passed on: RecheckDeposit waits on a funding pass in flight,
 // which must not delay the caller's error.
-func (s *Client) recheckDepositOnRefusedOpen(next nonStreamResponder) nonStreamResponder {
+//
+// A refusal that names the prepaid pool ends the turn as mbr_pool_exhausted,
+// with its Retry-After, rather than as the node's payment_verification_failed:
+// the payer's own submit of the same open would have answered that. It stays
+// paid, as Error.Paid says of any node's word that the open did not land, so
+// the reservation is held and the watchdog still drives the ticket.
+func (s *Client) recheckDepositOnRefusedOpen(ticketID string, next nonStreamResponder) nonStreamResponder {
 	return func(em emitter, resp *http.Response, body []byte) error {
-		err := next(em, resp, body)
-		if resp.StatusCode == http.StatusPaymentRequired && resp.Header.Get(wire.ResponseKeyHeader) == "" &&
-			openAIErrorCode(body) == "payment_verification_failed" {
-			if r, ok := s.wallet.(DepositRechecker); ok {
-				r.RecheckDeposit()
-			}
+		if resp.StatusCode != http.StatusPaymentRequired || resp.Header.Get(wire.ResponseKeyHeader) != "" ||
+			openAIErrorCode(body) != "payment_verification_failed" {
+			return next(em, resp, body)
+		}
+		var err error
+		if category := openRefusalCategory(body); poolRefusal(category) {
+			s.log.Warn("node refused the open: the prepaid pool has no free slot",
+				slog.String("ticket_id", ticketID), slog.String("category", category))
+			em.fail(s.poolExhaustedError())
+		} else {
+			err = next(em, resp, body)
+		}
+		if r, ok := s.wallet.(DepositRechecker); ok {
+			r.RecheckDeposit()
 		}
 		return err
 	}
+}
+
+// openRefusalCategory is the category of a node's refusal of an open it was
+// handed: the error's reason, or, from a node that sends none, the
+// parenthesized category ending its message. Empty when there is neither.
+func openRefusalCategory(body []byte) string {
+	// Maps rather than a struct: encoding/json matches a struct's keys without
+	// regard to case, where the TS twin reads `error.reason` exactly, and the two
+	// must agree on every body.
+	var top, errObj map[string]json.RawMessage
+	if json.Unmarshal(body, &top) != nil {
+		return ""
+	}
+	if raw, ok := top["error"]; !ok || json.Unmarshal(raw, &errObj) != nil {
+		return ""
+	}
+	reason, okReason := jsonStringField(errObj, "reason")
+	m, okMessage := jsonStringField(errObj, "message")
+	if !okReason || !okMessage {
+		return ""
+	}
+	if reason != "" {
+		return reason
+	}
+	for _, prefix := range legacyOpenRefusalPrefixes {
+		if rest, ok := strings.CutPrefix(m, prefix); ok && strings.HasSuffix(rest, ")") {
+			return strings.TrimSuffix(rest, ")")
+		}
+	}
+	return ""
+}
+
+// jsonStringField reads a string field, absent and null reading as "". ok is
+// false only for a value that is present and not a string.
+func jsonStringField(obj map[string]json.RawMessage, key string) (s string, ok bool) {
+	raw, present := obj[key]
+	if !present {
+		return "", true
+	}
+	return s, json.Unmarshal(raw, &s) == nil
+}
+
+// legacyOpenRefusalPrefixes are the messages a node's open refusal began with
+// before it named the category in error.reason, each followed by the
+// category and a closing parenthesis.
+var legacyOpenRefusalPrefixes = []string{
+	"payment verification failed: open group rejected by algod (",
+	"payment verification failed: open rejected by the cluster (",
+}
+
+// poolRefusal is whether a refusal category is the escrow's prepaid pool
+// refusing the open: Algorand's MBR pool asserts, or the Solana rent pool.
+func poolRefusal(category string) bool {
+	return category == "mbr_pool" || category == "rent_pool"
 }
 
 // settleAckPoster returns the OpenHandle's deliverAck for a node that takes
@@ -2810,7 +2878,7 @@ func (s *Client) runSealed(
 
 	nonStreamRespond := s.buildNonStreamResponder(ctx, ephemeral, txID, ticket, op, sh, timer, endpoint, model, usdRate, openFees, hop)
 	if openGroup != "" {
-		nonStreamRespond = s.recheckDepositOnRefusedOpen(nonStreamRespond)
+		nonStreamRespond = s.recheckDepositOnRefusedOpen(ticket.TicketID, nonStreamRespond)
 	}
 
 	// Transport-privacy routing. With no hop, send directly to the target
@@ -3673,12 +3741,7 @@ func (s *Client) openFailure(err error) *Error {
 	// Self-heals as in-flight tickets settle, so a retry-after nudge is
 	// honest.
 	if isPoolExhaustedOpenError(err) {
-		e := newError("mbr_pool_exhausted",
-			fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
-				"retry once in-flight requests settle, or to allow more at once, %s.",
-				s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
-		e.RetryAfter = 2 * time.Second
-		return e
+		return s.poolExhaustedError()
 	}
 	// "Always up, tells you what it needs": an open that fails because the
 	// payer can't cover ALGO fees / locked USDC (or isn't USDC-opted-in)
@@ -3691,6 +3754,17 @@ func (s *Client) openFailure(err error) *Error {
 				s.wallet.PayerAddr(), s.networkName(), s.remedies().Fund))
 	}
 	return newError("wallet_open", "payment group could not be submitted")
+}
+
+// poolExhaustedError is the payer's open refused for want of a free
+// prepaid-pool slot, whichever side submitted it.
+func (s *Client) poolExhaustedError() *Error {
+	e := newError("mbr_pool_exhausted",
+		fmt.Sprintf("zerosignal wallet %s has all concurrent ticket slots in use by in-flight requests on %s — "+
+			"retry once in-flight requests settle, or to allow more at once, %s.",
+			s.wallet.PayerAddr(), s.networkName(), s.remedies().RaiseSlots))
+	e.RetryAfter = 2 * time.Second
+	return e
 }
 
 // prepareDeposit opts the payer into the prepaid pool before the first

@@ -177,6 +177,7 @@ update-vectors:
 	cd go && $(GO) test ./zs         -run TestStreamEventVectors    -update
 	cd go && $(GO) test ./zs         -run TestRetryVectors          -update
 	cd go && $(GO) test ./zs         -run TestReconcileVectors      -update
+	cd go && $(GO) test ./zs         -run TestOpenRefusalVectors    -update
 	cd go && $(GO) test ./zs         -run TestVocabularyVectors     -update
 	cd go && $(GO) test ./zs         -run TestBandingVectors        -update
 	cd go && $(GO) test ./zs         -run TestDispatchVerdictVectors -update
