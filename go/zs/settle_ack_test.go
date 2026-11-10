@@ -204,7 +204,7 @@ func TestRecheckDepositOnRefusedOpen(t *testing.T) {
 			}
 			passed := false
 			next := func(emitter, *http.Response, []byte) error { passed = true; return nil }
-			if err := c.recheckDepositOnRefusedOpen(next)(&recEmitter{}, resp, tc.body); err != nil {
+			if err := c.recheckDepositOnRefusedOpen("T", next)(&recEmitter{}, resp, tc.body); err != nil {
 				t.Fatal(err)
 			}
 			if !passed {
@@ -212,6 +212,58 @@ func TestRecheckDepositOnRefusedOpen(t *testing.T) {
 			}
 			if w.rechecks != tc.want {
 				t.Errorf("rechecks = %d, want %d", w.rechecks, tc.want)
+			}
+		})
+	}
+}
+
+// A node refusing a handed-off open for want of a free prepaid-pool slot ends
+// the turn as the payer's own submit would have: mbr_pool_exhausted with a
+// Retry-After, and the node's refusal not passed on. Its reservation stays
+// held, since the open not landing is the node's unverified word. The deposit
+// is still rechecked. Any other refusal category, or none, passes the node's
+// refusal on as before.
+func TestRecheckDepositOnRefusedOpen_PoolRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		pool bool
+	}{
+		{"reason mbr_pool", `{"error":{"code":"payment_verification_failed","message":"payment verification failed: open group rejected by algod (mbr_pool)","reason":"mbr_pool"}}`, true},
+		{"reason rent_pool", `{"error":{"code":"payment_verification_failed","message":"x","reason":"rent_pool"}}`, true},
+		{"legacy algod message", `{"error":{"code":"payment_verification_failed","message":"payment verification failed: open group rejected by algod (mbr_pool)"}}`, true},
+		{"legacy cluster message", `{"error":{"code":"payment_verification_failed","message":"payment verification failed: open rejected by the cluster (rent_pool)"}}`, true},
+		{"reason contract", `{"error":{"code":"payment_verification_failed","message":"payment verification failed: open group rejected by algod (contract)","reason":"contract"}}`, false},
+		{"no category", `{"error":{"code":"payment_verification_failed","message":"payment verification failed"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &recheckWallet{}
+			g := &outcomeGuard{}
+			c := &Client{wallet: w, spend: g, log: discardLogger()}
+			resp := &http.Response{StatusCode: http.StatusPaymentRequired, Header: http.Header{}}
+			passed := false
+			next := func(emitter, *http.Response, []byte) error { passed = true; return nil }
+			em := &recEmitter{}
+			if err := c.recheckDepositOnRefusedOpen("T", next)(em, resp, []byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			if w.rechecks != 1 {
+				t.Errorf("rechecks = %d, want 1", w.rechecks)
+			}
+			if len(g.seen()) != 0 {
+				t.Errorf("spend guard heard %q, want the reservation held", g.seen())
+			}
+			if !tc.pool {
+				if !passed || em.failed != nil {
+					t.Errorf("passed %v, failed %v: want the refusal passed on untouched", passed, em.failed)
+				}
+				return
+			}
+			if passed {
+				t.Error("the node's refusal was passed on")
+			}
+			if em.failed == nil || em.failed.Code != "mbr_pool_exhausted" || em.failed.Kind != KindBusy || em.failed.RetryAfter <= 0 {
+				t.Errorf("failed with %+v, want mbr_pool_exhausted, busy, with a Retry-After", em.failed)
 			}
 		})
 	}

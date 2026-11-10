@@ -2886,10 +2886,18 @@ func (r *rechecking) RecheckDeposit() { r.rechecks++ }
 // the wallet must recheck its deposit then — and only on a handed-off open,
 // since a payer-submitted one already proved the pool.
 func TestDispatch_WalletPath_RefusedHandOffRechecksDeposit(t *testing.T) {
+	// The node's refusal names the prepaid pool: against a handed-off open it
+	// is the payer's own pool-full answer, a 429 mbr_pool_exhausted; a
+	// payer-submitted open's refusal passes through as the node sent it.
 	for _, tc := range []struct {
 		version string
 		want    int
-	}{{wire.NodeSubmitsOpenMinVersion, 1}, {"9.11", 0}} {
+		status  int
+		code    string
+	}{
+		{wire.NodeSubmitsOpenMinVersion, 1, http.StatusTooManyRequests, "mbr_pool_exhausted"},
+		{"9.11", 0, http.StatusPaymentRequired, "payment_verification_failed"},
+	} {
 		t.Run(tc.version, func(t *testing.T) {
 			node := newFakeNode(t, &nodeConfig{mode: modeNonStreamPaymentRefused})
 			node.operator.ProtoVersion = tc.version
@@ -2901,8 +2909,8 @@ func TestDispatch_WalletPath_RefusedHandOffRechecksDeposit(t *testing.T) {
 
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, clientReq(http.MethodPost, "/v1/chat/completions", `{"model":"gpt-test"}`))
-			if w.Result().StatusCode != http.StatusPaymentRequired {
-				t.Fatalf("status = %d body=%s, want 402", w.Result().StatusCode, w.Body.String())
+			if w.Result().StatusCode != tc.status || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
+				t.Fatalf("status = %d body=%s, want %d %s", w.Result().StatusCode, w.Body.String(), tc.status, tc.code)
 			}
 			if rw.rechecks != tc.want {
 				t.Errorf("RecheckDeposit calls = %d, want %d", rw.rechecks, tc.want)

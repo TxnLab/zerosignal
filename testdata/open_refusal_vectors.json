@@ -1,0 +1,140 @@
+[
+  {
+    "name": "reason mbr_pool",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool)\",\"reason\":\"mbr_pool\",\"type\":\"invalid_request_error\"}}",
+    "category": "mbr_pool",
+    "pool": true
+  },
+  {
+    "name": "reason rent_pool",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open rejected by the cluster (rent_pool)\",\"reason\":\"rent_pool\",\"type\":\"invalid_request_error\"}}",
+    "category": "rent_pool",
+    "pool": true
+  },
+  {
+    "name": "reason contract",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (contract)\",\"reason\":\"contract\",\"type\":\"invalid_request_error\"}}",
+    "category": "contract",
+    "pool": false
+  },
+  {
+    "name": "reason overspend",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (overspend)\",\"reason\":\"overspend\",\"type\":\"invalid_request_error\"}}",
+    "category": "overspend",
+    "pool": false
+  },
+  {
+    "name": "reason wins over the message",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool)\",\"reason\":\"contract\",\"type\":\"invalid_request_error\"}}",
+    "category": "contract",
+    "pool": false
+  },
+  {
+    "name": "legacy algod mbr_pool",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool)\",\"type\":\"invalid_request_error\"}}",
+    "category": "mbr_pool",
+    "pool": true
+  },
+  {
+    "name": "legacy cluster rent_pool",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open rejected by the cluster (rent_pool)\",\"type\":\"invalid_request_error\"}}",
+    "category": "rent_pool",
+    "pool": true
+  },
+  {
+    "name": "legacy algod contract",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (contract)\",\"type\":\"invalid_request_error\"}}",
+    "category": "contract",
+    "pool": false
+  },
+  {
+    "name": "legacy cluster usdc_insufficient",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open rejected by the cluster (usdc_insufficient)\",\"type\":\"invalid_request_error\"}}",
+    "category": "usdc_insufficient",
+    "pool": false
+  },
+  {
+    "name": "legacy without the closing parenthesis",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool\",\"type\":\"invalid_request_error\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "legacy with text after the category",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool) later\",\"type\":\"invalid_request_error\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "the open watchdog's refusal",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open_unconfirmed: the open did not confirm\",\"type\":\"invalid_request_error\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "bare refusal",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed\",\"type\":\"invalid_request_error\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "category only in another field",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed\",\"param\":\"mbr_pool\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "reason not a string",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"x\",\"reason\":7}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "message not a string",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":7,\"reason\":\"mbr_pool\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "reason key capitalised",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed\",\"Reason\":\"mbr_pool\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "error key capitalised",
+    "body": "{\"Error\":{\"code\":\"payment_verification_failed\",\"message\":\"x\",\"reason\":\"mbr_pool\"}}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "error is null",
+    "body": "{\"error\":null}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "error is an array",
+    "body": "{\"error\":[\"mbr_pool\"]}",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "reason is null",
+    "body": "{\"error\":{\"code\":\"payment_verification_failed\",\"message\":\"payment verification failed: open group rejected by algod (mbr_pool)\",\"reason\":null}}",
+    "category": "mbr_pool",
+    "pool": true
+  },
+  {
+    "name": "not JSON",
+    "body": "payment verification failed: open group rejected by algod (mbr_pool)",
+    "category": "",
+    "pool": false
+  },
+  {
+    "name": "empty",
+    "body": "",
+    "category": "",
+    "pool": false
+  }
+]
