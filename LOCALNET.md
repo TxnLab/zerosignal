@@ -16,9 +16,10 @@ The checkouts are siblings of this one: `contracts/` (`TxnLab/zerosignal-contrac
 
 - **Validator**: the program that runs a Solana chain. `solana-test-validator` runs a private one
   on `127.0.0.1:8899` that only this machine uses.
-- **Program**: Solana's word for a smart contract. ZeroSignal's is `zs_escrow`; it has the same
-  address on every cluster (localnet, devnet), so the address alone does not say which chain you
-  are on.
+- **Program**: Solana's word for a smart contract. ZeroSignal's is `zs_escrow`. A localnet loads
+  it at `2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1`; devnet runs its own deployment at
+  `EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47`. Each preset names its own, so leave the program
+  unset in a config that names its cluster.
 - **Config account**: the program's settings (the USDC mint, the fee, the stakes and the admin),
   written by the deploy; the admin can change the fee and stakes later.
 - **Test USDC mint**: on a local chain there is no real USDC, so the deploy creates a token that

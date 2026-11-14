@@ -404,7 +404,7 @@ func TestConfigValidateWarnings(t *testing.T) {
 		{name: "endpoint over a preset app id", cfg: Config{Signer: signer, Network: overridden}, want: "still that preset's (765860477)"},
 		{name: "endpoint with its own app id", cfg: Config{Signer: signer, Network: pinned}},
 		{name: "solana preset", cfg: Config{SolanaSigner: sol, Network: SolanaDevnet()}},
-		{name: "solana endpoint over a preset program", cfg: Config{SolanaSigner: sol, Network: solOverridden}, want: "still that preset's (2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1)"},
+		{name: "solana endpoint over a preset program", cfg: Config{SolanaSigner: sol, Network: solOverridden}, want: "still that preset's (EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47)"},
 		{name: "solana endpoint with its own program", cfg: Config{SolanaSigner: sol, Network: solPinned}},
 		{name: "solana endpoint naming the preset's own", cfg: Config{SolanaSigner: sol, Network: solSame}},
 		{name: "diverging ceiling", cfg: Config{Signer: signer, Network: Testnet(), MaxOutputCeiling: 8192}, want: "MaxOutputCeiling 8192 differs"},

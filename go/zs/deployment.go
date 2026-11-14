@@ -122,8 +122,9 @@ func (d Deployment) FeeUnit() FeeUnit { return FeeUnitOf(d.Rail) }
 // preset, reached at a loopback endpoint. Nothing there is real money and its
 // nodes run on this machine, so a payer's defaults loosen (Config.Privacy,
 // Config.AllowPrivateHosts). The endpoint check is what keeps a config that
-// names localnet but points at another chain from loosening them: a Solana
-// program has one id on every cluster, so the label alone proves nothing.
+// names localnet but points at another chain from loosening them: a program id
+// says nothing about the chain (the localnet preset's is deployed on devnet
+// too), so the label alone proves nothing.
 func (d Deployment) Local() bool {
 	if d.Network != "localnet" {
 		return false
@@ -242,8 +243,8 @@ func AdoptLegacyFile(legacy, current string) error {
 // other's file, not rows lost.
 //
 // On Solana the label is the cluster the config names, or "custom" for an
-// endpoint alone: the program id is the same on every cluster, so unlike an
-// app id it says nothing about which chain it is on.
+// endpoint alone: a localnet can load any build at any id, so unlike an app id
+// a program id says nothing about which chain it is on.
 func ResolveNetwork(n Network) (Deployment, []string, error) {
 	switch n.Rail {
 	case 0, ticket.RailAlgorand:

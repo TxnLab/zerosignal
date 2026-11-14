@@ -145,7 +145,7 @@ import { solanaSigner } from '@txnlab/zerosignal/accounts/solana'
 const config = resolveConfig({ solanaSigner: solanaSigner(key), network: solanaDevnet() })
 ```
 
-The `devnet` and `localnet` presets embed the `zs_escrow` program id and an RPC endpoint.
+The `devnet` and `localnet` presets each embed their own `zs_escrow` program id and an RPC endpoint.
 `rpcEndpoint` overrides the endpoint, verbatim. An endpoint with no preset must set `program`.
 The USDC mint is read from the program's Config.
 

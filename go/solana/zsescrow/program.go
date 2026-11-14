@@ -20,8 +20,13 @@ import (
 	"github.com/TxnLab/zerosignal/go/solana"
 )
 
-// ProgramID is the program on every cluster it is deployed to today.
+// ProgramID is the program's default build, the one a localnet loads and the
+// program's own test fixtures name.
 var ProgramID = solana.MustPublicKey("2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1")
+
+// DevnetProgramID is devnet's deployment, a build of its own: its Config pays
+// in Circle's devnet USDC, and a Config's mint is fixed when it is made.
+var DevnetProgramID = solana.MustPublicKey("EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47")
 
 // Seeds of the program's addresses.
 const (

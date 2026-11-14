@@ -287,7 +287,7 @@
   "solana_networks": {
     "devnet": {
       "rpc_endpoint": "https://api.devnet.solana.com",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "program": "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
       "free_credit_issuers": []
     },
     "localnet": {

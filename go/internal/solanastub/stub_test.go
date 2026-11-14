@@ -10,9 +10,31 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/TxnLab/zerosignal/go/solana"
+	"github.com/TxnLab/zerosignal/go/solana/rpc"
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 	"github.com/TxnLab/zerosignal/go/ticket"
 )
+
+// The stub serves the deployment its payers' presets read on each cluster;
+// the literals catch a preset that moved without the stub's runs.
+func TestProgramOn(t *testing.T) {
+	for _, c := range []struct {
+		genesis, want string
+	}{
+		{rpc.DevnetGenesis, "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47"},
+		{rpc.MainnetGenesis, "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"},
+		{"11111111111111111111111111111111", "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"},
+	} {
+		h, err := solana.ParseHash(c.genesis)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ProgramOn(h).String(); got != c.want {
+			t.Errorf("ProgramOn(%s) = %s, want %s", c.genesis, got, c.want)
+		}
+	}
+}
 
 // The stub's issuer signs with the committed localnet key, whose public half
 // is the one the localnet preset names.
@@ -28,8 +50,8 @@ func TestIssuer_IsTheLocalnetPresets(t *testing.T) {
 	}
 }
 
-// The localnet's keypair is also devnet's admin, so a run holding it must
-// refuse before it writes the Config anywhere but this machine.
+// A localnet's keypair can be devnet's admin, so a run holding it must refuse
+// before it writes the Config anywhere but this machine.
 func TestCheckLoopback(t *testing.T) {
 	for endpoint, ok := range map[string]bool{
 		"http://127.0.0.1:8899":         true,

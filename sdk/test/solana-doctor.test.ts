@@ -13,6 +13,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { base64 } from '@scure/base'
 import { TOKEN_PROGRAM_ID, encodeBase58, publicKeyBytes } from '@txnlab/zs-proto/solana'
 import {
+    DEVNET_PROGRAM_ID,
     Deployment,
     PROGRAM_ID,
     RENT_POOL_SIZE,
@@ -481,7 +482,7 @@ describe('solanaDoctorBase', () => {
             ...BASE,
             network: 'devnet',
             address: PAYER,
-            program: PROGRAM_ID,
+            program: DEVNET_PROGRAM_ID,
             relayRequired,
             allowStaging,
             slots,

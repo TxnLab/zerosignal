@@ -2812,8 +2812,9 @@
               "Retired with the owed vault: an undeliverable refund now goes to the",
               "treasury, as on Algorand. Retired fields keep their bytes so every",
               "later offset stays put on the clusters that already hold a Config.",
-              "Those Configs still hold the old values (devnet and testnet have this",
-              "bump and an arbiter set), so set_config zeroes every retired field",
+              "Those Configs still hold the old values (the default build's devnet and",
+              "testnet deployments have this bump and an arbiter set), so set_config",
+              "zeroes every retired field",
               "and a field later carved from them starts from zero."
             ],
             "type": "u8"

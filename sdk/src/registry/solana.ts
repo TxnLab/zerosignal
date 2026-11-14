@@ -60,7 +60,7 @@ export const SOLANA_SIGNER_RESERVE_LAMPORTS = 890_880n
 
 export interface SolanaChainReaderOptions {
     rpc: SolanaRpc
-    /** The zs_escrow program id; absent is PROGRAM_ID. */
+    /** The zs_escrow program id; absent is PROGRAM_ID, the localnet build's, so a reader on any other cluster names its preset's. */
     programId?: PublicKey | undefined
     /** Restricts the read to these operators, each of which must exist. Empty reads every one. */
     operatorIds?: readonly bigint[] | undefined

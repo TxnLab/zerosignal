@@ -13,8 +13,14 @@ import { utf8 } from '../../util/bytes.js'
 import { type PublicKey, publicKeyBytes } from '../key.js'
 import { associatedTokenAddress, findProgramAddress } from '../pda.js'
 
-/** The program on every cluster it is deployed to today. */
+/** The program's default build, the one a localnet loads and the program's own test fixtures name. */
 export const PROGRAM_ID: PublicKey = '2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1'
+
+/**
+ * Devnet's deployment, a build of its own: its Config pays in Circle's devnet
+ * USDC, and a Config's mint is fixed when it is made.
+ */
+export const DEVNET_PROGRAM_ID: PublicKey = 'EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47'
 
 export const CONFIG_SEED = 'config'
 export const OPERATOR_SEED = 'op'

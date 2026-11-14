@@ -237,7 +237,7 @@ func solanaDoctorCases() []solanaDoctorCase {
 		return SolanaDoctorReadings{
 			Network: SolanaClusterDevnet, Address: payer.String(), Slots: 10, RelayRequired: true,
 			BlockHeight: 312_345_678, Genesis: devnet,
-			Program: zsescrow.ProgramID.String(), ConfigGenesis: devnet, Mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+			Program: zsescrow.DevnetProgramID.String(), ConfigGenesis: devnet, Mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
 			TicketRent: ticketRent, PoolRent: poolRent,
 			Lamports:    50_000_000,
 			UsdcAccount: true, UsdcBalance: 2_500_000,
@@ -261,7 +261,7 @@ func solanaDoctorCases() []solanaDoctorCase {
 			r.RPCErr = "dial tcp: connection refused"
 		}},
 		{"config unreadable", func(r *SolanaDoctorReadings) {
-			r.ConfigErr = "program " + zsescrow.ProgramID.String() + " has no Config"
+			r.ConfigErr = "program " + zsescrow.DevnetProgramID.String() + " has no Config"
 			noConfig(r)
 		}},
 		{"no ticket rent", func(r *SolanaDoctorReadings) { r.TicketRent = 0 }},

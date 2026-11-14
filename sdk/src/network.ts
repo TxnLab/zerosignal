@@ -9,7 +9,7 @@
 
 import { base64 as scureBase64 } from '@scure/base'
 import { encodeBase58, publicKeyBytes } from '@txnlab/zs-proto/solana'
-import { PROGRAM_ID } from '@txnlab/zs-proto/solana/zsescrow'
+import { DEVNET_PROGRAM_ID, PROGRAM_ID } from '@txnlab/zs-proto/solana/zsescrow'
 
 import { configError } from './errors.js'
 import { isLoopbackAddress } from './privateip.js'
@@ -150,11 +150,11 @@ export interface FreeCreditIssuer {
 // It guards nothing.
 const LOCALNET_FREE_CREDIT_ISSUER = 'n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw='
 
-// One program id: devnet's deployment, which a localnet started by
-// `make localnet` in zerosignal-contracts' solana/ loads at the same address. Devnet has no
-// issuer until ZeroSignal's key is made.
+// A localnet started by `make localnet` in zerosignal-contracts' solana/ loads
+// the program's default build. Devnet has no issuer until ZeroSignal's key is
+// made.
 const solanaPresets: Record<SolanaClusterName, { rpcEndpoint: string; program: string; freeCreditIssuers: readonly FreeCreditIssuer[] }> = {
-    devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: PROGRAM_ID, freeCreditIssuers: [] },
+    devnet: { rpcEndpoint: 'https://api.devnet.solana.com', program: DEVNET_PROGRAM_ID, freeCreditIssuers: [] },
     localnet: {
         rpcEndpoint: 'http://127.0.0.1:8899',
         program: PROGRAM_ID,
@@ -189,8 +189,8 @@ export const solanaLocalnet = (): Network => ({ rail: 'solana', network: 'localn
  * rows left under the other key, not rows lost.
  *
  * On Solana the label is the cluster the config names, or "custom" for an
- * endpoint alone: the program id is the same on every cluster, so unlike an
- * app id it says nothing about which chain it is on.
+ * endpoint alone: a localnet can load any build at any id, so unlike an app id
+ * a program id says nothing about which chain it is on.
  */
 export function resolveNetwork(n: Network = {}): ResolvedNetwork {
     const rail = n.rail ?? 'algorand'
@@ -313,7 +313,8 @@ function resolveSolana(n: Network): ResolvedNetwork {
  * Nothing there is real money and its nodes run on this machine, so a payer's
  * defaults loosen (Config.privacy, Config.allowPrivateHosts). The endpoint
  * check keeps a config that names localnet but points at another chain from
- * loosening them: a Solana program has one id on every cluster.
+ * loosening them: a program id says nothing about the chain (the localnet
+ * preset's is deployed on devnet too).
  */
 export function isLocal(d: ResolvedNetwork): boolean {
     if (d.label !== 'localnet') return false
