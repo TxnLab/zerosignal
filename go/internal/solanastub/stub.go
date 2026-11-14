@@ -225,11 +225,15 @@ type Identity struct {
 	OperatorID uint64 `json:"operator_id"`
 	NodeID     uint64 `json:"node_id"`
 	URL        string `json:"url"`
-	// SigningPhrase is the node's 24-word signing phrase, which zs-node reads
-	// as a <NAME>_MNEMONIC; SigningAddress is its address, so a script can top
-	// it up without deriving it.
-	SigningPhrase  string `json:"signing_phrase"`
+	// The two addresses sit beside the phrases so the file says which wallet
+	// each phrase restores to, and a script can top up the signing key without
+	// deriving it. A file written before OwnerAddress existed reads with it
+	// empty; nothing reads it back.
 	SigningAddress string `json:"signing"`
+	OwnerAddress   string `json:"owner"`
+	// SigningPhrase is the node's 24-word signing phrase, which zs-node reads
+	// as a <NAME>_MNEMONIC.
+	SigningPhrase string `json:"signing_phrase"`
 	// OwnerPhrase is the operator owner's, which unregisters it.
 	OwnerPhrase string `json:"owner_phrase"`
 }
