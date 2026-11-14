@@ -24,8 +24,11 @@ import (
 	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
 
-// PayerUSDC is the test USDC FundPayer gives each payer, in base units.
-const PayerUSDC = 10_000_000
+// PayerUSDC is the test USDC FundPayer gives each payer, in base units. A turn
+// escrows under a cent, so one USDC is ample, and kept small because on devnet
+// a funder pays it from Circle's faucet, and the TS suite's concurrent scenarios
+// hold it all until their payers hand it back at the end.
+const PayerUSDC = 1_000_000
 
 // SOL a run hands out. A funded payer needs fees, its USDC account's rent and
 // its rent pool; the authority airdrops a localnet's free SOL generously,
