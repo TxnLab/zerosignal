@@ -31,7 +31,7 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
-### 2026-11-14 — devnet's program pays in Circle's devnet USDC (unreleased)
+### 2026-11-14 — devnet's program pays in Circle's devnet USDC (0.19.0)
 
 The `devnet` cluster preset names a new deployment, `EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47`
 (`zsescrow.DevnetProgramID` ↔ `DEVNET_PROGRAM_ID`), whose Config's mint is Circle's devnet USDC
