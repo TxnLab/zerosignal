@@ -47,7 +47,8 @@ import (
 //     ReadSignerSpendableLamports, not SignerSpendableMicroAlgos.
 type SolanaChainReader struct {
 	RPC rpc.Client
-	// Program is the zs_escrow program id; zero is zsescrow.ProgramID.
+	// Program is the zs_escrow program id; zero is zsescrow.ProgramID, the
+	// localnet build's, so a reader on any other cluster names its preset's.
 	Program solana.PublicKey
 	// OperatorIDs, when non-empty, restricts the read to these operators, each
 	// of which must exist, as ChainOperatorSource.OperatorIDs does.

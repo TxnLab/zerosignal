@@ -53,11 +53,11 @@ type FreeCreditIssuer struct {
 // credits. It guards nothing, so it is LoopbackOnly.
 const localnetFreeCreditIssuer = "n5/pE/SvxojCjN2WSMQJEU45KVij7zyjY3Fc7d36xjw="
 
-// clusters have one program id: devnet's deployment, which a localnet started
-// by `make localnet` in zerosignal-contracts' solana/ loads at the same address. Devnet has
-// no issuer until ZeroSignal's key is made.
+// A localnet started by `make localnet` in zerosignal-contracts' solana/ loads
+// the program's default build. Devnet has no issuer until ZeroSignal's key is
+// made.
 var clusters = map[string]Cluster{
-	ClusterDevnet: {RPCEndpoint: "https://api.devnet.solana.com", Program: ProgramID},
+	ClusterDevnet: {RPCEndpoint: "https://api.devnet.solana.com", Program: DevnetProgramID},
 	ClusterLocalnet: {RPCEndpoint: "http://127.0.0.1:8899", Program: ProgramID,
 		FreeCreditIssuers: []FreeCreditIssuer{{Key: localnetFreeCreditIssuer, LoopbackOnly: true}}},
 }

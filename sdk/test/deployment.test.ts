@@ -117,7 +117,7 @@ describe('deployment vectors', () => {
 
     it('warns when a Solana endpoint overrides a preset but keeps its program', () => {
         expect(resolveNetwork({ ...solanaDevnet(), rpcEndpoint: 'https://rpc.example' }).warnings).toEqual([
-            "Network.rpcEndpoint overrides the devnet preset but the program is still that preset's (2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1); set Network.program if the endpoint is another cluster",
+            "Network.rpcEndpoint overrides the devnet preset but the program is still that preset's (EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47); set Network.program if the endpoint is another cluster",
         ])
         expect(resolveNetwork(solanaDevnet()).warnings).toEqual([])
         expect(resolveNetwork({ ...solanaDevnet(), rpcEndpoint: 'https://api.devnet.solana.com' }).warnings).toEqual([])

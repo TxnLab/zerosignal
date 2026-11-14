@@ -405,7 +405,7 @@ func TestRPCDoctorChain_ReadsTheFleet(t *testing.T) {
 // solanaDoctorBase maps the Config onto what decides which nodes a request
 // could reach.
 func TestSolanaDoctorBase(t *testing.T) {
-	sn := SolanaNetwork{Cluster: SolanaClusterDevnet, Program: zsescrow.ProgramID}
+	sn := SolanaNetwork{Cluster: SolanaClusterDevnet, Program: zsescrow.DevnetProgramID}
 	for _, tc := range []struct {
 		cfg           Config
 		relayRequired bool
@@ -418,7 +418,7 @@ func TestSolanaDoctorBase(t *testing.T) {
 	} {
 		r := solanaDoctorBase(tc.cfg.withDefaults(), sn, "PAYER")
 		want := SolanaDoctorReadings{
-			Network: SolanaClusterDevnet, Address: "PAYER", Slots: tc.slots, Program: zsescrow.ProgramID.String(),
+			Network: SolanaClusterDevnet, Address: "PAYER", Slots: tc.slots, Program: zsescrow.DevnetProgramID.String(),
 			RelayRequired: tc.relayRequired, AllowStaging: tc.allowStaging,
 		}
 		if !reflect.DeepEqual(r, want) {

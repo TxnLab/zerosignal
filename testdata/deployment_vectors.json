@@ -147,9 +147,9 @@
       },
       "rail": "solana",
       "label": "devnet",
-      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "key": "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
       "rpc_endpoint": "https://api.devnet.solana.com",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47"
     },
     {
       "name": "solana localnet preset",
@@ -171,9 +171,9 @@
       },
       "rail": "solana",
       "label": "devnet",
-      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "key": "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
       "rpc_endpoint": "https://api.devnet.solana.com",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47"
     },
     {
       "name": "another program on localnet keeps localnet",
@@ -197,9 +197,9 @@
       },
       "rail": "solana",
       "label": "devnet",
-      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "key": "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
       "rpc_endpoint": "https://rpc.example/?api-key=k",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47"
     },
     {
       "name": "a solana endpoint with a program is custom",
@@ -246,9 +246,9 @@
       },
       "rail": "solana",
       "label": "devnet",
-      "key": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+      "key": "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
       "rpc_endpoint": "https://api.devnet.solana.com",
-      "program": "2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1"
+      "program": "EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47"
     },
     {
       "name": "the zero program is no program for an endpoint",
@@ -406,9 +406,14 @@
       },
       "rows": [
         {
-          "deployment": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "deployment": "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
           "escrow_app_id": 0,
           "owns": true
+        },
+        {
+          "deployment": "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+          "escrow_app_id": 0,
+          "owns": false
         },
         {
           "deployment": "solana-localnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",

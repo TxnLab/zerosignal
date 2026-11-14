@@ -76,9 +76,9 @@ const e2eGrace = 60
 //
 // With the mint's authority the run lowers the Config's default grace to
 // e2eGrace, so endings that wait out a deadline wait about a minute, and it
-// refuses an endpoint off this machine: the keypair a localnet is set up with
-// is also devnet's admin, and the grace change would land on every devnet
-// ticket. A funder changes nothing in the Config, so the grace is the
+// refuses an endpoint off this machine: a localnet can be set up with devnet's
+// own keys, whose deploy key is devnet's admin, and the grace change would then
+// land on every devnet ticket. A funder changes nothing in the Config, so the grace is the
 // cluster's.
 //
 // The stub serves only on loopback: its /stub/ routes fund whoever asks.
@@ -166,7 +166,7 @@ func DialFunded(ctx context.Context, endpoint string, f Funding) (*Chain, error)
 			return nil, err
 		}
 	}
-	chain, err := Dial(ctx, endpoint, zsescrow.ProgramID)
+	chain, err := Dial(ctx, endpoint, solana.PublicKey{})
 	if err != nil {
 		return nil, err
 	}
@@ -282,11 +282,13 @@ func WriteIdentity(path string, id Identity) error {
 }
 
 // checkIdentity refuses an identity the cluster doesn't hold as written: a
-// localnet reset since it was registered, or another cluster's.
+// localnet reset since it was registered, another cluster's, or another
+// program's (devnet's moved to its own deployment in 0.19.0).
 func (ch *Chain) checkIdentity(ctx context.Context, id Identity, signing solana.PublicKey) error {
 	n, err := ch.Node(ctx, id.OperatorID, id.NodeID)
 	if err != nil {
-		return fmt.Errorf("solanastub: the identity's node %d/%d: %w", id.OperatorID, id.NodeID, err)
+		return fmt.Errorf("solanastub: the identity's node %d/%d on program %s (registered on another cluster or program?): %w",
+			id.OperatorID, id.NodeID, ch.Deployment.Program, err)
 	}
 	if n.Signing != signing || n.BaseURL != id.URL {
 		return fmt.Errorf("solanastub: node %d/%d signs with %s at %q, not the identity's %s at %q",

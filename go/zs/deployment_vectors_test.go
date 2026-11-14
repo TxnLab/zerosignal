@@ -187,6 +187,7 @@ func buildDeploymentVectors(t *testing.T) deploymentVectors {
 		// A Solana row always names its deployment: a row without one is
 		// Algorand's, whatever its app id.
 		{"solana devnet", deploymentInput{Rail: "solana", Network: "devnet"}, []TicketRecord{
+			{Deployment: "solana-devnet-" + zsescrow.DevnetProgramID.String()},
 			{Deployment: "solana-devnet-" + zsescrow.ProgramID.String()},
 			{Deployment: "solana-localnet-" + zsescrow.ProgramID.String()},
 			{Deployment: "solana-devnet-" + solanaOtherProgram},
@@ -238,7 +239,7 @@ func TestDeploymentKeysPinned(t *testing.T) {
 		{Network: "localnet", EscrowAppID: 5}:  "algorand-localnet-5",
 		{Network: "testnet", EscrowAppID: 42}:  "algorand-testnet-42",
 		{Endpoint: "http://x", EscrowAppID: 5}: "algorand-custom-5",
-		{Rail: "solana", Network: "devnet"}:    "solana-devnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
+		{Rail: "solana", Network: "devnet"}:    "solana-devnet-EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47",
 		{Rail: "solana", Network: "localnet"}:  "solana-localnet-2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1",
 		{Rail: "solana", RPCEndpoint: "http://x", Program: solanaOtherProgram}: "solana-custom-" + solanaOtherProgram,
 	} {

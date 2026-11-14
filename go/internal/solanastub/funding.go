@@ -21,8 +21,9 @@ import (
 //
 // Authority is the test mint's authority, which a localnet is bootstrapped
 // with as the Config's admin too: it airdrops and mints, and it can lower the
-// grace and resolve a frozen ticket. Its keypair is also devnet's admin and
-// upgrade authority, so a run holding it stays on this machine.
+// grace and resolve a frozen ticket. A localnet can be set up with devnet's own
+// keys, whose deploy key is devnet's admin and upgrade authority, so a run
+// holding it stays on this machine.
 //
 // Funder is a wallet holding SOL and test USDC, which it transfers. It holds
 // no power over the program, so a run with it may reach any cluster, devnet's

@@ -32,20 +32,38 @@ type Chain struct {
 	Genesis    solana.Hash
 }
 
-// Dial reads the program's Config on the cluster at endpoint.
+// Dial reads the program's Config on the cluster at endpoint. A zero program
+// is the cluster's own (ProgramOn); any other overrides it, so pass one only
+// for a deployment no preset names.
 func Dial(ctx context.Context, endpoint string, program solana.PublicKey) (*Chain, error) {
 	c, err := rpc.NewClient(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	ch := &Chain{Endpoint: endpoint, RPC: c, Deployment: zsescrow.Deployment{Program: program}}
+	genesis, err := c.GetGenesisHash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if program.IsZero() {
+		program = ProgramOn(genesis)
+	}
+	ch := &Chain{Endpoint: endpoint, RPC: c, Deployment: zsescrow.Deployment{Program: program}, Genesis: genesis}
 	if err := ch.Refresh(ctx); err != nil {
 		return nil, err
 	}
-	if ch.Genesis, err = c.GetGenesisHash(ctx); err != nil {
-		return nil, err
-	}
 	return ch, nil
+}
+
+// ProgramOn is the program a cluster with this genesis runs, as the payers'
+// presets name it: devnet's on devnet's genesis, otherwise localnet's. Reading
+// the presets keeps the stub on the deployment its payers read.
+func ProgramOn(genesis solana.Hash) solana.PublicKey {
+	cluster := zsescrow.ClusterLocalnet
+	if genesis.String() == rpc.DevnetGenesis {
+		cluster = zsescrow.ClusterDevnet
+	}
+	p, _ := zsescrow.ClusterPreset(cluster)
+	return p.Program
 }
 
 // Refresh rereads the Config, which SetConfig changes.

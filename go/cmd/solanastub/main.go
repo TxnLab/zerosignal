@@ -50,7 +50,6 @@ import (
 	"github.com/TxnLab/zerosignal/go/internal/solanastub"
 	"github.com/TxnLab/zerosignal/go/keystore"
 	"github.com/TxnLab/zerosignal/go/solana"
-	"github.com/TxnLab/zerosignal/go/solana/zsescrow"
 )
 
 type flags struct {
@@ -198,7 +197,7 @@ func (f flags) register(funding solanastub.Funding) error {
 	}
 	return printLine(map[string]any{
 		"url": f.registerNode, "operator_id": opID, "node_id": nodeID,
-		"signing": solanastub.PublicKey(signing).String(), "program": zsescrow.ProgramID.String(),
+		"signing": solanastub.PublicKey(signing).String(), "program": chain.Deployment.Program.String(),
 		"fee_bps": chain.Config.FeeBps, "default_grace": chain.Config.DefaultGrace,
 	})
 }
@@ -301,7 +300,7 @@ func (f flags) serve(funding solanastub.Funding) error {
 	// this package by hand.
 	if err := printLine(map[string]any{
 		"url": s.URL, "operator_id": s.OperatorID, "node_id": s.NodeID,
-		"program": zsescrow.ProgramID.String(), "fee_bps": s.Chain.Config.FeeBps,
+		"program": s.Chain.Deployment.Program.String(), "fee_bps": s.Chain.Config.FeeBps,
 		"default_grace": s.Chain.Config.DefaultGrace, "payer_usdc": solanastub.PayerUSDC,
 		"model": solanastub.Model, "free_model": solanastub.FreeModel, "reply": solanastub.Reply, "sol_usd": solanastub.SOLUSD,
 		"credit_issuer": base64.StdEncoding.EncodeToString(s.Node.Issuer().Key()), "issuer_payer_header": solanastub.IssuerPayerHeader,

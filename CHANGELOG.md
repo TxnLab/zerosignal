@@ -31,6 +31,21 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-11-14 — devnet's program pays in Circle's devnet USDC (unreleased)
+
+The `devnet` cluster preset names a new deployment, `EnkEN4zvxpPVoSr87qpokZDvV2PLmtmapuJBZDx9vf47`
+(`zsescrow.DevnetProgramID` ↔ `DEVNET_PROGRAM_ID`), whose Config's mint is Circle's devnet USDC
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, from faucet.circle.com), so anyone can fund a
+devnet payer or operator without us. A Config's mint is fixed when it is made, and Anchor runs a
+program only at its declared id, so devnet runs a build of its own. The localnet preset keeps
+`2sXCgAPUVAFvmDhXG1pLGA6mjnWpqR521MZTfMnyc9h1` (`zsescrow.ProgramID` ↔ `PROGRAM_ID`), the
+default build. A devnet deployment key is therefore new (`solana-devnet-EnkEN4…`): a host's
+journal rows, saved catalog and spend under the old key belong to the abandoned program and are
+not carried over. A payer with a rent pool or open tickets there reaches them by naming that
+program with the devnet preset (`Network.Solana.Program` ↔ `program`, zs-proxy's
+`solana.program`), then `close-deposit`. `solanastub` takes its program from the cluster's
+genesis (`ProgramOn`, through the presets), and refuses a registered identity on another program.
+
 ### 2026-10-31 — a node's carried collateral is usable again (0.15.0)
 
 The carried-collateral gate (`attest.CollateralFreshEnough` ↔ `collateralFreshEnough`) held

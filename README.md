@@ -205,8 +205,10 @@ Without the endpoint and a key the scenarios skip, so `make test` and this repo'
 validator. The mint's authority is also the localnet Config's admin: the run shortens the default
 grace to 60 s, and refuses an endpoint off this machine.
 
-The same suites run on devnet with a funder in its place, a wallet holding SOL and test USDC that
-it hands out by transfer and that holds no power over the program:
+The same suites run on devnet with a funder in its place, a wallet holding SOL and Circle's devnet
+USDC (from [faucet.circle.com](https://faucet.circle.com), Solana Devnet) that it hands out by
+transfer and that holds no power over the program. The stub reads devnet's preset program, so an
+identity registered on another program is refused at start; register it again:
 
 ```bash
 # Once: register the stub's node. The URL is the loopback address later runs serve on.
