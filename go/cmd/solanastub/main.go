@@ -175,7 +175,11 @@ func (f flags) register(funding solanastub.Funding) error {
 	// Written before anything is staked: an operator whose owner key is lost
 	// can never be unregistered, its stake never returned.
 	id := solanastub.Identity{
-		URL: f.registerNode, SigningPhrase: signingPhrase, SigningAddress: solanastub.PublicKey(signing).String(), OwnerPhrase: ownerPhrase,
+		URL:            f.registerNode,
+		SigningAddress: solanastub.PublicKey(signing).String(),
+		OwnerAddress:   solanastub.PublicKey(owner).String(),
+		SigningPhrase:  signingPhrase,
+		OwnerPhrase:    ownerPhrase,
 	}
 	if err := solanastub.WriteIdentity(f.identityOut, id); err != nil {
 		return err
@@ -197,7 +201,7 @@ func (f flags) register(funding solanastub.Funding) error {
 	}
 	return printLine(map[string]any{
 		"url": f.registerNode, "operator_id": opID, "node_id": nodeID,
-		"signing": solanastub.PublicKey(signing).String(), "program": chain.Deployment.Program.String(),
+		"signing": id.SigningAddress, "owner": id.OwnerAddress, "program": chain.Deployment.Program.String(),
 		"fee_bps": chain.Config.FeeBps, "default_grace": chain.Config.DefaultGrace,
 	})
 }
