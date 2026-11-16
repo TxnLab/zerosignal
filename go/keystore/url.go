@@ -7,6 +7,7 @@ package keystore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,13 +28,15 @@ import (
 )
 
 // URLProvider fetches mnemonics from one or more cloud secret backends,
-// addressed by URL. Each URL's scheme picks the backend:
+// addressed by URL, or takes them inline from literal: entries. Each URL's
+// scheme picks the backend:
 //
 //	awssecretsmanager://<arn>?region=us-east-1                   → AWS Secrets Manager
 //	awsparamstore://<path>?region=us-east-1                      → AWS SSM Parameter Store
 //	gcpsecretmanager://projects/PROJECT/secrets/NAME/versions/V  → GCP Secret Manager
 //	azurekeyvault://<vault>/<secret>                             → Azure Key Vault
 //	file:///absolute/path/to/mnemonic                            → local file (tests / dev)
+//	literal:<phrase or secret key>                               → the secret itself
 //
 // Implementation note: AWS / GCP / file URLs route through
 // gocloud.dev/runtimevar, which is the actual cross-cloud abstraction.
@@ -43,9 +46,10 @@ import (
 // this provider; consumers see one uniform "give me a URL, get a
 // mnemonic" surface.
 type URLProvider struct {
-	// URLs maps logical name → backend URL. The name labels logs and
-	// error messages; lookups in the assembled keystore are still by
-	// derived address.
+	// URLs maps logical name → backend URL or literal: entry. The name
+	// labels logs and error messages; lookups in the assembled keystore are
+	// still by derived address. A value may be a secret, so never print
+	// the map.
 	URLs map[string]string
 
 	// AzureCredential, when non-nil, is used for any azurekeyvault://
@@ -94,6 +98,69 @@ func NewURLProviderFromEnv(envVarValue string) *URLProvider {
 
 const azureKeyVaultScheme = "azurekeyvault://"
 
+// LiteralScheme carries the secret in the entry itself. It exists for hosts
+// that pass the node one encrypted variable and nothing else: a dstack CVM
+// measures each variable's name, so a second key in a second variable is a
+// compose change, while two literal entries in ZS_MNEMONIC_URLS are not. The
+// entry is a secret, so no error or log may print it; errors name the entry.
+const LiteralScheme = "literal:"
+
+// goCloudSchemes are the runtimevar drivers this package registers. An entry
+// must name one of them, Azure's, or LiteralScheme: anything else may be a
+// literal typed wrong, so it is refused before gocloud sees it, since
+// gocloud's own error quotes the URL.
+var goCloudSchemes = []string{"awssecretsmanager://", "awsparamstore://", "gcpsecretmanager://", "file://"}
+
+func isBackend(url string) bool {
+	if strings.HasPrefix(url, azureKeyVaultScheme) {
+		return true
+	}
+	for _, s := range goCloudSchemes {
+		if strings.HasPrefix(url, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// literalValue is a literal entry's value, and whether the entry is one. It
+// forgives the near misses an operator types, a quoted entry, another case or
+// literal://, since each would otherwise be refused as an unknown scheme.
+func literalValue(url string) (string, bool) {
+	s := strings.TrimSpace(strings.Trim(strings.TrimSpace(url), `"'`))
+	if len(s) < len(LiteralScheme) || !strings.EqualFold(s[:len(LiteralScheme)], LiteralScheme) {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(s[len(LiteralScheme):], "//")), true
+}
+
+// literal is a literal entry's secret. Entries are split on commas before
+// this sees them, so a keypair file's JSON array arrives cut into pieces, and
+// a fragment loading as a key would be a worse failure than this refusal.
+func literal(v string) (string, error) {
+	switch {
+	case v == "":
+		return "", errors.New("literal entry is empty")
+	case strings.HasPrefix(v, "["):
+		return "", errors.New("literal entry holds a keypair file's array, whose commas separate " +
+			MnemonicURLsEnv + " entries; give its base58 secret key, or read the file with a file:// URL")
+	}
+	return v, nil
+}
+
+// describe is how an error names an entry's source: a backend's URL, which
+// names a secret rather than holding one, and otherwise only what kind of
+// entry it is.
+func describe(url string) string {
+	if isBackend(url) {
+		return url
+	}
+	if _, ok := literalValue(url); ok {
+		return strings.TrimSuffix(LiteralScheme, ":")
+	}
+	return "unrecognized"
+}
+
 // Mnemonics fetches every configured URL and returns the values as
 // MnemonicEntry. A failure on any single URL aborts the whole load —
 // partial keystores would mask misconfiguration of one source while
@@ -127,6 +194,7 @@ func (p *URLProvider) Mnemonics(ctx context.Context) ([]MnemonicEntry, error) {
 			mn  string
 			err error
 		)
+		lit, isLiteral := literalValue(url)
 		switch {
 		case strings.HasPrefix(url, azureKeyVaultScheme):
 			cred, credErr := resolveAzCred()
@@ -134,11 +202,16 @@ func (p *URLProvider) Mnemonics(ctx context.Context) ([]MnemonicEntry, error) {
 				return nil, fmt.Errorf("urlprovider: azure credential: %w", credErr)
 			}
 			mn, err = fetchAzureKeyVault(ctx, cred, url)
-		default:
+		case isBackend(url):
 			mn, err = fetchGoCloud(ctx, url)
+		case isLiteral:
+			mn, err = literal(lit)
+		default:
+			err = errors.New("neither a literal entry nor a URL of awssecretsmanager://, awsparamstore://, " +
+				"gcpsecretmanager://, azurekeyvault:// or file://")
 		}
 		if err != nil {
-			return nil, fmt.Errorf("urlprovider: %s (%s): %w", name, url, err)
+			return nil, fmt.Errorf("urlprovider: %s (%s): %w", name, describe(url), err)
 		}
 		out = append(out, MnemonicEntry{Name: name, Mnemonic: strings.TrimSpace(mn)})
 	}
