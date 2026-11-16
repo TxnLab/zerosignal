@@ -7,7 +7,7 @@ How the node and the proxy load Algorand mnemonics at startup. This is the singl
 `keystore.LoadFromEnv(ctx)` (called from `node/main.go` and `proxy/main.go`) consults two providers in order:
 
 1. **`EnvProvider`** — scans the OS environment for variables ending in `_MNEMONIC` and strips the suffix to derive a label.
-2. **`URLProvider`** — fetches one mnemonic per URL listed in `ZS_MNEMONIC_URLS`. Dispatches per URL scheme.
+2. **`URLProvider`** — fetches one mnemonic per URL listed in `ZS_MNEMONIC_URLS`. Dispatches per URL scheme; a `literal:` entry carries its secret inline.
 
 Mnemonics from any source are decoded into Ed25519 private keys and indexed by their derived Algorand address. The label (`OPERATOR_SIGNING`, `payment`, etc.) is informational only — lookups are by address.
 
@@ -67,7 +67,24 @@ Comma-separated `name=url` pairs. Whitespace around names and URLs is trimmed.
 | `awsparamstore://<path>?region=us-east-1` | AWS SSM Parameter Store | via `gocloud.dev/runtimevar` |
 | `gcpsecretmanager://projects/PROJECT/secrets/NAME/versions/latest` | GCP Secret Manager | via `gocloud.dev/runtimevar` |
 | `azurekeyvault://<vault-name>/<secret-name>` | Azure Key Vault | direct via `azsecrets`; gocloud has no Key Vault driver for runtimevar |
-| `file:///absolute/path/to/mnemonic?decoder=string` | Local file | via `gocloud.dev/runtimevar/filevar`; useful for tests + safe-to-commit configs that point at a gitignored file |
+| `file:///absolute/path/to/mnemonic?decoder=string` | Local file | via `gocloud.dev/runtimevar/filevar`; useful for tests, and for configs that point at a gitignored file |
+| `literal:<phrase or secret key>` | The entry itself | no fetch; see below |
+
+### Literal entries
+
+A `literal:` entry is the secret itself, so one variable can carry several keys:
+
+```
+ZS_MNEMONIC_URLS="algo=literal:word1 … word25,sol=literal:word1 … word12"
+```
+
+That is for a host that hands the binary one encrypted variable and nothing else. The case it exists for is a node serving both rails in a dstack CVM: the compose measures each variable's *name*, so a second key in a second `*_MNEMONIC` variable is a compose change and a release, while a second literal entry is not. Elsewhere, separate `*_MNEMONIC` variables say the same thing more plainly.
+
+- Any form the keystores take works except a `solana-keygen` keypair file's JSON array, whose commas separate entries; that one is refused, so give the key's base58 form or read the file with `file://`.
+- An empty literal is refused rather than skipped.
+- The scheme may be quoted, in any case, or written `literal://`; each loads as `literal:`.
+- An entry that is neither a literal nor a URL of a scheme above is refused before anything fetches it, so a mistyped literal is never quoted back.
+- The variable now holds secrets, so treat it as you would a `*_MNEMONIC` variable. Errors name the entry and the kind of entry, never the value.
 
 ### Authentication
 

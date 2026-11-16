@@ -758,8 +758,8 @@ func ZeroSignalSecretEnvNames() []string {
 		"NODE_LLM_OPENAI_API_KEY",
 		"NODE_IMAGE_LLM_OPENAI_API_KEY",
 		"NODE_LLM_COMFYUI_CLOUD_API_KEY",
-		// Cloud secret references, not secrets — the URLs name a
-		// secret manager. Still a credential channel, still no
+		// Signing keys: cloud secret references, or the keys themselves
+		// as literal: entries. A credential channel either way, with no
 		// configuration reachable through it.
 		"ZS_MNEMONIC_URLS",
 		// The algod bearer token. It is read by applyEnv like every

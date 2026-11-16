@@ -18,11 +18,12 @@ import (
 const LoadTimeout = 30 * time.Second
 
 // MnemonicURLsEnv is the env var both the node and the proxy consult
-// for cloud-backed mnemonic URLs. Format:
+// for cloud-backed mnemonic URLs and literal: entries. Format:
 //
-//	name1=awssecretsmanager://...,name2=gcpsecretmanager://...,name3=azurekeyvault://VAULT/SECRET
+//	name1=awssecretsmanager://...,name2=gcpsecretmanager://...,name3=literal:word1 word2 ...
 //
-// Empty or unset means "no cloud secrets configured" — env-only mode.
+// A literal: entry makes the value a secret. Empty or unset means "no URL
+// entries configured" — env-only mode.
 const MnemonicURLsEnv = "ZS_MNEMONIC_URLS"
 
 // ProvidersFromEnv returns the standard provider chain a binary should
