@@ -19,9 +19,6 @@ localnet.
 pnpm add @txnlab/zerosignal algosdk
 ```
 
-The package is private for now: the install needs an npm token that can read the `@txnlab`
-scope, in your user-level `~/.npmrc`.
-
 `algosdk` (^3.6) is a peer dependency: the `Signer` port is algosdk's `TransactionSigner`, called
 with algosdk `Transaction` objects, so the SDK and your wallet must share one copy.
 
