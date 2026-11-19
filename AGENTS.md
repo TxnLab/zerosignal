@@ -192,6 +192,6 @@ An escrow `open()` / `settle()` argument change also touches the hand-written gr
 
 Full procedure: README "Releasing". The rules that bite:
 - Go, `@txnlab/zs-proto` and `@txnlab/zerosignal` release in **lockstep** — one version, three tags (`go/vX.Y.Z`, `ts/vX.Y.Z`, `sdk/vX.Y.Z`) on one commit. `make release-pr VERSION=X.Y.Z` makes the version commit and its PR; after the merge, `make release-tag` reads the version from `main`'s `package.json` files, tags the commit that set it with all three, and pushes exactly those three. The Go tag is requested **without** its prefix: `go get github.com/TxnLab/zerosignal/go@vX.Y.Z`. Never move or delete a pushed `go/v*` tag.
-- npm releases are **staged** by CI and go live only on a maintainer's 2FA approval. The repo and its releases are private: both packages publish `--access restricted`, and the Go module needs `GOPRIVATE=github.com/TxnLab/*`.
+- npm releases are **staged** by CI and go live only on a maintainer's 2FA approval. The repo and its releases are public: both packages publish `--access public` with `--provenance` (the two flip together: npm refuses provenance for a restricted package), and the Go module resolves through the public module proxy.
 - Commits pushed here must use the GitHub **noreply** address — a push carrying a private email is rejected (GH007).
 - No `hayai` naming in new code (`make check-no-hayai`).

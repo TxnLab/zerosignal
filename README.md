@@ -257,8 +257,7 @@ What they do, step by step:
    of more than three tags, so never `git push --tags`. Re-running it is safe: it pushes only
    the tags missing from the remote and refuses, pushing nothing, when one already points at
    another commit. `scripts/release.test.sh` (in `make test`) pins these guards.
-3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`,
-   with the private-repo setup below).
+3. The Go module is live as soon as the tag is pushed (`go get github.com/TxnLab/zerosignal/go@vX.Y.Z`).
    Each of the `ts/v*` and `sdk/v*` tags runs [`release.yml`](./.github/workflows/release.yml),
    which runs the full test suite and **stages** that npm package. It does not publish it.
    The SDK is staged from its `pnpm pack` tarball, which pins `@txnlab/zs-proto` at `X.Y.Z`,
@@ -270,21 +269,18 @@ What they do, step by step:
 
 A new package needs a one-time setup before its first tag: npmjs.com lets a trusted publisher be
 added only to a package that exists, so publish its first version by hand with
-`pnpm publish --access restricted` (pnpm, because `npm publish` would ship a `workspace:*`
+`pnpm publish --access public` (pnpm, because `npm publish` would ship a `workspace:*`
 dependency literally), then add a trusted publisher for `TxnLab/zerosignal`'s `release.yml` that
 may only stage.
 
-While this repo is private, so are new releases. Both npm packages publish with
-`--access restricted` and no provenance (npm generates provenance only for a public package from a
-public repo), and installing them needs a token that reads the `@txnlab` scope. The Go module
-needs `GOPRIVATE=github.com/TxnLab/*` and git credentials for `TxnLab/zerosignal`. `go/v0.1.0`
-and `go/v0.1.1` predate this and stay public on the Go module proxy. Going public means flipping
-the repo, `publishConfig.access` in both `package.json` files, the `--access` and `--provenance`
-flags in `release.yml`, and the access value its two metadata checks expect, together.
+Both npm packages publish with `--access public` and provenance, and the Go module resolves through
+the public module proxy. `publishConfig.access` in both `package.json` files, the `--access` and
+`--provenance` flags in `release.yml`, and the access value its two metadata checks expect change
+together: npm refuses provenance for a restricted package.
 
 Under 0.x a minor bump is a breaking change and a patch bump is not. Never move or delete a
-pushed `go/v*` tag: every consumer's `go.sum` has recorded its hash, so a moved tag fails their
-builds with a checksum mismatch.
+pushed `go/v*` tag: sum.golang.org and every consumer's `go.sum` have recorded its hash, so a
+moved tag fails their builds with a checksum mismatch.
 
 ### When zs-node releases
 

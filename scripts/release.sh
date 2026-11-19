@@ -204,10 +204,13 @@ status() {
   fi
   echo "npm:"
   for p in @txnlab/zs-proto @txnlab/zerosignal; do
-    printf '  %-20s %s\n' "$p" "$(npm view "$p@$v" version 2>/dev/null || echo 'not installable yet')"
+    printf '  %-20s %s\n' "$p" "$(npm view "$p@$v" version --userconfig /dev/null 2>/dev/null || echo 'not installable yet')"
   done
-  printf 'go:\n  %s\n' "$(cd go && GOWORK=off GOFLAGS=-mod=mod GOPRIVATE='github.com/TxnLab/*' \
-    go list -m "github.com/TxnLab/zerosignal/go@v$v" 2>/dev/null || echo 'not resolvable yet')"
+  # Ask as an anonymous consumer would: the maintainer's own go env usually
+  # carries GOPRIVATE for the private consumers, which would read the tag
+  # straight from GitHub and report it before the public proxy serves it.
+  printf 'go:\n  %s\n' "$(cd go && GOWORK=off GOFLAGS=-mod=mod GOPROXY=https://proxy.golang.org \
+    GOPRIVATE= GONOPROXY= GONOSUMDB= go list -m "github.com/TxnLab/zerosignal/go@v$v" 2>/dev/null || echo 'not resolvable yet')"
 }
 
 cmd=${1:-}

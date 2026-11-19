@@ -4,8 +4,8 @@ name: Release
 # tag is pushed, `@txnlab/zerosignal` (the SDK) on an `sdk/vX.Y.Z` tag. The two
 # release in lockstep (`make check-lockstep`), so both tags go on one commit. Go
 # needs no job: a `go/vX.Y.Z` tag is itself the release, requested as `@vX.Y.Z`,
-# provided go/go.mod declares this repo's path. While the repo is private,
-# consumers fetch it from GitHub directly (`GOPRIVATE`), not the module proxy.
+# provided go/go.mod declares this repo's path; consumers get it through the
+# public module proxy.
 #
 # This workflow can only STAGE. Each package's trusted-publisher entry on
 # npmjs.com allows `npm stage publish` alone, so nothing it uploads is
@@ -16,11 +16,10 @@ name: Release
 # added to a package that exists, so a new package's first version is
 # published by hand before its first tag.
 #
-# Both packages are private (`--access restricted`) while this repo is. npm
-# generates provenance only for a public package built in a public repo, so
-# neither job asks for one. Going public means restoring
-# `--provenance --access public`, `publishConfig.access: public`, and the
-# `public` expected by both "Package metadata names this repo" steps, together.
+# Both packages are public and carry provenance, which npm generates only for a
+# public package built in a public repo. The `--access` and `--provenance`
+# flags, each package's `publishConfig.access`, and the value both "Package
+# metadata names this repo" steps expect change together.
 
 on:
   push:
@@ -86,9 +85,11 @@ jobs:
             exit 1
           fi
 
-      # The trusted-publisher entry names this repo, so repository.url must too,
-      # and a public publishConfig would contradict the --access restricted
-      # below — fail here, with a readable message, rather than at the registry.
+      # The trusted-publisher entry names this repo, and provenance is rejected
+      # unless repository.url names the repo that built it, so repository.url
+      # must name this repo; a restricted publishConfig would contradict the
+      # --access public below. Fail here, with a readable message, rather than
+      # at the registry.
       - name: Package metadata names this repo
         run: |
           url="$(node -p "require('./ts/package.json').repository.url")"
@@ -98,8 +99,8 @@ jobs:
             echo "ts/package.json repository.url is $url, want $want" >&2
             exit 1
           fi
-          if [ "$access" != "restricted" ]; then
-            echo "ts/package.json publishConfig.access is '$access', want restricted" >&2
+          if [ "$access" != "public" ]; then
+            echo "ts/package.json publishConfig.access is '$access', want public" >&2
             exit 1
           fi
           if ! grep -qx "module github.com/${GITHUB_REPOSITORY}/go" go/go.mod; then
@@ -126,7 +127,7 @@ jobs:
             *-*) dist_tag=next ;;
             *)   dist_tag=latest ;;
           esac
-          npm stage publish --provenance=false --access restricted --tag "$dist_tag"
+          npm stage publish --provenance --access public --tag "$dist_tag"
 
   publish-sdk:
     name: Publish SDK package
@@ -190,8 +191,8 @@ jobs:
             echo "sdk/package.json repository.url is $url, want $want" >&2
             exit 1
           fi
-          if [ "$access" != "restricted" ]; then
-            echo "sdk/package.json publishConfig.access is '$access', want restricted" >&2
+          if [ "$access" != "public" ]; then
+            echo "sdk/package.json publishConfig.access is '$access', want public" >&2
             exit 1
           fi
 
@@ -244,4 +245,4 @@ jobs:
             *-*) dist_tag=next ;;
             *)   dist_tag=latest ;;
           esac
-          npm stage publish "$RUNNER_TEMP"/txnlab-zerosignal-*.tgz --provenance=false --access restricted --tag "$dist_tag"
+          npm stage publish "$RUNNER_TEMP"/txnlab-zerosignal-*.tgz --provenance --access public --tag "$dist_tag"
