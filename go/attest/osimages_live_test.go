@@ -76,6 +76,8 @@ func TestLive_TrustedOSImages_MatchTheVendorRelease(t *testing.T) {
 		"8db40cb23008d6213668b5816702d100b37b859a8a5bfd18d938ae3a1b3715bd": metaDstack("v0.5.12", "dstack-0.5.12"),
 		"91fd5d69ccee3e5ea4f2aeb8c9b632c4358c4ecfc29ba1aa6fb1e402af209829": metaDstack("v0.5.12", "dstack-nvidia-0.5.12"),
 		"ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6": mkosiOS("v0.6.1", "dstack-0.6.1"),
+		"feff3645893ad910d4f0e06d8f553cf80a7c9fede2ce0698fa63116283260366": mkosiOS("v0.6.4", "dstack-0.6.4"),
+		"4771a29e03e93f0e2d5e37174cd8bb1112942c9689deb36b16c5df9e183d8623": mkosiOS("v0.6.5", "dstack-0.6.5"),
 	}
 
 	// EVERY TRUSTED DIGEST MUST BE NAMED HERE. Without this, adding an image to

@@ -52,7 +52,10 @@ func (b BootChain) measured() bool {
 //
 // THE VALUES COME FROM BOOTING THE IMAGE, not from a calculation. Each was read
 // from Intel-signed quotes of CVMs we deployed with node/internal/tee/
-// dstackprobe.sh `matrix`, whose boot logs replay to these registers, and the
+// dstackprobe.sh `matrix`, whose boot logs replay to these registers (the
+// rows measured 2026-11-20 took the quote and log from Phala's attestation
+// API, with each quote checked against Intel's chain and each log's
+// os-image-hash and app-id replayed against it), and the
 // MRTD/RTMR1/RTMR2 of an image agreed across every shape and host it ran on.
 // Adding an image or a shape means running that grid for it first: an image
 // whose row is not measured is refused, and so is a shape whose RTMR0 is not
@@ -123,6 +126,32 @@ func TrustedDstackBootChains() []BootChain {
 			MRTD:    "2a674327c50218dba880066b349b8d559d749ed68dce33fd651c184a877d084b07a9e583767a7ad5da13ed91deec2b70",
 			RTMR1:   "89ef86c5125b986c325f0a94acfa87718a4ef3a4d4f237dbb72dda3cf777fd2c054555fb4407eb53338d7d67329a7333",
 			RTMR2:   "e9000e338f33233e8f51b7fd031e1c158bdcf8572eab041c0bc8eb7fef48b23259a6a556e6c8e2af99999fc39c793179",
+			RTMR0:   []string{rtmr0Small, rtmr0Large},
+		},
+		{
+			// dstack-0.6.4 (Dstack-TEE/dstack mkosi-os-v0.6.4, confirmed
+			// 2026-11-20). CPU only. Measured 2026-11-20: tdx.small and
+			// tdx.large on Phala's prod5 host, read from `phala cvms
+			// attestation` as 0.6.5's were. MRTD and RTMR0 are 0.6.1's.
+			OSImage: "feff3645893ad910d4f0e06d8f553cf80a7c9fede2ce0698fa63116283260366",
+			Name:    "dstack-0.6.4",
+			MRTD:    "2a674327c50218dba880066b349b8d559d749ed68dce33fd651c184a877d084b07a9e583767a7ad5da13ed91deec2b70",
+			RTMR1:   "0d390cdff163d981adbe90bb1d3666463be9de93a83de9b09ad0fe233974fdddc475731ba40d0bdc523efe8887cf82b8",
+			RTMR2:   "df939336955fec7a8d316b4ee4fe7b7e0810194c6911aa61c559882ad17984bfb4a7fc7c3112d25a4968f23bd6b907be",
+			RTMR0:   []string{rtmr0Small, rtmr0Large},
+		},
+		{
+			// dstack-0.6.5 (Dstack-TEE/dstack mkosi-os-v0.6.5, confirmed
+			// 2026-11-20; the release ships no image-hashes.txt). CPU only.
+			// Measured 2026-11-20: tdx.small twice and tdx.large, all on
+			// Phala's prod5 host, read from `phala cvms attestation` because
+			// the container log was not served. MRTD and RTMR0 are 0.6.1's;
+			// RTMR1 and RTMR2 are its own, and match a production node's quote.
+			OSImage: "4771a29e03e93f0e2d5e37174cd8bb1112942c9689deb36b16c5df9e183d8623",
+			Name:    "dstack-0.6.5",
+			MRTD:    "2a674327c50218dba880066b349b8d559d749ed68dce33fd651c184a877d084b07a9e583767a7ad5da13ed91deec2b70",
+			RTMR1:   "2f72a4db2f7de90adeabe55607b0c1cf209fc243bc773f5862d1b00d3bb198e835e99d502e90a24005f0d1368dd24f29",
+			RTMR2:   "3d9910a33a26a769c5146dea31bea0d2924a7746ad09e121dabe709eddd5c647716f4d89279e0e24d8dbb93f9cdb605b",
 			RTMR0:   []string{rtmr0Small, rtmr0Large},
 		},
 	}
