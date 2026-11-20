@@ -284,12 +284,16 @@ export function phalaPreLaunchDigests(): readonly string[] {
  *
  * Read off a dstack-0.6.1 CVM's app_compose on dstack-pha-prod5 (2026-10-19),
  * and the same key is the `id` in key_provider_info of the 2026-08
- * dstack-0.5.9 capture. A second Phala KMS would refuse nodes deployed against
- * it with key_provider_id until it is added here, the fail-closed direction.
+ * dstack-0.5.9 capture. A Phala KMS not listed here refuses nodes deployed
+ * against it with key_provider_id until it is added, the fail-closed direction.
+ *
+ * The second is "Phala KMS 2026-11" (`phala kms list`, its ca_pubkey), named
+ * by a dstack-0.6.5 CVM's app_compose on dstack-pha1-prod5 (2026-11-20).
  */
 export function phalaKMSKeyProviderIds(): readonly string[] {
     return [
         '3059301306072a8648ce3d020106082a8648ce3d030107034200048844eb42ccdf8c52fd4f174f362fcb9bbd19c45fd48f1edec2d8f1ca23536ec1a74021b4cee610c074f8294d431b2b7fee2c39e5333fdaf0a4522d43fb159d9f',
+        '3059301306072a8648ce3d020106082a8648ce3d03010703420004e8e325a477b0bf22800dc927a46c68638938d283fe73d1f9028eeac7028193f3470122193875f598b7addc503e534712ab437b4120776bbac32ddf8897f844ee',
     ]
 }
 

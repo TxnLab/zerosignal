@@ -36,7 +36,8 @@ package attest
 // node/internal/tee/dstackprobe.sh's ds_os_image_hash, which nothing pins.
 // Images before 0.6.0 are `Dstack-TEE/meta-dstack` releases; from 0.6.0 they
 // are `mkosi-os-v*` releases of `Dstack-TEE/dstack`, built by a different
-// backend, with the digest also listed in that release's image-hashes.txt.
+// backend, whose digest.txt the live test reads; 0.6.1 also lists it in an
+// image-hashes.txt, which 0.6.5 does not ship.
 //
 // Removing an entry de-routes every node still on that image, and refuses any
 // ACI upstream on it too, since node's upstream attestation reads this list.
@@ -146,11 +147,12 @@ func TrustedDstackOSImages() []string {
 // dstack-0.5.12: rootfs 2850 inodes, initramfs 637 entries; the login-relevant
 // set is identical to 0.5.9's.
 //
-// dstack-nvidia-0.5.12 AND dstack-0.6.1 ARE NOT HERE, and their absence is a
-// fact rather than an oversight: they are trusted, but their rootfs has not
-// been enumerated. The nvidia rootfs is a different, larger image, and 0.6.1 is
-// a different build (Debian/mkosi), so neither inherits a scan. An upstream on
-// either gets the STRICT root-backdoor rule. Add an image once its scan is run,
+// dstack-nvidia-0.5.12 AND THE 0.6 LINE (0.6.1, 0.6.4, 0.6.5) ARE NOT HERE, and
+// their absence is a fact rather than an oversight: they are trusted, but their
+// rootfs has not been enumerated. The nvidia rootfs is a different, larger
+// image, and the 0.6 images are a different build (Debian/mkosi), so none
+// inherits a scan, and no 0.6 release inherits another's. An upstream on any of
+// them gets the STRICT root-backdoor rule. Add an image once its scan is run,
 // not before.
 func OSImagesWithoutSSHDaemon() []string {
 	return []string{

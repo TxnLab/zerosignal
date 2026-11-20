@@ -727,12 +727,18 @@ func PhalaPreLaunchDigests() []string {
 //
 // Read off a dstack-0.6.1 CVM's app_compose on dstack-pha-prod5 (2026-10-19).
 // The same key is the `id` in key_provider_info of the 2026-08 dstack-0.5.9
-// capture, so it has held across a guest-image generation. Phala running a
-// second KMS would refuse nodes deployed against it with key_provider_id
-// until it is added here, which is the fail-closed direction.
+// capture, so it has held across a guest-image generation. A KMS Phala runs
+// that is not listed here refuses nodes deployed against it with
+// key_provider_id until it is added, which is the fail-closed direction.
+//
+// The second is "Phala KMS 2026-11" (`phala kms list`, its ca_pubkey), the KMS
+// a dstack-0.6.5 CVM redeployed onto dstack-pha1-prod5 named in its
+// app_compose on 2026-11-20. The first stays for CVMs still deployed against
+// it.
 func PhalaKMSKeyProviderIDs() []string {
 	return []string{
 		"3059301306072a8648ce3d020106082a8648ce3d030107034200048844eb42ccdf8c52fd4f174f362fcb9bbd19c45fd48f1edec2d8f1ca23536ec1a74021b4cee610c074f8294d431b2b7fee2c39e5333fdaf0a4522d43fb159d9f",
+		"3059301306072a8648ce3d020106082a8648ce3d03010703420004e8e325a477b0bf22800dc927a46c68638938d283fe73d1f9028eeac7028193f3470122193875f598b7addc503e534712ab437b4120776bbac32ddf8897f844ee",
 	}
 }
 

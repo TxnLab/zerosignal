@@ -271,7 +271,7 @@ var ErrStorageUnencrypted = errors.New("attest: the replay records an unencrypte
 // ABSENT PASSES, and that is the 0.5.x line, not a skip. 0.5.9 and 0.5.12
 // honour the same cmdline switch and record nothing, so on those images
 // the choice is invisible and the gap stays open; 0.6.1 emits the event on
-// every boot. Requiring it would refuse every 0.5.x node for a record
+// every boot, and so do 0.6.4 and 0.6.5 (their 2026-11-20 captures). Requiring it would refuse every 0.5.x node for a record
 // their image cannot write.
 //
 // A malformed value refuses rather than passes: only the exact byte dstack

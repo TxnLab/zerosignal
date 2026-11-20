@@ -239,6 +239,18 @@ func captured061(t *testing.T, asDeployed bool) string {
 	return strings.Replace(doc, backdoor, "", 1)
 }
 
+// captured065 is the app_compose a live Phala dstack-0.6.5 node published on
+// 2026-11-20, byte for byte: its sha256 is the compose-hash that node's quote
+// replays to. Deployed with --no-dev-os, so nothing is removed.
+func captured065(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/app_compose_dstack065.json")
+	if err != nil {
+		t.Fatalf("read the 0.6.5 capture: %v", err)
+	}
+	return string(b)
+}
+
 // emptyIfNil renders a nil slice as `[]` rather than `null` in the vectors.
 // A TS reader comparing against `[]` would otherwise have to special-case
 // null, and "the field is absent" and "the list is empty" must not be
@@ -866,6 +878,23 @@ func buildDocumentVectors(t *testing.T, release string, policies map[string]Comp
 			"the same document as deployed: phala deploy without --no-dev-os appended " +
 				"DSTACK_AUTHORIZED_KEYS, and that is its one violation",
 			captured061(t, true),
+			"zerosignal",
+		},
+		{
+			"dstack_065_phala_kms_2026_11",
+			"the 0.6.1 shape on Phala's 2026-11 KMS, the second key provider id, which " +
+				"new CVMs are deployed against",
+			`{"manifest_version":"3","runner":"docker-compose",` + composeField(release) +
+				`,"allowed_envs":["NODE_LLM_OPENAI_API_KEY"],"init_script":[],` +
+				`"key_provider":"kms","key_provider_id":"` + PhalaKMSKeyProviderIDs()[1] + `"}`,
+			"enforced",
+		},
+		{
+			"dstack_065_captured",
+			"the document a live Phala dstack-0.6.5 node published (2026-11-20) on the " +
+				"2026-11 KMS. Pins the shape Phala emits on 0.6.5, pre-launch script and " +
+				"toggles included.",
+			captured065(t),
 			"zerosignal",
 		},
 		{

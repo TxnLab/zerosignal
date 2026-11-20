@@ -31,6 +31,22 @@ Kept above the version history rather than inside it because a heading here that
 generation would make "does this peer speak it?" unanswerable — nothing on the wire carries
 the answer.
 
+### 2026-11-20 — dstack 0.6.4 and 0.6.5 guest images are trusted; Phala's 2026-11 KMS key
+
+Phala no longer offers `dstack-0.6.1`, so a dstack node deployed now boots `dstack-0.6.5`,
+and payers refused every one with `measurement_mismatch`.
+
+- `TrustedDstackBootChains` ↔ `trustedDstackBootChains` gains `dstack-0.6.4` (`feff3645…`)
+  and `dstack-0.6.5` (`4771a29e…`), so `TrustedDstackOSImages` lists both. Each digest was
+  checked against its Dstack-TEE/dstack `mkosi-os` release, and each image was measured on
+  `tdx.small` and `tdx.large`. MRTD and RTMR0 are 0.6.1's; RTMR1 and RTMR2 are each
+  release's own.
+- Neither image is in `OSImagesWithoutSSHDaemon`: no rootfs scan has been run, so an
+  upstream on either gets the strict root-backdoor rule, as on 0.6.1.
+- `PhalaKMSKeyProviderIDs` ↔ `phalaKMSKeyProviderIds` gains the key of Phala's 2026-11 KMS
+  (`…04e8e325…`), which new CVMs are deployed against. The first key stays, for CVMs
+  deployed against it.
+
 ### 2026-11-19 — releases are public
 
 `TxnLab/zerosignal`, `@txnlab/zs-proto` and `@txnlab/zerosignal` are public, every earlier version
