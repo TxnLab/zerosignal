@@ -361,6 +361,46 @@ describe('Client.create building the registry', () => {
         )
     })
 
+    // An abort during that read is the caller's, not a chain failure: create
+    // passes the read's own abort error through rather than reporting a failed
+    // deployment read, so a host doesn't read its own abort as algod being
+    // down. (The algod client prefixes the reason with its call, so the
+    // reason itself is not what arrives.)
+    it('passes an abort during the deployment read through unwrapped', async () => {
+        const ctl = new AbortController()
+        const reason = new Error('caller gone')
+        let asked!: () => void
+        const reading = new Promise<void>((r) => (asked = r))
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+                if (new URL(String(input)).pathname !== '/v2/transactions/params') {
+                    return Response.json({ message: 'not found' }, { status: 404 })
+                }
+                asked()
+                const signal = init?.signal
+                return new Promise<Response>((_, reject) => {
+                    if (signal?.aborted) reject(signal.reason)
+                    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+                })
+            }),
+        )
+        const net = fleet(serve)
+        const pending = Client.create(
+            { signer, network: testnet(), wallet: callerWallet, fetch: net.fetch, disableTee: true, privacy: 'direct' },
+            ctl.signal,
+        )
+        await reading
+        ctl.abort(reason)
+        const err = await pending.then(
+            () => undefined,
+            (e: unknown) => e,
+        )
+        expect(err).toBeInstanceOf(Error)
+        expect((err as Error).message).toMatch(/caller gone/)
+        expect((err as Error).message).not.toMatch(/read the escrow deployment/)
+    })
+
     // The chat app builds its own source and passes no deployment, so the
     // source derives it from algod's genesis hash at its first chain read.
     it('has a host-built source derive the deployment from the chain', async () => {

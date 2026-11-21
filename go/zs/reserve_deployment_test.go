@@ -129,6 +129,37 @@ func TestReserve_PayerWithoutDeploymentRefuses(t *testing.T) {
 	}
 }
 
+// The missing deployment is the payer's own defect, so it is named ahead of
+// the node's missing ephemeral: errNoEphemeral would send dispatch re-probing
+// the node and end the turn no_ephemeral_capacity, blaming the wrong side.
+// The TS twin pins the same order in parts.test.ts.
+func TestReserve_PayerWithoutDeploymentNamedBeforeNoEphemeral(t *testing.T) {
+	payerAddr, _, payerPriv, err := ticket.GenerateAlgorandKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked := false
+	h := newReserveHarness(t, func(http.ResponseWriter, *http.Request) { asked = true })
+	op := h.operator
+	op.EphemeralExpiry = time.Now().Add(-time.Minute).Unix()
+	if _, err := op.SealRecipient(time.Now()); !errors.Is(err, errNoEphemeral) {
+		t.Fatalf("fixture: SealRecipient = %v, want errNoEphemeral", err)
+	}
+	req := sampleReserveReq()
+	req.PayerAddr = payerAddr
+	c := &HTTPReserveClient{
+		HTTPClient: http.DefaultClient,
+		Signer:     rawKeyBytesSigner{addr: payerAddr, priv: payerPriv},
+	}
+	_, err = c.Reserve(context.Background(), op, req, nil)
+	if !errors.Is(err, errNoPayerDeployment) {
+		t.Fatalf("Reserve: %v, want errNoPayerDeployment ahead of errNoEphemeral", err)
+	}
+	if asked {
+		t.Fatal("a payer with no deployment sent a reserve")
+	}
+}
+
 // The receipt check follows the ticket: a receipt must be bound to the
 // ticket's deployment, and an unbound one is refused even beside an unbound
 // ticket.
