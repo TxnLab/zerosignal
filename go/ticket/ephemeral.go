@@ -33,7 +33,7 @@ import (
 //
 // The target binding — (operatorID, nodeID) — is deliberately NOT part of this
 // struct: both are already top-level /v1/zs/details fields, and passing them
-// to CanonicalBytes / Sign / Verify as parameters (rather than trusting them
+// to CanonicalBytes / Sign / VerifyFor as parameters (rather than trusting them
 // from the wire, or carrying them in a field a caller may forget to set) means
 // a relay or substituting node cannot re-point a captured-and-resigned-looking
 // block at a different operator — or at a different node of the SAME operator.
@@ -50,9 +50,9 @@ type EphemeralAdvertisement struct {
 	Expiry    int64  `json:"ephemeral_expiry"`     // unix seconds — end of the validity window
 	IssuedAt  int64  `json:"ephemeral_issued_at"`  // unix seconds — start of the window (key mint/rotation time); signed, so [IssuedAt, Expiry] is tamper-evident
 	Sig       string `json:"ephemeral_sig"`        // base64(Ed25519 over EphemeralSigDigest)
-	// Deployment and SigV2 carry the deployment-bound signature alongside the
-	// legacy one. A node publishes both, because the advertisement is served
-	// to every payer and a payer that predates the fields reads only Sig.
+	// Deployment and SigV2 carry the deployment-bound signature, the only one
+	// VerifyFor accepts. Sign still fills Sig over the legacy layout, which a
+	// 9.13 node published for older payers; a 9.14 node publishes SigV2 alone.
 	Deployment DeploymentID `json:"ephemeral_deployment,omitzero"`
 	SigV2      string       `json:"ephemeral_sig_v2,omitempty"` // base64(Ed25519 over EphemeralSigDigestV2)
 }
@@ -72,7 +72,8 @@ type EphemeralAdvertisement struct {
 // and node over to different signatures.
 //
 // v2 is a separate tag for the deployment-bound layout SigV2 covers, not a
-// renaming of v1: both are signed while the legacy layout stays accepted.
+// renaming of v1. Only v2 is verified (from 9.14); v1 stays defined so its
+// bytes stay pinned.
 const (
 	ephemeralSigningTag   = "zs-ephemeral-v1\x00"
 	ephemeralSigningTagV2 = "zs-ephemeral-v2\x00"
@@ -86,7 +87,7 @@ const (
 const DefaultEphemeralSkew = 60 * time.Second
 
 // MaxEphemeralLifetime caps the signed validity window Expiry-IssuedAt and is
-// a HARD check in Verify. The node's advertised TTL is 25m; 40m (≈1.5× advTTL)
+// a HARD check in VerifyFor. The node's advertised TTL is 25m; 40m (≈1.5× advTTL)
 // clears an honest current key with margin while rejecting a malicious node
 // that advertises a long-lived "ephemeral" (e.g. expiry years out) so it can
 // secretly retain the private half and defeat forward secrecy. This is the
@@ -96,7 +97,7 @@ const DefaultEphemeralSkew = 60 * time.Second
 const MaxEphemeralLifetime = 40 * time.Minute
 
 // FreshnessTarget is the SOFT relay-staleness threshold on now-IssuedAt,
-// consumed by Stale (NOT by Verify). A hard-valid block older than this that
+// consumed by Stale (NOT by VerifyFor). A hard-valid block older than this that
 // arrived via a relay means the relay is serving a staler key than the node
 // should have — prefer a fresher path and downrank the relay, but still use
 // the block (it's decryptable and forward-secret). ≈ rotationPeriod (20m) +
@@ -105,13 +106,13 @@ const MaxEphemeralLifetime = 40 * time.Minute
 // behavior, never reject. See node-side timing in ephemeral.go.
 const FreshnessTarget = 21 * time.Minute
 
-// ErrEphemeralExpired is returned by Verify when the signature is valid but
+// ErrEphemeralExpired is returned by VerifyFor when the signature is valid but
 // the advertisement is past Expiry + skew. It is a sentinel so callers can
 // distinguish a stale-but-genuine block (fall back to the on-chain key
 // silently) from a forged or substituted one (log the substitution attempt).
 var ErrEphemeralExpired = errors.New("ephemeral advertisement expired")
 
-// ErrEphemeralLifetimeTooLong is returned by Verify when the signature is
+// ErrEphemeralLifetimeTooLong is returned by VerifyFor when the signature is
 // valid but the signed window Expiry-IssuedAt exceeds MaxEphemeralLifetime —
 // an authentic-but-over-long advertisement, i.e. a node trying to pin a
 // long-lived key it could retain to defeat forward secrecy. Distinct from
@@ -166,7 +167,8 @@ func EphemeralSigDigestV2(a *EphemeralAdvertisement, operatorID, nodeID uint64) 
 }
 
 // EphemeralSigDigest returns sha256(CanonicalBytes(operatorID, nodeID)) — the
-// 32-byte value both Sign and Verify feed to ed25519. CanonicalBytes already
+// 32-byte legacy value Sign feeds to ed25519, which no verifier accepts from
+// 9.14. CanonicalBytes already
 // includes the "zs-ephemeral-v1\x00" domain tag so the digest is
 // cross-protocol safe. Exposed (like TicketSigDigest / ReceiptSigDigest) so
 // the signing payload stays single-source.
@@ -218,21 +220,22 @@ func (a *EphemeralAdvertisement) Sign(ctx context.Context, signer BytesSigner, s
 	return nil
 }
 
-// Verify checks that a.Sig is a valid Ed25519 signature of
-// EphemeralSigDigest(a) under pub for the given (operatorID, nodeID), and
-// that the advertisement has not expired (now ≤ Expiry + skew).
+// VerifyFor checks that a.SigV2 is a valid Ed25519 signature of
+// EphemeralSigDigestV2(a) under pub for the given (operatorID, nodeID) and
+// deployment, and that the advertisement has not expired (now ≤ Expiry +
+// skew).
 //
 // operatorID and nodeID are inputs, never trusted from the wire: they enter
 // the recomputed digest directly and are never written back onto a, so the
 // signature only validates when the recipient was signed for that exact
-// (chain-resolved) node, and Verify leaves the object it verified unmodified.
+// (chain-resolved) node, and VerifyFor leaves the object it verified unmodified.
 // A relay or substituting node cannot re-point a block at a different operator
 // — or a sibling node of the same operator (relevant when an operator reuses
 // one signing key across its nodes) — without re-signing under that node's
 // key.
 //
-// Verify performs the HARD (fail-closed) checks only; the SOFT relay-staleness
-// signal is Stale, called separately after Verify returns nil. Order is
+// VerifyFor performs the HARD (fail-closed) checks only; the SOFT
+// relay-staleness signal is Stale, called separately after it returns nil. Order is
 // deliberate: (1) signature, so a forged block fails generically (a caller can
 // log it as a substitution attempt) and the timestamps below are authentic
 // before any policy keys off them; (2) not-before + lifetime cap on the
@@ -242,36 +245,17 @@ func (a *EphemeralAdvertisement) Sign(ctx context.Context, signer BytesSigner, s
 // DefaultEphemeralSkew for skew; now is injected so callers can test boundaries
 // deterministically.
 //
-// Verify checks only the legacy Sig; payers verify with VerifyFor.
-func (a *EphemeralAdvertisement) Verify(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration) error {
-	return a.verify(pub, now, operatorID, nodeID, skew, false)
-}
-
-// VerifyFor checks SigV2 when the advertisement is bound, after requiring its
-// Deployment to equal want, and checks the legacy Sig only when it is unbound
-// and allowLegacy holds. A bound advertisement is judged by SigV2 alone: Sig
-// is there for payers that predate the binding.
-//
-// allowLegacy is the payer's call from the node's advertised proto_version.
-// That version is unsigned, so during the rollout a relay can strip the v2
-// fields and lower it; closing that requires refusing legacy outright, which
-// is the end of the dual-accept window.
-func (a *EphemeralAdvertisement) VerifyFor(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration, want DeploymentID, allowLegacy bool) error {
-	if err := checkDeployment(a.Deployment, want, allowLegacy); err != nil {
+// Sig, the legacy signature, is never read: a relay that strips the bound
+// fields leaves an advertisement this refuses.
+func (a *EphemeralAdvertisement) VerifyFor(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration, want DeploymentID) error {
+	if err := checkDeployment(a.Deployment, want); err != nil {
 		return fmt.Errorf("ephemeral: %w", err)
 	}
-	return a.verify(pub, now, operatorID, nodeID, skew, !a.Deployment.IsZero())
-}
-
-func (a *EphemeralAdvertisement) verify(pub ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, skew time.Duration, bound bool) error {
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid ed25519 public key length %d", len(pub))
 	}
-	encoded, digest := a.Sig, EphemeralSigDigest(a, operatorID, nodeID)
-	if bound {
-		encoded, digest = a.SigV2, EphemeralSigDigestV2(a, operatorID, nodeID)
-	}
-	sig, err := base64.StdEncoding.DecodeString(encoded)
+	digest := EphemeralSigDigestV2(a, operatorID, nodeID)
+	sig, err := base64.StdEncoding.DecodeString(a.SigV2)
 	if err != nil {
 		return fmt.Errorf("decode ephemeral sig: %w", err)
 	}
@@ -307,7 +291,7 @@ func (a *EphemeralAdvertisement) verify(pub ed25519.PublicKey, now time.Time, op
 }
 
 // Stale is the SOFT relay-attribution signal: true when the block's age
-// (now - IssuedAt) exceeds FreshnessTarget. Call it ONLY after Verify returns
+// (now - IssuedAt) exceeds FreshnessTarget. Call it ONLY after VerifyFor returns
 // nil (it trusts IssuedAt is authentic). A stale block fetched via a relay
 // means the relay served an older key than the node should have — prefer a
 // fresher path and downrank the relay — but the block is still usable

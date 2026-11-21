@@ -16,9 +16,10 @@ import {
     setBodyHashBytes,
     signReceipt,
     tokensPerSec,
-    verifyReceipt,
+    verifyReceiptFor,
     type UsageReceipt,
 } from '../src/ticket/receipt.js'
+import { encodeDeploymentId } from '../src/ticket/deployment.js'
 import { UsageType } from '../src/ticket/usagetype.js'
 import { newFakeSigner } from './helpers.js'
 
@@ -39,17 +40,22 @@ function sampleReceipt(): UsageReceipt {
     }
 }
 
+// Verifiers accept only bound receipts, so the sign / verify cases sign one.
+const DEP = new Uint8Array(32).fill(7)
+const boundReceipt = (): UsageReceipt => ({ ...sampleReceipt(), deployment: encodeDeploymentId(DEP) })
+const verifyReceipt = (r: UsageReceipt, pub: Uint8Array) => verifyReceiptFor(r, pub, DEP)
+
 describe('UsageReceipt sign / verify', () => {
     it('round-trips through Sign + Verify', async () => {
         const { signer, address, publicKey } = newFakeSigner()
-        const r = sampleReceipt()
+        const r = boundReceipt()
         await signReceipt(r, signer, address)
         expect(() => verifyReceipt(r, publicKey)).not.toThrow()
     })
 
     it('Verify fails when amount_charged is mutated after signing', async () => {
         const { signer, address, publicKey } = newFakeSigner()
-        const r = sampleReceipt()
+        const r = boundReceipt()
         await signReceipt(r, signer, address)
         r.amount_charged += 1
         expect(() => verifyReceipt(r, publicKey)).toThrow()
@@ -57,7 +63,7 @@ describe('UsageReceipt sign / verify', () => {
 
     it('Verify fails when body_hash is mutated after signing', async () => {
         const { signer, address, publicKey } = newFakeSigner()
-        const r = sampleReceipt()
+        const r = boundReceipt()
         await signReceipt(r, signer, address)
         r.body_hash = 'b'.repeat(64)
         expect(() => verifyReceipt(r, publicKey)).toThrow()
@@ -65,7 +71,7 @@ describe('UsageReceipt sign / verify', () => {
 
     it('Verify fails for a missing signature', () => {
         const { publicKey } = newFakeSigner()
-        const r = sampleReceipt()
+        const r = boundReceipt()
         expect(() => verifyReceipt(r, publicKey)).toThrow(/signature missing/)
     })
 })

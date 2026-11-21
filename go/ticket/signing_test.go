@@ -184,17 +184,17 @@ func TestTicketVerify_DigestShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tk := sampleTicket()
+	tk := boundTicket()
 	digest := TicketSigDigest(tk)
 	tk.Sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, digest[:]))
-	if err := tk.Verify(pub); err != nil {
+	if err := tk.VerifyFor(pub, testDep); err != nil {
 		t.Fatalf("digest-shaped sig should verify, got %v", err)
 	}
 
-	tk2 := sampleTicket()
+	tk2 := boundTicket()
 	legacyMsg := append([]byte("MX"), tk2.CanonicalBytes()...)
 	tk2.Sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, legacyMsg))
-	if err := tk2.Verify(pub); err == nil {
+	if err := tk2.VerifyFor(pub, testDep); err == nil {
 		t.Fatal("legacy MX-prefixed sig should fail Verify")
 	}
 }

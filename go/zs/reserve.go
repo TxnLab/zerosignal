@@ -382,10 +382,9 @@ type ReserveClient interface {
 type HTTPReserveClient struct {
 	HTTPClient *http.Client
 	Signer     ticket.BytesSigner
-	// Deployment is the payer's own deployment id. When set, a reserve to a
-	// node that advertises wire.DeploymentBindingMinVersion names it, and the
-	// ticket that comes back must be bound to it. Zero keeps the legacy
-	// layouts with every node.
+	// Deployment is the payer's own deployment id. Every reserve names it, and
+	// the ticket that comes back must be bound to it. Zero refuses to reserve:
+	// no node issues an unbound ticket, and no payer accepts one.
 	Deployment ticket.DeploymentID
 	// Rail is the payer's rail; zero is Algorand. It decides how the open
 	// payload is checked and whether the payer chooses the ticket id.
@@ -439,6 +438,10 @@ var errBadReserveEnvelope = errors.New("node rejected sealed reserve envelope (b
 // dispatcher surfaces 503 no_ephemeral_capacity, mirroring no_tee_capacity. See
 // Operator.SealRecipient and proto/SPEC.md § 8.
 var errNoEphemeral = errors.New("operator has no valid forward-secrecy ephemeral recipient")
+
+// errNoPayerDeployment is a reserve client that doesn't know its own
+// deployment, so it can't bind the reserve or check the ticket.
+var errNoPayerDeployment = errors.New("reserve: the payer's escrow deployment is unknown")
 
 // ErrNoEphemeral exposes the sentinel behind IsNoEphemeral so a caller in
 // another package can CONSTRUCT the condition, not just recognise it. The
@@ -516,11 +519,11 @@ func (c *HTTPReserveClient) Reserve(ctx context.Context, op Operator, req ticket
 	}()
 	req.ProxyRecipient = ephemeral.Recipient().String()
 	// Set before signing: a signed deployment selects the bound reserve
-	// layout, and the node reads it to decide which ticket layout to issue.
-	req.Deployment = ticket.DeploymentID{}
-	if !c.Deployment.IsZero() && wire.UsesDeploymentBinding(op.ProtoVersion) {
-		req.Deployment = c.Deployment
+	// layout, and the node binds the ticket to it.
+	if c.Deployment.IsZero() {
+		return nil, errNoPayerDeployment
 	}
+	req.Deployment = c.Deployment
 	if req.TicketID, err = requestTicketID(c.Rail); err != nil {
 		return nil, err
 	}
@@ -747,10 +750,7 @@ func (c *HTTPReserveClient) reserveAttempt(
 		return nil, fmt.Errorf("parse reserve response: %w", err)
 	}
 
-	// A node we named our deployment to must answer with a ticket bound to
-	// it; one we didn't may answer with either layout, and a bound ticket
-	// must still be bound to us.
-	if err := parsed.Ticket.VerifyFor(op.TicketSigningKey, c.Deployment, req.Deployment.IsZero()); err != nil {
+	if err := parsed.Ticket.VerifyFor(op.TicketSigningKey, c.Deployment); err != nil {
 		return nil, fmt.Errorf("verify ticket: %w", err)
 	}
 	if err := validateTicketShape(&parsed.Ticket, op, req); err != nil {
@@ -827,7 +827,7 @@ func openAIErrorCode(body []byte) string {
 
 // validateTicketShape checks that the ticket's fields reflect what we
 // asked for and what the registered operator is. Signature validity is
-// checked separately via Ticket.Verify — this function catches
+// checked separately via Ticket.VerifyFor — this function catches
 // cases where the signature happens to be valid (e.g. operator signed
 // garbage with their legit key) but the content is inconsistent.
 func validateTicketShape(t *ticket.Ticket, op Operator, req ticket.ReserveRequest) error {

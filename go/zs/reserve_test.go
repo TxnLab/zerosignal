@@ -90,6 +90,17 @@ func (r rawKeyBytesSigner) SignBytes(_ context.Context, addr string, msg []byte)
 	return ed25519.Sign(r.priv, msg), nil
 }
 
+// harnessDeployment is the deployment the tests' reserve clients name. The
+// harness binds each ticket to the deployment the reserve names, as a node
+// does.
+var harnessDeployment = func() ticket.DeploymentID {
+	d, err := ticket.AlgorandDeploymentID(bytes.Repeat([]byte{7}, 32), 1001)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}()
+
 // newReserveHarness builds a fake node with a bound handler h. The
 // operator published by the harness has h's URL as its BaseURL.
 func newReserveHarness(t *testing.T, h http.HandlerFunc) *reserveTestHarness {
@@ -160,6 +171,7 @@ func (h *reserveTestHarness) issueValidTicket(t *testing.T, req ticket.ReserveRe
 	if req.TicketID != "" {
 		tkt.TicketID = req.TicketID
 	}
+	tkt.Deployment = req.Deployment
 	if err := tkt.Sign(context.Background(), rawKeyBytesSigner{addr: h.signAddr, priv: h.signKey}, h.signAddr); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +247,7 @@ func TestHTTPReserveClient_HappyPath(t *testing.T) {
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
 
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	got, err := c.Reserve(context.Background(), h.operator, req, nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
@@ -289,7 +301,7 @@ func TestHTTPReserveClient_ReadsBothRatesByTheirWireKeys(t *testing.T) {
 		w.Header().Set("Content-Type", wire.SealedReserveResponseContentType)
 		_, _ = w.Write(sealed)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	got, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
@@ -306,7 +318,7 @@ func TestHTTPReserveClient_NilClientIsGuarded(t *testing.T) {
 	var reached atomic.Bool
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) { reached.Store(true) })
 
-	_, err := (&HTTPReserveClient{}).Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
+	_, err := (&HTTPReserveClient{Deployment: harnessDeployment}).Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil || reached.Load() {
 		t.Fatalf("a nil-client reserve reached a loopback node (err %v, reached %v)", err, reached.Load())
 	}
@@ -321,7 +333,7 @@ func TestHTTPReserveClient_BusyReturnsBusyError(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"busy"}}`))
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if !IsBusy(err) {
 		t.Fatalf("err = %v, want BusyError", err)
@@ -345,7 +357,7 @@ func TestHTTPReserveClient_BadSigRejected(t *testing.T) {
 		resp.Ticket.Sig = base64.StdEncoding.EncodeToString(sigBytes)
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want sig verify error")
@@ -388,7 +400,7 @@ func TestHTTPReserveClient_CommitKMismatchRejected(t *testing.T) {
 		resp.WrappedResponseKey = base64.StdEncoding.EncodeToString(buf.Bytes())
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want commit_k mismatch error, got nil")
@@ -417,7 +429,7 @@ func TestHTTPReserveClient_PresignedOpenIsCheckedThenPassedOn(t *testing.T) {
 				resp.PreSignedOpenTxn = tc.group
 				writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 			})
-			c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+			c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 			rt, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
@@ -443,7 +455,7 @@ func TestHTTPReserveClient_TicketModelMismatch(t *testing.T) {
 		resp := h.issueValidTicket(t, rr)
 		writeSealedReserve(t, w, resp, rr.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil || !strings.Contains(err.Error(), "model") {
 		t.Errorf("err = %v, want model mismatch", err)
@@ -454,7 +466,7 @@ func TestHTTPReserveClient_Non200NonBusy(t *testing.T) {
 	h := newReserveHarness(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusBadRequest)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil || strings.Contains(err.Error(), "busy") {
 		t.Errorf("err = %v; want non-busy error", err)
@@ -480,7 +492,7 @@ func TestHTTPReserveClient_BodyCutOffByDeadline_Unclassified(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(ctx, h.operator, sampleReserveReq(), nil)
 	if err == nil || !strings.HasPrefix(err.Error(), "read reserve response: ") {
 		t.Fatalf("err = %v; want the body read failure", err)
@@ -500,7 +512,7 @@ func TestHTTPReserveClient_ContextLengthExceeded_ReturnsSizeError(t *testing.T) 
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"max_output_tokens exceeds this operator's cap for the model","type":"invalid_request_error","code":"context_length_exceeded"}}`))
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if !IsSize(err) {
 		t.Fatalf("err = %v, want SizeError", err)
@@ -531,7 +543,7 @@ func TestHTTPReserveClient_OtherEnvelopedBadRequest_NotSizeError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"bad payer addr","type":"invalid_request_error","code":"invalid_payer_addr"}}`))
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want error")
@@ -703,7 +715,7 @@ func TestHTTPReserveClient_NetworkFailure(t *testing.T) {
 		TicketSigningKey:         make(ed25519.PublicKey, ed25519.PublicKeySize),
 		BaseURL:                  "http://127.0.0.1:1", // unlikely to be listening
 	}
-	c := &HTTPReserveClient{HTTPClient: &http.Client{Timeout: 200 * time.Millisecond}}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: &http.Client{Timeout: 200 * time.Millisecond}}
 	_, err = c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("want network error")
@@ -739,7 +751,7 @@ func TestHTTPReserveClient_SealsRequest(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = "PAYERADDR1234567890"
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -781,7 +793,7 @@ func TestHTTPReserveClient_SignsPayer(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -793,14 +805,14 @@ func TestHTTPReserveClient_SignsPayer(t *testing.T) {
 		t.Fatal("reserve body carried no payer_issued_at")
 	}
 	// Verifies for the target the proxy routed to (the node's own identity).
-	if err := seen.Verify(payerPub, h.operator.ID, h.operator.NodeID, time.Now(), ticket.DefaultReserveSkew); err != nil {
+	if err := seen.VerifyFor(payerPub, h.operator.ID, h.operator.NodeID, time.Now(), ticket.DefaultReserveSkew, harnessDeployment); err != nil {
 		t.Fatalf("node-side verify of the proxy signature failed: %v", err)
 	}
 	// Target-bound: a sibling node or a different operator rejects it.
-	if err := seen.Verify(payerPub, h.operator.ID, h.operator.NodeID+1, time.Now(), ticket.DefaultReserveSkew); err == nil {
+	if err := seen.VerifyFor(payerPub, h.operator.ID, h.operator.NodeID+1, time.Now(), ticket.DefaultReserveSkew, harnessDeployment); err == nil {
 		t.Error("signature verified for the wrong node_id (target binding broken)")
 	}
-	if err := seen.Verify(payerPub, h.operator.ID+1, h.operator.NodeID, time.Now(), ticket.DefaultReserveSkew); err == nil {
+	if err := seen.VerifyFor(payerPub, h.operator.ID+1, h.operator.NodeID, time.Now(), ticket.DefaultReserveSkew, harnessDeployment); err == nil {
 		t.Error("signature verified for the wrong operator_id (target binding broken)")
 	}
 }
@@ -839,7 +851,7 @@ func TestHTTPReserveClient_ResyncsOnClockSkew(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve should succeed after the node_time resync: %v", err)
 	}
@@ -854,7 +866,7 @@ func TestHTTPReserveClient_ResyncsOnClockSkew(t *testing.T) {
 		t.Fatal("first attempt should have used the local clock, not node_time")
 	}
 	// The resynced signature verifies for the target at the node's clock.
-	if err := seen[1].Verify(payerPub, h.operator.ID, h.operator.NodeID, time.Unix(nodeTime+5, 0), ticket.DefaultReserveSkew); err != nil {
+	if err := seen[1].VerifyFor(payerPub, h.operator.ID, h.operator.NodeID, time.Unix(nodeTime+5, 0), ticket.DefaultReserveSkew, harnessDeployment); err != nil {
 		t.Fatalf("resynced signature should verify: %v", err)
 	}
 }
@@ -882,7 +894,7 @@ func TestHTTPReserveClient_ResyncsAtMostOnce(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = payerAddr
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient, Signer: rawKeyBytesSigner{addr: payerAddr, priv: payerPriv}}
 	_, err = c.Reserve(context.Background(), h.operator, req, nil)
 	if err == nil {
 		t.Fatal("Reserve should fail when the node persistently rejects the signature")
@@ -905,7 +917,7 @@ func TestHTTPReserveClient_UnsignedSkewIsARefusal(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"error":{"code":"invalid_payer_sig","message":"required (node_time=1700000123)"}}`)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), h.operator, sampleReserveReq(), nil)
 	if re, ok := AsReserveHTTP(err); !ok || re.Status != http.StatusUnauthorized {
 		t.Fatalf("err = %#v, want a *ReserveHTTPError 401", err)
@@ -935,7 +947,7 @@ func TestHTTPReserveClient_NoSignerOmitsSig(t *testing.T) {
 
 	req := sampleReserveReq()
 	req.PayerAddr = "PAYERADDR1234567890"
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient} // no Signer
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient} // no Signer
 	if _, err := c.Reserve(context.Background(), h.operator, req, nil); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
@@ -954,7 +966,7 @@ func TestHTTPReserveClient_NoEphemeral_Error(t *testing.T) {
 		TicketSigningKey: make(ed25519.PublicKey, ed25519.PublicKeySize),
 		BaseURL:          "http://127.0.0.1:1",
 	}
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if !IsNoEphemeral(err) {
 		t.Fatalf("err = %v, want errNoEphemeral for an operator with no ephemeral recipient", err)

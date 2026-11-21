@@ -11,7 +11,8 @@ import {
     type ReserveRequest,
     type Ticket,
     commitResponseKey,
-    verifyReserveRequest,
+    encodeDeploymentId,
+    verifyReserveRequestFor,
 } from '@txnlab/zs-proto/ticket'
 import {
     type EphemeralIdentity,
@@ -186,12 +187,14 @@ describe('reserve', () => {
     it('signs under the payer, bound to the target, at the clock', async () => {
         const { pub, signer } = keypair()
         const { node, seen, fetch } = await fakeNode((r) => ok(r))
-        await reserve(call(node, fetch, { signer, request: { ...call(node, fetch).request, payer_addr: 'PAYER' } }))
+        const dep = new Uint8Array(32).fill(5)
+        const request = { ...call(node, fetch).request, payer_addr: 'PAYER', deployment: encodeDeploymentId(dep) }
+        await reserve(call(node, fetch, { signer, request }))
         const r = seen[0]!.request
         expect(r.payer_addr).toBe('PAYER')
         expect(r.payer_issued_at).toBe(NOW)
-        expect(() => verifyReserveRequest(3, 9, r, pub, NOW, 0)).not.toThrow()
-        expect(() => verifyReserveRequest(3, 8, r, pub, NOW, 0)).toThrow()
+        expect(() => verifyReserveRequestFor(3, 9, r, pub, NOW, 0, dep)).not.toThrow()
+        expect(() => verifyReserveRequestFor(3, 8, r, pub, NOW, 0, dep)).toThrow()
     })
 
     it('leaves a request unsigned without a payer, even with a signer', async () => {

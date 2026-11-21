@@ -52,6 +52,8 @@ function keypair() {
 }
 
 export const TICKET_ID = 'dGlja2V0LXdhaXQtMDAwMA=='
+/** The deployment both fixture halves are bound to; a receipt must be. */
+export const DEPLOYMENT = Buffer.from(new Uint8Array(32).fill(3)).toString('base64')
 
 /** The fee unit of an Algorand deployment, which every turn fixture is. */
 export const ALGO_FEES = feeUnitOf('algorand')
@@ -74,6 +76,7 @@ export async function fixture(
         node_id: 3,
         max_price: 100_000,
         commit_k: Buffer.from(commitResponseKey(responseKey)).toString('base64'),
+        deployment: DEPLOYMENT,
     } as unknown as Ticket
     const receipt: UsageReceipt = {
         ticket_id: TICKET_ID,
@@ -88,6 +91,7 @@ export async function fixture(
         aux_output_usage_type: 0,
         aux_output_count: 0,
         cached_input_count: 0,
+        deployment: DEPLOYMENT,
     } as UsageReceipt
     setBodyHashBytes(receipt, bodyHash)
     Object.assign(receipt, over)

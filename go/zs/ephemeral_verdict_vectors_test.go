@@ -43,8 +43,8 @@ type ephemeralVerdictWant struct {
 }
 
 // Deployment is the payer's own (base64, absent when it doesn't know it) and
-// ProtoVersion the node's advertised one; together they decide whether the
-// legacy signature is still enough.
+// ProtoVersion the node's advertised one. Only the bound signature counts, at
+// every version: the version is unsigned, so it cannot buy the legacy one back.
 type ephemeralVerdictCase struct {
 	Name         string               `json:"name"`
 	OperatorID   uint64               `json:"operator_id"`
@@ -138,14 +138,32 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 		// mutate edits the wire block after signing.
 		mutate func(*ephemeralVerdictAdv)
 		key    string
-		// signDep, when set, makes the node sign the bound layout too.
-		signDep ticket.DeploymentID
-		// payerDep and proto are the payer's deployment and the node's
-		// advertised version.
-		payerDep ticket.DeploymentID
-		proto    string
+		// signDep is the deployment the node binds its signature to (zero:
+		// this payer's). legacyOnly makes the node sign the legacy layout
+		// alone, as a pre-9.13 node did.
+		signDep    ticket.DeploymentID
+		legacyOnly bool
+		// payerDep is the payer's deployment (zero: mine); noPayerDep leaves
+		// the payer without one. proto is the node's advertised version.
+		payerDep   ticket.DeploymentID
+		noPayerDep bool
+		proto      string
 	}
+	depOf := func(fill byte) ticket.DeploymentID {
+		d, err := ticket.AlgorandDeploymentID(bytes.Repeat([]byte{fill}, 32), 1001)
+		if err != nil {
+			panic(err)
+		}
+		return d
+	}
+	mine, other := depOf(1), depOf(2)
 	c := func(s spec) ephemeralVerdictCase {
+		if s.signDep.IsZero() && !s.legacyOnly {
+			s.signDep = mine
+		}
+		if s.payerDep.IsZero() && !s.noPayerDep {
+			s.payerDep = mine
+		}
 		if s.recip == "" {
 			s.recip = evRecip
 		}
@@ -186,14 +204,6 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 			Deployment: payerDep, ProtoVersion: s.proto, Adv: wireAdv,
 		}
 	}
-	depOf := func(fill byte) ticket.DeploymentID {
-		d, err := ticket.AlgorandDeploymentID(bytes.Repeat([]byte{fill}, 32), 1001)
-		if err != nil {
-			panic(err)
-		}
-		return d
-	}
-	mine, other := depOf(1), depOf(2)
 	const life = 25 * 60
 	fresh := int64(evNow - 60)
 
@@ -232,37 +242,41 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 			mutate: func(a *ephemeralVerdictAdv) { a.Expiry++ }}),
 		c(spec{name: "recipient swapped after signing", issued: fresh, expiry: fresh + life,
 			mutate: func(a *ephemeralVerdictAdv) { a.AgePubkey = zeroPoint }}),
+		// The signature cases edit the bound signature, the only one checked;
+		// the legacy one beside it stays valid and rescues nothing.
 		c(spec{name: "a flipped signature byte", issued: fresh, expiry: fresh + life,
 			mutate: func(a *ephemeralVerdictAdv) {
-				sig, _ := base64.StdEncoding.DecodeString(a.Sig)
+				sig, _ := base64.StdEncoding.DecodeString(a.SigV2)
 				sig[0] ^= 1
-				a.Sig = base64.StdEncoding.EncodeToString(sig)
+				a.SigV2 = base64.StdEncoding.EncodeToString(sig)
 			}}),
 		c(spec{name: "no signature", issued: fresh, expiry: fresh + life,
-			mutate: func(a *ephemeralVerdictAdv) { a.Sig = "" }}),
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = "" }}),
 		c(spec{name: "a signature that is not base64", issued: fresh, expiry: fresh + life,
-			mutate: func(a *ephemeralVerdictAdv) { a.Sig = "!" + a.Sig[1:] }}),
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = "!" + a.SigV2[1:] }}),
 		// Go's base64 decoder skips CR and LF anywhere in its input.
 		c(spec{name: "a signature with a line break", issued: fresh, expiry: fresh + life,
-			mutate: func(a *ephemeralVerdictAdv) { a.Sig = a.Sig[:40] + "\r\n" + a.Sig[40:] }}),
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = a.SigV2[:40] + "\r\n" + a.SigV2[40:] }}),
 		// ...but only CR and LF: any other whitespace is a bad character.
 		c(spec{name: "a signature with a space", issued: fresh, expiry: fresh + life,
-			mutate: func(a *ephemeralVerdictAdv) { a.Sig = a.Sig[:40] + " " + a.Sig[40:] }}),
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = a.SigV2[:40] + " " + a.SigV2[40:] }}),
 		c(spec{name: "a signature with a tab", issued: fresh, expiry: fresh + life,
-			mutate: func(a *ephemeralVerdictAdv) { a.Sig = a.Sig[:40] + "\t" + a.Sig[40:] }}),
+			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = a.SigV2[:40] + "\t" + a.SigV2[40:] }}),
 		// StdEncoding (not Strict) ignores the unused low bits of the character
 		// before the padding; a 64-byte signature leaves four of them.
 		c(spec{name: "a signature with set padding bits", issued: fresh, expiry: fresh + life,
 			mutate: func(a *ephemeralVerdictAdv) {
 				const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-				i := len(a.Sig) - 3
-				a.Sig = a.Sig[:i] + string(alphabet[strings.IndexByte(alphabet, a.Sig[i])|0x0f]) + a.Sig[i+1:]
+				i := len(a.SigV2) - 3
+				a.SigV2 = a.SigV2[:i] + string(alphabet[strings.IndexByte(alphabet, a.SigV2[i])|0x0f]) + a.SigV2[i+1:]
 			}}),
 		c(spec{name: "a short signature", issued: fresh, expiry: fresh + life,
 			mutate: func(a *ephemeralVerdictAdv) {
-				sig, _ := base64.StdEncoding.DecodeString(a.Sig)
-				a.Sig = base64.StdEncoding.EncodeToString(sig[:63])
+				sig, _ := base64.StdEncoding.DecodeString(a.SigV2)
+				a.SigV2 = base64.StdEncoding.EncodeToString(sig[:63])
 			}}),
+		c(spec{name: "a bound block without the legacy signature", issued: fresh, expiry: fresh + life,
+			mutate: func(a *ephemeralVerdictAdv) { a.Sig = "" }}),
 		c(spec{name: "a signing key of the wrong length", issued: fresh, expiry: fresh + life, key: key[:62]}),
 		c(spec{name: "a signed recipient with a bad checksum", recip: badChecksum, issued: fresh, expiry: fresh + life}),
 		c(spec{name: "a signed recipient in mixed case", recip: mixedCase, issued: fresh, expiry: fresh + life}),
@@ -279,39 +293,46 @@ func ephemeralVerdictCases() []ephemeralVerdictCase {
 		c(spec{name: "an expired block with an unparseable recipient", recip: "age1notarecipient", issued: evNow - 61 - life, expiry: evNow - 61}),
 		c(spec{name: "a signed all-zero recipient parses", recip: zeroPoint, issued: fresh, expiry: fresh + life}),
 
-		// Deployment binding. A payer that knows its deployment needs the bound
-		// signature from a node new enough to give one; an older node, or a
-		// payer that doesn't know its deployment, gets by on the legacy one.
-		c(spec{name: "bound: a 9.13 node signed for this deployment", issued: fresh, expiry: fresh + life,
-			signDep: mine, payerDep: mine, proto: "9.13"}),
+		// Deployment binding. Only a signature bound to the payer's own
+		// deployment verifies, whatever version the node advertises; a payer
+		// that doesn't know its deployment refuses every block.
+		c(spec{name: "bound: a 9.14 node signed for this deployment", issued: fresh, expiry: fresh + life, proto: "9.14"}),
+		c(spec{name: "bound: a 9.13 node signed for this deployment", issued: fresh, expiry: fresh + life, proto: "9.13"}),
 		c(spec{name: "bound: a 9.13 node signed for another deployment", issued: fresh, expiry: fresh + life,
-			signDep: other, payerDep: mine, proto: "9.13"}),
-		c(spec{name: "bound: a 9.13 node with only the legacy signature", issued: fresh, expiry: fresh + life,
-			payerDep: mine, proto: "9.13"}),
-		c(spec{name: "bound: a 9.12 node with only the legacy signature", issued: fresh, expiry: fresh + life,
-			payerDep: mine, proto: "9.12"}),
-		c(spec{name: "bound: a node with no version and only the legacy signature", issued: fresh, expiry: fresh + life,
-			payerDep: mine}),
-		c(spec{name: "bound: a payer with no deployment reads the legacy signature", issued: fresh, expiry: fresh + life,
 			signDep: other, proto: "9.13"}),
+		c(spec{name: "bound: a 9.13 node with only the legacy signature is refused", issued: fresh, expiry: fresh + life,
+			legacyOnly: true, proto: "9.13"}),
+		c(spec{name: "bound: a 9.12 node with only the legacy signature is refused", issued: fresh, expiry: fresh + life,
+			legacyOnly: true, proto: "9.12"}),
+		c(spec{name: "bound: a node with no version and only the legacy signature is refused", issued: fresh, expiry: fresh + life,
+			legacyOnly: true}),
+		// A relay that strips the deployment leaves the legacy signature alone.
+		c(spec{name: "bound: a block with its deployment and bound signature stripped is refused", issued: fresh, expiry: fresh + life,
+			proto:  "9.14",
+			mutate: func(a *ephemeralVerdictAdv) { a.Deployment, a.SigV2 = "", "" }}),
+		c(spec{name: "bound: a block with its deployment stripped is refused", issued: fresh, expiry: fresh + life,
+			proto:  "9.14",
+			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "" }}),
+		c(spec{name: "bound: a payer with no deployment refuses a bound block", issued: fresh, expiry: fresh + life,
+			signDep: other, noPayerDep: true, proto: "9.13"}),
+		c(spec{name: "bound: a payer with no deployment refuses a legacy block", issued: fresh, expiry: fresh + life,
+			legacyOnly: true, noPayerDep: true, proto: "9.12"}),
 		c(spec{name: "bound: a v2 signature that does not verify", issued: fresh, expiry: fresh + life,
-			signDep: mine, payerDep: mine, proto: "9.13",
+			proto:  "9.13",
 			mutate: func(a *ephemeralVerdictAdv) { a.SigV2 = a.Sig }}),
 		c(spec{name: "bound: a deployment that is not 32 bytes", issued: fresh, expiry: fresh + life,
-			signDep: mine, payerDep: mine, proto: "9.13",
+			proto:  "9.13",
 			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
-		// The legacy path still parses the deployment: a valid legacy
-		// signature beside a malformed one is refused, as it is when bound.
 		c(spec{name: "bound: a malformed deployment from an older node", issued: fresh, expiry: fresh + life,
-			signDep: mine, payerDep: mine, proto: "9.12",
+			proto:  "9.12",
 			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
 		c(spec{name: "bound: a malformed deployment to a payer that knows none", issued: fresh, expiry: fresh + life,
-			signDep: mine, proto: "9.13",
+			noPayerDep: true, proto: "9.13",
 			mutate: func(a *ephemeralVerdictAdv) { a.Deployment = "AAAA" }}),
 		c(spec{name: "bound: an older node whose bound signature names another deployment", issued: fresh, expiry: fresh + life,
-			signDep: other, payerDep: mine, proto: "9.12"}),
+			signDep: other, proto: "9.12"}),
 		c(spec{name: "bound: expiry is still checked", issued: evNow - 61 - life, expiry: evNow - 61,
-			signDep: mine, payerDep: mine, proto: "9.13"}),
+			proto: "9.13"}),
 	}
 }
 
@@ -344,7 +365,7 @@ func TestEphemeralVerdictVectors(t *testing.T) {
 		Comment string                 `json:"comment"`
 		Cases   []ephemeralVerdictCase `json:"cases"`
 	}{
-		Comment: "Generated by proto/go/zs TestEphemeralVerdictVectors. Each case is one probe's advertisement as the wire carries it, checked against the node's chain-resolved (operator_id, node_id) and Ed25519 signing_key (hex) at now (unix seconds), by a payer whose own deployment id is deployment (absent: unknown) against a node advertising proto_version. want.outcome is absent | verified | expired | rejected | unparseable; want.stale is the relay-staleness signal, set only on a verified block.",
+		Comment: "Generated by proto/go/zs TestEphemeralVerdictVectors. Each case is one probe's advertisement as the wire carries it, checked against the node's chain-resolved (operator_id, node_id) and Ed25519 signing_key (hex) at now (unix seconds), by a payer whose own deployment id is deployment (absent: unknown) against a node advertising proto_version. Only ephemeral_sig_v2, bound to the payer's deployment, is checked; ephemeral_sig is the legacy signature, refused alone at every version. want.outcome is absent | verified | expired | rejected | unparseable; want.stale is the relay-staleness signal, set only on a verified block.",
 		Cases:   cases,
 	}
 	out, err := json.MarshalIndent(f, "", "  ")

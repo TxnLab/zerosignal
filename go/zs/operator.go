@@ -42,7 +42,7 @@ type BuiltinToolDef struct {
 //
 // TicketSigningKey is the one identity field with no on-chain counterpart: it
 // is cached at registry-load time as the ed25519 public key decoded from
-// SigningAddr, so Ticket.Verify runs without a decode per request.
+// SigningAddr, so Ticket.VerifyFor runs without a decode per request.
 type Operator struct {
 	ID uint64
 	// NodeID is the serving node's id within ID (operator/node split). A
@@ -85,7 +85,7 @@ type Operator struct {
 	// (mandatory forward secrecy by key-erasure — SPEC.md § 3c, § 4, § 8). They
 	// are populated by the enrich pass ONLY after the advertised block has been
 	// verified against the on-chain signing key
-	// (ticket.EphemeralAdvertisement.Verify under TicketSigningKey) and found
+	// (ticket.EphemeralAdvertisement.VerifyFor under TicketSigningKey) and found
 	// in-policy + unexpired; a forged / wrong-operator / over-long / expired
 	// advertisement leaves them at their zero value. There is NO long-lived
 	// anchor: when EphemeralRecipient is nil (or EphemeralExpiry has since

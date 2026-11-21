@@ -6,7 +6,6 @@
 import { readFileSync } from 'node:fs'
 import { base64 } from '@scure/base'
 import { encodeDeploymentId } from '@txnlab/zs-proto/ticket'
-import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ReserveCall } from '../src/reserve.js'
@@ -37,8 +36,15 @@ vi.mock('../src/verify.js', async (importOriginal) => ({
     verifyTicketSignature: (...args: unknown[]) => verifyTicketSignature(...args),
 }))
 
-const { NoEphemeralError, ProtestReason, TicketSignatureInvalidError, httpReserveClient, memoryJournal, resolveNetwork } =
-    await import('../src/index.js')
+const {
+    NoEphemeralError,
+    NoPayerDeploymentError,
+    ProtestReason,
+    TicketSignatureInvalidError,
+    httpReserveClient,
+    memoryJournal,
+    resolveNetwork,
+} = await import('../src/index.js')
 type TicketRecord = import('../src/index.js').TicketRecord
 const app1 = resolveNetwork({ network: 'localnet', escrowAppId: 1n })
 
@@ -134,15 +140,20 @@ describe('httpReserveClient', () => {
     const signer = { signBytes: vi.fn() }
     const op = testOperator({ ephemeralRecipient: 'age1live', ephemeralExpiry: 2_000 })
     const request = { model: 'm' } as ReserveCall['request']
+    // Every reserve names the payer's deployment, so each client here has one.
+    const deployment = new Uint8Array(32).fill(5)
+    const named = { ...request, deployment: encodeDeploymentId(deployment) }
+    const client = (o: Omit<Parameters<typeof httpReserveClient>[0], 'deployment'>) =>
+        httpReserveClient({ deployment, ...o })
 
     it('reserves on the operator, sealed to its live recipient', async () => {
         const signal = new AbortController().signal
-        const c = httpReserveClient({ fetch, signer, timeoutMs: 1234, clock: () => 1_000_000 })
+        const c = client({ fetch, signer, timeoutMs: 1234, clock: () => 1_000_000 })
         await expect(c.reserve(op, request, null, signal)).resolves.toEqual({ ...reserved, sealRecipient: 'age1live' })
         expect(reserveCalls).toHaveLength(1)
         const call = reserveCalls[0]!
         expect(call.target).toEqual({ operatorId: 7, nodeId: 2, baseUrl: op.baseUrl, sealRecipient: 'age1live' })
-        expect(call.request).toBe(request)
+        expect(call.request).toEqual(named)
         expect(call.hop).toBeNull()
         expect(call.fetch).toBe(fetch)
         expect(call.signer).toBe(signer)
@@ -152,7 +163,7 @@ describe('httpReserveClient', () => {
     })
 
     it('leaves unset what the caller did not set', async () => {
-        await httpReserveClient({ fetch, clock: () => 0 }).reserve(op, request, null)
+        await client({ fetch, clock: () => 0 }).reserve(op, request, null)
         const call = reserveCalls[0]!
         expect('signer' in call).toBe(false)
         expect('timeoutMs' in call).toBe(false)
@@ -161,12 +172,12 @@ describe('httpReserveClient', () => {
 
     // reserve() would abort at once on 0; the default applies instead.
     it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('reads a timeout of %s as unset', async (timeoutMs) => {
-        await httpReserveClient({ fetch, timeoutMs, clock: () => 0 }).reserve(op, request, null)
+        await client({ fetch, timeoutMs, clock: () => 0 }).reserve(op, request, null)
         expect('timeoutMs' in reserveCalls[0]!).toBe(false)
     })
 
     it('rejects an operator whose recipient expired, before any request', async () => {
-        const c = httpReserveClient({ fetch, clock: () => 2_000_000 })
+        const c = client({ fetch, clock: () => 2_000_000 })
         await expect(c.reserve(op, request, null)).rejects.toThrow(NoEphemeralError)
         expect(reserveCalls).toHaveLength(0)
     })
@@ -178,46 +189,45 @@ describe('httpReserveClient', () => {
         onReserve = () => {
             live.ephemeralRecipient = 'age1rotated'
         }
-        const r = await httpReserveClient({ fetch, clock: () => 0 }).reserve(live, request, null)
+        const r = await client({ fetch, clock: () => 0 }).reserve(live, request, null)
         expect(r.sealRecipient).toBe('age1live')
     })
 
-    it("verifies the ticket's signature under the operator's key", async () => {
-        const key = new Uint8Array(32).fill(9)
-        await httpReserveClient({ fetch, clock: () => 0 }).reserve({ ...op, ticketSigningKey: key }, request, null)
-        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key, undefined, true)
+    // Every node is asked for a bound ticket, whatever version it advertises
+    // (a relay can lower that), and must give one.
+    it.each(['9.14', '9.12', '', 'junk'])(
+        'names the deployment to a node advertising %j, and demands a bound ticket',
+        async (protoVersion) => {
+            const key = new Uint8Array(32).fill(9)
+            const target = { ...op, ticketSigningKey: key, protoVersion }
+            await client({ fetch, clock: () => 0 }).reserve(target, { ...request, deployment: 'stale' }, null)
+            expect(reserveCalls[0]!.request).toEqual(named)
+            expect(request).not.toHaveProperty('deployment')
+            expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key, deployment)
+        },
+    )
+
+    // Go's errNoPayerDeployment: nothing it could send binds, and nothing a
+    // node sends back would verify.
+    it('refuses to reserve without a deployment of its own, before any request', async () => {
+        await expect(httpReserveClient({ fetch, clock: () => 0, deployment: undefined }).reserve(op, request, null)).rejects.toThrow(
+            NoPayerDeploymentError,
+        )
+        expect(reserveCalls).toHaveLength(0)
+        expect(verifyTicketSignature).not.toHaveBeenCalled()
     })
 
-    const deployment = new Uint8Array(32).fill(5)
-
-    // A node new enough is asked for a bound ticket, and must give one.
-    it('names the deployment to a node that binds, and demands a bound ticket', async () => {
-        const key = new Uint8Array(32).fill(9)
-        const newer = { ...op, ticketSigningKey: key, protoVersion: DEPLOYMENT_BINDING_MIN_VERSION }
-        await httpReserveClient({ fetch, clock: () => 0, deployment }).reserve(newer, request, null)
-        expect(reserveCalls[0]!.request).toEqual({ ...request, deployment: encodeDeploymentId(deployment) })
-        expect(request).not.toHaveProperty('deployment')
-        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, key, deployment, false)
-    })
-
-    it.each(['9.12', '', 'junk'])('keeps the legacy layout with a node advertising %j', async (protoVersion) => {
-        const older = { ...op, protoVersion }
-        await httpReserveClient({ fetch, clock: () => 0, deployment }).reserve(older, { ...request, deployment: 'stale' }, null)
-        expect(reserveCalls[0]!.request).toEqual(request)
-        expect(verifyTicketSignature).toHaveBeenCalledExactlyOnceWith(reserved.ticket, op.ticketSigningKey, deployment, true)
-    })
-
-    it('names nothing without a deployment of its own', async () => {
-        const newer = { ...op, protoVersion: DEPLOYMENT_BINDING_MIN_VERSION }
-        await httpReserveClient({ fetch, clock: () => 0 }).reserve(newer, request, null)
-        expect(reserveCalls[0]!.request).toBe(request)
+    // Go checks the deployment first too: it is the cause at every node.
+    it('reports the missing deployment ahead of an expired recipient', async () => {
+        const c = httpReserveClient({ fetch, clock: () => 2_000_000, deployment: undefined })
+        await expect(c.reserve(op, request, null)).rejects.toThrow(NoPayerDeploymentError)
     })
 
     it('rejects a ticket whose signature does not verify', async () => {
         verifyTicketSignature.mockImplementation(() => {
             throw new TicketSignatureInvalidError('bad')
         })
-        await expect(httpReserveClient({ fetch, clock: () => 0 }).reserve(op, request, null)).rejects.toThrow(
+        await expect(client({ fetch, clock: () => 0 }).reserve(op, request, null)).rejects.toThrow(
             TicketSignatureInvalidError,
         )
     })
@@ -226,21 +236,21 @@ describe('httpReserveClient', () => {
     // dispatch moves on rather than ending the request at open.
     it('rejects a presigned open group that does not decode', async () => {
         reserved.presignedOpenTxn = openGroup('size_one')
-        await expect(httpReserveClient({ fetch, clock: () => 0 }).reserve(op, request, null)).rejects.toThrow(
+        await expect(client({ fetch, clock: () => 0 }).reserve(op, request, null)).rejects.toThrow(
             /decode presigned open group: .*want 2/,
         )
     })
 
     it('passes a presigned open group that decodes', async () => {
         reserved.presignedOpenTxn = openGroup('valid')
-        const r = await httpReserveClient({ fetch, clock: () => 0 }).reserve(op, request, null)
+        const r = await client({ fetch, clock: () => 0 }).reserve(op, request, null)
         expect(r.presignedOpenTxn).toBe(openGroup('valid'))
     })
 
     // A Solana payer names a fresh 16-byte id on every reserve, so it never
     // signs two opens with one id at a node.
     it('names a fresh ticket id on every Solana reserve', async () => {
-        const c = httpReserveClient({ fetch, clock: () => 0, rail: 'solana' })
+        const c = client({ fetch, clock: () => 0, rail: 'solana' })
         for (let i = 0; i < 3; i++) await c.reserve(op, { ...request, ticket_id: 'stale' }, null)
         const ids = reserveCalls.map((call) => call.request.ticket_id!)
         for (const id of ids) expect(base64.encode(base64.decode(id))).toBe(id)
@@ -250,8 +260,8 @@ describe('httpReserveClient', () => {
     })
 
     it.each([undefined, 'algorand'] as const)('leaves the ticket id to the node on rail %j', async (rail) => {
-        await httpReserveClient({ fetch, clock: () => 0, rail }).reserve(op, { ...request, ticket_id: 'stale' }, null)
-        expect(reserveCalls[0]!.request).toEqual(request)
+        await client({ fetch, clock: () => 0, rail }).reserve(op, { ...request, ticket_id: 'stale' }, null)
+        expect(reserveCalls[0]!.request).toEqual(named)
     })
 
     // On Solana the open is the node's offer transaction, so an Algorand group
@@ -263,12 +273,12 @@ describe('httpReserveClient', () => {
         ['a Solana offer on Algorand', 'algorand', offer, /decode presigned open group/],
     ] as const)('rejects %s', async (_, rail, open, want) => {
         reserved.presignedOpenTxn = open
-        await expect(httpReserveClient({ fetch, clock: () => 0, rail }).reserve(op, request, null)).rejects.toThrow(want)
+        await expect(client({ fetch, clock: () => 0, rail }).reserve(op, request, null)).rejects.toThrow(want)
     })
 
     it('passes a Solana offer that decodes', async () => {
         reserved.presignedOpenTxn = offer
-        const r = await httpReserveClient({ fetch, clock: () => 0, rail: 'solana' }).reserve(op, request, null)
+        const r = await client({ fetch, clock: () => 0, rail: 'solana' }).reserve(op, request, null)
         expect(r.presignedOpenTxn).toBe(offer)
     })
 })

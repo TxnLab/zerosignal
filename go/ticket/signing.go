@@ -55,7 +55,7 @@ const (
 
 // DecodeAlgorandAddress decodes a 58-character Algorand address into its
 // underlying Ed25519 public key, validating the checksum. This is the
-// verifier proxies use for Ticket.Verify: the registry publishes only the
+// verifier proxies use for Ticket.VerifyFor: the registry publishes only the
 // address, and the pubkey is recovered on demand.
 func DecodeAlgorandAddress(addr string) (ed25519.PublicKey, error) {
 	if len(addr) != algoAddressLen {

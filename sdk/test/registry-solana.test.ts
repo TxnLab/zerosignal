@@ -331,7 +331,7 @@ describe('ChainOperatorSource over a ChainReader', () => {
         const { logger, lines } = recordingLogger()
         const source = new ChainOperatorSource({ chain, logger })
         await expect(source.fetchChain()).resolves.toEqual([])
-        expect(lines.map((l) => l.msg)).toEqual(['could not derive the escrow deployment; checking ephemeral signatures on the legacy layout'])
+        expect(lines.map((l) => l.msg)).toEqual(['could not derive the escrow deployment; every node is refused until it is'])
         chain.deploymentErr = undefined
         await source.fetchChain()
         await source.fetchChain()

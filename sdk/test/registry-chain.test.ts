@@ -32,7 +32,6 @@ import {
     FETCH_BOX_CONCURRENCY,
     NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
-    deploymentOrFail,
     fetchAllOperators,
     fetchNodesForOperators,
     fetchOperatorsById,
@@ -600,41 +599,6 @@ describe('the chain read', () => {
         const pending = sourceOf(fake).fetchChain(ctl.signal)
         ctl.abort(new Error('caller gone'))
         await expect(pending).rejects.toThrow(/caller gone/)
-    })
-})
-
-// Go's TestDeploymentOrFail.
-describe('deploymentOrFail', () => {
-    const id = new Uint8Array(32).fill(9)
-    const warnings: string[] = []
-    const logger: Logger = {
-        debug: () => {},
-        info: () => {},
-        warn: (msg: string) => void warnings.push(msg),
-        error: () => {},
-    }
-    const down = new Error('down')
-
-    it('returns the id read', async () => {
-        expect(await deploymentOrFail(async () => id, true, logger)).toBe(id)
-    })
-
-    it('fails when the SDK built the wallet, without warning', async () => {
-        warnings.length = 0
-        await expect(deploymentOrFail(() => Promise.reject(down), true, logger)).rejects.toBe(down)
-        expect(warnings).toEqual([])
-    })
-
-    it("warns and starts unbound with a caller's wallet", async () => {
-        warnings.length = 0
-        expect(await deploymentOrFail(() => Promise.reject(down), false, logger)).toBeUndefined()
-        expect(warnings).toHaveLength(1)
-    })
-
-    it("propagates an abort even with a caller's wallet", async () => {
-        const ctl = new AbortController()
-        ctl.abort()
-        await expect(deploymentOrFail(() => Promise.reject(down), false, logger, ctl.signal)).rejects.toBe(down)
     })
 })
 

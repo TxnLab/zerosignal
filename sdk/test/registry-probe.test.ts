@@ -121,6 +121,7 @@ const NOW_MS = 1_800_000_000_000
 interface EphemeralCase {
     name: string
     signing_key: string
+    deployment?: string
     advertisement: Record<string, unknown>
 }
 
@@ -133,6 +134,11 @@ const ephemeral = (name: string): EphemeralCase => ephemeralCases.find((c) => c.
 const FRESH = ephemeral('a fresh, genuine block')
 const STALE = ephemeral('past the freshness target is stale but usable')
 const FORGED = ephemeral('a flipped signature byte')
+
+// The payer's deployment, which every node here advertises: the one the
+// ephemeral vectors are bound to, since an unknown one refuses every node.
+const DEP_B64 = FRESH.deployment ?? btoa(String.fromCharCode(...new Uint8Array(32).fill(9)))
+const DEP = Uint8Array.from(atob(DEP_B64), (c) => c.charCodeAt(0))
 
 // The target is the node the ephemeral vectors are signed for.
 const T: NodeRef = { op: 42, node: 7 }
@@ -189,7 +195,13 @@ function json(status: number, body: unknown): Response {
 }
 
 function details(over: Record<string, unknown> = {}): Response {
-    return json(200, { models: [{ id: 'fresh-model' }], oracle_healthy: true, proto_version: PROTO_VERSION, ...over })
+    return json(200, {
+        models: [{ id: 'fresh-model' }],
+        oracle_healthy: true,
+        proto_version: PROTO_VERSION,
+        deployment: DEP_B64,
+        ...over,
+    })
 }
 
 const relayError = (status: number, code: string) => json(status, { error: { code, message: 'm' } })
@@ -211,7 +223,7 @@ function recordingLogger() {
 }
 
 function prober(o: ProbeOptions) {
-    return new NodeProber({ clock: () => NOW_MS, ...o })
+    return new NodeProber({ clock: () => NOW_MS, deployment: DEP, ...o })
 }
 
 describe('NodeProber direct', () => {
@@ -241,7 +253,7 @@ describe('NodeProber direct', () => {
             [undefined, false],
             [b64(1), true],
         ] as const) {
-            const { fetch } = network(() => details(advertised === undefined ? {} : { deployment: advertised }))
+            const { fetch } = network(() => details({ deployment: advertised }))
             const { logger, lines } = recordingLogger()
             const p = prober({ fetch, privacy: 'direct', deployment: mine, logger })
             const op = node(T, { reachable: true, models: ['carried'], reachableAsOf: NOW_MS - 60_000 })

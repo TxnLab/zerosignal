@@ -11,9 +11,10 @@ import {
     parseTicketJSON,
     signTicket,
     ticketCanonicalBytes,
-    verifyTicket,
+    verifyTicketFor,
     type Ticket,
 } from '../src/ticket/ticket.js'
+import { encodeDeploymentId } from '../src/ticket/deployment.js'
 import { parseReserveResponseJSON } from '../src/ticket/reserve.js'
 import { UsageType } from '../src/ticket/usagetype.js'
 import { RESPONSE_KEY_SIZE } from '../src/wire/constants.js'
@@ -43,10 +44,15 @@ function sampleTicket(): Ticket {
     }
 }
 
+// Verifiers accept only bound tickets, so the sign / verify cases sign one.
+const DEP = new Uint8Array(32).fill(7)
+const boundTicket = (): Ticket => ({ ...sampleTicket(), deployment: encodeDeploymentId(DEP) })
+const verifyTicket = (t: Ticket, pub: Uint8Array) => verifyTicketFor(t, pub, DEP)
+
 describe('Ticket sign / verify', () => {
     it('round-trips through Sign + Verify', async () => {
         const { signer, address, publicKey } = newFakeSigner()
-        const t = sampleTicket()
+        const t = boundTicket()
         await signTicket(t, signer, address)
         expect(() => verifyTicket(t, publicKey)).not.toThrow()
     })
@@ -67,7 +73,7 @@ describe('Ticket sign / verify', () => {
     it('Verify fails under a different pubkey', async () => {
         const { signer, address } = newFakeSigner()
         const otherPub = ed25519.getPublicKey(ed25519.utils.randomPrivateKey())
-        const t = sampleTicket()
+        const t = boundTicket()
         await signTicket(t, signer, address)
         expect(() => verifyTicket(t, otherPub)).toThrow(/verification failed/)
     })
@@ -99,7 +105,7 @@ describe('Ticket sign / verify', () => {
         ]
         for (const c of cases) {
             const { signer, address, publicKey } = newFakeSigner()
-            const t = sampleTicket()
+            const t = boundTicket()
             await signTicket(t, signer, address)
             c.mutate(t)
             expect(() => verifyTicket(t, publicKey), `tampered ${c.name}`).toThrow()
@@ -108,7 +114,7 @@ describe('Ticket sign / verify', () => {
 
     it('Verify rejects a malformed sig', async () => {
         const { signer, address, publicKey } = newFakeSigner()
-        const t = sampleTicket()
+        const t = boundTicket()
         await signTicket(t, signer, address)
         t.sig = '!!!not-base64!!!'
         expect(() => verifyTicket(t, publicKey)).toThrow()
@@ -118,7 +124,7 @@ describe('Ticket sign / verify', () => {
 
     it('Verify rejects a wrong-length pubkey', async () => {
         const { signer, address } = newFakeSigner()
-        const t = sampleTicket()
+        const t = boundTicket()
         await signTicket(t, signer, address)
         expect(() => verifyTicket(t, new Uint8Array([1, 2, 3]))).toThrow(/invalid ed25519 public key length/)
     })
@@ -203,7 +209,7 @@ describe('parseTicketJSON', () => {
     it('round-trips every signed field', async () => {
         const { signer, address, publicKey } = newFakeSigner()
         const t = {
-            ...sampleTicket(),
+            ...boundTicket(),
             input_usage_type: UsageType.None,
             output_usage_type: UsageType.Images,
             cache_read_rate: 3,

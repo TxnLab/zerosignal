@@ -100,10 +100,9 @@ func VerifyReceipt(c ReceiptCheck) error {
 			Err:       errors.New("no ticket to bind the receipt to"),
 		}
 	}
-	// A receipt is bound exactly when its ticket is, and to the same
-	// deployment; the ticket's binding was checked against ours at reserve.
-	want := c.Ticket.Deployment
-	if err := c.Receipt.VerifyFor(c.Operator.TicketSigningKey, want, want.IsZero()); err != nil {
+	// The receipt is bound to its ticket's deployment, which was checked
+	// against ours at reserve.
+	if err := c.Receipt.VerifyFor(c.Operator.TicketSigningKey, c.Ticket.Deployment); err != nil {
 		return &ReceiptError{
 			Violation: ReceiptViolationSig,
 			Err:       fmt.Errorf("receipt signature verify: %w", err),

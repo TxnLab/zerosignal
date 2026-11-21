@@ -28,6 +28,13 @@ func sampleReceipt() *UsageReceipt {
 	return r
 }
 
+// boundReceipt is sampleReceipt bound to testDep, the only kind that verifies.
+func boundReceipt() *UsageReceipt {
+	r := sampleReceipt()
+	r.Deployment = testDep
+	return r
+}
+
 func TestUsageReceipt_CanonicalBytes_Deterministic(t *testing.T) {
 	r := sampleReceipt()
 	a := r.CanonicalBytes()
@@ -45,7 +52,7 @@ func TestUsageReceipt_SignVerify_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := sampleReceipt()
+	r := boundReceipt()
 	signer := receiptTestSigner{addr: signingAddr, priv: priv}
 	if err := r.Sign(context.Background(), signer, signingAddr); err != nil {
 		t.Fatalf("Sign: %v", err)
@@ -53,7 +60,7 @@ func TestUsageReceipt_SignVerify_RoundTrip(t *testing.T) {
 	if r.Sig == "" {
 		t.Fatal("Sig is empty after Sign")
 	}
-	if err := r.Verify(pub); err != nil {
+	if err := r.VerifyFor(pub, testDep); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -76,13 +83,13 @@ func TestUsageReceipt_Sign_PropagatesSignerError(t *testing.T) {
 }
 
 func TestUsageReceipt_Verify_RejectsShortSig(t *testing.T) {
-	r := sampleReceipt()
+	r := boundReceipt()
 	r.Sig = base64.StdEncoding.EncodeToString([]byte("too short"))
 	_, pub, _, err := GenerateAlgorandKeypair()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Verify(pub); err == nil {
+	if err := r.VerifyFor(pub, testDep); err == nil {
 		t.Fatal("expected error for short signature")
 	}
 }
@@ -98,17 +105,17 @@ func TestUsageReceipt_Verify_DigestShape_Required(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := sampleReceipt()
+	r := boundReceipt()
 	digest := ReceiptSigDigest(r)
 	r.Sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, digest[:]))
-	if err := r.Verify(pub); err != nil {
+	if err := r.VerifyFor(pub, testDep); err != nil {
 		t.Fatalf("digest-shaped sig should verify, got %v", err)
 	}
 
-	r2 := sampleReceipt()
+	r2 := boundReceipt()
 	legacyMsg := append([]byte("MX"), r2.CanonicalBytes()...)
 	r2.Sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, legacyMsg))
-	if err := r2.Verify(pub); err == nil {
+	if err := r2.VerifyFor(pub, testDep); err == nil {
 		t.Fatal("legacy MX-prefixed sig should fail Verify")
 	}
 }
@@ -140,12 +147,12 @@ func TestUsageReceipt_Verify_FailsOnFieldTamper(t *testing.T) {
 	}
 	for field, tamper := range mutate {
 		t.Run(field, func(t *testing.T) {
-			r := sampleReceipt()
+			r := boundReceipt()
 			if err := r.Sign(context.Background(), signer, signingAddr); err != nil {
 				t.Fatalf("Sign: %v", err)
 			}
 			tamper(r)
-			if err := r.Verify(pub); err == nil {
+			if err := r.VerifyFor(pub, testDep); err == nil {
 				t.Fatalf("Verify should fail after tampering %s", field)
 			}
 		})

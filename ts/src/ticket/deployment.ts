@@ -102,19 +102,13 @@ export function decodeDeploymentId(s: string): Uint8Array {
 }
 
 /**
- * checkDeployment is the shared verifier rule (Go's checkDeployment): a bound
- * object must name want; an unbound one passes only when allowLegacy.
+ * checkDeployment is the shared verifier rule (Go's checkDeployment): the
+ * object must be bound, and to want. An unbound object is refused whatever
+ * want is, so a relay that strips the binding and lowers proto_version gains
+ * nothing.
  */
-export function checkDeployment(
-    what: string,
-    got: string | undefined,
-    want: Uint8Array | undefined,
-    allowLegacy: boolean,
-): void {
-    if (!got) {
-        if (!allowLegacy) throw new LegacySignatureError(what)
-        return
-    }
+export function checkDeployment(what: string, got: string | undefined, want: Uint8Array | undefined): void {
+    if (!got) throw new LegacySignatureError(what)
     const g = decodeDeploymentId(got)
     if (!want || want.length !== 32 || !g.every((b, i) => b === want[i])) throw new DeploymentMismatchError(what)
 }

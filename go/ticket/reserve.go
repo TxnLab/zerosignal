@@ -122,9 +122,7 @@ type ReserveRequest struct {
 	// and whether signed or not it asks the node for deployment-bound (v3)
 	// tickets and receipts. A node on another deployment refuses the reserve,
 	// which is how a payer configured for testnet finds out it reached a
-	// mainnet node. A caller only sets it after wire.UsesDeploymentBinding
-	// confirms the target; a node that predates the field ignores it, and a
-	// payer that predates it gets v2 tickets.
+	// mainnet node. From 9.14 a node refuses a reserve without it.
 	Deployment DeploymentID `json:"deployment,omitzero"`
 	// TicketID is the ticket id the payer asks the node to issue, in
 	// Ticket.TicketID's canonical spelling. A Solana payer sends a fresh
@@ -165,7 +163,7 @@ const MaxReserveSigAge = 60 * time.Second
 // a skewed-clock client can resync and re-sign once rather than fail opaquely.
 const DefaultReserveSkew = 30 * time.Second
 
-// ErrReserveSigExpired is returned by Verify when the signature is valid but
+// ErrReserveSigExpired is returned by VerifyFor when the signature is valid but
 // the [IssuedAt, IssuedAt+MaxReserveSigAge] window has passed (now beyond it +
 // skew). A sentinel so the node distinguishes a stale-but-genuine signature
 // (client clock lagging → 401 with node_time for a one-shot resync) from a
@@ -224,8 +222,8 @@ func (r *ReserveRequest) CanonicalBytes(operatorID, nodeID uint64) []byte {
 }
 
 // ReserveSigDigest returns sha256(CanonicalBytes(operatorID, nodeID)) — the
-// 32-byte value both Sign and Verify feed to ed25519. CanonicalBytes already
-// prepends the "zs-reserve-v1\x00" domain tag so the digest is cross-protocol
+// 32-byte value both Sign and VerifyFor feed to ed25519. CanonicalBytes already
+// prepends the domain tag (and the deployment) so the digest is cross-protocol
 // safe. Exposed (like TicketSigDigest / EphemeralSigDigest) so the signing
 // payload stays single-source.
 func ReserveSigDigest(r *ReserveRequest, operatorID, nodeID uint64) [sha256.Size]byte {
@@ -258,7 +256,7 @@ func (r *ReserveRequest) Sign(ctx context.Context, signer BytesSigner, payerAddr
 	return nil
 }
 
-// Verify checks that r.PayerSig is a valid Ed25519 signature of
+// VerifyFor checks that r.PayerSig is a valid Ed25519 signature of
 // ReserveSigDigest(r, operatorID, nodeID) under pub, and that the signed
 // [IssuedAt, IssuedAt+MaxReserveSigAge] window is live within skew. pub is
 // recovered by the caller from r.PayerAddr (DecodeAlgorandAddress); operatorID
@@ -266,7 +264,7 @@ func (r *ReserveRequest) Sign(ctx context.Context, signer BytesSigner, payerAddr
 // from the wire — a signature presented to the wrong node simply fails to
 // verify (target binding, see CanonicalBytes).
 //
-// Ordering mirrors EphemeralAdvertisement.Verify: (1) decode + ed25519.Verify,
+// Ordering mirrors EphemeralAdvertisement.VerifyFor: (1) decode + ed25519.Verify,
 // so a forgery fails generically and the timestamps below are authentic before
 // any policy keys off them; (2) not-before — reject a future-dated IssuedAt
 // (a payer cannot pre-sign); (3) the short validity window last, surfacing
@@ -274,18 +272,11 @@ func (r *ReserveRequest) Sign(ctx context.Context, signer BytesSigner, payerAddr
 // node_time for a one-shot client resync rather than treat it as a forgery.
 // now is injected so callers can test boundaries deterministically.
 //
-// Verify accepts only the legacy (v1, unbound) layout; nodes verify with
-// VerifyFor.
-func (r *ReserveRequest) Verify(pub ed25519.PublicKey, operatorID, nodeID uint64, now time.Time, skew time.Duration) error {
-	return r.VerifyFor(pub, operatorID, nodeID, now, skew, DeploymentID{}, true)
-}
-
-// VerifyFor is Verify that also accepts the v2 layout bound to want, the
-// verifying node's own deployment. allowLegacy admits an unbound signature.
-// The deployment check runs first so a payer on another network gets
+// The request must be bound to want, the verifying node's own deployment. The
+// deployment check runs first so a payer on another network gets
 // ErrDeploymentMismatch rather than a generic signature failure.
-func (r *ReserveRequest) VerifyFor(pub ed25519.PublicKey, operatorID, nodeID uint64, now time.Time, skew time.Duration, want DeploymentID, allowLegacy bool) error {
-	if err := checkDeployment(r.Deployment, want, allowLegacy); err != nil {
+func (r *ReserveRequest) VerifyFor(pub ed25519.PublicKey, operatorID, nodeID uint64, now time.Time, skew time.Duration, want DeploymentID) error {
+	if err := checkDeployment(r.Deployment, want); err != nil {
 		return fmt.Errorf("reserve: %w", err)
 	}
 	if len(pub) != ed25519.PublicKeySize {

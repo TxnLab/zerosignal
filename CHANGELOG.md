@@ -1741,6 +1741,42 @@ caller. Consumers gain a new refusal code and lose one.
 
 ---
 
+## 9.14 — the legacy signing layouts are refused (minor)
+
+9.13 put a deployment-bound layout beside each legacy one and kept both accepted. `proto_version`
+is unsigned, so a relay could lower it and strip the bound fields from details, and the payer then
+accepted the legacy ephemeral signature, ticket and receipt from that node. 9.14 accepts only the
+bound layouts (SPEC §3a "Deployment binding").
+
+- **Payer.** Names its deployment on every reserve and requires a ticket, receipt and ephemeral
+  bound to it, whatever the node advertises. A payer that doesn't know its deployment reserves
+  nothing and drops every node, so `New` / `Client.create` now fail when the deployment read
+  fails, even under a host-supplied wallet (which used to start unbound with a warning), and read
+  it whenever they build the reserve client. A node that names no deployment on details is
+  dropped.
+- **Node.** Refuses a reserve that names no deployment with `400 deployment_mismatch`, on both
+  rails, and stops publishing the legacy `ephemeral_sig`.
+- **Why a minor.** Every 9.13 peer already uses the bound layouts toward a ≥ 9.13 peer: a 9.13
+  payer names its deployment to a 9.14 node and reads only `ephemeral_sig_v2` from it, and a 9.13
+  node serves a 9.14 payer as before. Only pre-9.13 software loses its peers, and none is in the
+  fleet. SPEC §3c now lets a minor refuse an old tag once every compatible peer uses the new one.
+  One 9.13 payer also loses its peers for a while: one whose deployment read failed ran unbound,
+  and it refuses every 9.14 node, which no longer publishes the legacy ephemeral signature, until
+  the read succeeds.
+- **API.** Go: `VerifyFor` loses `allowLegacy` on `Ticket`, `UsageReceipt`, `ReserveRequest` and
+  `EphemeralAdvertisement`, the legacy-only `Verify` methods are gone, and
+  `wire.DeploymentBindingMinVersion` / `UsesDeploymentBinding` are removed. TS: the same in
+  `@txnlab/zs-proto` (`verify*For`, `DEPLOYMENT_BINDING_MIN_VERSION`, `usesDeploymentBinding`). In
+  `@txnlab/zerosignal`, `verifyTicketSignature` loses `allowLegacy`: its deployment is required,
+  and `undefined` refuses every ticket. New: `NoPayerDeploymentError` (TS), which the default
+  reserve client throws when it knows no deployment, and its unexported Go twin
+  `errNoPayerDeployment`. The legacy layouts' canonical bytes and signing stay, so `vectors.json`
+  is unchanged.
+- **Unchanged.** The rail-neutral payment names: a node still reads the legacy names, which a
+  later major drops.
+
+---
+
 ## 9.13 — signatures bind the escrow deployment (minor)
 
 Ticket, receipt, reserve-request and ephemeral signatures bound only `(operator_id, node_id)`,

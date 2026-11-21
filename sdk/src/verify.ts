@@ -43,21 +43,15 @@ export class CommitKMismatchError extends Error {
 
 /**
  * verifyTicketSignature throws TicketSignatureInvalidError unless the node
- * signed t under signingKey, bound to deployment, or unbound while
- * allowLegacy. Go's reserve passes allowLegacy only when the reserve named no
- * deployment. With no deployment, only an unbound ticket passes.
+ * signed t under signingKey, bound to deployment, the payer's own. With no
+ * deployment nothing passes.
  */
-export function verifyTicketSignature(
-    t: Ticket,
-    signingKey: Uint8Array,
-    deployment?: Uint8Array,
-    allowLegacy = true,
-): void {
+export function verifyTicketSignature(t: Ticket, signingKey: Uint8Array, deployment: Uint8Array | undefined): void {
     if (signingKey.length !== ED25519_PUBKEY_LEN) {
         throw new TicketSignatureInvalidError(`invalid ed25519 public key length ${signingKey.length}`)
     }
     try {
-        verifyTicketFor(t, signingKey, deployment, allowLegacy)
+        verifyTicketFor(t, signingKey, deployment)
     } catch (err) {
         throw new TicketSignatureInvalidError(message(err))
     }
@@ -109,10 +103,10 @@ export const receiptViolations = ['sig', 'amount', 'body_hash'] as const satisfi
  */
 export function verifyReceipt(r: UsageReceipt, t: Ticket, signingKey: Uint8Array, computedHash: Uint8Array): void {
     try {
-        // A receipt is bound exactly when its ticket is, and to the same
-        // deployment; the ticket's binding was checked at reserve.
+        // The receipt is bound to its ticket's deployment, which was checked
+        // against ours at reserve.
         const want = t.deployment ? decodeDeploymentId(t.deployment) : undefined
-        verifyReceiptFor(r, signingKey, want, want === undefined)
+        verifyReceiptFor(r, signingKey, want)
     } catch (err) {
         throw new ReceiptError('sig', `receipt signature verify: ${message(err)}`, err)
     }

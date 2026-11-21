@@ -37,8 +37,10 @@ const deploymentTag = "zs-deployment-v1\x00"
 // or on Algorand and Solana, would sign artifacts valid on both. A verifier
 // always compares against its OWN deployment id, never one read off the wire.
 //
-// The zero value means "not bound" and selects the legacy layouts. A real id
-// is a SHA-256 output, so it is never zero.
+// The zero value means "not bound" and selects the legacy layouts, which no
+// verifier accepts from 9.14 (SPEC § 3a "Deployment binding"); they remain
+// defined so their bytes stay pinned. A real id is a SHA-256 output, so it is
+// never zero.
 type DeploymentID [sha256.Size]byte
 
 // ErrDeploymentMismatch is returned when a signed object names a deployment
@@ -46,8 +48,7 @@ type DeploymentID [sha256.Size]byte
 // networks or escrows.
 var ErrDeploymentMismatch = errors.New("signed for a different deployment")
 
-// ErrLegacySignature is returned when a signed object carries no deployment id
-// and the verifier requires one.
+// ErrLegacySignature is returned when a signed object carries no deployment id.
 var ErrLegacySignature = errors.New("signature is not deployment-bound")
 
 // NewDeploymentID derives the id from its three inputs:
@@ -123,14 +124,12 @@ func (d *DeploymentID) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// checkDeployment is the shared verifier rule: a bound object must name
-// want; an unbound one passes only when allowLegacy.
-func checkDeployment(got, want DeploymentID, allowLegacy bool) error {
+// checkDeployment is the shared verifier rule: the object must be bound, and
+// to want. An unbound object is refused whatever want is, so a relay that
+// strips the binding and lowers proto_version gains nothing.
+func checkDeployment(got, want DeploymentID) error {
 	if got.IsZero() {
-		if !allowLegacy {
-			return ErrLegacySignature
-		}
-		return nil
+		return ErrLegacySignature
 	}
 	if want.IsZero() || got != want {
 		return ErrDeploymentMismatch

@@ -18,7 +18,6 @@ export {
     NoOperatorsError,
     SIGNER_BALANCE_CONCURRENCY,
     SIGNER_BALANCE_TIMEOUT_MS,
-    deploymentOrFail,
     fetchAllOperators,
     fetchNodesForOperators,
     fetchOperatorsById,

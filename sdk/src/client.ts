@@ -48,7 +48,7 @@ import {
     walletChain,
 } from './reconciler.js'
 import { type RefundWatchdog, Watchdog } from './refund-watchdog.js'
-import { type ChainReader, deploymentOrFail, readDeploymentId } from './registry/chain.js'
+import { type ChainReader, readDeploymentId } from './registry/chain.js'
 import { SolanaChainReader } from './registry/solana.js'
 import { type ResponderDeps, bufferedResponder } from './responder.js'
 import { type SealedDeps, runSealed } from './sealed.js'
@@ -115,16 +115,28 @@ export class Client {
     static async create(config: Config, signal?: AbortSignal): Promise<Client> {
         const cfg = resolveConfig(config)
         for (const w of cfg.warnings) cfg.logger.warn(w)
-        const chain = cfg.wallet === undefined || cfg.registry === undefined ? railChain(cfg) : undefined
+        // The reserve client needs the deployment too: every reserve names it.
+        const chain =
+            cfg.wallet === undefined || cfg.registry === undefined || cfg.reserveClient === undefined
+                ? railChain(cfg)
+                : undefined
         if (chain) await checkLocalChain(cfg, chain.genesis, signal)
         // The wallet first, as in Go: its read is the one that fails create,
         // so it fails before the slow discovery rather than after.
-        const builtWallet = cfg.wallet === undefined
         const wallet = cfg.wallet ?? (await chain!.wallet(signal))
-        const deployment =
-            chain === undefined
-                ? undefined
-                : await deploymentOrFail(() => chain.deployment(signal), builtWallet, cfg.logger, signal)
+        // A payer that can't read its deployment can't reserve or route, so
+        // a failed read fails create, whoever built the wallet.
+        let deployment: Uint8Array | undefined
+        if (chain !== undefined) {
+            try {
+                deployment = await chain.deployment(signal)
+            } catch (err) {
+                if (signal?.aborted) throw err
+                throw new Error(`read the escrow deployment: ${err instanceof Error ? err.message : String(err)}`, {
+                    cause: err,
+                })
+            }
+        }
         const reserveClient =
             cfg.reserveClient ??
             httpReserveClient({

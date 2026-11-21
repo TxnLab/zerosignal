@@ -102,8 +102,8 @@ export interface ReserveRequest {
     // base64(32-byte deployment id) the payer believes the node is on. Signed,
     // it selects the v2 payer-signature layout; signed or not, it asks the node
     // for deployment-bound tickets and receipts, and a node on another
-    // deployment refuses the reserve. Only set after usesDeploymentBinding
-    // confirms the target. Mirrors Go's ReserveRequest.Deployment.
+    // deployment refuses the reserve. From 9.14 a node refuses a reserve
+    // without it. Mirrors Go's ReserveRequest.Deployment.
     deployment?: string
     // The ticket id the payer asks the node to issue, in the ticket's
     // canonical spelling. A Solana payer sends a fresh random one on every
@@ -173,7 +173,7 @@ export const MAX_RESERVE_SIG_AGE_SEC = 60
 // Mirrors proto/go/ticket/reserve.go DefaultReserveSkew.
 export const DEFAULT_RESERVE_SKEW_SEC = 30
 
-// ReserveSigExpiredError is thrown by verifyReserveRequest when the signature is
+// ReserveSigExpiredError is thrown by verifyReserveRequestFor when the signature is
 // valid but the [issued_at, issued_at+MAX_RESERVE_SIG_AGE_SEC] window has passed
 // (within skew). A distinguishable class so a caller can tell a stale-but-genuine
 // signature (client clock lagging) from a forgery. Mirrors Go's
@@ -223,9 +223,9 @@ export function reserveCanonicalBytes(
 }
 
 // reserveSigDigest returns sha256(reserveCanonicalBytes(operatorId, nodeId, r))
-// — the 32-byte value both signReserveRequest and verifyReserveRequest feed to
-// ed25519. reserveCanonicalBytes already prepends the "zs-reserve-v1\x00" domain
-// tag so the digest is cross-protocol safe.
+// — the 32-byte value both signReserveRequest and verifyReserveRequestFor feed to
+// ed25519. reserveCanonicalBytes already prepends the domain tag (and the
+// deployment) so the digest is cross-protocol safe.
 export function reserveSigDigest(
     operatorId: number | bigint,
     nodeId: number | bigint,
@@ -259,31 +259,17 @@ export async function signReserveRequest(
     r.payer_sig = base64.encode(sig)
 }
 
-// verifyReserveRequest checks that r.payer_sig is a valid Ed25519 signature of
-// reserveSigDigest(operatorId, nodeId, r) under pub, and that the signed window
-// is live within skew. pub is recovered by the caller from r.payer_addr
+// verifyReserveRequestFor checks that r.payer_sig is a valid Ed25519 signature
+// of reserveSigDigest(operatorId, nodeId, r) under pub, and that the signed
+// window is live within skew. pub is recovered by the caller from r.payer_addr
 // (decodeAlgorandAddress); operatorId / nodeId are the verifying node's OWN
-// identity, never trusted from the wire. Ordering mirrors verifyEphemeral:
+// identity, never trusted from the wire. Ordering mirrors verifyEphemeralFor:
 // (1) signature; (2) not-before; (3) the short window last, throwing
 // ReserveSigExpiredError so a stale-but-genuine signature is distinguishable.
 // nowUnixSec is injected so callers can test boundaries deterministically.
 //
-// verifyReserveRequest accepts only the legacy (v1, unbound) layout; nodes
-// verify with verifyReserveRequestFor.
-export function verifyReserveRequest(
-    operatorId: number | bigint,
-    nodeId: number | bigint,
-    r: ReserveRequest,
-    pub: Uint8Array,
-    nowUnixSec: number,
-    skewSec: number,
-): void {
-    verifyReserveRequestFor(operatorId, nodeId, r, pub, nowUnixSec, skewSec, undefined, true)
-}
-
-// verifyReserveRequestFor also accepts the v2 layout bound to want, the
-// verifying node's own deployment; allowLegacy admits an unbound signature.
-// The deployment check runs first. Mirrors Go's ReserveRequest.VerifyFor.
+// The request must be bound to want, the verifying node's own deployment; the
+// deployment check runs first. Mirrors Go's ReserveRequest.VerifyFor.
 export function verifyReserveRequestFor(
     operatorId: number | bigint,
     nodeId: number | bigint,
@@ -292,9 +278,8 @@ export function verifyReserveRequestFor(
     nowUnixSec: number,
     skewSec: number,
     want: Uint8Array | undefined,
-    allowLegacy: boolean,
 ): void {
-    checkDeployment('reserve', r.deployment, want, allowLegacy)
+    checkDeployment('reserve', r.deployment, want)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }

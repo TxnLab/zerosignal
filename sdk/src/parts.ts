@@ -17,7 +17,7 @@ import {
     encodeDeploymentId,
     knownDeployment,
 } from '@txnlab/zs-proto/ticket'
-import { type SettleAck, usesDeploymentBinding } from '@txnlab/zs-proto/wire'
+import type { SettleAck } from '@txnlab/zs-proto/wire'
 
 import type { AckSettleResult, SettleSubmission } from './ack.js'
 import type { AffinityStore } from './affinity.js'
@@ -101,16 +101,30 @@ export interface HttpReserveClientOptions {
     timeoutMs?: number | undefined
     clock?: Clock | undefined
     /**
-     * The payer's own deployment id. When set, a reserve to a node advertising
-     * DEPLOYMENT_BINDING_MIN_VERSION names it, and the ticket must come back
-     * bound to it. Absent keeps the legacy layouts with every node.
+     * The payer's own deployment id. Every reserve names it, and the ticket
+     * must come back bound to it. Absent refuses to reserve: no node issues an
+     * unbound ticket, and no payer accepts one. Required as a key, so a
+     * caller can't leave it out by accident and build a client that never
+     * reserves.
      */
-    deployment?: Uint8Array | undefined
+    deployment: Uint8Array | undefined
     /**
      * The payer's rail; absent is Algorand. It decides how the open payload
      * is checked and whether the payer chooses the ticket id.
      */
     rail?: Rail | undefined
+}
+
+/**
+ * NoPayerDeploymentError is a reserve client that doesn't know its own
+ * deployment, so it can't bind the reserve or check the ticket. Go:
+ * errNoPayerDeployment.
+ */
+export class NoPayerDeploymentError extends Error {
+    constructor() {
+        super("reserve: the payer's escrow deployment is unknown")
+        this.name = 'NoPayerDeploymentError'
+    }
 }
 
 /** httpReserveClient is the default ReserveClient, Go's HTTPReserveClient. */
@@ -121,16 +135,14 @@ export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
         // async, so a missing recipient rejects like every other failure.
         async reserve(op, request, hop, signal) {
             const ref = refOf(op)
+            // Before the recipient check, as in Go: a payer with no deployment
+            // can reserve at no node, so that, not one node's ephemeral, is
+            // the cause to report. Set before signing: a signed deployment
+            // selects the bound reserve layout, and the node binds the ticket
+            // to it.
+            if (deployment === undefined) throw new NoPayerDeploymentError()
             const sealRecipient = sealRecipientOf(op, clock())
-            // Set before signing: a signed deployment selects the bound reserve
-            // layout, and the node reads it to pick the ticket layout.
-            const named = deployment !== undefined && usesDeploymentBinding(op.protoVersion)
-            let sent: ReserveRequest = request
-            if (named) sent = { ...request, deployment: encodeDeploymentId(deployment) }
-            else if (request.deployment !== undefined) {
-                const { deployment: _stale, ...fields } = request
-                sent = fields
-            }
+            let sent: ReserveRequest = { ...request, deployment: encodeDeploymentId(deployment) }
             const ticketId = requestTicketId(o.rail)
             if (ticketId !== undefined) sent = { ...sent, ticket_id: ticketId }
             else if (sent.ticket_id !== undefined) {
@@ -152,7 +164,7 @@ export function httpReserveClient(o: HttpReserveClientOptions): ReserveClient {
             const r = await reserve(call)
             // reserve() leaves these to its caller; Go's Reserve runs both, and
             // its dispatch trusts the result.
-            verifyTicketSignature(r.ticket, op.ticketSigningKey, deployment, !named)
+            verifyTicketSignature(r.ticket, op.ticketSigningKey, deployment)
             if (r.presignedOpenTxn) checkOpenOffer(o.rail, r.presignedOpenTxn)
             return { ...r, sealRecipient }
         },

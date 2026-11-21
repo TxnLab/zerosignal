@@ -47,7 +47,7 @@ function algorandChecksum(pub: Uint8Array): Uint8Array {
 
 // decodeAlgorandAddress decodes a 58-character Algorand address into
 // its underlying Ed25519 public key, validating the checksum. The
-// verifier callers use for verifyTicket / verifyReceipt: the registry
+// verifier callers use for verifyTicketFor / verifyReceiptFor: the registry
 // publishes only the address; the pubkey is recovered on demand.
 export function decodeAlgorandAddress(addr: string): Uint8Array {
     if (addr.length !== ALGO_ADDRESS_LEN) {

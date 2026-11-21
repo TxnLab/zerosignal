@@ -183,39 +183,34 @@ func TestTicket_VerifyFor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := bound.VerifyFor(pub, mine, false); err != nil {
+	if err := bound.VerifyFor(pub, mine); err != nil {
 		t.Fatalf("bound, own deployment: %v", err)
 	}
-	if err := bound.VerifyFor(pub, mine, true); err != nil {
-		t.Fatalf("bound, own deployment, legacy allowed: %v", err)
-	}
-	if err := bound.VerifyFor(pub, other, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := bound.VerifyFor(pub, other); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("bound, other deployment: %v, want ErrDeploymentMismatch", err)
 	}
-	if err := bound.VerifyFor(pub, DeploymentID{}, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := bound.VerifyFor(pub, DeploymentID{}); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("bound, verifier unbound: %v, want ErrDeploymentMismatch", err)
 	}
-	if err := bound.Verify(pub); !errors.Is(err, ErrDeploymentMismatch) {
-		t.Fatalf("legacy Verify on a bound ticket: %v, want ErrDeploymentMismatch", err)
+	// A genuine legacy signature is refused whatever the verifier knows.
+	if err := legacy.VerifyFor(pub, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("legacy, own deployment: %v, want ErrLegacySignature", err)
 	}
-	if err := legacy.VerifyFor(pub, mine, true); err != nil {
-		t.Fatalf("legacy, allowed: %v", err)
-	}
-	if err := legacy.VerifyFor(pub, mine, false); !errors.Is(err, ErrLegacySignature) {
-		t.Fatalf("legacy, not allowed: %v, want ErrLegacySignature", err)
+	if err := legacy.VerifyFor(pub, DeploymentID{}); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("legacy, verifier unbound: %v, want ErrLegacySignature", err)
 	}
 
-	// Relabelling a signed ticket to another deployment, or stripping its
-	// deployment, breaks the signature rather than passing the label check.
+	// Relabelling a signed ticket to another deployment breaks the signature
+	// rather than passing the label check; stripping it is refused outright.
 	relabelled := *bound
 	relabelled.Deployment = other
-	if err := relabelled.VerifyFor(pub, other, false); err == nil {
+	if err := relabelled.VerifyFor(pub, other); err == nil {
 		t.Fatal("relabelled ticket verified")
 	}
 	stripped := *bound
 	stripped.Deployment = DeploymentID{}
-	if err := stripped.VerifyFor(pub, mine, true); err == nil {
-		t.Fatal("stripped ticket verified as legacy")
+	if err := stripped.VerifyFor(pub, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("stripped ticket: %v, want ErrLegacySignature", err)
 	}
 }
 
@@ -238,27 +233,27 @@ func TestReceipt_VerifyFor(t *testing.T) {
 		t.Fatal("receipt v3 layout is not tag ‖ deployment ‖ v2 body")
 	}
 
-	if err := bound.VerifyFor(pub, mine, false); err != nil {
+	if err := bound.VerifyFor(pub, mine); err != nil {
 		t.Fatalf("bound, own deployment: %v", err)
 	}
-	if err := bound.VerifyFor(pub, other, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := bound.VerifyFor(pub, other); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("bound, other deployment: %v", err)
+	}
+	if err := bound.VerifyFor(pub, DeploymentID{}); !errors.Is(err, ErrDeploymentMismatch) {
+		t.Fatalf("bound, verifier unbound: %v", err)
 	}
 	stripped := *bound
 	stripped.Deployment = DeploymentID{}
-	if err := stripped.VerifyFor(pub, mine, true); err == nil {
-		t.Fatal("stripped receipt verified as legacy")
+	if err := stripped.VerifyFor(pub, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("stripped receipt: %v, want ErrLegacySignature", err)
 	}
 
 	legacy := sampleReceipt()
 	if err := legacy.Sign(context.Background(), signer, addr); err != nil {
 		t.Fatal(err)
 	}
-	if err := legacy.VerifyFor(pub, mine, false); !errors.Is(err, ErrLegacySignature) {
-		t.Fatalf("legacy, not allowed: %v", err)
-	}
-	if err := legacy.VerifyFor(pub, mine, true); err != nil {
-		t.Fatalf("legacy, allowed: %v", err)
+	if err := legacy.VerifyFor(pub, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("legacy: %v, want ErrLegacySignature", err)
 	}
 }
 
@@ -293,27 +288,28 @@ func TestReserve_VerifyFor(t *testing.T) {
 		t.Fatal("reserve v2 layout is not tag ‖ deployment ‖ v1 body")
 	}
 
-	if err := bound.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, mine, false); err != nil {
+	if err := bound.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, mine); err != nil {
 		t.Fatalf("bound, own deployment: %v", err)
 	}
-	if err := bound.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, other, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := bound.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, other); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("bound, other deployment: %v", err)
 	}
 	// The deployment check runs before the window, so a mismatched payer with
 	// a stale signature still learns it is on the wrong network.
-	if err := bound.VerifyFor(pub, 42, 7, now.Add(time.Hour), DefaultReserveSkew, other, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := bound.VerifyFor(pub, 42, 7, now.Add(time.Hour), DefaultReserveSkew, other); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("bound, other deployment, expired: %v", err)
 	}
-	if err := bound.Verify(pub, 42, 7, now, DefaultReserveSkew); !errors.Is(err, ErrDeploymentMismatch) {
-		t.Fatalf("legacy Verify on a bound reserve: %v", err)
+	if err := bound.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, DeploymentID{}); !errors.Is(err, ErrDeploymentMismatch) {
+		t.Fatalf("bound, verifier unbound: %v", err)
 	}
 
+	// A genuine, live legacy signature is refused, and before the window.
 	legacy := newReq(DeploymentID{})
-	if err := legacy.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, mine, true); err != nil {
-		t.Fatalf("legacy, allowed: %v", err)
+	if err := legacy.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("legacy: %v, want ErrLegacySignature", err)
 	}
-	if err := legacy.VerifyFor(pub, 42, 7, now, DefaultReserveSkew, mine, false); !errors.Is(err, ErrLegacySignature) {
-		t.Fatalf("legacy, not allowed: %v", err)
+	if err := legacy.VerifyFor(pub, 42, 7, now.Add(time.Hour), DefaultReserveSkew, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("legacy, expired: %v, want ErrLegacySignature", err)
 	}
 }
 
@@ -331,42 +327,38 @@ func TestEphemeral_DualSignature(t *testing.T) {
 	if a.Sig == "" || a.SigV2 == "" || a.Sig == a.SigV2 {
 		t.Fatalf("bound advertisement needs two distinct signatures, got %q / %q", a.Sig, a.SigV2)
 	}
-	// A payer that predates the binding still verifies the legacy signature.
-	if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err != nil {
-		t.Fatalf("legacy verify of a dual-signed advertisement: %v", err)
-	}
-	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine, false); err != nil {
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine); err != nil {
 		t.Fatalf("bound verify: %v", err)
 	}
-	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, other, true); !errors.Is(err, ErrDeploymentMismatch) {
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, other); !errors.Is(err, ErrDeploymentMismatch) {
 		t.Fatalf("other deployment: %v", err)
+	}
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, DeploymentID{}); !errors.Is(err, ErrDeploymentMismatch) {
+		t.Fatalf("verifier unbound: %v", err)
 	}
 
 	// A bound advertisement is judged by SigV2: a valid Sig cannot carry a
 	// forged SigV2.
 	forged := *a
 	forged.SigV2 = a.Sig
-	if err := forged.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine, true); err == nil {
+	if err := forged.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine); err == nil {
 		t.Fatal("bound advertisement verified on the legacy signature")
 	}
 	// SigV2 covers the target binding too.
-	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID+1, DefaultEphemeralSkew, mine, false); err == nil {
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID+1, DefaultEphemeralSkew, mine); err == nil {
 		t.Fatal("bound advertisement verified for a sibling node")
 	}
 
-	// Stripping the v2 fields leaves a legacy advertisement, which passes only
-	// while legacy is allowed.
+	// Stripping the v2 fields leaves a legacy advertisement whose Sig is
+	// genuine; it is refused all the same.
 	stripped := *a
 	stripped.Deployment, stripped.SigV2 = DeploymentID{}, ""
-	if err := stripped.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine, false); !errors.Is(err, ErrLegacySignature) {
-		t.Fatalf("stripped, legacy refused: %v", err)
-	}
-	if err := stripped.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine, true); err != nil {
-		t.Fatalf("stripped, legacy allowed: %v", err)
+	if err := stripped.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, mine); !errors.Is(err, ErrLegacySignature) {
+		t.Fatalf("stripped: %v, want ErrLegacySignature", err)
 	}
 
 	// The policy checks still run on the bound path.
-	if err := a.VerifyFor(pub, time.Unix(a.Expiry, 0).Add(2*DefaultEphemeralSkew), advOperatorID, advNodeID, DefaultEphemeralSkew, mine, false); !errors.Is(err, ErrEphemeralExpired) {
+	if err := a.VerifyFor(pub, time.Unix(a.Expiry, 0).Add(2*DefaultEphemeralSkew), advOperatorID, advNodeID, DefaultEphemeralSkew, mine); !errors.Is(err, ErrEphemeralExpired) {
 		t.Fatalf("expired bound advertisement: %v", err)
 	}
 }

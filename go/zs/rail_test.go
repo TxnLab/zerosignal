@@ -32,7 +32,7 @@ func railReserve(t *testing.T, rail ticket.Rail, edit func(h *reserveTestHarness
 		}
 		writeSealedReserve(t, w, resp, seen.ProxyRecipient)
 	})
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient, Rail: rail}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient, Rail: rail}
 	req := sampleReserveReq()
 	req.TicketID = staleTicketID
 	rt, err := c.Reserve(context.Background(), h.operator, req, nil)

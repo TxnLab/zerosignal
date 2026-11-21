@@ -50,12 +50,12 @@ export interface EphemeralAdvertisement {
     // [issued_at, expiry] is tamper-evident. Required to recompute the
     // canonical bytes.
     ephemeral_issued_at: number
-    // base64(Ed25519 signature over ephemeralSigDigest). Filled by
-    // signEphemeral; verifyEphemeral reads it.
+    // base64(Ed25519 signature over ephemeralSigDigest), the legacy layout.
+    // Filled by signEphemeral; no verifier accepts it from 9.14, and no 9.14
+    // node publishes it.
     ephemeral_sig?: string
-    // The deployment-bound signature, published beside the legacy one because
-    // the advertisement is served to every payer and an older payer reads
-    // only ephemeral_sig. Mirrors Go's Deployment / SigV2.
+    // The deployment-bound signature, the only one verifyEphemeralFor
+    // accepts. Mirrors Go's Deployment / SigV2.
     ephemeral_deployment?: string
     ephemeral_sig_v2?: string
 }
@@ -87,7 +87,7 @@ export const EPHEMERAL_SIGNING_TAG_V2 = 'zs-ephemeral-v2\x00'
 export const DEFAULT_EPHEMERAL_SKEW_SEC = 60
 
 // MAX_EPHEMERAL_LIFETIME_SEC caps the signed window ephemeral_expiry -
-// ephemeral_issued_at and is a HARD check in verifyEphemeral. The node's
+// ephemeral_issued_at and is a HARD check in verifyEphemeralFor. The node's
 // advertised TTL is 25m; 40m (≈1.5× advTTL) clears an honest current key with
 // margin while rejecting a node that advertises a long-lived "ephemeral" so it
 // can secretly retain the private half and defeat forward secrecy. Mirrors
@@ -96,11 +96,11 @@ export const MAX_EPHEMERAL_LIFETIME_SEC = 40 * 60
 
 // FRESHNESS_TARGET_SEC is the SOFT relay-staleness threshold on
 // now - ephemeral_issued_at, consumed by ephemeralStale (NOT by
-// verifyEphemeral). ≈ rotationPeriod (20m) + skew (60s). Mirrors
+// verifyEphemeralFor). ≈ rotationPeriod (20m) + skew (60s). Mirrors
 // proto/go/ticket/ephemeral.go FreshnessTarget.
 export const FRESHNESS_TARGET_SEC = 21 * 60
 
-// EphemeralExpiredError is thrown by verifyEphemeral when the signature is
+// EphemeralExpiredError is thrown by verifyEphemeralFor when the signature is
 // valid but the advertisement is past ephemeral_expiry + skew. It is a
 // distinguishable class so callers can tell a stale-but-genuine block (fall
 // back to the on-chain key silently) from a forged or substituted one (log
@@ -112,7 +112,7 @@ export class EphemeralExpiredError extends Error {
     }
 }
 
-// EphemeralLifetimeError is thrown by verifyEphemeral when the signature is
+// EphemeralLifetimeError is thrown by verifyEphemeralFor when the signature is
 // valid but the signed window exceeds MAX_EPHEMERAL_LIFETIME_SEC — an
 // authentic-but-over-long advertisement (a node trying to pin a long-lived key
 // it could retain to defeat forward secrecy). Distinct from
@@ -189,7 +189,7 @@ export function ephemeralSigDigestV2(
 }
 
 // ephemeralSigDigest returns sha256(ephemeralCanonicalBytes(operatorId,
-// nodeId, a)) — the 32-byte value both signEphemeral and verifyEphemeral feed
+// nodeId, a)) — the 32-byte value both signEphemeral and verifyEphemeralFor feed
 // to ed25519. ephemeralCanonicalBytes already includes the
 // "zs-ephemeral-v1\x00" domain tag so the digest is cross-protocol safe.
 export function ephemeralSigDigest(
@@ -232,10 +232,10 @@ export async function signEphemeral(
     else delete a.ephemeral_sig_v2
 }
 
-// verifyEphemeral checks that a.ephemeral_sig is a valid Ed25519 signature of
-// ephemeralSigDigest(operatorId, nodeId, a) under pub for the given
-// (operatorId, nodeId), and that the advertisement has not expired
-// (now ≤ ephemeral_expiry + skew).
+// verifyEphemeralFor checks that a.ephemeral_sig_v2 is a valid Ed25519
+// signature of ephemeralSigDigestV2(operatorId, nodeId, a) under pub for the
+// given (operatorId, nodeId) and deployment want, and that the advertisement
+// has not expired (now ≤ ephemeral_expiry + skew).
 //
 // operatorId and nodeId are inputs, never trusted from the wire: both are
 // bound into the digest, so the signature only validates when the recipient
@@ -244,7 +244,7 @@ export async function signEphemeral(
 // the same operator (relevant when an operator reuses one signing key across
 // its nodes) — without re-signing under that node's key.
 //
-// verifyEphemeral performs the HARD (fail-closed) checks only; the SOFT
+// verifyEphemeralFor performs the HARD (fail-closed) checks only; the SOFT
 // relay-staleness signal is ephemeralStale, called separately after this
 // returns. Order is deliberate: (1) signature, so a forged block throws a
 // generic verification Error (a caller can log it as a substitution attempt)
@@ -255,24 +255,8 @@ export async function signEphemeral(
 // advertisement as an attack. Pass DEFAULT_EPHEMERAL_SKEW_SEC for skewSec;
 // nowUnixSec is injected so callers can test boundaries deterministically.
 //
-// verifyEphemeral checks only the legacy ephemeral_sig; payers verify with
-// verifyEphemeralFor.
-export function verifyEphemeral(
-    operatorId: number | bigint,
-    nodeId: number | bigint,
-    a: EphemeralAdvertisement,
-    pub: Uint8Array,
-    nowUnixSec: number,
-    skewSec: number,
-): void {
-    verifyEphemeralSig(operatorId, nodeId, a, pub, nowUnixSec, skewSec, false)
-}
-
-// verifyEphemeralFor checks ephemeral_sig_v2 when the advertisement is bound,
-// after requiring its ephemeral_deployment to equal want, and the legacy
-// ephemeral_sig only when it is unbound and allowLegacy holds. allowLegacy is
-// the payer's call from the node's advertised proto_version, which is unsigned;
-// the Go doc on VerifyFor says what that leaves open during the rollout.
+// ephemeral_sig, the legacy signature, is never read: a relay that strips the
+// bound fields leaves an advertisement this refuses.
 export function verifyEphemeralFor(
     operatorId: number | bigint,
     nodeId: number | bigint,
@@ -281,25 +265,12 @@ export function verifyEphemeralFor(
     nowUnixSec: number,
     skewSec: number,
     want: Uint8Array | undefined,
-    allowLegacy: boolean,
 ): void {
-    checkDeployment('ephemeral', a.ephemeral_deployment, want, allowLegacy)
-    verifyEphemeralSig(operatorId, nodeId, a, pub, nowUnixSec, skewSec, Boolean(a.ephemeral_deployment))
-}
-
-function verifyEphemeralSig(
-    operatorId: number | bigint,
-    nodeId: number | bigint,
-    a: EphemeralAdvertisement,
-    pub: Uint8Array,
-    nowUnixSec: number,
-    skewSec: number,
-    bound: boolean,
-): void {
+    checkDeployment('ephemeral', a.ephemeral_deployment, want)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }
-    const encoded = bound ? a.ephemeral_sig_v2 : a.ephemeral_sig
+    const encoded = a.ephemeral_sig_v2
     if (!encoded) throw new Error('ephemeral signature missing')
     let sig: Uint8Array
     try {
@@ -310,7 +281,7 @@ function verifyEphemeralSig(
     if (sig.length !== 64) {
         throw new Error(`invalid ed25519 signature length ${sig.length}`)
     }
-    const digest = bound ? ephemeralSigDigestV2(operatorId, nodeId, a) : ephemeralSigDigest(operatorId, nodeId, a)
+    const digest = ephemeralSigDigestV2(operatorId, nodeId, a)
     if (!ed25519.verify(sig, digest, pub)) {
         throw new Error('ephemeral signature verification failed')
     }
@@ -339,7 +310,7 @@ function verifyEphemeralSig(
 
 // ephemeralStale is the SOFT relay-attribution signal: true when the block's
 // age (nowUnixSec - ephemeral_issued_at) exceeds FRESHNESS_TARGET_SEC. Call it
-// ONLY after verifyEphemeral succeeds (it trusts ephemeral_issued_at is
+// ONLY after verifyEphemeralFor succeeds (it trusts ephemeral_issued_at is
 // authentic). A stale block fetched via a relay means the relay served an older
 // key than the node should have — prefer a fresher path and downrank the relay
 // — but the block is still usable, so this never rejects, only attributes.

@@ -81,9 +81,9 @@ func newSettleFixtureFor(t *testing.T, ticketID string) settleFixture {
 	var addr types.Address
 	copy(addr[:], pub)
 	op := Operator{ID: 7, NodeID: 3, SigningAddr: addr.String(), TicketSigningKey: pub}
-	tkt := &ticket.Ticket{TicketID: ticketID, OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000}
+	tkt := &ticket.Ticket{TicketID: ticketID, OperatorID: op.ID, NodeID: op.NodeID, MaxPrice: 100_000, Deployment: harnessDeployment}
 	plaintext := []byte("hello world")
-	receipt := &ticket.UsageReceipt{TicketID: tkt.TicketID, ActualInputCount: 10, ActualOutputCount: 5, AmountCharged: 50_000}
+	receipt := &ticket.UsageReceipt{TicketID: tkt.TicketID, ActualInputCount: 10, ActualOutputCount: 5, AmountCharged: 50_000, Deployment: harnessDeployment}
 	receipt.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
 	if err := receipt.Sign(context.Background(), rawKeyBytesSigner{addr: op.SigningAddr, priv: priv}, op.SigningAddr); err != nil {
 		t.Fatal(err)
