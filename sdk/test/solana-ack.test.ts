@@ -1141,6 +1141,10 @@ describe('Solana reconciler', () => {
         recordModelDemand: () => {},
     }
     const signer = { address: PAYER, signBytes: async () => new Uint8Array(), signTransactions: async () => [] }
+    // Supplied so create reads no chain: without one it builds the reserve
+    // client and reads the deployment from localnet's algod, which passes
+    // where a localnet happens to run and times out in CI.
+    const reserveClient = { reserve: () => Promise.reject(new Error('unused')) }
 
     // A Client over a SolanaWallet sweeps its journal from create, as one
     // over the SDK's Algorand Wallet does.
@@ -1150,7 +1154,7 @@ describe('Solana reconciler', () => {
         setTicketDeadline(f, nowSeconds() - 3600n)
         const journal = memoryJournal()
         await journal.put(rowOf('open'))
-        const c = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })
+        const c = await Client.create({ signer, network: sweepNetwork, registry, reserveClient, wallet: f.wallet, stores: { journal } })
         try {
             await vi.waitFor(() => expect(f.state.sent).toHaveLength(1))
         } finally {
@@ -1163,7 +1167,7 @@ describe('Solana reconciler', () => {
     // Wallet.
     it('journals a SolanaWallet in memory and sweeps one journal once', async () => {
         const f = await fixture()
-        const c = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet })
+        const c = await Client.create({ signer, network: sweepNetwork, registry, reserveClient, wallet: f.wallet })
         try {
             expect(isMemoryJournal(c.config.stores.journal!)).toBe(true)
             expect(partsOf.get(c)!.reconciler).toBeDefined()
@@ -1171,9 +1175,11 @@ describe('Solana reconciler', () => {
             await c.close()
         }
         const journal = memoryJournal()
-        const a = await Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })
+        const a = await Client.create({ signer, network: sweepNetwork, registry, reserveClient, wallet: f.wallet, stores: { journal } })
         try {
-            await expect(Client.create({ signer, network: sweepNetwork, registry, wallet: f.wallet, stores: { journal } })).rejects.toMatchObject({
+            await expect(
+                Client.create({ signer, network: sweepNetwork, registry, reserveClient, wallet: f.wallet, stores: { journal } }),
+            ).rejects.toMatchObject({
                 code: 'invalid_config',
                 message: expect.stringContaining('already swept by another Client'),
             })
