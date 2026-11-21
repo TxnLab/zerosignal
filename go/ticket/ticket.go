@@ -61,10 +61,10 @@ type Ticket struct {
 	// the wire value is a concrete rate and a v1-era flat charge is reproduced
 	// exactly (no discount). Rides one uint64 at the tail of CanonicalBytes.
 	CacheReadRate uint64 `json:"cache_read_rate"`
-	// Deployment, when set, selects the v3 layout, which binds the signature to
-	// one escrow deployment (see DeploymentID). The node sets it only when the
-	// payer's reserve named the node's deployment, so a payer that predates the
-	// field keeps receiving v2 tickets.
+	// Deployment selects the v3 layout, which binds the signature to one escrow
+	// deployment (see DeploymentID). Every reserve names the payer's, and a
+	// node issues only bound tickets; zero is the v2 layout, which VerifyFor
+	// refuses from 9.14.
 	Deployment DeploymentID `json:"deployment,omitzero"`
 	Sig        string       `json:"sig"` // base64(Ed25519 over CanonicalBytes) — filled by Sign
 }
@@ -158,20 +158,12 @@ func (t *Ticket) Sign(ctx context.Context, signer BytesSigner, signingAddr strin
 	return nil
 }
 
-// Verify accepts only a legacy (v2, unbound) signature. Payers verify with
-// VerifyFor, which also accepts v3 for their own deployment.
-func (t *Ticket) Verify(pub ed25519.PublicKey) error {
-	return t.VerifyFor(pub, DeploymentID{}, true)
-}
-
 // VerifyFor returns nil if t.Sig is a valid Ed25519 signature of
-// TicketSigDigest(t) under pub and t is bound to want, or unbound while
-// allowLegacy holds. A payer passes allowLegacy only when its reserve named no
-// deployment, so a node that was asked for v3 cannot answer with v2.
-// Callers typically recover pub from an Algorand address via
+// TicketSigDigest(t) under pub and t is bound to want, the verifier's own
+// deployment. Callers typically recover pub from an Algorand address via
 // DecodeAlgorandAddress.
-func (t *Ticket) VerifyFor(pub ed25519.PublicKey, want DeploymentID, allowLegacy bool) error {
-	if err := checkDeployment(t.Deployment, want, allowLegacy); err != nil {
+func (t *Ticket) VerifyFor(pub ed25519.PublicKey, want DeploymentID) error {
+	if err := checkDeployment(t.Deployment, want); err != nil {
 		return fmt.Errorf("ticket: %w", err)
 	}
 	if len(pub) != ed25519.PublicKeySize {

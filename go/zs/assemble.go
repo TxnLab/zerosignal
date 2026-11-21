@@ -39,8 +39,9 @@ type networkParts struct {
 	// store for every routing signal the caller left nil.
 	source *ChainOperatorSource
 	stop   func()
-	// deploymentID is the id read off the chain, zero when no part was built
-	// or the read failed; free credits are minted for it.
+	// deploymentID is the id read off the chain, zero only when the host
+	// supplied every part (a failed read fails New); free credits are minted
+	// for it.
 	deploymentID ticket.DeploymentID
 }
 
@@ -59,7 +60,8 @@ type railChain struct {
 func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (networkParts, error) {
 	p := networkParts{registry: cfg.Registry, reserve: cfg.ReserveClient, wallet: cfg.Wallet}
 	var chain *railChain
-	if p.registry == nil || p.wallet == nil {
+	// The reserve client needs the deployment too: every reserve names it.
+	if p.registry == nil || p.wallet == nil || p.reserve == nil {
 		var err error
 		if dep.Rail == ticket.RailSolana {
 			chain, err = solanaRailChain(cfg, dep.Solana)
@@ -73,20 +75,23 @@ func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (network
 			return networkParts{}, err
 		}
 	}
-	builtWallet := p.wallet == nil
-	if builtWallet {
+	if p.wallet == nil {
 		w, err := chain.wallet(ctx)
 		if err != nil {
 			return networkParts{}, err
 		}
 		p.wallet = w
 	}
+	// A payer that can't read its deployment can't reserve or route: every
+	// reserve names it, and every node is checked against it. So a failed
+	// read fails New, whoever built the wallet.
 	var deployment ticket.DeploymentID
 	if chain != nil {
 		d, err := chain.deployment(ctx)
-		if deployment, err = deploymentOrFail(d, err, builtWallet, cfg.Logger); err != nil {
-			return networkParts{}, err
+		if err != nil {
+			return networkParts{}, fmt.Errorf("read the escrow deployment: %w", err)
 		}
+		deployment = d
 	}
 	p.deploymentID = deployment
 	if p.reserve == nil {
@@ -104,23 +109,6 @@ func buildNetworkParts(ctx context.Context, cfg Config, dep Deployment) (network
 		p.registry, p.stop = reg, reg.Stop
 	}
 	return p, nil
-}
-
-// deploymentOrFail decides what a failed genesis read means. When the SDK
-// built the wallet, that wallet just read the chain, so algod is up and the
-// failure is not a blip worth starting unbound for. A host-supplied wallet
-// means this payer may start without algod; it warns and keeps the legacy
-// layouts until restarted.
-func deploymentOrFail(d ticket.DeploymentID, err error, builtWallet bool, log *slog.Logger) (ticket.DeploymentID, error) {
-	switch {
-	case err == nil:
-		return d, nil
-	case builtWallet:
-		return ticket.DeploymentID{}, err
-	default:
-		log.Warn("could not read the network genesis hash; reserving without a deployment binding", slog.Any("err", err))
-		return ticket.DeploymentID{}, nil
-	}
 }
 
 // algorandRailChain reads the escrow app through one algod client.

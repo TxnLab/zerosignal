@@ -15,7 +15,6 @@ import { base64 } from '@scure/base'
 import { decodeBase58, encodeBase58 } from '@txnlab/zs-proto/solana'
 import { Deployment, PROGRAM_ID, decodeConfig } from '@txnlab/zs-proto/solana/zsescrow'
 import { encodeDeploymentId, solanaDeploymentId } from '@txnlab/zs-proto/ticket'
-import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ReserveCall } from '../src/reserve.js'
@@ -144,7 +143,6 @@ describe('Client.create on Solana', () => {
             const op = testOperator({
                 ephemeralRecipient: 'age1live',
                 ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600,
-                protoVersion: DEPLOYMENT_BINDING_MIN_VERSION,
             })
             await expect(
                 parts.reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
@@ -153,6 +151,8 @@ describe('Client.create on Solana', () => {
             expect(call.request.deployment).toBe(
                 encodeDeploymentId(solanaDeploymentId(decodeBase58(GENESIS, 32), decodeBase58(PROGRAM_ID, 32))),
             )
+            // Built with the rail: the payer names its own ticket id.
+            expect(base64.decode(call.request.ticket_id ?? '')).toHaveLength(16)
             const msg = new Uint8Array([1, 2, 3])
             expect(await ed25519.verifyAsync(await call.signer!.signBytes(PAYER, msg), msg, publicKey)).toBe(true)
             await expect(call.signer!.signBytes('OTHER', msg)).rejects.toThrow()

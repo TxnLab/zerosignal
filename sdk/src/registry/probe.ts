@@ -180,7 +180,7 @@ export interface ProbeOptions {
      * The payer's own deployment id, which a node's bound ephemeral signature
      * must name. Absent, a ChainOperatorSource derives it from algod's genesis
      * hash at its first chain read, as Go's zero ChainOperatorSource.Deployment;
-     * until then only the legacy signature is checked.
+     * until then every node is refused.
      */
     deployment?: Uint8Array | undefined
 }

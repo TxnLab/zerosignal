@@ -7,6 +7,7 @@ package zs
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,16 +28,17 @@ func TestProbeOne_CarriesRetention(t *testing.T) {
 		// Two models with DIFFERENT tiers: a node can point text and image at
 		// separate upstreams, and a per-model copy that collapsed to one value
 		// would pass a single-model fixture.
-		_, _ = w.Write([]byte(`{"models":[
+		_, _ = fmt.Fprintf(w, `{"deployment":%q,"models":[
 			{"id":"chat","context_window":8192,"retention":"upstream_confirmed"},
 			{"id":"pic","context_window":8192,"retention":"upstream_enforced"},
 			{"id":"plain","context_window":8192},
 			{"id":"bold","context_window":8192,"retention":"mathematically_impossible_to_retain"}
-		]}`))
+		]}`, harnessDeployment.String())
 	}))
 	defer node.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(nil, 2*time.Second),
 		DetailsTimeout: 2 * time.Second,
 		Log:            discardLogger(),

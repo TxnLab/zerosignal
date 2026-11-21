@@ -40,11 +40,9 @@ func deploymentReserve(t *testing.T, payer ticket.DeploymentID, nodeVersion stri
 	h.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = h.decodeReserve(t, r)
 		resp := h.issueValidTicket(t, seen)
-		if d := answerWith(seen); !d.IsZero() {
-			resp.Ticket.Deployment = d
-			if err := resp.Ticket.Sign(context.Background(), rawKeyBytesSigner{addr: h.signAddr, priv: h.signKey}, h.signAddr); err != nil {
-				t.Fatal(err)
-			}
+		resp.Ticket.Deployment = answerWith(seen)
+		if err := resp.Ticket.Sign(context.Background(), rawKeyBytesSigner{addr: h.signAddr, priv: h.signKey}, h.signAddr); err != nil {
+			t.Fatal(err)
 		}
 		writeSealedReserve(t, w, resp, seen.ProxyRecipient)
 	})
@@ -75,12 +73,12 @@ func TestReserve_NamesDeploymentToANewNode(t *testing.T) {
 		t.Fatalf("node saw deployment %v, want %v", seen.Deployment, mine)
 	}
 	// The payer signature is over the bound layout: the node verifies it
-	// with its own deployment and no legacy allowance.
+	// with its own deployment.
 	pub, err := ticket.DecodeAlgorandAddress(seen.PayerAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := seen.VerifyFor(pub, 1, 0, time.Now(), ticket.DefaultReserveSkew, mine, false); err != nil {
+	if err := seen.VerifyFor(pub, 1, 0, time.Now(), ticket.DefaultReserveSkew, mine); err != nil {
 		t.Fatalf("node-side verify of the bound reserve: %v", err)
 	}
 }
@@ -97,39 +95,43 @@ func TestReserve_NewNodeMustAnswerBound(t *testing.T) {
 	}
 }
 
-// An older node never sees the field, and its legacy ticket passes. A ticket
-// it binds anyway must still name our deployment.
-func TestReserve_OlderNodeKeepsLegacy(t *testing.T) {
+// proto_version is unsigned, so it decides nothing: whatever a node (or a
+// relay rewriting its details) advertises, the payer names its deployment and
+// refuses a legacy ticket.
+func TestReserve_EveryVersionIsAskedForABoundTicket(t *testing.T) {
 	mine := testDeployment(t, 1)
 	for _, version := range []string{"9.12", "", "not-a-version"} {
 		seen, err := deploymentReserve(t, mine, version, fixed(ticket.DeploymentID{}))
-		if err != nil {
-			t.Fatalf("version %q: Reserve: %v", version, err)
+		if !errors.Is(err, ticket.ErrLegacySignature) {
+			t.Fatalf("version %q: legacy ticket: %v, want ErrLegacySignature", version, err)
 		}
-		if !seen.Deployment.IsZero() {
-			t.Fatalf("version %q: payer named its deployment to a node that predates it", version)
+		if seen.Deployment != mine {
+			t.Fatalf("version %q: node saw deployment %v, want %v", version, seen.Deployment, mine)
 		}
 	}
 	if _, err := deploymentReserve(t, mine, "9.12", fixed(mine)); err != nil {
-		t.Fatalf("older node, ticket bound to us: %v", err)
+		t.Fatalf("older advertised version, ticket bound to us: %v", err)
 	}
 	if _, err := deploymentReserve(t, mine, "9.12", fixed(testDeployment(t, 2))); !errors.Is(err, ticket.ErrDeploymentMismatch) {
-		t.Fatalf("older node, ticket bound elsewhere: %v, want ErrDeploymentMismatch", err)
+		t.Fatalf("older advertised version, ticket bound elsewhere: %v, want ErrDeploymentMismatch", err)
 	}
 }
 
-func TestReserve_PayerWithoutDeploymentStaysLegacy(t *testing.T) {
-	seen, err := deploymentReserve(t, ticket.DeploymentID{}, "9.13", fixed(ticket.DeploymentID{}))
-	if err != nil {
-		t.Fatalf("Reserve: %v", err)
+// A payer that doesn't know its deployment can neither bind the reserve nor
+// check the ticket, so it sends nothing.
+func TestReserve_PayerWithoutDeploymentRefuses(t *testing.T) {
+	seen, err := deploymentReserve(t, ticket.DeploymentID{}, "9.14", echo)
+	if !errors.Is(err, errNoPayerDeployment) {
+		t.Fatalf("Reserve: %v, want errNoPayerDeployment", err)
 	}
-	if !seen.Deployment.IsZero() {
-		t.Fatal("a payer with no deployment named one")
+	if seen.PayerAddr != "" {
+		t.Fatal("a payer with no deployment sent a reserve")
 	}
 }
 
-// The receipt check follows the ticket: a bound ticket needs a receipt bound to
-// the same deployment, and an unbound ticket a legacy receipt.
+// The receipt check follows the ticket: a receipt must be bound to the
+// ticket's deployment, and an unbound one is refused even beside an unbound
+// ticket.
 func TestVerifyReceipt_FollowsTicketBinding(t *testing.T) {
 	mine, other := testDeployment(t, 1), testDeployment(t, 2)
 	addr, pub, priv, err := ticket.GenerateAlgorandKeypair()
@@ -154,7 +156,7 @@ func TestVerifyReceipt_FollowsTicketBinding(t *testing.T) {
 		{"bound ticket, bound receipt", mine, mine, nil},
 		{"bound ticket, legacy receipt", mine, ticket.DeploymentID{}, ticket.ErrLegacySignature},
 		{"bound ticket, receipt bound elsewhere", mine, other, ticket.ErrDeploymentMismatch},
-		{"legacy ticket, legacy receipt", ticket.DeploymentID{}, ticket.DeploymentID{}, nil},
+		{"legacy ticket, legacy receipt", ticket.DeploymentID{}, ticket.DeploymentID{}, ticket.ErrLegacySignature},
 		{"legacy ticket, bound receipt", ticket.DeploymentID{}, mine, ticket.ErrDeploymentMismatch},
 	}
 	for _, c := range cases {

@@ -15,10 +15,8 @@ import {
     EphemeralExpiredError,
     decodeDeploymentId,
     ephemeralStale,
-    verifyEphemeral,
     verifyEphemeralFor,
 } from '@txnlab/zs-proto/ticket'
-import { usesDeploymentBinding } from '@txnlab/zs-proto/wire'
 
 import type { NodeRef } from '../types.js'
 
@@ -30,14 +28,12 @@ export interface EphemeralWireFields {
     ephemeral_sig?: string | undefined
     ephemeral_deployment?: string | undefined
     ephemeral_sig_v2?: string | undefined
-    /** The node's advertised version, which decides whether the legacy signature is enough. */
-    proto_version?: string | undefined
 }
 
 /**
  * The chain-resolved node the advertisement must have been signed for, and the
- * payer's own deployment id (absent: unknown, so only the legacy signature is
- * checked).
+ * payer's own deployment id, which the bound signature must name (absent:
+ * unknown, and every advertisement is refused).
  */
 export interface EphemeralTarget {
     op: bigint | number
@@ -110,23 +106,17 @@ export function checkEphemeralAdvertisement(
     }
     try {
         // Go parses the deployment before any check, so a malformed one is
-        // refused even on the legacy path.
+        // refused as malformed, ahead of the binding checks.
         if (advDeployment) decodeDeploymentId(advDeployment)
-        if (!target.deployment) {
-            verifyEphemeral(target.op, target.node, adv, signingPubKey, nowSec, DEFAULT_EPHEMERAL_SKEW_SEC)
-        } else {
-            const allowLegacy = !usesDeploymentBinding(stringField(wire.proto_version) ?? '')
-            verifyEphemeralFor(
-                target.op,
-                target.node,
-                adv,
-                signingPubKey,
-                nowSec,
-                DEFAULT_EPHEMERAL_SKEW_SEC,
-                target.deployment,
-                allowLegacy,
-            )
-        }
+        verifyEphemeralFor(
+            target.op,
+            target.node,
+            adv,
+            signingPubKey,
+            nowSec,
+            DEFAULT_EPHEMERAL_SKEW_SEC,
+            target.deployment,
+        )
     } catch (err) {
         if (err instanceof EphemeralExpiredError) return { outcome: 'expired' }
         return { outcome: 'rejected', error: asError(err) }

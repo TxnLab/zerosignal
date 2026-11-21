@@ -6,12 +6,10 @@
 package zs
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,8 +62,7 @@ func TestReadDeploymentID_HashesGenesisAndAppID(t *testing.T) {
 }
 
 // A host that builds its own source supplies no deployment; the chain read
-// derives it, or every node's ephemeral would be checked on the legacy
-// signature alone.
+// derives it, or every node would be refused.
 func TestFetchChain_DerivesDeploymentWhenUnset(t *testing.T) {
 	g := &genesisAlgod{err: errors.New("down")}
 	s := &ChainOperatorSource{
@@ -96,35 +93,35 @@ func TestFetchChain_DerivesDeploymentWhenUnset(t *testing.T) {
 	}
 }
 
-// With the SDK's own wallet algod is known to be up, so a failed genesis read
-// fails New; with a host's wallet it warns and starts unbound.
-func TestDeploymentOrFail(t *testing.T) {
-	d, _ := ticket.AlgorandDeploymentID(genesis7(), 42)
-	down := errors.New("down")
-	var logs bytes.Buffer
-	log := slog.New(slog.NewTextHandler(&logs, nil))
+// A payer that can't read its deployment can neither reserve nor route, so a
+// failed genesis read fails New even with a host's wallet and registry,
+// which used to start it unbound.
+func TestNew_HostWalletFailsWithoutTheDeployment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
 
-	if got, err := deploymentOrFail(d, nil, true, log); err != nil || got != d {
-		t.Fatalf("success: got %s, %v", got, err)
+	cfg := suppliedParts(t)
+	cfg.ReserveClient = nil
+	cfg.Logger = discardLogger()
+	cfg.Network.Algod = algod.Config{Endpoint: srv.URL}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := New(ctx, cfg)
+	if err == nil {
+		c.Close()
+		t.Fatal("New started a payer with no deployment")
 	}
-	if _, err := deploymentOrFail(ticket.DeploymentID{}, down, true, log); !errors.Is(err, down) {
-		t.Fatalf("built wallet: err = %v, want the read's error", err)
-	}
-	if logs.Len() != 0 {
-		t.Fatalf("a failing New must not also warn: %s", logs.String())
-	}
-	got, err := deploymentOrFail(ticket.DeploymentID{}, down, false, log)
-	if err != nil || !got.IsZero() {
-		t.Fatalf("host wallet: got %s, %v; want zero and no error", got, err)
-	}
-	if !strings.Contains(logs.String(), "level=WARN") {
-		t.Fatalf("host wallet: want a WARN, got %q", logs.String())
+	if !strings.Contains(err.Error(), "read the escrow deployment") {
+		t.Fatalf("New: %v, want the deployment read's failure", err)
 	}
 }
 
-// New hands the genesis-derived id to the reserve client it builds, so
-// reserves to a 9.13 node are bound.
-func TestNew_ReserveClientGetsTheDeployment(t *testing.T) {
+// genesisOnlyAlgod answers the transaction-params read, which carries the
+// genesis hash the deployment derives from, and 404s everything else.
+func genesisOnlyAlgod(t *testing.T) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/transactions/params" {
 			http.NotFound(w, r)
@@ -139,12 +136,17 @@ func TestNew_ReserveClientGetsTheDeployment(t *testing.T) {
 			"min-fee":           1000,
 		})
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
 
+// New hands the genesis-derived id to the reserve client it builds, so
+// every reserve is bound.
+func TestNew_ReserveClientGetsTheDeployment(t *testing.T) {
 	cfg := suppliedParts(t)
 	cfg.Registry, cfg.ReserveClient = nil, nil
 	cfg.Logger = discardLogger()
-	cfg.Network.Algod = algod.Config{Endpoint: srv.URL}
+	cfg.Network.Algod = algod.Config{Endpoint: genesisOnlyAlgod(t)}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	c, err := New(ctx, cfg)

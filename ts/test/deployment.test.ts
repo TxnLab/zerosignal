@@ -17,14 +17,13 @@ import {
     encodeDeploymentId,
     knownDeployment,
 } from '../src/ticket/deployment.js'
-import { parseTicketJSON, signTicket, verifyTicket, verifyTicketFor, type Ticket } from '../src/ticket/ticket.js'
+import { parseTicketJSON, signTicket, verifyTicketFor, type Ticket } from '../src/ticket/ticket.js'
 import { parseReceiptJSON, signReceipt, verifyReceiptFor, type UsageReceipt } from '../src/ticket/receipt.js'
 import { signReserveRequest, verifyReserveRequestFor, type ReserveRequest } from '../src/ticket/reserve.js'
 import {
     DEFAULT_EPHEMERAL_SKEW_SEC,
     EphemeralExpiredError,
     signEphemeral,
-    verifyEphemeral,
     verifyEphemeralFor,
     type EphemeralAdvertisement,
 } from '../src/ticket/ephemeral.js'
@@ -111,18 +110,18 @@ describe('verifyTicketFor', () => {
         const legacy = ticket()
         await signTicket(legacy, signer, address)
 
-        expect(() => verifyTicketFor(bound, publicKey, MINE, false)).not.toThrow()
-        expect(() => verifyTicketFor(bound, publicKey, OTHER, true)).toThrow(DeploymentMismatchError)
-        expect(() => verifyTicketFor(bound, publicKey, undefined, true)).toThrow(DeploymentMismatchError)
-        expect(() => verifyTicket(bound, publicKey)).toThrow(DeploymentMismatchError)
-        expect(() => verifyTicketFor(legacy, publicKey, MINE, true)).not.toThrow()
-        expect(() => verifyTicketFor(legacy, publicKey, MINE, false)).toThrow(LegacySignatureError)
+        expect(() => verifyTicketFor(bound, publicKey, MINE)).not.toThrow()
+        expect(() => verifyTicketFor(bound, publicKey, OTHER)).toThrow(DeploymentMismatchError)
+        expect(() => verifyTicketFor(bound, publicKey, undefined)).toThrow(DeploymentMismatchError)
+        // An unbound ticket is refused whatever the verifier knows.
+        expect(() => verifyTicketFor(legacy, publicKey, MINE)).toThrow(LegacySignatureError)
+        expect(() => verifyTicketFor(legacy, publicKey, undefined)).toThrow(LegacySignatureError)
 
-        // Relabelling or stripping breaks the signature.
+        // Relabelling breaks the signature; stripping leaves an unbound ticket.
         const relabelled = { ...bound, deployment: encodeDeploymentId(OTHER) }
-        expect(() => verifyTicketFor(relabelled, publicKey, OTHER, false)).toThrow(/verification failed/)
+        expect(() => verifyTicketFor(relabelled, publicKey, OTHER)).toThrow(/verification failed/)
         const { deployment: _, ...stripped } = bound
-        expect(() => verifyTicketFor(stripped, publicKey, MINE, true)).toThrow(/verification failed/)
+        expect(() => verifyTicketFor(stripped, publicKey, MINE)).toThrow(LegacySignatureError)
     })
 })
 
@@ -131,12 +130,13 @@ describe('verifyReceiptFor', () => {
         const { signer, address, publicKey } = newFakeSigner()
         const bound = receipt(MINE_S)
         await signReceipt(bound, signer, address)
-        expect(() => verifyReceiptFor(bound, publicKey, MINE, false)).not.toThrow()
-        expect(() => verifyReceiptFor(bound, publicKey, OTHER, true)).toThrow(DeploymentMismatchError)
+        expect(() => verifyReceiptFor(bound, publicKey, MINE)).not.toThrow()
+        expect(() => verifyReceiptFor(bound, publicKey, OTHER)).toThrow(DeploymentMismatchError)
+        expect(() => verifyReceiptFor(bound, publicKey, undefined)).toThrow(DeploymentMismatchError)
         const legacy = receipt()
         await signReceipt(legacy, signer, address)
-        expect(() => verifyReceiptFor(legacy, publicKey, MINE, false)).toThrow(LegacySignatureError)
-        expect(() => verifyReceiptFor(legacy, publicKey, MINE, true)).not.toThrow()
+        expect(() => verifyReceiptFor(legacy, publicKey, MINE)).toThrow(LegacySignatureError)
+        expect(() => verifyReceiptFor(legacy, publicKey, undefined)).toThrow(LegacySignatureError)
     })
 })
 
@@ -154,17 +154,16 @@ describe('verifyReserveRequestFor', () => {
             deployment: MINE_S,
         }
         await signReserveRequest(42, 7, r, signer, address)
-        expect(() => verifyReserveRequestFor(42, 7, r, publicKey, issuedAt + 5, 30, MINE, false)).not.toThrow()
-        expect(() => verifyReserveRequestFor(42, 7, r, publicKey, issuedAt + 3600, 30, OTHER, true)).toThrow(
+        expect(() => verifyReserveRequestFor(42, 7, r, publicKey, issuedAt + 5, 30, MINE)).not.toThrow()
+        expect(() => verifyReserveRequestFor(42, 7, r, publicKey, issuedAt + 3600, 30, OTHER)).toThrow(
             DeploymentMismatchError,
         )
         const legacy: ReserveRequest = { ...r }
         delete legacy.deployment
         await signReserveRequest(42, 7, legacy, signer, address)
-        expect(() => verifyReserveRequestFor(42, 7, legacy, publicKey, issuedAt + 5, 30, MINE, false)).toThrow(
+        expect(() => verifyReserveRequestFor(42, 7, legacy, publicKey, issuedAt + 5, 30, MINE)).toThrow(
             LegacySignatureError,
         )
-        expect(() => verifyReserveRequestFor(42, 7, legacy, publicKey, issuedAt + 5, 30, MINE, true)).not.toThrow()
     })
 })
 
@@ -184,25 +183,31 @@ describe('ephemeral dual signature', () => {
         expect(a.ephemeral_sig_v2).toBeTruthy()
         expect(a.ephemeral_sig).not.toBe(a.ephemeral_sig_v2)
 
-        expect(() => verifyEphemeral(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC)).not.toThrow()
-        expect(() => verifyEphemeralFor(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, false)).not.toThrow()
-        expect(() => verifyEphemeralFor(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, OTHER, true)).toThrow(
+        expect(() => verifyEphemeralFor(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE)).not.toThrow()
+        expect(() => verifyEphemeralFor(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, OTHER)).toThrow(
+            DeploymentMismatchError,
+        )
+        expect(() => verifyEphemeralFor(42, 7, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, undefined)).toThrow(
             DeploymentMismatchError,
         )
         const forged = { ...a, ephemeral_sig_v2: a.ephemeral_sig }
-        expect(() => verifyEphemeralFor(42, 7, forged, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, true)).toThrow()
-        expect(() => verifyEphemeralFor(42, 8, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, false)).toThrow()
+        expect(() => verifyEphemeralFor(42, 7, forged, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE)).toThrow()
+        expect(() => verifyEphemeralFor(42, 8, a, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE)).toThrow()
 
+        // A relay that strips the bound fields leaves the legacy signature,
+        // which no verifier reads.
         const { ephemeral_deployment: _d, ephemeral_sig_v2: _s, ...stripped } = a
-        expect(() =>
-            verifyEphemeralFor(42, 7, stripped, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, false),
-        ).toThrow(LegacySignatureError)
-        expect(() =>
-            verifyEphemeralFor(42, 7, stripped, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, true),
-        ).not.toThrow()
+        expect(() => verifyEphemeralFor(42, 7, stripped, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE)).toThrow(
+            LegacySignatureError,
+        )
+        // Bound, with the v2 signature stripped: the legacy one doesn't stand in.
+        const { ephemeral_sig_v2: _v2, ...noV2 } = a
+        expect(() => verifyEphemeralFor(42, 7, noV2, publicKey, now, DEFAULT_EPHEMERAL_SKEW_SEC, MINE)).toThrow(
+            /signature missing/,
+        )
 
         expect(() =>
-            verifyEphemeralFor(42, 7, a, publicKey, a.ephemeral_expiry + 600, DEFAULT_EPHEMERAL_SKEW_SEC, MINE, false),
+            verifyEphemeralFor(42, 7, a, publicKey, a.ephemeral_expiry + 600, DEFAULT_EPHEMERAL_SKEW_SEC, MINE),
         ).toThrow(EphemeralExpiredError)
     })
 

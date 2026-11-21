@@ -32,6 +32,8 @@ const sha256 = (b: Uint8Array) => new Uint8Array(createHash('sha256').update(b).
 const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64')
 const hello = new TextEncoder().encode('hello world')
 const key = new Uint8Array(32).map((_, i) => (i * 13 + 5) & 0xff)
+// Verifiers accept only bound tickets and receipts, so the fixtures are bound.
+const DEP = new Uint8Array(32).fill(1)
 
 const TICKET: Ticket = {
     ticket_id: 'c2l4dGVlbi1ieXRlLWlkIQ==',
@@ -50,6 +52,7 @@ const TICKET: Ticket = {
     commit_k: b64(sha256(key)),
     input_usage_type: 1,
     output_usage_type: 1,
+    deployment: b64(DEP),
 }
 
 const RECEIPT: UsageReceipt = {
@@ -65,6 +68,7 @@ const RECEIPT: UsageReceipt = {
     aux_output_usage_type: 0,
     aux_output_count: 0,
     cached_input_count: 0,
+    deployment: b64(DEP),
 }
 
 async function signed<T extends Ticket | UsageReceipt>(base: T, kind: 'ticket' | 'receipt') {
@@ -94,12 +98,12 @@ function violation(f: () => void): string | undefined {
 describe('verifyTicketSignature', () => {
     it('accepts the signing node and nothing else', async () => {
         const { v, pub } = await signed(TICKET, 'ticket')
-        expect(() => verifyTicketSignature(v, pub)).not.toThrow()
-        expect(() => verifyTicketSignature(flipSig(v), pub)).toThrow(TicketSignatureInvalidError)
-        expect(() => verifyTicketSignature({ ...v, max_price: 5001 }, pub)).toThrow(TicketSignatureInvalidError)
-        expect(() => verifyTicketSignature(v, keypair().pub)).toThrow(TicketSignatureInvalidError)
-        expect(() => verifyTicketSignature(v, pub.slice(1))).toThrow(TicketSignatureInvalidError)
-        expect(() => verifyTicketSignature({ ...v, sig: b64(new Uint8Array(63)) }, pub)).toThrow(
+        expect(() => verifyTicketSignature(v, pub, DEP)).not.toThrow()
+        expect(() => verifyTicketSignature(flipSig(v), pub, DEP)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature({ ...v, max_price: 5001 }, pub, DEP)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature(v, keypair().pub, DEP)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature(v, pub.slice(1), DEP)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature({ ...v, sig: b64(new Uint8Array(63)) }, pub, DEP)).toThrow(
             TicketSignatureInvalidError,
         )
     })
@@ -210,37 +214,39 @@ describe('parseReceiptJSON', () => {
         expect(() => decodeReceiptHeader(b64(json))).toThrow(/amount_charged/)
     })
 
-    // Go's TestVerifyReceipt_FollowsTicketBinding: a receipt is bound exactly
-    // when its ticket is, and to the same deployment.
+    // Go's TestVerifyReceipt_FollowsTicketBinding: a receipt must be bound to
+    // its ticket's deployment, and an unbound one is refused.
     it.each([
         ['bound ticket, bound receipt', 'A', 'A', undefined],
         ['bound ticket, legacy receipt', 'A', undefined, 'sig'],
         ['bound ticket, receipt bound elsewhere', 'A', 'B', 'sig'],
-        ['legacy ticket, legacy receipt', undefined, undefined, undefined],
+        ['legacy ticket, legacy receipt', undefined, undefined, 'sig'],
         ['legacy ticket, bound receipt', undefined, 'A', 'sig'],
     ] as const)('%s', async (_name, onTicket, onReceipt, want) => {
         const ids = { A: b64(new Uint8Array(32).fill(1)), B: b64(new Uint8Array(32).fill(2)) }
         const k = keypair()
-        const r: UsageReceipt = { ...RECEIPT, ...(onReceipt ? { deployment: ids[onReceipt] } : {}) }
+        const { deployment: _rd, ...unboundReceipt } = RECEIPT
+        const r: UsageReceipt = { ...unboundReceipt, ...(onReceipt ? { deployment: ids[onReceipt] } : {}) }
         await signReceipt(r, k.signer, 'ADDR')
-        const t: Ticket = { ...TICKET, ...(onTicket ? { deployment: ids[onTicket] } : {}) }
+        const { deployment: _td, ...unboundTicket } = TICKET
+        const t: Ticket = { ...unboundTicket, ...(onTicket ? { deployment: ids[onTicket] } : {}) }
         expect(violation(() => verifyReceipt(r, t, k.pub, sha256(hello)))).toBe(want)
     })
 
-    it('a ticket verifies only under the binding the reserve asked for', async () => {
+    it('a ticket verifies only bound to the payer’s own deployment', async () => {
         const mine = new Uint8Array(32).fill(1)
         const k = keypair()
         const bound: Ticket = { ...TICKET, deployment: b64(mine) }
         await signTicket(bound, k.signer, 'ADDR')
-        expect(() => verifyTicketSignature(bound, k.pub, mine, false)).not.toThrow()
-        expect(() => verifyTicketSignature(bound, k.pub, new Uint8Array(32).fill(2), true)).toThrow(
+        expect(() => verifyTicketSignature(bound, k.pub, mine)).not.toThrow()
+        expect(() => verifyTicketSignature(bound, k.pub, new Uint8Array(32).fill(2))).toThrow(
             TicketSignatureInvalidError,
         )
-        // No deployment of its own: only a legacy ticket passes.
-        expect(() => verifyTicketSignature(bound, k.pub)).toThrow(TicketSignatureInvalidError)
-        const legacy = { ...TICKET }
+        // No deployment of its own: nothing passes.
+        expect(() => verifyTicketSignature(bound, k.pub, undefined)).toThrow(TicketSignatureInvalidError)
+        const { deployment: _d, ...legacy } = TICKET
         await signTicket(legacy, k.signer, 'ADDR')
-        expect(() => verifyTicketSignature(legacy, k.pub, mine, false)).toThrow(TicketSignatureInvalidError)
-        expect(() => verifyTicketSignature(legacy, k.pub, mine, true)).not.toThrow()
+        expect(() => verifyTicketSignature(legacy, k.pub, mine)).toThrow(TicketSignatureInvalidError)
+        expect(() => verifyTicketSignature(legacy, k.pub, undefined)).toThrow(TicketSignatureInvalidError)
     })
 })

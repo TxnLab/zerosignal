@@ -36,13 +36,14 @@ func TestVerifyReceipt_FreeModel(t *testing.T) {
 		AmountCharged:     0,
 		TtftMs:            42,
 		DecodeMs:          0,
+		Deployment:        harnessDeployment,
 	}
 	rcpt.SetBodyHashBytes(sum)
 	if err := rcpt.Sign(context.Background(), signer, signAddr); err != nil {
 		t.Fatal(err)
 	}
 
-	tkt := &ticket.Ticket{TicketID: rcpt.TicketID, MaxPrice: 0}
+	tkt := &ticket.Ticket{TicketID: rcpt.TicketID, MaxPrice: 0, Deployment: harnessDeployment}
 	op := Operator{TicketSigningKey: pub}
 
 	if err := VerifyReceipt(ReceiptCheck{Ticket: tkt, Operator: op, Receipt: rcpt, ComputedHash: sum}); err != nil {
@@ -108,7 +109,7 @@ func TestVerifyReceipt_CachedTokenDiscount(t *testing.T) {
 	body := []byte(`{"id":"chatcmpl-x","choices":[]}`)
 	sum := sha256.Sum256(body)
 
-	tkt := &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA==", MaxPrice: 210_000}
+	tkt := &ticket.Ticket{TicketID: "AAAAAAAAAAAAAAAAAAAAAA==", MaxPrice: 210_000, Deployment: harnessDeployment}
 	op := Operator{TicketSigningKey: pub}
 
 	// Discounted receipt: 800 of 1000 input tokens cache-served, charged
@@ -119,6 +120,7 @@ func TestVerifyReceipt_CachedTokenDiscount(t *testing.T) {
 		ActualOutputCount: 500,
 		AmountCharged:     120_000,
 		CachedInputCount:  800,
+		Deployment:        harnessDeployment,
 	}
 	rcpt.SetBodyHashBytes(sum)
 	if err := rcpt.Sign(context.Background(), signer, signAddr); err != nil {

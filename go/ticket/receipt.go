@@ -77,9 +77,9 @@ type UsageReceipt struct {
 	// dedicated image routes and whenever the upstream reports no cached count.
 	// Rides one uint64 at the tail of CanonicalBytes.
 	CachedInputCount uint64 `json:"cached_input_count"`
-	// Deployment, when set, selects the v3 layout (see DeploymentID). The node
-	// copies it from the ticket, so a receipt is bound exactly when its ticket
-	// is.
+	// Deployment selects the v3 layout (see DeploymentID). The node copies it
+	// from the ticket; zero is the v2 layout, which VerifyFor refuses from
+	// 9.14.
 	Deployment DeploymentID `json:"deployment,omitzero"`
 	Sig        string       `json:"sig"` // base64(Ed25519 over sha256(receiptSigningTag || canonical bytes))
 }
@@ -179,19 +179,12 @@ func (r *UsageReceipt) Sign(ctx context.Context, signer BytesSigner, signingAddr
 	return nil
 }
 
-// Verify accepts only a legacy (v2, unbound) signature. Payers verify with
-// VerifyFor.
-func (r *UsageReceipt) Verify(pub ed25519.PublicKey) error {
-	return r.VerifyFor(pub, DeploymentID{}, true)
-}
-
 // VerifyFor returns nil if r.Sig is a valid Ed25519 signature of
-// ReceiptSigDigest(r) under pub and r is bound to want, or unbound while
-// allowLegacy holds. A payer passes allowLegacy only for a receipt whose
-// ticket was unbound. Verifying the same digest the contract verifies means
-// off-chain VerifyFor and on-chain ed25519verify_bare agree byte-for-byte.
-func (r *UsageReceipt) VerifyFor(pub ed25519.PublicKey, want DeploymentID, allowLegacy bool) error {
-	if err := checkDeployment(r.Deployment, want, allowLegacy); err != nil {
+// ReceiptSigDigest(r) under pub and r is bound to want. Verifying the same
+// digest the contract verifies means off-chain VerifyFor and on-chain
+// ed25519verify_bare agree byte-for-byte.
+func (r *UsageReceipt) VerifyFor(pub ed25519.PublicKey, want DeploymentID) error {
+	if err := checkDeployment(r.Deployment, want); err != nil {
 		return fmt.Errorf("receipt: %w", err)
 	}
 	if len(pub) != ed25519.PublicKeySize {
@@ -233,7 +226,7 @@ func (r *UsageReceipt) EncodeReceiptHeader() (string, error) {
 
 // DecodeReceiptHeader parses the base64(JSON) shape the node writes to
 // X-Zs-Receipt. The inverse of EncodeReceiptHeader; proxy uses this
-// before Verify.
+// before VerifyFor.
 func DecodeReceiptHeader(value string) (UsageReceipt, error) {
 	raw, err := base64.StdEncoding.DecodeString(value)
 	if err != nil {

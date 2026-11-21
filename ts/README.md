@@ -33,7 +33,7 @@ ESM only, Node ≥ 20.19 or any modern browser. Five runtime dependencies: `@nob
 |---|---|
 | `@txnlab/zs-proto` | Everything from `wire`, `ticket`, `selection`, `imageprice`, `tokenize`, `attest`, `inject`, `tools` |
 | `…/wire` | Envelope types, `wrapRequest` / `unwrapResponseKey` / `decryptBody` / `decryptSSEDataValue`, `decryptRequest` / `ResponseSealer` (node side, for round-trip tests), AAD builders, admission-tag HMAC, body hash, sealed inner frame, ephemeral identity, protocol version |
-| `…/ticket` | `Ticket` / `UsageReceipt` / reserve types, `signTicket` / `verifyTicket` / `signReceipt` / `verifyReceipt`, signature digests, `commitResponseKey`, receipt header codec, Algorand address codec, `BytesSigner` |
+| `…/ticket` | `Ticket` / `UsageReceipt` / reserve types, `signTicket` / `verifyTicketFor` / `signReceipt` / `verifyReceiptFor` (bound layouts only), the deployment id, signature digests, `commitResponseKey`, receipt header codec, Algorand address codec, `BytesSigner` |
 | `…/selection` | Operator and relay selection policy, `deriveMaxOutput` |
 | `…/pricing` | Token pricing and `verifyTicketPrice` |
 | `…/imageprice` | Image-generation pricing |

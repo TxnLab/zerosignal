@@ -94,7 +94,7 @@ func TestNewChainSource_MapsConfig(t *testing.T) {
 		t.Errorf("app %d payer %q ids %v", src.EscrowAppID, src.ProxyPayerAddr, src.OperatorIDs)
 	}
 	if src.Deployment != dep {
-		t.Error("deployment dropped: the ephemeral check would fall back to the legacy signature")
+		t.Error("deployment dropped: every node's ephemeral would be refused")
 	}
 	if src.DetailsTimeout != 7*time.Second || src.DetailsConcurrency != 11 || src.LatencyStateMax != 13 {
 		t.Errorf("timeout %v concurrency %d latency max %d", src.DetailsTimeout, src.DetailsConcurrency, src.LatencyStateMax)
@@ -349,11 +349,14 @@ func TestNew_BuildsTheRegistryAndCloseStopsIt(t *testing.T) {
 	cfg := suppliedParts(t)
 	cfg.Registry = nil
 	cfg.Logger = discardLogger()
+	// The deployment must be read for New to succeed; the operator reads
+	// behind it still fail, which bootRegistry tolerates.
+	cfg.Network.Algod = algod.Config{Endpoint: genesisOnlyAlgod(t)}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	c, err := New(ctx, cfg)
 	if err != nil {
-		t.Fatalf("New with an unreachable chain: %v", err)
+		t.Fatalf("New with an unreadable chain: %v", err)
 	}
 	reg, ok := c.Registry().(*DynamicRegistryProvider)
 	if !ok {

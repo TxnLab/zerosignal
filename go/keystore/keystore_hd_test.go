@@ -218,6 +218,11 @@ func TestKeyStore_HD_DrivesTicketSignVerify(t *testing.T) {
 		Stream:         false,
 		CommitK:        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	}
+	dep, err := ticket.AlgorandDeploymentID(make([]byte, 32), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk.Deployment = dep
 	if err := tk.Sign(context.Background(), ks, hdAddrSeq); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -225,7 +230,7 @@ func TestKeyStore_HD_DrivesTicketSignVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tk.Verify(pub); err != nil {
+	if err := tk.VerifyFor(pub, dep); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }

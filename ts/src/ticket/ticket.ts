@@ -88,10 +88,10 @@ export interface Ticket {
     cache_read_rate: number
     // base64(32-byte deployment id). Present selects the v3 layout, which
     // binds the signature to one escrow deployment (see deployment.ts). Absent
-    // on a ticket from a node the payer didn't ask for one.
+    // is the v2 layout, which verifyTicketFor refuses from 9.14.
     deployment?: string
     // base64(Ed25519 signature over ticketSigDigest). Filled by
-    // signTicket; verifyTicket reads it.
+    // signTicket; verifyTicketFor reads it.
     sig?: string
 }
 
@@ -163,23 +163,11 @@ export async function signTicket(
     t.sig = base64.encode(sig)
 }
 
-// verifyTicket accepts only a legacy (v2, unbound) signature. Payers verify
-// with verifyTicketFor.
-export function verifyTicket(t: Ticket, pub: Uint8Array): void {
-    verifyTicketFor(t, pub, undefined, true)
-}
-
 // verifyTicketFor throws unless t.sig is a valid Ed25519 signature of
-// ticketSigDigest(t) under pub and t is bound to want, or unbound while
-// allowLegacy holds. A payer passes allowLegacy only when its reserve named no
+// ticketSigDigest(t) under pub and t is bound to want, the verifier's own
 // deployment. Mirrors Go's Ticket.VerifyFor.
-export function verifyTicketFor(
-    t: Ticket,
-    pub: Uint8Array,
-    want: Uint8Array | undefined,
-    allowLegacy: boolean,
-): void {
-    checkDeployment('ticket', t.deployment, want, allowLegacy)
+export function verifyTicketFor(t: Ticket, pub: Uint8Array, want: Uint8Array | undefined): void {
+    checkDeployment('ticket', t.deployment, want)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }

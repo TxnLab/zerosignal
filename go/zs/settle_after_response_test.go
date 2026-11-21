@@ -68,6 +68,7 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 		NodeID:     op.NodeID,
 		MaxPrice:   100_000,
 		CommitK:    base64.StdEncoding.EncodeToString(commit[:]),
+		Deployment: harnessDeployment,
 	}
 	const txID = "APPCALLTXID00000000000000000000000000000000000000000"
 
@@ -90,6 +91,7 @@ func TestNonStreamResponder_WritesBeforeSettleSubmit(t *testing.T) {
 		ActualInputCount:  10,
 		ActualOutputCount: 5,
 		AmountCharged:     50_000,
+		Deployment:        harnessDeployment,
 	}
 	receipt.SetBodyHashBytes(wire.BodyHashOfBody(plaintext))
 	if err := receipt.Sign(context.Background(), rawKeyBytesSigner{addr: op.SigningAddr, priv: priv}, op.SigningAddr); err != nil {

@@ -404,28 +404,6 @@ export async function readDeploymentId(
 }
 
 /**
- * deploymentOrFail decides what a failed genesis read means, as Go's
- * deploymentOrFail. When the SDK built the wallet, that wallet just read the
- * chain, so algod is up and the failure is not a blip worth starting unbound
- * for. A caller's wallet means this payer may start without algod; it warns
- * and keeps the legacy layouts. An abort always propagates.
- */
-export async function deploymentOrFail(
-    read: () => Promise<Uint8Array>,
-    builtWallet: boolean,
-    logger: Logger,
-    signal?: AbortSignal,
-): Promise<Uint8Array | undefined> {
-    try {
-        return await read()
-    } catch (err) {
-        if (builtWallet || signal?.aborted) throw err
-        logger.warn('could not read the network genesis hash; reserving without a deployment binding', { err: message(err) })
-        return undefined
-    }
-}
-
-/**
  * SIGNER_BALANCE_TIMEOUT_MS caps a whole balance pass, Go's
  * signerBalanceTimeout, sized there to fit the refresh budget the details
  * probes share. A signer not read in time keeps its last-known value.
@@ -579,8 +557,7 @@ export class ChainOperatorSource {
 
     // Reads the genesis hash once when no deployment was supplied, as Go's
     // deriveDeployment: a host that builds its own source would otherwise have
-    // every node's ephemeral checked on the legacy signature alone. A failure
-    // is retried on the next chain read.
+    // every node refused. A failure is retried on the next chain read.
     async #deriveDeployment(signal?: AbortSignal): Promise<void> {
         if (this.#prober.deployment !== undefined) return
         const reader = this.#reader
@@ -594,7 +571,7 @@ export class ChainOperatorSource {
             this.#prober.deployment = await read()
         } catch (err) {
             if (signal?.aborted) throw err
-            this.#log.warn('could not derive the escrow deployment; checking ephemeral signatures on the legacy layout', {
+            this.#log.warn('could not derive the escrow deployment; every node is refused until it is', {
                 err: message(err),
             })
         }

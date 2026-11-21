@@ -186,6 +186,17 @@ type fakeNode struct {
 	lastSealedNeutralNames bool
 }
 
+// testDeployment is the deployment the tests' payers name. The fake node binds
+// its tickets to the one the reserve names, and its receipts to the same, as a
+// node does.
+var testDeployment = func() ticket.DeploymentID {
+	d, err := ticket.AlgorandDeploymentID(bytes.Repeat([]byte{7}, 32), 1001)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}()
+
 // rawKeyBytesSigner satisfies ticket.BytesSigner with a single raw
 // ed25519.PrivateKey — used in tests that need a signer interface but
 // already hold the key directly.
@@ -434,6 +445,7 @@ func (n *fakeNode) issueTicket(t *testing.T, w http.ResponseWriter, pub ed25519.
 		Model:          req.Model,
 		Stream:         req.Stream,
 		CommitK:        base64.StdEncoding.EncodeToString(commit[:]),
+		Deployment:     req.Deployment,
 	}
 	if err := tkt.Sign(context.Background(), rawKeyBytesSigner{addr: n.signingAddr, priv: n.signingKey}, n.signingAddr); err != nil {
 		t.Fatalf("sign ticket: %v", err)
@@ -941,7 +953,7 @@ func setup(t *testing.T, cfg *testCfg, nodes ...*fakeNode) deps {
 	sr.set(registry)
 	return deps{
 		RegistryProvider: sr,
-		ReserveClient:    &zs.HTTPReserveClient{HTTPClient: http.DefaultClient},
+		ReserveClient:    &zs.HTTPReserveClient{Deployment: testDeployment, HTTPClient: http.DefaultClient},
 		ToolAffinity:     zs.NewIDAffinity(64, time.Minute, nil),
 		ResponseAffinity: zs.NewIDAffinity(64, time.Minute, nil),
 		Wallet: &fakeWallet{
@@ -1072,6 +1084,9 @@ func (n *fakeNode) buildSignedStreamReceipt(t *testing.T, cfg *nodeConfig, ticke
 	if r.TicketID == "" {
 		r.TicketID = ticketID
 	}
+	if r.Deployment.IsZero() {
+		r.Deployment = testDeployment
+	}
 	signer := rawKeyBytesSigner{addr: n.signingAddr, priv: n.signingKey}
 	if err := r.Sign(context.Background(), signer, n.signingAddr); err != nil {
 		t.Fatalf("sign stream receipt: %v", err)
@@ -1084,6 +1099,9 @@ func (n *fakeNode) buildSignedStreamReceipt(t *testing.T, cfg *nodeConfig, ticke
 // let a forwarding relay resolve the payer on chain.
 func (n *fakeNode) attachReceiptHeader(t *testing.T, w http.ResponseWriter, r *ticket.UsageReceipt, k [wire.ResponseKeySize]byte, replyTo age.Recipient, txID, ticketID string) {
 	t.Helper()
+	if r.Deployment.IsZero() {
+		r.Deployment = testDeployment
+	}
 	signer := rawKeyBytesSigner{addr: n.signingAddr, priv: n.signingKey}
 	if err := r.Sign(context.Background(), signer, n.signingAddr); err != nil {
 		t.Fatalf("sign receipt: %v", err)

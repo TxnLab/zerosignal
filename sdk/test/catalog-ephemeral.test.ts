@@ -23,7 +23,6 @@ interface VectorCase {
     now: number
     /** The payer's own deployment id, base64; absent when it doesn't know it. */
     deployment?: string
-    proto_version?: string
     advertisement: {
         ephemeral_age_pubkey: string
         ephemeral_expiry: number
@@ -45,6 +44,12 @@ const caseNamed = (name: string) => {
     if (!c) throw new Error(`no vector named ${name}`)
     return c
 }
+// The case's payer: without its deployment every advertisement is refused.
+const targetOf = (c: VectorCase) => ({
+    op: c.operator_id,
+    node: c.node_id,
+    deployment: c.deployment ? decodeDeploymentId(c.deployment) : undefined,
+})
 
 describe('checkEphemeralAdvertisement vectors', () => {
     it('covers every outcome', () => {
@@ -62,8 +67,7 @@ describe('checkEphemeralAdvertisement vectors', () => {
                     ids === 'bigint'
                         ? { op: BigInt(c.operator_id), node: BigInt(c.node_id), deployment }
                         : { op: c.operator_id, node: c.node_id, deployment }
-                const wire = { ...c.advertisement, proto_version: c.proto_version }
-                const v = checkEphemeralAdvertisement(target, hexToBytes(c.signing_key), wire, c.now)
+                const v = checkEphemeralAdvertisement(target, hexToBytes(c.signing_key), c.advertisement, c.now)
                 expect({ name: c.name, outcome: v.outcome, stale: staleOf(v) }).toEqual({
                     name: c.name,
                     ...c.want,
@@ -74,12 +78,7 @@ describe('checkEphemeralAdvertisement vectors', () => {
 
     it('returns the advertised recipient and window on a verified block', () => {
         const c = caseNamed('a fresh, genuine block')
-        const v = checkEphemeralAdvertisement(
-            { op: c.operator_id, node: c.node_id },
-            hexToBytes(c.signing_key),
-            c.advertisement,
-            c.now,
-        )
+        const v = checkEphemeralAdvertisement(targetOf(c), hexToBytes(c.signing_key), c.advertisement, c.now)
         expect(v).toEqual({
             outcome: 'verified',
             recipient: c.advertisement.ephemeral_age_pubkey,
@@ -93,7 +92,7 @@ describe('checkEphemeralAdvertisement vectors', () => {
         // Genuine and long expired: as a string the expiry would still sign the
         // same bytes, then concatenate with the skew and never expire.
         const c = caseNamed('past expiry plus skew is expired')
-        const target = { op: c.operator_id, node: c.node_id }
+        const target = targetOf(c)
         const key = hexToBytes(c.signing_key)
         const later = c.now + 365 * 86_400
         const mistyped = (patch: Record<string, unknown>) =>
@@ -104,15 +103,16 @@ describe('checkEphemeralAdvertisement vectors', () => {
         expect(mistyped({ ephemeral_expiry: c.advertisement.ephemeral_expiry + 0.5 })).toBe('rejected')
         expect(mistyped({ ephemeral_expiry: null })).toBe('rejected')
         expect(mistyped({ ephemeral_sig: 42 })).toBe('rejected')
+        expect(mistyped({ ephemeral_sig_v2: 42 })).toBe('rejected')
         expect(mistyped({ ephemeral_age_pubkey: ['age1x'] })).toBe('rejected')
     })
 
     it('reads missing fields as Go zero values', () => {
         const c = caseNamed('a fresh, genuine block')
         const key = hexToBytes(c.signing_key)
-        const target = { op: c.operator_id, node: c.node_id }
+        const target = targetOf(c)
         expect(checkEphemeralAdvertisement(target, key, {}, c.now).outcome).toBe('absent')
-        const { ephemeral_sig: _sig, ...unsigned } = c.advertisement
+        const { ephemeral_sig_v2: _sig, ...unsigned } = c.advertisement
         expect(checkEphemeralAdvertisement(target, key, unsigned, c.now).outcome).toBe('rejected')
     })
 })

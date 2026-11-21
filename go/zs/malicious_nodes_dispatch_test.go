@@ -66,6 +66,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 		OperatorID: op.ID,
 		NodeID:     op.NodeID,
 		MaxPrice:   100_000,
+		Deployment: harnessDeployment,
 	}
 
 	plaintext := []byte("hello world")
@@ -75,6 +76,7 @@ func TestRunReceiptChecks_ExcludesNodeOnGroupRejection(t *testing.T) {
 		ActualInputCount:  10,
 		ActualOutputCount: 5,
 		AmountCharged:     50_000, // <= MaxPrice
+		Deployment:        harnessDeployment,
 	}
 	receipt.SetBodyHashBytes(computed)
 	if err := receipt.Sign(context.Background(), rawKeyBytesSigner{addr: op.SigningAddr, priv: priv}, op.SigningAddr); err != nil {

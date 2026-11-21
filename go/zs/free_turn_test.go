@@ -69,7 +69,7 @@ func newFreeTurn(t *testing.T, charge uint64) (*Client, Operator, *ReservedTicke
 	}
 	commit := ticket.CommitResponseKey(k)
 	tkt := &ticket.Ticket{TicketID: "ZnJlZS10dXJuLXRpY2tldA==", OperatorID: 7, NodeID: 3, InputCount: 8, MaxOutputCount: 64,
-		CommitK: base64.StdEncoding.EncodeToString(commit[:])}
+		CommitK: base64.StdEncoding.EncodeToString(commit[:]), Deployment: harnessDeployment}
 	rt := &ReservedTicket{Ticket: tkt, ResponseKey: k, AgeIdentity: payerID, SealRecipient: nodeID.Recipient()}
 
 	n := &freeNode{}
@@ -92,7 +92,7 @@ func newFreeTurn(t *testing.T, charge uint64) (*Client, Operator, *ReservedTicke
 			return
 		}
 		sum := wire.BodyHashOfBody(body)
-		rcpt := &ticket.UsageReceipt{TicketID: dec.TicketID, ActualInputCount: 8, ActualOutputCount: 5, AmountCharged: charge, BodyHash: hex.EncodeToString(sum[:])}
+		rcpt := &ticket.UsageReceipt{TicketID: dec.TicketID, ActualInputCount: 8, ActualOutputCount: 5, AmountCharged: charge, BodyHash: hex.EncodeToString(sum[:]), Deployment: harnessDeployment}
 		if err := rcpt.Sign(r.Context(), rawKeyBytesSigner{addr: addr.String(), priv: priv}, addr.String()); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

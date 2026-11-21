@@ -9,9 +9,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { base64 } from '@scure/base'
 import { algorandDeploymentId, encodeDeploymentId } from '@txnlab/zs-proto/ticket'
-import { DEPLOYMENT_BINDING_MIN_VERSION } from '@txnlab/zs-proto/wire'
 
 import type { AlgodEscrowChainOptions } from '../src/escrow/algod.js'
 import type { ReserveCall } from '../src/reserve.js'
@@ -55,8 +53,16 @@ vi.mock('../src/escrow/algod.js', async (importOriginal) => {
     return { ...real, AlgodEscrowChain: StandInChain, suggestedParams: () => h.params() }
 })
 
-const { Client, ESCROW_CONFIG_TIMEOUT_MS, Wallet, isMemoryJournal, resolveNetwork, solanaDevnet, testnet } =
-    await import('../src/index.js')
+const {
+    Client,
+    ESCROW_CONFIG_TIMEOUT_MS,
+    NoPayerDeploymentError,
+    Wallet,
+    isMemoryJournal,
+    resolveNetwork,
+    solanaDevnet,
+    testnet,
+} = await import('../src/index.js')
 const { dispatchDepsOf, partsOf } = await import('../src/client-parts.js')
 const { testOperator } = await import('./fixtures.js')
 type Config = import('../src/index.js').Config
@@ -70,8 +76,10 @@ const registry = {
     recordModelDemand: () => {},
 }
 const base: Config = { signer, network: testnet(), registry }
-// A Solana Client with its parts supplied, so nothing reads a cluster.
+// A Solana Client with its parts supplied, the reserve client included, so
+// nothing reads a cluster: a built reserve client would need the deployment.
 const solanaPayer = 'Vote111111111111111111111111111111111111111'
+const standInReserveClient = { reserve: () => Promise.reject(new Error('unused')) }
 const solanaBase: Config = {
     solanaSigner: {
         address: solanaPayer,
@@ -81,6 +89,7 @@ const solanaBase: Config = {
     network: solanaDevnet(),
     registry,
     wallet: { payerAddr: () => solanaPayer } as never,
+    reserveClient: standInReserveClient,
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -150,14 +159,12 @@ describe('Client.create building the wallet', () => {
         await expect(Client.create(base)).rejects.toThrow('genesis down')
     })
 
-    // The reserve client it builds names the genesis-derived deployment to a
-    // node that binds.
+    // The reserve client it builds names the genesis-derived deployment.
     it('hands the deployment to the reserve client it builds', async () => {
         const c = await Client.create(base)
         const op = testOperator({
             ephemeralRecipient: 'age1live',
             ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600,
-            protoVersion: DEPLOYMENT_BINDING_MIN_VERSION,
         })
         await expect(
             partsOf
@@ -169,21 +176,36 @@ describe('Client.create building the wallet', () => {
         c.close()
     })
 
-    // A reserve client built without the rail would let a Solana payer's node
-    // choose its ticket ids.
-    it('hands the rail to the reserve client it builds', async () => {
-        const c = await Client.create(solanaBase)
+    // A payer that can't read its deployment can neither reserve nor route,
+    // so with a caller's wallet and registry, and no reserve client, create
+    // still reads it, and fails when it can't. Go's
+    // TestNew_HostWalletFailsWithoutTheDeployment.
+    it("fails create when the deployment can't be read under a caller's wallet and registry", async () => {
+        h.params = () => Promise.reject(new Error('genesis down'))
+        await expect(Client.create({ ...base, wallet: { payerAddr: () => 'PAYER' } as never })).rejects.toThrow(
+            /^read the escrow deployment: .*genesis down/,
+        )
+        expect(h.reserveCalls).toHaveLength(0)
+    })
+
+    // A reserve client built with no deployment reserves nothing; create
+    // never builds one now, so the client is driven directly. The rail it
+    // hands a built client is checked in client-solana.test.ts.
+    it('a reserve client with no deployment refuses before any request', async () => {
+        const { httpReserveClient } = await import('../src/parts.js')
+        const rc = httpReserveClient({
+            fetch: () => Promise.reject(new Error('unused')),
+            rail: 'solana',
+            deployment: undefined,
+        })
         const op = testOperator({
             ephemeralRecipient: 'age1live',
             ephemeralExpiry: Math.floor(Date.now() / 1000) + 3600,
         })
-        await expect(
-            partsOf
-                .get(c)!
-                .reserveClient.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null),
-        ).rejects.toThrow('captured')
-        expect(base64.decode(h.reserveCalls[0]!.request.ticket_id ?? '')).toHaveLength(16)
-        c.close()
+        await expect(rc.reserve(op, { model: 'm', input_count: 1, max_output_count: 1 } as never, null)).rejects.toThrow(
+            NoPayerDeploymentError,
+        )
+        expect(h.reserveCalls).toHaveLength(0)
     })
 
     // Credits need the deployment they are minted for; a Solana Client that

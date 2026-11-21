@@ -15,9 +15,10 @@ import {
     ephemeralCanonicalBytes,
     ephemeralStale,
     signEphemeral,
-    verifyEphemeral,
+    verifyEphemeralFor,
     type EphemeralAdvertisement,
 } from '../src/ticket/ephemeral.js'
+import { encodeDeploymentId } from '../src/ticket/deployment.js'
 import {
     generateAlgorandKeypair,
     inMemoryEd25519Signer,
@@ -40,6 +41,25 @@ function sampleAdvertisement(): EphemeralAdvertisement {
     }
 }
 
+// Verifiers accept only bound advertisements, read through ephemeral_sig_v2,
+// so the sign / verify cases sign one.
+const DEP = new Uint8Array(32).fill(7)
+
+function boundAdvertisement(): EphemeralAdvertisement {
+    return { ...sampleAdvertisement(), ephemeral_deployment: encodeDeploymentId(DEP) }
+}
+
+function verifyEphemeral(
+    operatorId: number,
+    nodeId: number,
+    a: EphemeralAdvertisement,
+    pub: Uint8Array,
+    now: number,
+    skew: number,
+): void {
+    verifyEphemeralFor(operatorId, nodeId, a, pub, now, skew, DEP)
+}
+
 function newSigner(): {
     signer: ReturnType<typeof inMemoryEd25519Signer>
     address: string
@@ -53,9 +73,9 @@ function newSigner(): {
 describe('EphemeralAdvertisement sign / verify', () => {
     it('round-trips through signEphemeral + verifyEphemeral', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
-        expect(a.ephemeral_sig).toBeTruthy()
+        expect(a.ephemeral_sig_v2).toBeTruthy()
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
         ).not.toThrow()
@@ -63,14 +83,14 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('sign fails for an unknown address', async () => {
         const { signer } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await expect(
             signEphemeral(OPERATOR_ID, NODE_ID, a, signer, generateAlgorandKeypair().address),
         ).rejects.toThrow()
     })
 
     it('sign fails on a nil signer', async () => {
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await expect(
             signEphemeral(OPERATOR_ID, NODE_ID, a, null as never, 'anything'),
         ).rejects.toThrow(/signer is nil/)
@@ -79,7 +99,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
     it('verify fails under a wrong key', async () => {
         const { signer, address } = newSigner()
         const otherPub = ed25519.getPublicKey(ed25519.utils.randomPrivateKey())
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, otherPub, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
@@ -88,7 +108,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('verify fails on an operator_id mismatch', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         expect(() =>
             verifyEphemeral(OPERATOR_ID + 1, NODE_ID, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
@@ -97,7 +117,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('verify fails on a node_id mismatch (sibling-node substitution, v3 tag)', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID + 1, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
@@ -114,17 +134,21 @@ describe('EphemeralAdvertisement sign / verify', () => {
             },
             { name: 'ephemeral_expiry', mutate: (a) => (a.ephemeral_expiry += 1) },
             {
-                name: 'ephemeral_sig',
+                name: 'ephemeral_sig_v2',
                 mutate: (a) => {
-                    const raw = base64.decode(a.ephemeral_sig!)
+                    const raw = base64.decode(a.ephemeral_sig_v2!)
                     raw[0] = (raw[0]! ^ 0xff) & 0xff
-                    a.ephemeral_sig = base64.encode(raw)
+                    a.ephemeral_sig_v2 = base64.encode(raw)
                 },
             },
+            // The bound check reads ephemeral_sig_v2 alone, so a stripped one is
+            // refused even with the legacy signature intact.
+            { name: 'ephemeral_sig_v2 removed', mutate: (a) => delete a.ephemeral_sig_v2 },
+            { name: 'ephemeral_deployment removed', mutate: (a) => delete a.ephemeral_deployment },
         ]
         for (const c of cases) {
             const { signer, address, publicKey } = newSigner()
-            const a = sampleAdvertisement()
+            const a = boundAdvertisement()
             await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
             c.mutate(a)
             expect(
@@ -136,13 +160,13 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('verify rejects a malformed / wrong-length sig', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
-        a.ephemeral_sig = '!!!not-base64!!!'
+        a.ephemeral_sig_v2 = '!!!not-base64!!!'
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
         ).toThrow()
-        a.ephemeral_sig = base64.encode(new TextEncoder().encode('too-short'))
+        a.ephemeral_sig_v2 = base64.encode(new TextEncoder().encode('too-short'))
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
         ).toThrow(/invalid ed25519 signature length/)
@@ -150,7 +174,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('verify rejects a missing sig', () => {
         const { publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, publicKey, NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
         ).toThrow(/signature missing/)
@@ -158,7 +182,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
 
     it('verify rejects a wrong-length pubkey', async () => {
         const { signer, address } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         expect(() =>
             verifyEphemeral(OPERATOR_ID, NODE_ID, a, new Uint8Array([1, 2, 3]), NOW, DEFAULT_EPHEMERAL_SKEW_SEC),
@@ -169,7 +193,7 @@ describe('EphemeralAdvertisement sign / verify', () => {
 describe('EphemeralAdvertisement expiry boundary', () => {
     it('is valid at exactly expiry + skew', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         const atBoundary = a.ephemeral_expiry + DEFAULT_EPHEMERAL_SKEW_SEC
         expect(() =>
@@ -179,7 +203,7 @@ describe('EphemeralAdvertisement expiry boundary', () => {
 
     it('throws EphemeralExpiredError one second past expiry + skew', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         const pastBoundary = a.ephemeral_expiry + DEFAULT_EPHEMERAL_SKEW_SEC + 1
         expect(() =>
@@ -190,7 +214,7 @@ describe('EphemeralAdvertisement expiry boundary', () => {
     it('runs the signature check before the expiry check (forged + expired → not the sentinel)', async () => {
         const { signer, address } = newSigner()
         const otherPub = ed25519.getPublicKey(ed25519.utils.randomPrivateKey())
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         const pastBoundary = a.ephemeral_expiry + DEFAULT_EPHEMERAL_SKEW_SEC + 1
         // Forged-and-expired must surface as a verification failure, not the
@@ -208,7 +232,7 @@ describe('EphemeralAdvertisement lifetime + not-before (hard checks)', () => {
     it('rejects an authentically-signed but over-long window', async () => {
         const { signer, address, publicKey } = newSigner()
         const a: EphemeralAdvertisement = {
-            ephemeral_age_pubkey: AGE_PUBKEY,
+            ...boundAdvertisement(),
             // Window one second over the cap.
             ephemeral_issued_at: NOW,
             ephemeral_expiry: NOW + MAX_EPHEMERAL_LIFETIME_SEC + 1,
@@ -222,7 +246,7 @@ describe('EphemeralAdvertisement lifetime + not-before (hard checks)', () => {
     it('accepts a window exactly at the cap', async () => {
         const { signer, address, publicKey } = newSigner()
         const a: EphemeralAdvertisement = {
-            ephemeral_age_pubkey: AGE_PUBKEY,
+            ...boundAdvertisement(),
             ephemeral_issued_at: NOW,
             ephemeral_expiry: NOW + MAX_EPHEMERAL_LIFETIME_SEC,
         }
@@ -234,7 +258,7 @@ describe('EphemeralAdvertisement lifetime + not-before (hard checks)', () => {
 
     it('rejects a future-dated issued_at (beyond skew)', async () => {
         const { signer, address, publicKey } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         // now sits more than skew before issued_at.
         const now = a.ephemeral_issued_at - 2 * DEFAULT_EPHEMERAL_SKEW_SEC
@@ -246,7 +270,7 @@ describe('EphemeralAdvertisement lifetime + not-before (hard checks)', () => {
 
 describe('ephemeralStale (soft relay-attribution)', () => {
     it('is fresh within FRESHNESS_TARGET_SEC and stale past it', () => {
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         expect(ephemeralStale(a, a.ephemeral_issued_at + FRESHNESS_TARGET_SEC - 1)).toBe(false)
         expect(ephemeralStale(a, a.ephemeral_issued_at + FRESHNESS_TARGET_SEC + 1)).toBe(true)
     })
@@ -254,7 +278,7 @@ describe('ephemeralStale (soft relay-attribution)', () => {
 
 describe('ephemeralCanonicalBytes', () => {
     it('is deterministic for identical inputs', () => {
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         expect(ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a)).toEqual(
             ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a),
         )
@@ -262,7 +286,7 @@ describe('ephemeralCanonicalBytes', () => {
 
     it('does not depend on the signature', async () => {
         const { signer, address } = newSigner()
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         const before = ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a)
         await signEphemeral(OPERATOR_ID, NODE_ID, a, signer, address)
         const after = ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a)
@@ -276,14 +300,14 @@ describe('ephemeralCanonicalBytes', () => {
     })
 
     it('binds the operator id (different id → different bytes)', () => {
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         expect(ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a)).not.toEqual(
             ephemeralCanonicalBytes(OPERATOR_ID + 1, NODE_ID, a),
         )
     })
 
     it('binds the node id (different node → different bytes)', () => {
-        const a = sampleAdvertisement()
+        const a = boundAdvertisement()
         expect(ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID, a)).not.toEqual(
             ephemeralCanonicalBytes(OPERATOR_ID, NODE_ID + 1, a),
         )

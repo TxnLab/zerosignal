@@ -47,6 +47,23 @@ func sampleAdvertisement() *EphemeralAdvertisement {
 	}
 }
 
+// testDep is the deployment the verify tests bind their objects to. Only a
+// bound object verifies, so a policy check is reachable only through one.
+var testDep = func() DeploymentID {
+	d, err := AlgorandDeploymentID(bytes.Repeat([]byte{1}, 32), 100)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}()
+
+// boundAdvertisement is sampleAdvertisement bound to testDep.
+func boundAdvertisement() *EphemeralAdvertisement {
+	a := sampleAdvertisement()
+	a.Deployment = testDep
+	return a
+}
+
 func TestEphemeral_CanonicalBytes_ByteExact(t *testing.T) {
 	a := sampleAdvertisement()
 
@@ -142,18 +159,18 @@ func TestEphemeral_Sign_UsesCanonicalArgumentOrder(t *testing.T) {
 
 func TestEphemeral_SignVerify_RoundTrip(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
 	now := time.Unix(a.Expiry-1, 0) // well before expiry
-	if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err != nil {
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
 
 func TestEphemeral_Sign_NilSigner(t *testing.T) {
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), nil, "anything", advOperatorID, advNodeID); err == nil {
 		t.Fatal("want error on nil signer")
 	}
@@ -161,7 +178,7 @@ func TestEphemeral_Sign_NilSigner(t *testing.T) {
 
 func TestEphemeral_Sign_UnknownAddress(t *testing.T) {
 	signer, _, _ := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, "OTHER_ADDR_NOT_IN_KEYSTORE_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", advOperatorID, advNodeID); err == nil {
 		t.Fatal("want error when signing with an unknown address")
 	}
@@ -170,22 +187,22 @@ func TestEphemeral_Sign_UnknownAddress(t *testing.T) {
 func TestEphemeral_Verify_WrongKey(t *testing.T) {
 	signer, addr, _ := newFakeSigner(t)
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(a.Expiry-1, 0)
-	if err := a.Verify(otherPub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err == nil {
+	if err := a.VerifyFor(otherPub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err == nil {
 		t.Fatal("want verify error with wrong pubkey")
 	}
 }
 
 func TestEphemeral_Verify_WrongPubKeyLength(t *testing.T) {
 	signer, addr, _ := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	_ = a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID)
 	now := time.Unix(a.Expiry-1, 0)
-	if err := a.Verify(ed25519.PublicKey([]byte{1, 2, 3}), now, advOperatorID, advNodeID, DefaultEphemeralSkew); err == nil {
+	if err := a.VerifyFor(ed25519.PublicKey([]byte{1, 2, 3}), now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err == nil {
 		t.Fatal("want error on short pubkey")
 	}
 }
@@ -199,22 +216,22 @@ func TestEphemeral_Verify_TamperedField(t *testing.T) {
 			a.AgePubkey = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsuwzd4"
 		}},
 		{"expiry", func(a *EphemeralAdvertisement) { a.Expiry++ }},
-		{"sig", func(a *EphemeralAdvertisement) {
-			raw, _ := base64.StdEncoding.DecodeString(a.Sig)
+		{"sig_v2", func(a *EphemeralAdvertisement) {
+			raw, _ := base64.StdEncoding.DecodeString(a.SigV2)
 			raw[0] ^= 0xFF
-			a.Sig = base64.StdEncoding.EncodeToString(raw)
+			a.SigV2 = base64.StdEncoding.EncodeToString(raw)
 		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			signer, addr, pub := newFakeSigner(t)
-			a := sampleAdvertisement()
+			a := boundAdvertisement()
 			if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 				t.Fatal(err)
 			}
 			c.mutate(a)
 			now := time.Unix(a.Expiry-1, 0)
-			if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err == nil {
+			if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err == nil {
 				t.Fatalf("tampered %s: verify passed", c.name)
 			}
 		})
@@ -223,7 +240,7 @@ func TestEphemeral_Verify_TamperedField(t *testing.T) {
 
 func TestEphemeral_Verify_OperatorIDMismatch(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +248,7 @@ func TestEphemeral_Verify_OperatorIDMismatch(t *testing.T) {
 	// The signer signed for operator 42; verifying under a different
 	// chain-resolved id must fail, because the id Verify is given is the one
 	// that enters the recomputed digest.
-	err := a.Verify(pub, now, advOperatorID+1, advNodeID, DefaultEphemeralSkew)
+	err := a.VerifyFor(pub, now, advOperatorID+1, advNodeID, DefaultEphemeralSkew, testDep)
 	if err == nil {
 		t.Fatal("want verify error on operator_id mismatch")
 	}
@@ -246,12 +263,12 @@ func TestEphemeral_Verify_OperatorIDMismatch(t *testing.T) {
 // scenario when an operator reuses one key across its nodes.
 func TestEphemeral_Verify_NodeIDMismatch(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
 	now := time.Unix(a.Expiry-1, 0)
-	err := a.Verify(pub, now, advOperatorID, advNodeID+1, DefaultEphemeralSkew)
+	err := a.VerifyFor(pub, now, advOperatorID, advNodeID+1, DefaultEphemeralSkew, testDep)
 	if err == nil {
 		t.Fatal("want verify error on node_id mismatch")
 	}
@@ -262,23 +279,23 @@ func TestEphemeral_Verify_NodeIDMismatch(t *testing.T) {
 
 func TestEphemeral_Verify_BadSigEncoding(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	_ = a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID)
 	now := time.Unix(a.Expiry-1, 0)
 
-	a.Sig = "!!!not-base64!!!"
-	if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err == nil {
+	a.SigV2 = "!!!not-base64!!!"
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err == nil {
 		t.Fatal("want error on non-base64 sig")
 	}
-	a.Sig = base64.StdEncoding.EncodeToString([]byte("too-short"))
-	if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err == nil {
+	a.SigV2 = base64.StdEncoding.EncodeToString([]byte("too-short"))
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err == nil {
 		t.Fatal("want error on wrong-length sig")
 	}
 }
 
 func TestEphemeral_Verify_ExpiryBoundary(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
@@ -289,13 +306,13 @@ func TestEphemeral_Verify_ExpiryBoundary(t *testing.T) {
 	// Just inside the window: now == expiry+skew is still valid (Verify uses
 	// strict After).
 	atEdge := expiry.Add(skew)
-	if err := a.Verify(pub, atEdge, advOperatorID, advNodeID, skew); err != nil {
+	if err := a.VerifyFor(pub, atEdge, advOperatorID, advNodeID, skew, testDep); err != nil {
 		t.Fatalf("at expiry+skew should be valid, got %v", err)
 	}
 
 	// Just after the window: ErrEphemeralExpired sentinel.
 	pastEdge := expiry.Add(skew).Add(time.Nanosecond)
-	err := a.Verify(pub, pastEdge, advOperatorID, advNodeID, skew)
+	err := a.VerifyFor(pub, pastEdge, advOperatorID, advNodeID, skew, testDep)
 	if !errors.Is(err, ErrEphemeralExpired) {
 		t.Fatalf("just past expiry+skew want ErrEphemeralExpired, got %v", err)
 	}
@@ -306,12 +323,12 @@ func TestEphemeral_Verify_ForgedButUnexpired_FailsOnSignature(t *testing.T) {
 	// error), never the expiry sentinel — signature is checked first.
 	signer, addr, _ := newFakeSigner(t)
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(a.Expiry-1, 0) // unexpired
-	err := a.Verify(otherPub, now, advOperatorID, advNodeID, DefaultEphemeralSkew)
+	err := a.VerifyFor(otherPub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep)
 	if err == nil {
 		t.Fatal("forged block verified")
 	}
@@ -329,12 +346,12 @@ func TestEphemeral_SignVerify_WithGeneratedKeypair(t *testing.T) {
 		t.Fatal(err)
 	}
 	signer := &fakeBytesSigner{keys: map[string]ed25519.PrivateKey{addr: priv}}
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
 	now := time.Unix(a.Expiry-1, 0)
-	if err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err != nil {
+	if err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -345,7 +362,7 @@ func TestEphemeral_SignVerify_WithGeneratedKeypair(t *testing.T) {
 // it is unexpired and validly signed. This is the key-retention guard.
 func TestEphemeral_Verify_LifetimeTooLong(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	// Push IssuedAt far enough back that the window blows the cap, then sign so
 	// the (over-long) window is authentic.
 	a.IssuedAt = a.Expiry - int64((MaxEphemeralLifetime + time.Minute).Seconds())
@@ -353,7 +370,7 @@ func TestEphemeral_Verify_LifetimeTooLong(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Unix(a.Expiry-1, 0) // unexpired
-	err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew)
+	err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep)
 	if !errors.Is(err, ErrEphemeralLifetimeTooLong) {
 		t.Fatalf("want ErrEphemeralLifetimeTooLong, got %v", err)
 	}
@@ -368,22 +385,22 @@ func TestEphemeral_Verify_LifetimeBoundary(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
 	maxSec := int64(MaxEphemeralLifetime.Seconds())
 
-	atCap := sampleAdvertisement()
+	atCap := boundAdvertisement()
 	atCap.IssuedAt = atCap.Expiry - maxSec
 	if err := atCap.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(atCap.Expiry-1, 0)
-	if err := atCap.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); err != nil {
+	if err := atCap.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); err != nil {
 		t.Fatalf("window exactly at MaxEphemeralLifetime should pass, got %v", err)
 	}
 
-	overCap := sampleAdvertisement()
+	overCap := boundAdvertisement()
 	overCap.IssuedAt = overCap.Expiry - maxSec - 1
 	if err := overCap.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
-	if err := overCap.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew); !errors.Is(err, ErrEphemeralLifetimeTooLong) {
+	if err := overCap.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep); !errors.Is(err, ErrEphemeralLifetimeTooLong) {
 		t.Fatalf("window one second over the cap want ErrEphemeralLifetimeTooLong, got %v", err)
 	}
 }
@@ -392,13 +409,13 @@ func TestEphemeral_Verify_LifetimeBoundary(t *testing.T) {
 // is rejected (a node cannot advertise a key it has not minted yet).
 func TestEphemeral_Verify_FutureIssuedAt(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	if err := a.Sign(context.Background(), signer, addr, advOperatorID, advNodeID); err != nil {
 		t.Fatal(err)
 	}
 	// now sits well before IssuedAt (more than skew earlier).
 	now := time.Unix(a.IssuedAt, 0).Add(-2 * DefaultEphemeralSkew)
-	err := a.Verify(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew)
+	err := a.VerifyFor(pub, now, advOperatorID, advNodeID, DefaultEphemeralSkew, testDep)
 	if err == nil {
 		t.Fatal("future-dated issued_at must fail verify")
 	}
@@ -410,7 +427,7 @@ func TestEphemeral_Verify_FutureIssuedAt(t *testing.T) {
 // TestEphemeral_Stale exercises the SOFT relay-attribution helper independent
 // of Verify: fresh inside FreshnessTarget, stale once age exceeds it.
 func TestEphemeral_Stale(t *testing.T) {
-	a := sampleAdvertisement()
+	a := boundAdvertisement()
 	issued := time.Unix(a.IssuedAt, 0)
 
 	fresh := issued.Add(FreshnessTarget - time.Second)

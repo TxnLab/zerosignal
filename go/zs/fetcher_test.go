@@ -41,7 +41,8 @@ func TestChainOperatorSource_EnrichPopulatesToolDetails(t *testing.T) {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
+		_, _ = fmt.Fprintf(w, `{
+			"deployment":%q,
 			"models":[
 				{"id":"gpt-4o-mini","context_window":128000,"max_output_tokens":16384}
 			],
@@ -53,11 +54,12 @@ func TestChainOperatorSource_EnrichPopulatesToolDetails(t *testing.T) {
 			"min_charge_output_tokens":1000,
 			"min_charge_algo_txns":9,
 			"min_charge_microusdc":1620
-		}`))
+		}`, harnessDeployment.String())
 	}))
 	defer srv.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		DetailsTimeout: 2 * time.Second,
 		Log:            discardLogger(),
@@ -876,10 +878,12 @@ func teeStubServer(t *testing.T, operatorID uint64, adv ticket.EphemeralAdvertis
 				Models: []inject.OperatorDetailsModel{
 					{ID: "gpt-4o-mini", ContextWindow: 8192},
 				},
-				EphemeralAgePubkey: adv.AgePubkey,
-				EphemeralExpiry:    adv.Expiry,
-				EphemeralIssuedAt:  adv.IssuedAt,
-				EphemeralSig:       adv.Sig,
+				Deployment:          harnessDeployment.String(),
+				EphemeralAgePubkey:  adv.AgePubkey,
+				EphemeralExpiry:     adv.Expiry,
+				EphemeralIssuedAt:   adv.IssuedAt,
+				EphemeralDeployment: adv.Deployment.String(),
+				EphemeralSigV2:      adv.SigV2,
 			}
 			if advertiseTEE {
 				details.TEE = &inject.TEEAdvertisement{
@@ -910,6 +914,7 @@ func TestEnrich_TEEAdvertisedAndVerified(t *testing.T) {
 	defer srv.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
 		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
@@ -947,6 +952,7 @@ func TestEnrich_TEEStubRejectedWhenAllowStubFalse(t *testing.T) {
 	defer srv.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
 		TEEVerifier:    &tee.BundleVerifier{AllowStub: false}, // production posture
@@ -976,6 +982,7 @@ func TestEnrich_TEEMissingAdvertisement(t *testing.T) {
 	defer srv.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
 		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
@@ -1015,10 +1022,12 @@ func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 				Models: []inject.OperatorDetailsModel{
 					{ID: "m1", ContextWindow: 1024},
 				},
-				EphemeralAgePubkey: adv.AgePubkey,
-				EphemeralExpiry:    adv.Expiry,
-				EphemeralIssuedAt:  adv.IssuedAt,
-				EphemeralSig:       adv.Sig,
+				Deployment:          harnessDeployment.String(),
+				EphemeralAgePubkey:  adv.AgePubkey,
+				EphemeralExpiry:     adv.Expiry,
+				EphemeralIssuedAt:   adv.IssuedAt,
+				EphemeralDeployment: adv.Deployment.String(),
+				EphemeralSigV2:      adv.SigV2,
 				TEE: &inject.TEEAdvertisement{
 					Mode:        inject.TEEModeStub,
 					AttestedAt:  time.Now().UTC(),
@@ -1037,6 +1046,7 @@ func TestEnrich_TEEFetchFailureCapturedInStatus(t *testing.T) {
 	op.BaseURL = srv.URL
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 500*time.Millisecond),
 		Attestation:    NewAttestationClient(srv.Client(), 500*time.Millisecond),
 		TEEVerifier:    &tee.BundleVerifier{AllowStub: true},
@@ -1072,6 +1082,7 @@ func TestEnrich_TEEVerifierNilDisablesTEE(t *testing.T) {
 	defer srv.Close()
 
 	source := &ChainOperatorSource{
+		Deployment:     harnessDeployment,
 		Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 		Attestation:    NewAttestationClient(srv.Client(), 2*time.Second),
 		TEEVerifier:    nil, // disabled

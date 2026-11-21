@@ -67,6 +67,9 @@ func receiptCheckScenarios(t *testing.T) []receiptCheckScenario {
 		payersLoose = "c2l4dGVlbi1ieXRlLWlkIR=="
 	)
 	delivered := sha256.Sum256([]byte("hello world"))
+	// Every scenario is bound to mine unless it says otherwise: an unbound
+	// ticket or receipt is refused before any other check could speak.
+	mine, elsewhere := testDeployment(t, 1), testDeployment(t, 2)
 
 	base := func(name string) receiptCheckScenario {
 		return receiptCheckScenario{
@@ -77,11 +80,13 @@ func receiptCheckScenarios(t *testing.T) []receiptCheckScenario {
 				MaxPrice: 5000, MinPrice: 100, ExpiresAt: 1_700_000_000, Model: "m", Stream: true,
 				CommitK:        base64.StdEncoding.EncodeToString(make([]byte, 32)),
 				InputUsageType: ticket.UsageTypeTokens, OutputUsageType: ticket.UsageTypeTokens,
+				Deployment: mine,
 			},
 			Receipt: ticket.UsageReceipt{
 				TicketID: payers, ActualInputCount: 42, ActualOutputCount: 17, AmountCharged: 2600,
 				TtftMs: 120, DecodeMs: 900,
 				InputUsageType: ticket.UsageTypeTokens, OutputUsageType: ticket.UsageTypeTokens,
+				Deployment: mine,
 			},
 			SigningKey:   base64.StdEncoding.EncodeToString(pub),
 			ComputedHash: hex.EncodeToString(delivered[:]),
@@ -145,7 +150,6 @@ func receiptCheckScenarios(t *testing.T) []receiptCheckScenario {
 		func(sc *receiptCheckScenario) { sc.Receipt.AmountCharged = 5001 }, nil)
 	add("a cached input count above the actual input count is refused as amount", "amount", "",
 		func(sc *receiptCheckScenario) { sc.Receipt.CachedInputCount = sc.Receipt.ActualInputCount + 1 }, nil)
-	mine, elsewhere := testDeployment(t, 1), testDeployment(t, 2)
 	bound := func(tkt, rcpt ticket.DeploymentID) func(*receiptCheckScenario) {
 		return func(sc *receiptCheckScenario) { sc.Ticket.Deployment, sc.Receipt.Deployment = tkt, rcpt }
 	}
@@ -153,6 +157,7 @@ func receiptCheckScenarios(t *testing.T) []receiptCheckScenario {
 	add("a bound ticket's legacy receipt is refused", "sig", "", bound(mine, ticket.DeploymentID{}), nil)
 	add("a bound ticket's receipt bound elsewhere is refused", "sig", "", bound(mine, elsewhere), nil)
 	add("a legacy ticket's bound receipt is refused", "sig", "", bound(ticket.DeploymentID{}, mine), nil)
+	add("a legacy ticket's legacy receipt is refused", "sig", "", bound(ticket.DeploymentID{}, ticket.DeploymentID{}), nil)
 	add("a body_hash other than the delivered content's is refused as body_hash", "body_hash", "",
 		func(sc *receiptCheckScenario) { sc.Receipt.SetBodyHashBytes(sha256.Sum256([]byte("other content"))) }, nil)
 	return out

@@ -27,8 +27,9 @@ import (
 )
 
 // signEphemeralAdv signs a ticket.EphemeralAdvertisement for (operatorID,
-// nodeID) under priv (the node's on-chain signing key) and returns the
-// populated block. signAddr must match what rawKeyBytesSigner is keyed on.
+// nodeID) under priv (the node's on-chain signing key), bound to
+// harnessDeployment, and returns the populated block. signAddr must match what
+// rawKeyBytesSigner is keyed on.
 func signEphemeralAdv(t *testing.T, signAddr string, priv ed25519.PrivateKey, operatorID, nodeID uint64, agePubkey string, expiry int64) ticket.EphemeralAdvertisement {
 	t.Helper()
 	adv := ticket.EphemeralAdvertisement{
@@ -37,7 +38,8 @@ func signEphemeralAdv(t *testing.T, signAddr string, priv ed25519.PrivateKey, op
 		// Signed window 10m (≤ MaxEphemeralLifetime) ending at expiry, so the
 		// lifetime cap passes and the expired-block tests still surface
 		// ErrEphemeralExpired (not the lifetime sentinel).
-		IssuedAt: expiry - 600,
+		IssuedAt:   expiry - 600,
+		Deployment: harnessDeployment,
 	}
 	if err := adv.Sign(context.Background(), rawKeyBytesSigner{addr: signAddr, priv: priv}, signAddr, operatorID, nodeID); err != nil {
 		t.Fatalf("sign ephemeral advertisement: %v", err)
@@ -141,12 +143,17 @@ func newEphemeralEnrichFixture(t *testing.T, operatorID uint64, signFn func(sign
 			Models: []inject.OperatorDetailsModel{
 				{ID: "gpt-test", ContextWindow: 8192},
 			},
+			Deployment: harnessDeployment.String(),
 		}
 		if adv != nil {
 			details.EphemeralAgePubkey = adv.AgePubkey
 			details.EphemeralExpiry = adv.Expiry
 			details.EphemeralIssuedAt = adv.IssuedAt
 			details.EphemeralSig = adv.Sig
+			if !adv.Deployment.IsZero() {
+				details.EphemeralDeployment = adv.Deployment.String()
+			}
+			details.EphemeralSigV2 = adv.SigV2
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(details)
@@ -155,6 +162,7 @@ func newEphemeralEnrichFixture(t *testing.T, operatorID uint64, signFn func(sign
 
 	return &ephemeralEnrichFixture{
 		source: &ChainOperatorSource{
+			Deployment:     harnessDeployment,
 			Details:        NewDetailsClient(srv.Client(), 2*time.Second),
 			DetailsTimeout: 2 * time.Second,
 			Log:            discardLogger(),
@@ -250,10 +258,11 @@ func TestEnrich_ForgedEphemeralIgnored(t *testing.T) {
 	eph := mustX25519(t)
 	f := newEphemeralEnrichFixture(t, 42, func(signAddr string, priv ed25519.PrivateKey) *ticket.EphemeralAdvertisement {
 		adv := signEphemeralAdv(t, signAddr, priv, 42, testEnrichNodeID, eph.Recipient().String(), time.Now().Add(10*time.Minute).Unix())
-		// Tamper with the signature so it no longer verifies under the key.
-		sig := []byte(adv.Sig)
+		// Tamper with the bound signature, the one a payer checks, so it no
+		// longer verifies under the key.
+		sig := []byte(adv.SigV2)
 		sig[len(sig)-1] ^= 0x01
-		adv.Sig = string(sig)
+		adv.SigV2 = string(sig)
 		return &adv
 	})
 
@@ -316,17 +325,18 @@ func TestApplyEphemeral_RelayStalenessDownranks(t *testing.T) {
 	now := time.Now()
 
 	signAdv := func(issuedAt, expiry int64) inject.OperatorDetails {
-		adv := ticket.EphemeralAdvertisement{AgePubkey: eph.Recipient().String(), Expiry: expiry, IssuedAt: issuedAt}
+		adv := ticket.EphemeralAdvertisement{AgePubkey: eph.Recipient().String(), Expiry: expiry, IssuedAt: issuedAt, Deployment: harnessDeployment}
 		// (42, 0) matches the op built below — this test's operator carries no
 		// node id, and the binding has to agree with it or every Verify fails.
 		if serr := adv.Sign(context.Background(), rawKeyBytesSigner{addr: signingAddr, priv: priv}, signingAddr, 42, 0); serr != nil {
 			t.Fatalf("sign advertisement: %v", serr)
 		}
 		return inject.OperatorDetails{
-			EphemeralAgePubkey: adv.AgePubkey,
-			EphemeralExpiry:    adv.Expiry,
-			EphemeralIssuedAt:  adv.IssuedAt,
-			EphemeralSig:       adv.Sig,
+			EphemeralAgePubkey:  adv.AgePubkey,
+			EphemeralExpiry:     adv.Expiry,
+			EphemeralIssuedAt:   adv.IssuedAt,
+			EphemeralDeployment: adv.Deployment.String(),
+			EphemeralSigV2:      adv.SigV2,
 		}
 	}
 
@@ -335,7 +345,7 @@ func TestApplyEphemeral_RelayStalenessDownranks(t *testing.T) {
 	staleIssued := now.Add(-(ticket.FreshnessTarget + time.Minute)).Unix()
 	staleResp := signAdv(staleIssued, now.Add(10*time.Minute).Unix())
 
-	s := &ChainOperatorSource{Log: discardLogger()}
+	s := &ChainOperatorSource{Deployment: harnessDeployment, Log: discardLogger()}
 	op := Operator{ID: 42, SigningAddr: signingAddr, TicketSigningKey: pub}
 	const relayID = uint64(99)
 	hop := &RelayHop{RelayID: relayID}
@@ -357,7 +367,7 @@ func TestApplyEphemeral_RelayStalenessDownranks(t *testing.T) {
 
 	// A directly-fetched stale block (no relay) must NOT attribute to anyone —
 	// an honest current key legitimately ages toward advTTL.
-	s2 := &ChainOperatorSource{Log: discardLogger()}
+	s2 := &ChainOperatorSource{Deployment: harnessDeployment, Log: discardLogger()}
 	o2 := op
 	for i := 0; i < steering.RelayDownrankThreshold+1; i++ {
 		s2.applyEphemeralAdvertisement(&o2, staleResp, nil, discardLogger())
@@ -383,22 +393,23 @@ func TestApplyEphemeral_UnparseableRecipientClearsAndWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	adv := ticket.EphemeralAdvertisement{AgePubkey: "age1notarecipient", Expiry: now.Add(10 * time.Minute).Unix(), IssuedAt: now.Unix()}
+	adv := ticket.EphemeralAdvertisement{AgePubkey: "age1notarecipient", Expiry: now.Add(10 * time.Minute).Unix(), IssuedAt: now.Unix(), Deployment: harnessDeployment}
 	if err := adv.Sign(context.Background(), rawKeyBytesSigner{addr: signingAddr, priv: priv}, signingAddr, 42, 0); err != nil {
 		t.Fatal(err)
 	}
 	resp := inject.OperatorDetails{
-		EphemeralAgePubkey: adv.AgePubkey,
-		EphemeralExpiry:    adv.Expiry,
-		EphemeralIssuedAt:  adv.IssuedAt,
-		EphemeralSig:       adv.Sig,
+		EphemeralAgePubkey:  adv.AgePubkey,
+		EphemeralExpiry:     adv.Expiry,
+		EphemeralIssuedAt:   adv.IssuedAt,
+		EphemeralDeployment: adv.Deployment.String(),
+		EphemeralSigV2:      adv.SigV2,
 	}
 	op := Operator{
 		ID: 42, SigningAddr: signingAddr, TicketSigningKey: pub,
 		EphemeralRecipient: mustX25519(t).Recipient(), EphemeralRecipientPubkey: "age1earlier", EphemeralExpiry: 1, EphemeralIssuedAt: 1,
 	}
 	var logs bytes.Buffer
-	s := &ChainOperatorSource{}
+	s := &ChainOperatorSource{Deployment: harnessDeployment}
 	s.applyEphemeralAdvertisement(&op, resp, nil, slog.New(slog.NewTextHandler(&logs, nil)))
 
 	if op.EphemeralRecipient != nil || op.EphemeralRecipientPubkey != "" || op.EphemeralExpiry != 0 || op.EphemeralIssuedAt != 0 {
@@ -485,7 +496,7 @@ func TestReserve_SealsToEphemeralRecipient(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	rt, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
@@ -523,7 +534,7 @@ func TestReserve_NoEphemeralSkips(t *testing.T) {
 	op.EphemeralRecipient = nil
 	op.EphemeralRecipientPubkey = ""
 	op.EphemeralExpiry = 0
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if !IsNoEphemeral(err) {
 		t.Fatalf("Reserve err = %v, want errNoEphemeral (no ephemeral)", err)
@@ -560,7 +571,7 @@ func TestReserve_BadEnvelopeSurfaced(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	_, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err == nil {
 		t.Fatal("ephemeral-sealed bad_reserve_envelope must surface as an error")
@@ -601,7 +612,7 @@ func TestReserve_DispatchSharesPinnedRecipient(t *testing.T) {
 	op.EphemeralRecipientPubkey = eph.Recipient().String()
 	op.EphemeralExpiry = time.Now().Add(10 * time.Minute).Unix()
 
-	c := &HTTPReserveClient{HTTPClient: http.DefaultClient}
+	c := &HTTPReserveClient{Deployment: harnessDeployment, HTTPClient: http.DefaultClient}
 	rt, err := c.Reserve(context.Background(), op, sampleReserveReq(), nil)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)

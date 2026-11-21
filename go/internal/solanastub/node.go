@@ -252,7 +252,6 @@ func (n *Node) details(w http.ResponseWriter, r *http.Request) {
 		EphemeralAgePubkey:  adv.AgePubkey,
 		EphemeralExpiry:     adv.Expiry,
 		EphemeralIssuedAt:   adv.IssuedAt,
-		EphemeralSig:        adv.Sig,
 		EphemeralDeployment: n.deployment.String(),
 		EphemeralSigV2:      adv.SigV2,
 		Models: []inject.OperatorDetailsModel{
@@ -306,8 +305,8 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "model_not_found", "the stub serves "+Model+" and "+FreeModel)
 		return
 	}
-	if !req.Deployment.IsZero() && req.Deployment != n.deployment {
-		writeError(w, http.StatusBadRequest, "deployment_mismatch", "another deployment")
+	if req.Deployment != n.deployment {
+		writeError(w, http.StatusBadRequest, "deployment_mismatch", "another deployment, or none")
 		return
 	}
 	payer, err := solana.ParsePublicKey(req.PayerAddr)
@@ -316,7 +315,7 @@ func (n *Node) reserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pub := ed25519.PublicKey(payer[:])
-	if err := req.VerifyFor(pub, n.operatorID, n.nodeID, time.Now(), time.Minute, n.deployment, false); err != nil {
+	if err := req.VerifyFor(pub, n.operatorID, n.nodeID, time.Now(), time.Minute, n.deployment); err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid_payer_sig", err.Error())
 		return
 	}

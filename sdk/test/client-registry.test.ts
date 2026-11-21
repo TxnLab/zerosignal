@@ -352,13 +352,13 @@ describe('Client.create building the registry', () => {
         ])
     })
 
-    // With a caller's wallet this payer may start without algod: a failed
-    // genesis read warns and leaves it unbound rather than failing create.
-    it("starts unbound, with one warning, when the genesis read fails under a caller's wallet", async () => {
-        const warnings: string[] = []
-        const logger = { debug: () => {}, info: () => {}, warn: (m: string) => void warnings.push(m), error: () => {} }
-        await clientOver(serve, { privacy: 'direct', logger }, { paramsFail: true })
-        expect(warnings.filter((m) => m.includes('reserving without a deployment binding'))).toHaveLength(1)
+    // A payer that can't read its deployment can neither reserve nor route,
+    // so a failed genesis read fails create even under a caller's wallet,
+    // which used to start it unbound. Go: TestNew_HostWalletFailsWithoutTheDeployment.
+    it("fails create when the genesis read fails under a caller's wallet", async () => {
+        await expect(clientOver(serve, { privacy: 'direct' }, { paramsFail: true })).rejects.toThrow(
+            /read the escrow deployment/,
+        )
     })
 
     // The chat app builds its own source and passes no deployment, so the
@@ -572,7 +572,9 @@ describe('Client.create building the registry', () => {
         const registry = new DiscoveryRegistry({ source: { fetchChain: async () => [], enrichSubset: async () => {} } })
         await registry.ready
         const stop = vi.spyOn(registry, 'stop')
-        const c = await Client.create({ signer, network: testnet(), wallet: callerWallet, registry })
+        // A built reserve client would read the deployment from algod.
+        const reserveClient = { reserve: () => Promise.reject(new Error('unused')) }
+        const c = await Client.create({ signer, network: testnet(), wallet: callerWallet, registry, reserveClient })
         await c.close()
         expect(stop).not.toHaveBeenCalled()
         expect(algod.fetch).not.toHaveBeenCalled()

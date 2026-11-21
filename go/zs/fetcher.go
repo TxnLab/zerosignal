@@ -264,8 +264,7 @@ type ChainOperatorSource struct {
 
 	// derivedMu guards derivedDeployment, the id the chain read derives from
 	// the chain's genesis hash when Deployment is unset. A host that builds its
-	// own source would otherwise leave every node's ephemeral checked on the
-	// legacy signature alone.
+	// own source would otherwise have every node refused.
 	derivedMu         sync.Mutex
 	derivedDeployment ticket.DeploymentID
 }
@@ -282,8 +281,8 @@ func (s *ChainOperatorSource) deployment() ticket.DeploymentID {
 }
 
 // deriveDeployment reads the genesis hash once, when no id was supplied. A
-// failure is retried on the next chain read; until one succeeds the probes
-// accept legacy signatures, which is what a source with no id did before.
+// failure is retried on the next chain read; until one succeeds every node's
+// ephemeral is refused, so the source routes nowhere.
 func (s *ChainOperatorSource) deriveDeployment(ctx context.Context) {
 	if !s.deployment().IsZero() {
 		return
@@ -303,7 +302,7 @@ func (s *ChainOperatorSource) deriveDeployment(ctx context.Context) {
 		if log == nil {
 			log = slog.Default()
 		}
-		log.Warn("could not derive the escrow deployment; checking ephemeral signatures on the legacy layout", slog.Any("err", err))
+		log.Warn("could not derive the escrow deployment; every node is refused until it is", slog.Any("err", err))
 		return
 	}
 	s.derivedMu.Lock()
@@ -907,12 +906,12 @@ func (s *ChainOperatorSource) ReprobeEphemeral(ctx context.Context, all []Operat
 //
 // Trust comes entirely from the on-chain signing key — the advertised
 // /v1/zs/details JSON is untrusted, so the three ephemeral_* fields
-// are bound back to op.ID at verify time (Verify supplies the
+// are bound back to op.ID at verify time (VerifyFor takes the
 // chain-resolved id, never the wire's). Outcomes:
 //
 //   - No advertisement (empty pubkey): clear any prior ephemeral and
 //     return — the operator isn't offering one this cycle.
-//   - Verify nil: parse the recipient and store all three. A later
+//   - VerifyFor nil: parse the recipient and store all three. A later
 //     SealRecipient call seals to it (subject to its own expiry re-check).
 //   - ErrEphemeralExpired: signature was genuine but stale — clear the
 //     fields SILENTLY, leaving no seal target this cycle (there is no
@@ -1023,10 +1022,9 @@ type ephemeralVerdict struct {
 // chain-resolved identity: applyEphemeralAdvertisement's decision, without
 // its writes and logs.
 //
-// deployment is the payer's own. Zero means the payer doesn't know it, and
-// only the legacy signature is checked. Otherwise a node advertising
-// wire.DeploymentBindingMinVersion must present the bound signature for that
-// deployment, and an older node passes on the legacy one.
+// deployment is the payer's own, and the node must present the bound
+// signature for it. Zero means the payer doesn't know it yet, and every
+// advertisement is refused until it does.
 func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, now time.Time, operatorID, nodeID uint64, deployment ticket.DeploymentID) ephemeralVerdict {
 	if resp.EphemeralAgePubkey == "" {
 		return ephemeralVerdict{Outcome: ephemeralAbsent}
@@ -1041,7 +1039,7 @@ func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, n
 		AgePubkey: resp.EphemeralAgePubkey,
 		Expiry:    resp.EphemeralExpiry,
 		// IssuedAt is required to recompute the signed canonical bytes; without
-		// it Verify rejects every block on the lifetime cap (Expiry-0 ≫
+		// it VerifyFor rejects every block on the lifetime cap (Expiry-0 ≫
 		// MaxEphemeralLifetime). A 3.0 node omits it → IssuedAt 0 → correctly
 		// rejected (it signed an older layout anyway).
 		IssuedAt:   resp.EphemeralIssuedAt,
@@ -1049,17 +1047,11 @@ func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, n
 		Deployment: advDeployment,
 		SigV2:      resp.EphemeralSigV2,
 	}
-	// The chain-resolved pair goes to Verify rather than riding on adv: the
+	// The chain-resolved pair goes to VerifyFor rather than riding on adv: the
 	// signed canonical bytes bind both, so a sibling node's advertisement
 	// (possible under a shared operator signing key) can never validate as
 	// this node's.
-	var err error
-	if deployment.IsZero() {
-		err = adv.Verify(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew)
-	} else {
-		allowLegacy := !wire.UsesDeploymentBinding(resp.ProtoVersion)
-		err = adv.VerifyFor(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew, deployment, allowLegacy)
-	}
+	err := adv.VerifyFor(signingKey, now, operatorID, nodeID, ticket.DefaultEphemeralSkew, deployment)
 	switch {
 	case err == nil:
 		recipient, perr := age.ParseX25519Recipient(resp.EphemeralAgePubkey)
@@ -1074,16 +1066,20 @@ func checkEphemeral(resp inject.OperatorDetails, signingKey ed25519.PublicKey, n
 	}
 }
 
-// errNoDetailsDeployment is a node new enough to name its deployment that
-// names none.
-var errNoDetailsDeployment = errors.New("details: node advertises no escrow deployment")
+var (
+	// errNoDetailsDeployment is a node that names no deployment.
+	errNoDetailsDeployment = errors.New("details: node advertises no escrow deployment")
+	// errDetailsUnknownPayerDeployment is a probe by a payer that doesn't know
+	// its own deployment yet. Not errNoPayerDeployment: that one reads as a
+	// reserve's refusal, and this is the probe's.
+	errDetailsUnknownPayerDeployment = errors.New("details: the payer's escrow deployment is unknown")
+)
 
 // checkDetailsDeployment decides whether a node's advertised deployment lets
-// this payer route to it. deployment is the payer's own; zero means it doesn't
-// know it, and any well-formed advertisement passes, as in checkEphemeral. A
-// malformed one is refused either way. The field is unsigned, so a relay can
-// strip it and lower proto_version; the bound ephemeral and ticket checks are
-// what still hold then. The TS SDK's checkDetailsDeployment is the twin,
+// this payer route to it: the node must name the payer's own. deployment zero
+// means the payer doesn't know it yet, and every node is refused, as in
+// checkEphemeral. The field is unsigned, so a relay can strip or change it;
+// the bound ephemeral and ticket checks are what hold then. The TS SDK's checkDetailsDeployment is the twin,
 // pinned by testdata/details_deployment_vectors.json.
 func checkDetailsDeployment(resp inject.OperatorDetails, deployment ticket.DeploymentID) error {
 	var adv ticket.DeploymentID
@@ -1094,12 +1090,9 @@ func checkDetailsDeployment(resp inject.OperatorDetails, deployment ticket.Deplo
 	}
 	switch {
 	case deployment.IsZero():
-		return nil
+		return errDetailsUnknownPayerDeployment
 	case adv.IsZero():
-		if wire.UsesDeploymentBinding(resp.ProtoVersion) {
-			return errNoDetailsDeployment
-		}
-		return nil
+		return errNoDetailsDeployment
 	case adv != deployment:
 		return fmt.Errorf("details: node serves escrow deployment %s, not this payer's", adv)
 	}

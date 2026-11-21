@@ -136,22 +136,10 @@ export async function signReceipt(
     r.sig = base64.encode(sig)
 }
 
-// verifyReceipt accepts only a legacy (v2, unbound) signature. Payers verify
-// with verifyReceiptFor.
-export function verifyReceipt(r: UsageReceipt, pub: Uint8Array): void {
-    verifyReceiptFor(r, pub, undefined, true)
-}
-
 // verifyReceiptFor throws unless r.sig is valid under pub and r is bound to
-// want, or unbound while allowLegacy holds. A payer passes allowLegacy only for
-// a receipt whose ticket was unbound. Mirrors Go's UsageReceipt.VerifyFor.
-export function verifyReceiptFor(
-    r: UsageReceipt,
-    pub: Uint8Array,
-    want: Uint8Array | undefined,
-    allowLegacy: boolean,
-): void {
-    checkDeployment('receipt', r.deployment, want, allowLegacy)
+// want. Mirrors Go's UsageReceipt.VerifyFor.
+export function verifyReceiptFor(r: UsageReceipt, pub: Uint8Array, want: Uint8Array | undefined): void {
+    checkDeployment('receipt', r.deployment, want)
     if (pub.length !== 32) {
         throw new Error(`invalid ed25519 public key length ${pub.length}`)
     }
@@ -178,7 +166,7 @@ export function encodeReceiptHeader(r: UsageReceipt): string {
 }
 
 // decodeReceiptHeader parses the base64(JSON) shape the node writes to
-// X-Zs-Receipt, as strictly as parseReceiptJSON. Use before verifyReceipt.
+// X-Zs-Receipt, as strictly as parseReceiptJSON. Use before verifyReceiptFor.
 export function decodeReceiptHeader(value: string): UsageReceipt {
     let raw: Uint8Array
     try {
@@ -191,7 +179,7 @@ export function decodeReceiptHeader(value: string): UsageReceipt {
 
 // parseReceiptJSON decodes a receipt from its JSON bytes, refusing any value
 // that doesn't fit its field's Go type (see util/strictjson.ts). That is what
-// makes verifyReceipt's amount check sound: a node that signed 2^64-1 can't
+// makes the SDK's verifyReceipt amount check sound: a node that signed 2^64-1 can't
 // send -1 past amount_charged ≤ max_price.
 export function parseReceiptJSON(raw: Uint8Array): UsageReceipt {
     return receiptFromJSON(raw, 'decode receipt json')

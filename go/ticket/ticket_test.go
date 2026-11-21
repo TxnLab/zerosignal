@@ -64,13 +64,20 @@ func sampleTicket() *Ticket {
 	}
 }
 
+// boundTicket is sampleTicket bound to testDep, the only kind that verifies.
+func boundTicket() *Ticket {
+	tk := sampleTicket()
+	tk.Deployment = testDep
+	return tk
+}
+
 func TestTicket_SignVerify_RoundTrip(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	tk := sampleTicket()
+	tk := boundTicket()
 	if err := tk.Sign(context.Background(), signer, addr); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if err := tk.Verify(pub); err != nil {
+	if err := tk.VerifyFor(pub, testDep); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -94,9 +101,9 @@ func TestTicket_Sign_NilSigner(t *testing.T) {
 func TestTicket_Verify_WrongKey(t *testing.T) {
 	signer, addr, _ := newFakeSigner(t)
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
-	tk := sampleTicket()
+	tk := boundTicket()
 	_ = tk.Sign(context.Background(), signer, addr)
-	if err := tk.Verify(otherPub); err == nil {
+	if err := tk.VerifyFor(otherPub, testDep); err == nil {
 		t.Fatal("want verify error with wrong pubkey")
 	}
 }
@@ -130,12 +137,12 @@ func TestTicket_Verify_TamperedField(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			signer, addr, pub := newFakeSigner(t)
-			tk := sampleTicket()
+			tk := boundTicket()
 			if err := tk.Sign(context.Background(), signer, addr); err != nil {
 				t.Fatal(err)
 			}
 			c.mutate(tk)
-			if err := tk.Verify(pub); err == nil {
+			if err := tk.VerifyFor(pub, testDep); err == nil {
 				t.Fatalf("tampered %s: verify passed", c.name)
 			}
 		})
@@ -144,23 +151,23 @@ func TestTicket_Verify_TamperedField(t *testing.T) {
 
 func TestTicket_Verify_BadSig(t *testing.T) {
 	signer, addr, pub := newFakeSigner(t)
-	tk := sampleTicket()
+	tk := boundTicket()
 	_ = tk.Sign(context.Background(), signer, addr)
 	tk.Sig = "!!!not-base64!!!"
-	if err := tk.Verify(pub); err == nil {
+	if err := tk.VerifyFor(pub, testDep); err == nil {
 		t.Fatal("want error on non-base64 sig")
 	}
 	tk.Sig = base64.StdEncoding.EncodeToString([]byte("too-short"))
-	if err := tk.Verify(pub); err == nil {
+	if err := tk.VerifyFor(pub, testDep); err == nil {
 		t.Fatal("want error on wrong-length sig")
 	}
 }
 
 func TestTicket_Verify_WrongPubKeyLength(t *testing.T) {
 	signer, addr, _ := newFakeSigner(t)
-	tk := sampleTicket()
+	tk := boundTicket()
 	_ = tk.Sign(context.Background(), signer, addr)
-	if err := tk.Verify(ed25519.PublicKey([]byte{1, 2, 3})); err == nil {
+	if err := tk.VerifyFor(ed25519.PublicKey([]byte{1, 2, 3}), testDep); err == nil {
 		t.Fatal("want error on short pubkey")
 	}
 }

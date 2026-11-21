@@ -363,7 +363,9 @@ function keypair() {
 const sha256 = (b: Uint8Array) => new Uint8Array(createHash('sha256').update(b).digest())
 const body = new TextEncoder().encode('hello world')
 
-const TICKET = { ticket_id: 'c2l4dGVlbi1ieXRlLWlkIQ==', max_price: 5000 } as Ticket
+// Bound, since a receipt verifies only under its ticket's deployment.
+const DEPLOYMENT = Buffer.from(new Uint8Array(32).fill(4)).toString('base64')
+const TICKET = { ticket_id: 'c2l4dGVlbi1ieXRlLWlkIQ==', max_price: 5000, deployment: DEPLOYMENT } as Ticket
 
 const IDS = {
     appId: 9n,
@@ -387,6 +389,7 @@ async function signedReceipt(over: Partial<UsageReceipt> = {}) {
         aux_output_usage_type: 2,
         aux_output_count: 3,
         cached_input_count: 0,
+        deployment: DEPLOYMENT,
         ...over,
     }
     await signReceipt(r, k.signer, 'ADDR')

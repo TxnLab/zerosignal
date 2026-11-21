@@ -55,7 +55,10 @@ const callerWallet = (over: Partial<WalletOpener> = {}): WalletOpener => ({
     ...over,
 })
 
-const base: Config = { signer, network: testnet(), registry, wallet: callerWallet() }
+// With the wallet, registry and reserve client all supplied, create reads no
+// chain: a built reserve client would need the deployment read from algod.
+const standInReserveClient = { reserve: () => Promise.reject(new Error('unused')) }
+const base: Config = { signer, network: testnet(), registry, wallet: callerWallet(), reserveClient: standInReserveClient }
 
 // Lets the cache's background refresh settle.
 const flush = () => new Promise((r) => setTimeout(r, 0))

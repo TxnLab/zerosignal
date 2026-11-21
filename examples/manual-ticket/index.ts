@@ -40,6 +40,7 @@ import {
     verifyReservePrice,
 } from '@txnlab/zerosignal'
 import { mnemonicSigner } from '@txnlab/zerosignal/accounts/mnemonic'
+import { algorandDeploymentId } from '@txnlab/zerosignal/proto/ticket'
 import { ENCRYPTED_CONTENT_TYPE, RESPONSE_KEY_HEADER, ResponseOpener } from '@txnlab/zerosignal/proto/wire'
 
 const MAX_OUTPUT_TOKENS = 512
@@ -107,7 +108,16 @@ const body = JSON.stringify({
     stream: true,
 })
 const input = reserveInputCount(op, model, body, MAX_OUTPUT_TOKENS)
-const reserveClient = httpReserveClient({ fetch: cfg.fetch, signer: payerBytesSigner(signer), timeoutMs: cfg.reserveTimeout })
+// Every reserve names the payer's escrow deployment (the network's genesis
+// hash and the escrow app), and the ticket must come back bound to it.
+const params = await algod.getTransactionParams().do()
+const deployment = algorandDeploymentId(params.genesisHash, cfg.network.escrowAppId)
+const reserveClient = httpReserveClient({
+    fetch: cfg.fetch,
+    signer: payerBytesSigner(signer),
+    timeoutMs: cfg.reserveTimeout,
+    deployment,
+})
 const reserved = await reserveClient.reserve(
     op,
     {
