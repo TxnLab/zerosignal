@@ -14,12 +14,15 @@
 //	cd proxy && go run github.com/TxnLab/zerosignal/go/cmd/releasenotes -product zs-proxy
 //	cd node  && go run github.com/TxnLab/zerosignal/go/cmd/releasenotes -product zs-node
 //
-// The source repos are PRIVATE and the output is published verbatim to a public
-// GitHub release body and a Discord embed, so publish-safety is the governing
-// constraint: commit hashes, author names, branch names, and changed file paths
-// are never sent to the model at all, the prompt forbids emitting internals, and
-// the result is scanned for leaks (locally, against data the model never saw)
-// before it is written. It is still a model — the output is a DRAFT for review.
+// The output is published verbatim to a GitHub release body and a Discord
+// embed, and zs-node's source repo is PRIVATE, so publish-safety is the
+// governing constraint: commit hashes, author names, branch names, and changed
+// file paths are never sent to the model at all, the prompt forbids emitting
+// internals, and the result is scanned for leaks (locally, against data the
+// model never saw) before it is written. zs-proxy's source is public, which
+// changes only what its prompt says about the repo and whether the repo's own
+// name counts as a leak (profile.publicSource). It is still a model — the
+// output is a DRAFT for review.
 //
 // This file MUST stay stdlib-only. The protocol module is a real dependency of
 // both zs-proxy and zs-node, so a third-party import here lands in both of their
@@ -103,7 +106,7 @@ func parseFlags() (*options, error) {
 	fs := flag.NewFlagSet("releasenotes", flag.ContinueOnError)
 	fs.StringVar(&o.product, "product", "", "product profile: zs-proxy or zs-node (selects the prompt's audience framing)")
 	fs.StringVar(&o.baseURL, "url", envOr("ZS_RELEASE_NOTES_URL", "http://127.0.0.1:9376/v1"), "OpenAI-compatible base URL of a RUNNING zs-proxy")
-	fs.StringVar(&o.model, "model", envOr("ZS_RELEASE_NOTES_MODEL", "grok-4.6"), "model to draft with")
+	fs.StringVar(&o.model, "model", envOr("ZS_RELEASE_NOTES_MODEL", "grok-4.7"), "model to draft with")
 	fs.StringVar(&o.out, "out", "RELEASE_NOTES.md", "file to write (left untouched if the run fails)")
 	fs.StringVar(&o.repo, "repo", ".", "git repository to read commits from")
 	fs.StringVar(&o.from, "from", "", "start of the commit range (default: the tag before -to)")
@@ -232,7 +235,7 @@ func run() error {
 	}
 
 	notes := normalize(body)
-	scanForLeaks(g, rng, notes)
+	scanForLeaks(g, rng, notes, profile)
 	checkDiscordBudget(notes)
 
 	return writeOut(o.out, notes, fmt.Sprintf(
@@ -442,6 +445,11 @@ type profile struct {
 	description string
 	audience    string
 	releaseRepo string
+	// publicSource is true when the commits come from a public repo, so the
+	// repo's own name is no secret and the prompt must not call the source
+	// private. Internal names stay out of the notes either way: they are noise
+	// to users even when anyone could look them up.
+	publicSource bool
 }
 
 var profiles = map[string]profile{
@@ -454,7 +462,8 @@ var profiles = map[string]profile{
 			"manager, the setup wizard, or an editor integration; some are still evaluating whether to\n" +
 			"route their daily coding tool through it. They care about their tools working, requests\n" +
 			"not failing, and knowing what a request costs.",
-		releaseRepo: "txnlab/zs-proxy",
+		releaseRepo:  "txnlab/zs-proxy",
+		publicSource: true,
 	},
 	"zs-node": {
 		product: "zs-node",
@@ -481,11 +490,21 @@ func profileFor(product string) (profile, error) {
 }
 
 func (p profile) systemPrompt() string {
+	source, sourceRule, readers, repoName :=
+		"a PRIVATE source repository", "The source repository is private.", "cannot see the source", " or the private repository's name"
+	if p.publicSource {
+		source, sourceRule, readers, repoName =
+			"the "+p.product+" source repository", "The notes are for users, not contributors.", "will not read the source", ""
+	}
 	return strings.NewReplacer(
 		"{{PRODUCT}}", p.product,
 		"{{PRODUCT_DESC}}", p.description,
 		"{{AUDIENCE}}", p.audience,
 		"{{RELEASE_REPO}}", p.releaseRepo,
+		"{{SOURCE}}", source,
+		"{{SOURCE_RULE}}", sourceRule,
+		"{{READERS}}", readers,
+		"{{REPO_NAME}}", repoName,
 	).Replace(systemPromptTemplate)
 }
 
@@ -499,10 +518,10 @@ func (p profile) userPrompt(n int, payload string) string {
 
 const systemPromptTemplate = `You are the release-notes editor for {{PRODUCT}}, {{PRODUCT_DESC}}
 
-You turn a set of git commits from a PRIVATE source repository into the PUBLIC release notes
+You turn a set of git commits from {{SOURCE}} into the PUBLIC release notes
 published on the {{RELEASE_REPO}} GitHub release page and mirrored into a Discord announcement.
-Your output is published essentially verbatim to people who did not write this code and cannot
-see the source.
+Your output is published essentially verbatim to people who did not write this code and
+{{READERS}}.
 
 ## Audience
 
@@ -513,11 +532,11 @@ change when they upgrade, and what it costs them. They do not care how the code 
 
 ## Hard rules
 
-1. PUBLIC SAFETY. The source repository is private. Never emit, and never paraphrase closely
+1. PUBLIC SAFETY. {{SOURCE_RULE}} Never emit, and never paraphrase closely
    enough to reveal: file paths, directory names, package names, type names, function names,
    struct fields, or any internal identifier; commit hashes, verbatim commit-message quotes,
-   branch names, author names, or PR/issue numbers; internal module paths or the private
-   repository's name; unreleased or in-progress work, internal roadmap, security findings not
+   branch names, author names, or PR/issue numbers; internal module paths{{REPO_NAME}};
+   unreleased or in-progress work, internal roadmap, security findings not
    already fixed and shipped in THIS release, customer names, credentials, hostnames, wallet
    addresses, or private endpoints.
    Things a user already types or already sees are PUBLIC, and you SHOULD name them precisely:
@@ -1268,22 +1287,26 @@ var (
 func looksLikeHash(s string) bool { return strings.ContainsAny(s, "0123456789") }
 
 // scanForLeaks warns (never fails — this is a draft for human review) when the
-// notes appear to name something from the private repo. Everything it scans for
+// notes appear to name something internal to the repo. Everything it scans for
 // is derived LOCALLY, from data the model was never sent: paths, author names,
 // and hashes are excluded from the payload by construction, so a hit here means
 // the model reconstructed an internal name from a commit body.
-func scanForLeaks(g *git, rng, notes string) {
-	leaks := findLeaks(notes, collectForbidden(g, rng))
+func scanForLeaks(g *git, rng, notes string, p profile) {
+	leaks := findLeaks(notes, collectForbidden(g, rng, p))
 	for _, l := range leaks {
-		logf("WARNING: possible private-repo leak, line %d: %q", l.line, l.token)
+		logf("WARNING: possible internal-name leak, line %d: %q", l.line, l.token)
 	}
 	if len(leaks) > 0 {
-		logf("WARNING: %d possible leak(s) above — the source repo is PRIVATE and this file is published publicly. Edit before 'make release'.", len(leaks))
+		why := "the source repo is PRIVATE and this file is published publicly"
+		if p.publicSource {
+			why = "this file is published as user-facing notes"
+		}
+		logf("WARNING: %d possible leak(s) above — %s. Edit before 'make release'.", len(leaks), why)
 	}
 }
 
-// collectForbidden derives the private-repo token set from git, locally.
-func collectForbidden(g *git, rng string) map[string]bool {
+// collectForbidden derives the internal token set from git, locally.
+func collectForbidden(g *git, rng string, p profile) map[string]bool {
 	forbidden := map[string]bool{}
 	add := func(tok string) {
 		tok = strings.TrimSpace(tok)
@@ -1322,14 +1345,32 @@ func collectForbidden(g *git, rng string) map[string]bool {
 			}
 		}
 	}
-	// The private repo's own name ("hayai-proxy" / "hayai-node"); the public
-	// binary names ("zs-proxy" / "zs-node") are legitimate and stay unflagged.
+	// A private repo's own name ("hayai-node") is a leak. A public product's
+	// own repo is not: its name is the product's ("zs-proxy", releasing from
+	// txnlab/zs-proxy), which every set of notes says, so flagging it would warn
+	// on every run. Only that repo is exempt, so a checkout whose origin is
+	// still a private predecessor (TxnLab/hayai-proxy) keeps flagging it.
 	if out, err := g.run("config", "--get", "remote.origin.url"); err == nil {
 		remote := strings.TrimSpace(out)
-		add(remote)
-		add(strings.TrimSuffix(filepath.Base(remote), ".git"))
+		if !(p.publicSource && namesRepo(remote, p.releaseRepo)) {
+			add(remote)
+			add(strings.TrimSuffix(filepath.Base(remote), ".git"))
+		}
 	}
 	return forbidden
+}
+
+// namesRepo reports whether a git remote URL, SSH or HTTPS, points at the
+// owner/name repo. GitHub owners are case-insensitive, and the boundary check
+// keeps txnlab/zs-proxy from matching someone's fork named xtxnlab/zs-proxy.
+func namesRepo(remote, ownerName string) bool {
+	r := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(remote, "/"), ".git"))
+	want := strings.ToLower(ownerName)
+	if !strings.HasSuffix(r, want) {
+		return false
+	}
+	rest := r[:len(r)-len(want)]
+	return strings.HasSuffix(rest, "/") || strings.HasSuffix(rest, ":")
 }
 
 type leak struct {

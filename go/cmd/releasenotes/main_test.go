@@ -391,7 +391,7 @@ func TestCollectForbiddenSkipsBareDirectorySegments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	forbidden := collectForbidden(g, "HEAD")
+	forbidden := collectForbidden(g, "HEAD", profiles["zs-node"])
 	for _, want := range []string{"internal/server/handlers.go", "handlers.go", "test person", "t@example.com"} {
 		if !forbidden[want] {
 			t.Errorf("expected %q in the forbidden set", want)
@@ -401,6 +401,82 @@ func TestCollectForbiddenSkipsBareDirectorySegments(t *testing.T) {
 		if forbidden[unwanted] {
 			t.Errorf("bare directory segment %q must not be forbidden — it is ordinary release-note vocabulary", unwanted)
 		}
+	}
+}
+
+// A private repo's remote name is a leak; a public product's own repo is the
+// product's name, which every set of notes says. Any other remote, such as a
+// checkout still pointing at the private predecessor, stays a leak. Paths and
+// authors stay internal either way. Built against a real repo because the name
+// comes from remote.origin.url.
+func TestCollectForbiddenRemoteNameFollowsSourceVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		case_, product, remote, name string
+		flagged                      bool
+	}{
+		{"private", "zs-node", "git@github.com:TxnLab/hayai-node.git", "hayai-node", true},
+		{"public own repo ssh", "zs-proxy", "git@github.com:txnlab/zs-proxy.git", "zs-proxy", false},
+		{"public own repo https", "zs-proxy", "https://github.com/TxnLab/zs-proxy", "zs-proxy", false},
+		{"public product, private origin", "zs-proxy", "git@github.com:TxnLab/hayai-proxy.git", "hayai-proxy", true},
+		{"public product, lookalike owner", "zs-proxy", "git@github.com:xtxnlab/zs-proxy.git", "zs-proxy", true},
+	} {
+		t.Run(tc.case_, func(t *testing.T) {
+			dir := t.TempDir()
+			g := &git{dir: dir}
+			for _, args := range [][]string{
+				{"init", "-q", "-b", "main"},
+				{"config", "user.email", "t@example.com"},
+				{"config", "user.name", "Test Person"},
+				{"remote", "add", "origin", tc.remote},
+			} {
+				if _, err := g.run(args...); err != nil {
+					t.Skipf("git unavailable: %v", err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "feat: start"}} {
+				if _, err := g.run(args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			forbidden := collectForbidden(g, "HEAD", profiles[tc.product])
+			if forbidden[tc.name] != tc.flagged {
+				t.Errorf("forbidden[%q] = %v, want %v", tc.name, forbidden[tc.name], tc.flagged)
+			}
+			if forbidden[strings.ToLower(tc.remote)] != tc.flagged {
+				t.Errorf("forbidden[remote URL] = %v, want %v", forbidden[strings.ToLower(tc.remote)], tc.flagged)
+			}
+			for _, want := range []string{"main.go", "test person", "t@example.com"} {
+				if !forbidden[want] {
+					t.Errorf("expected %q in the forbidden set", want)
+				}
+			}
+		})
+	}
+}
+
+// The prompt must not tell the model a public repo is private, and must keep
+// telling it a private one is.
+func TestPromptSourceFramingFollowsVisibility(t *testing.T) {
+	privatePhrases := []string{
+		"a PRIVATE source repository",
+		"The source repository is private.",
+		"cannot see the source",
+		" or the private repository's name",
+	}
+	for name, p := range profiles {
+		sys := strings.Join(strings.Fields(p.systemPrompt()), " ")
+		for _, ph := range privatePhrases {
+			if got := strings.Contains(sys, ph); got == p.publicSource {
+				t.Errorf("%s (publicSource=%v): prompt contains %q = %v", name, p.publicSource, ph, got)
+			}
+		}
+	}
+	if !profiles["zs-proxy"].publicSource || profiles["zs-node"].publicSource {
+		t.Error("zs-proxy's source is public and zs-node's is private")
 	}
 }
 
