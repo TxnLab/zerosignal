@@ -133,8 +133,8 @@
         "age-encryption": "0.3.0"
     },
     "devDependencies": {
-        "@types/node": "^22.10.0",
+        "@types/node": "22.19.17",
         "typescript": "5.6.3",
-        "vitest": "4.1.11"
+        "vitest": "4.1.12"
     }
 }
